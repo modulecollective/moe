@@ -68,8 +68,14 @@ func newPushFixture(t *testing.T) *pushFixture {
 	// Seed the run first — seedRun writes a minimal project.json, so
 	// we overwrite it afterwards with the fields push/project.Load need.
 	trailerstest.SeedRun(t, root, projectID, runID, "sdlc", run.StatusInProgress)
+	// `"ship":"merge"` is explicit, not incidental: the project default
+	// is pr, and most tests below exercise the merge path against a
+	// non-GitHub origin. Saying it once here beats repeating `--merge` at
+	// every call site — and the route-selection matrix
+	// (TestPushRouteSelection) overwrites this field per case, so the
+	// default is still pinned.
 	writeFile(t, filepath.Join(root, "projects", projectID, "project.json"),
-		`{"id":"`+projectID+`","submodule":"`+subPath+`","remote":"`+origin+`","default_branch":"main"}`+"\n")
+		`{"id":"`+projectID+`","ship":"merge","submodule":"`+subPath+`","remote":"`+origin+`","default_branch":"main"}`+"\n")
 	// bureaucracy.conf rides along here: markBureaucracy only writes the
 	// marker, and run.New refuses a dirty tree — so any test that chains
 	// push into a run-opening path (runopen.Open, pulseMinter.mint)
@@ -1436,14 +1442,19 @@ touch "`+canary+`"
 }
 
 // TestPromptPushNextStageAcceptsMergeChoice: feeding "m\n" on stdin
-// runs push with no extra args (the merge path).
+// runs push with --merge.
+//
+// The flag is the regression pin. Bare push follows the project's ship
+// setting, so an unflagged dispatch here would open a PR on a
+// pr-default project — the exact inversion of the key the operator
+// pressed, and silent.
 func TestPromptPushNextStageAcceptsMergeChoice(t *testing.T) {
 	got := capturePromptDispatch(t, "m\n")
 	if !got.ran {
 		t.Fatalf("expected push to be dispatched")
 	}
-	if len(got.args) != 1 || got.args[0] != "tele/fix-it" {
-		t.Fatalf("merge path: expected [project/run], got %v", got.args)
+	if len(got.args) != 2 || got.args[0] != "--merge" || got.args[1] != "tele/fix-it" {
+		t.Fatalf("merge path: expected [--merge, project/run], got %v", got.args)
 	}
 }
 
@@ -2490,5 +2501,160 @@ func TestPushNoHooksDirectoryIsNoOp(t *testing.T) {
 	}
 	if strings.Contains(stdout, "pre-push hooks:") || strings.Contains(stderr, "pre-push hooks:") {
 		t.Fatalf("no scripts to run, but saw pre-push section header in output:\n%s\n%s", stdout, stderr)
+	}
+}
+
+// routeFixture is newPushFixture plus a GitHub-shaped remote (rewritten
+// back to the local bare repo) and a fake gh, so both routes are
+// reachable from one fixture. ship is written verbatim into
+// project.json — "" leaves the key absent, which is the case that
+// matters most.
+func routeFixture(t *testing.T, ship string) *pushFixture {
+	t.Helper()
+	f := newPushFixture(t)
+	const fakeRemote = "https://github.com/owner/repo.git"
+	addInsteadOfRewrite(t, fakeRemote, f.origin)
+	shipField := ""
+	if ship != "" {
+		shipField = `"ship":"` + ship + `",`
+	}
+	writeFile(t, filepath.Join(f.root, "projects", f.projectID, "project.json"),
+		`{"id":"`+f.projectID+`",`+shipField+`"submodule":"projects/`+f.projectID+`/src",`+
+			`"remote":"`+fakeRemote+`","default_branch":"main"}`+"\n")
+	gittest.Run(t, f.root, "add", filepath.Join("projects", f.projectID, "project.json"))
+	gittest.Run(t, f.root, "commit", "-m", "route fixture: ship="+ship)
+	fakeGh(t, nil)
+	return f
+}
+
+// TestPushRouteSelection is the whole contract in one table: an
+// explicit flag wins, and with no flag the project's ship setting
+// decides. Absent and unrecognised both read as pr — the reversible
+// route is the fail-safe, since a PR can be closed unmerged and a merge
+// has landed.
+func TestPushRouteSelection(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		ship      string
+		flag      string
+		wantMerge bool
+	}{
+		{"absent defaults to pr", "", "", false},
+		{"explicit pr", "pr", "", false},
+		{"explicit merge", "merge", "", true},
+		{"garbage reads as pr", "yolo", "", false},
+		{"--pr overrides merge", "merge", "--pr", false},
+		{"--merge overrides pr", "pr", "--merge", true},
+		{"--merge overrides absent", "", "--merge", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := routeFixture(t, tc.ship)
+			mainBefore := f.originHead()
+
+			args := []string{"sdlc", "push"}
+			if tc.flag != "" {
+				args = append(args, tc.flag)
+			}
+			args = append(args, f.projectID+"/"+f.runID)
+			stdout, stderr, code := f.runInRoot(args...)
+			if code != 0 {
+				t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
+			}
+
+			md := f.reloadRun()
+			if tc.wantMerge {
+				if md.Status != run.StatusMerged {
+					t.Fatalf("status = %s, want merged\nstdout=%s", md.Status, stdout)
+				}
+				if got := f.originHead(); got != f.tipSHA {
+					t.Fatalf("origin/main = %s, want the branch tip %s", got, f.tipSHA)
+				}
+				if sandbox.Exists(f.root, f.projectID, f.runID) {
+					t.Fatalf("merge route should have removed the sandbox")
+				}
+				return
+			}
+			if md.Status != run.StatusPushed {
+				t.Fatalf("status = %s, want pushed\nstdout=%s", md.Status, stdout)
+			}
+			if got := f.originHead(); got != mainBefore {
+				t.Fatalf("origin/main advanced on the PR route: %s -> %s", mainBefore, got)
+			}
+			if !sandbox.Exists(f.root, f.projectID, f.runID) {
+				t.Fatalf("PR route must keep the sandbox")
+			}
+			if !strings.Contains(stdout, "opened PR: ") {
+				t.Fatalf("expected a PR URL in stdout, got:\n%s", stdout)
+			}
+		})
+	}
+}
+
+// TestPushRejectsBothRouteFlags: --pr and --merge pick opposite routes,
+// so asking for both is a usage error rather than a silent precedence
+// rule nobody can remember.
+func TestPushRejectsBothRouteFlags(t *testing.T) {
+	f := newPushFixture(t)
+	stdout, stderr, code := f.runInRoot("sdlc", "push", "--pr", "--merge", f.projectID+"/"+f.runID)
+	if code != 2 {
+		t.Fatalf("exit=%d, want 2\nstdout=%s\nstderr=%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stderr, "opposite routes") {
+		t.Fatalf("expected a conflicting-flags message, got:\n%s", stderr)
+	}
+	if md := f.reloadRun(); md.Status != run.StatusInProgress {
+		t.Fatalf("status = %s, want untouched in_progress", md.Status)
+	}
+}
+
+// TestCascadeShipStepFollowsProjectShip: the bangs, `moe chain kick`
+// and the heartbeat's rides all funnel through cascadeShipStep, which
+// dispatches push with no route flag. That unflagged dispatch is what
+// makes the project setting bind machine-driven work — pin both sides
+// of it.
+func TestCascadeShipStepFollowsProjectShip(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		ship      string
+		wantMerge bool
+	}{
+		{"absent rides to a PR", "", false},
+		{"merge rides to a merge", "merge", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := routeFixture(t, tc.ship)
+			defer withRideMode(rideDynamic)()
+			t.Setenv("MOE_HOME", f.root)
+			t.Setenv("NO_COLOR", "1")
+
+			md := f.reloadRun()
+			mainBefore := f.originHead()
+			var stdout, stderr bytes.Buffer
+			steps, shipped, code := cascadeShipStep("sdlc", md, false, &stdout, &stderr)
+			if code != 0 || !shipped {
+				t.Fatalf("cascadeShipStep: code=%d shipped=%v steps=%+v\nstdout=%s\nstderr=%s",
+					code, shipped, steps, stdout.String(), stderr.String())
+			}
+
+			got := f.reloadRun()
+			if tc.wantMerge {
+				if got.Status != run.StatusMerged {
+					t.Fatalf("status = %s, want merged", got.Status)
+				}
+				if head := f.originHead(); head != f.tipSHA {
+					t.Fatalf("origin/main = %s, want tip %s", head, f.tipSHA)
+				}
+				return
+			}
+			if got.Status != run.StatusPushed {
+				t.Fatalf("status = %s, want pushed", got.Status)
+			}
+			if head := f.originHead(); head != mainBefore {
+				t.Fatalf("origin/main advanced on a PR-route cascade ship: %s -> %s", mainBefore, head)
+			}
+			if !strings.Contains(stdout.String(), "opened PR: ") {
+				t.Fatalf("expected a PR URL in stdout, got:\n%s", stdout.String())
+			}
+		})
 	}
 }

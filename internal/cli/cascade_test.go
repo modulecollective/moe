@@ -1188,7 +1188,10 @@ func TestPromptPushNextStageShowsBangBangLegend(t *testing.T) {
 	if code := promptPushNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("push prompt exit=%d", code)
 	}
-	if !strings.Contains(stdout.String(), "!! = ship this run · !!! = ship + ride the chain") {
+	// The route in parentheses is what `!!` will actually do — the
+	// project default, since the bangs carry no flag. A tempdir root has
+	// no project.json, which reads as the pr default.
+	if !strings.Contains(stdout.String(), "!! = ship this run (pr) · !!! = ship + ride the chain") {
 		t.Fatalf("expected !! / !!! legend at push gate, got: %q", stdout.String())
 	}
 }

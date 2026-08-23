@@ -31,7 +31,7 @@ import (
 func pushCommand(workflow string) *Command {
 	return &Command{
 		Name:    "push",
-		Summary: "ship the run's code branch: fast-forward merge to default, or open a PR with --pr",
+		Summary: "ship the run's code branch by the project's ship route (--pr / --merge to override)",
 		Run: func(args []string, stdout, stderr io.Writer) int {
 			code, _ := runPushTyped(workflow, args, stdout, stderr)
 			return code
@@ -106,12 +106,15 @@ func runPushSynthesisSession(projectID, runID string, headless bool, stdout, std
 	return runStageSession(projectID, runID, "push", opts, stdout, stderr)
 }
 
-// runPushTyped ships the sandbox branch. The default path fast-forwards
-// the target repo's default branch to include moe/<run>, deletes the
-// remote branch, drops the sandbox clone, and marks the run `merged`.
-// The `--pr` path is today's behavior: push the branch, open (or re-use)
-// a PR, mark the run `pushed`, keep the sandbox. A pushed run later
-// reconciles to merged/closed via `moe sync`.
+// runPushTyped ships the sandbox branch by one of two routes, chosen
+// by `--pr` / `--merge` or, with neither, by the project's ship setting
+// (`moe project ship`, defaulting to pr).
+//
+// The PR route pushes the branch, opens (or re-uses) a PR, marks the run
+// `pushed` and keeps the sandbox; a pushed run later reconciles to
+// merged/closed via `moe sync`. The merge route fast-forwards the target
+// repo's default branch to include moe/<run>, deletes the remote branch,
+// drops the sandbox clone, and marks the run `merged`.
 //
 // Idempotent on terminal runs: rerunning after a merged/closed run is
 // a no-op that prints the terminal state and exits 0 — unless the
@@ -134,14 +137,22 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 	fs := flag.NewFlagSet(workflow+" push", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	prFlag := fs.Bool("pr", false, "open a PR instead of fast-forward merging to the default branch")
+	mergeFlag := fs.Bool("merge", false, "fast-forward merge to the default branch instead of opening a PR")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe %s push [--pr] <project>/<run>\n", workflow)
+		moePrintf(stderr, "usage: moe %s push [--pr|--merge] <project>/<run>\n", workflow)
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Default: push moe/<run>, fast-forward-merge it into the target repo's")
-		moePrintln(stderr, "default branch, delete the remote branch, and remove the sandbox clone.")
-		moePrintln(stderr, "--pr: push moe/<run> and open (or re-use) a PR; leave the sandbox in place.")
+		moePrintln(stderr, "The route defaults to the project's ship setting (`moe project ship`),")
+		moePrintln(stderr, "which is `pr` unless the project says otherwise.")
+		moePrintln(stderr, "")
+		moePrintln(stderr, "--pr:    push moe/<run> and open (or re-use) a PR; leave the sandbox in place.")
+		moePrintln(stderr, "--merge: push moe/<run>, fast-forward-merge it into the target repo's default")
+		moePrintln(stderr, "         branch, delete the remote branch, and remove the sandbox clone.")
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return 2, nil
+	}
+	if *prFlag && *mergeFlag {
+		moePrintf(stderr, "moe %s push: --pr and --merge pick opposite routes; give at most one\n", workflow)
 		return 2, nil
 	}
 	if fs.NArg() != 1 {
@@ -218,6 +229,19 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 		return 1, nil
 	}
 
+	// One route seam for every entry. A flag is an explicit override;
+	// with neither, the project's standing ship setting decides — so a
+	// bare `moe <wf> push`, a `!!` cascade, a chain kick and a
+	// heartbeat ride all land the same way, and the operator sets that
+	// way once per project instead of remembering a flag per ship.
+	openPR := project.ShipOf(pj) == project.ShipPR
+	if *prFlag {
+		openPR = true
+	}
+	if *mergeFlag {
+		openPR = false
+	}
+
 	if err := checkCodeContent(root, md); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1, nil
@@ -252,9 +276,9 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 	// A run whose whole deliverable landed in bureaucracy commits has
 	// nothing to ship from the sandbox. Route it to close before the
 	// nothing-to-push refusal, origin work, or the pre-push hooks —
-	// there is no tree to vet and nothing to rebase. Both flags reach
-	// here, so `--pr` on a no-ship run closes too instead of opening a
-	// PR for an empty branch.
+	// there is no tree to vet and nothing to rebase. Route selection is
+	// already done and neither route reaches past this, so a no-ship run
+	// closes rather than opening a PR for an empty branch.
 	if code, handled := closeNoShipRun(root, md, pj, clonePath, branch, opts, stdout, stderr); handled {
 		return code, nil
 	}
@@ -320,9 +344,10 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 			return 1, nil
 		}
 
-		if *prFlag {
-			// --pr never ff-pushes, so there's no advance race and no
-			// retry — this returns out of the loop on the first pass.
+		if openPR {
+			// The PR route never ff-pushes, so there's no advance race
+			// and no retry — this returns out of the loop on the first
+			// pass.
 			if code := runPushSynthesisSession(md.Project, md.ID, true, stdout, stderr); code != 0 {
 				return code, nil
 			}
@@ -479,7 +504,7 @@ func buildRebaseConflictKickoff(workflow string, c *push.RebaseConflictError) st
 	return b.String()
 }
 
-// openPRPath is the --pr behavior: open (or re-use) a PR for the
+// openPRPath is the PR route: open (or re-use) a PR for the
 // already-pushed branch and record the first push's state. The
 // sandbox is intentionally left in place — iteration via
 // `moe <wf> code` stays a one-liner until the PR merges. Synthesis

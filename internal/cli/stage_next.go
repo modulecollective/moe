@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sync"
@@ -658,7 +659,9 @@ func promptCloseNextStage(closeCmd *Command, justFinished string, md *run.Metada
 }
 
 // promptPushNextStage offers three choices: decline (default), merge
-// (`moe <wf> push`), or PR (`moe <wf> push --pr`), plus optional `x`
+// (`moe <wf> push --merge`), or PR (`moe <wf> push --pr`) — both routes
+// flagged explicitly, because an unflagged push takes whichever route
+// the project's ship setting names. Plus optional `x`
 // (scuttle: dispatch the workflow's close) and `b` (re-open the
 // just-finished code stage) suffixes when the respective commands are
 // non-nil. Parsing is case-insensitive; the label capitalization just
@@ -721,7 +724,11 @@ func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root 
 	moePrintf(stdout, "next: %s — run now? %s\n", hint, label)
 	moePrintln(stdout, renderPromptLegend(opts))
 	if md.Workflow == "sdlc" {
-		moePrintln(stdout, "  !! = ship this run · !!! = ship + ride the chain")
+		// The bangs take the project's ship route, and `!!` is one
+		// keystroke from a reflex Enter — name the route it takes so the
+		// operator reads it before typing it. m/p are already explicit.
+		moePrintf(stdout, "  !! = ship this run (%s) · !!! = ship + ride the chain\n",
+			project.ReadShip(root, md.Project))
 	}
 	sig, stopSig := installSigint()
 	defer stopSig()
@@ -739,7 +746,10 @@ func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root 
 	answer := strings.ToLower(strings.TrimSpace(line))
 	switch answer {
 	case "m":
-		return next.Run([]string{md.Project + "/" + md.ID}, stdout, stderr)
+		// --merge explicitly: bare push now follows the project's ship
+		// setting, so an unflagged dispatch would open a PR on a
+		// pr-default project — the inversion of what the operator typed.
+		return next.Run([]string{"--merge", md.Project + "/" + md.ID}, stdout, stderr)
 	case "!!":
 		// `!!` at the push gate uses the typed cascade push path, not
 		// Command.Run: cascade harvest is --no-edit even though manual
@@ -1189,13 +1199,17 @@ func cascadeStageBlocked(md *run.Metadata, stage string, stderr io.Writer) (canv
 }
 
 // cascadeShipStep runs the sdlc terminal ship for a `!!` / `!!!` cascade:
-// the merge-path push, its bounded retry-after-recovery loop, and (for
-// `!!!`) the chain ride into the next live child. It owns the slice of
+// the push, its bounded retry-after-recovery loop, and (for `!!!`) the
+// chain ride into the next live child. It owns the slice of
 // cascadeFromGate the recent headless bugs lived in, so the stage loop
 // above reads uniformly — dispatch each stage; the terminal ship is one
 // call.
 //
-// `!!` / `!!!` at push ship via the merge path. runPushTyped owns
+// The push carries no route flag, so the project's ship setting decides
+// whether it merges or opens a PR — the same answer a bare `moe sdlc
+// push` gets. That is the whole point of the setting: `moe chain kick`
+// and the heartbeat's rides land here too, so the operator sets the
+// route once per project rather than per ship. runPushTyped owns
 // synthesis before the shared ship gate, so the cascade drives the ship
 // through the one typed push entry — no separate synthesis call. The push
 // goes through pushFromCascade (bypassing g.Lookup("push")) so the
