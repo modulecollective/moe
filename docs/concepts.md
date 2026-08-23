@@ -102,6 +102,7 @@ inputs are plain markdown:
 - The stage-location header says where the run is in the ladder and what the
   chain prompt will offer next.
 - Project digital-twin documents point the agent at recorded intent.
+- An answered inbox question is delivered to that run's later stage prompts.
 - Lore and followup pointers tell the agent where to look and where to leave
   traces.
 - Project-specific guidance such as `AGENTS.md` or `CLAUDE.md` is named

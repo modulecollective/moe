@@ -563,7 +563,8 @@ Per project, `moe project mode <id> paused|safe|auto` caps what that clock may
 do. `paused` means the heartbeat never sweeps the project at all. `safe` means
 it sweeps and grooms as ever but starts only threads you marked — a stage you
 advanced, a chore's standing intent, a workflow tag on the idea a run came
-from — holding everything else with a named reason. `auto` is the default and
+from, a question on the run you answered — holding everything else with a
+named reason. `auto` is the default and
 today's behaviour. The mode binds the clock, not you: bangs, stage verbs, chain
 kicks and a hand-typed `moe pulse new --dynamic` run in every mode, because the
 typed word is the consent. Serve's **advance mark** is that same consent from
