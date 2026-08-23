@@ -601,3 +601,141 @@ func TestChainKickRidesWithAQuestionOnAMember(t *testing.T) {
 		t.Fatalf("the ride was held by an open question; stderr=%q", errb.String())
 	}
 }
+
+// The wiring, end to end through the real session machinery: a note
+// reaches the turn's prompt, the turn's success stamps it delivered as
+// its own journal commit, and the *next* turn's prompt no longer carries
+// it. Delivered-once is the whole claim, and it lives in three places at
+// once — the prompt builder, runStageSession's post-turn call, and the
+// record — so nothing short of a real turn proves it.
+func TestStageTurnDeliversTheNoteOnceAndStampsIt(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedSdlcOneShotProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+	suppressNextStagePrompt(t)
+
+	promptFile := filepath.Join(t.TempDir(), "prompts.txt")
+	t.Setenv("MOE_TEST_PROMPT_DUMP", promptFile)
+	fakeClaudeOnPath(t, `#!/bin/sh
+prompt=
+next=0
+for a in "$@"; do
+  if [ "$next" = "1" ]; then prompt=$a; next=0; fi
+  case "$a" in --append-system-prompt) next=1 ;; esac
+done
+printf '%s\n--END-PROMPT--\n' "$prompt" >> "$MOE_TEST_PROMPT_DUMP"
+canvas=$(printf '%s' "$prompt" | awk '/Your canvas for this document is the single file:/ {getline; gsub(/^ +| +$/, ""); print; exit}')
+if [ -n "$canvas" ]; then printf 'a turn happened\n' >> "$canvas"; fi
+exit 0
+`)
+
+	var out, errb bytes.Buffer
+	if code := runNew("sdlc", []string{"tele/note-me"}, &out, &errb); code != 0 {
+		t.Fatalf("runNew exit=%d stderr=%q", code, errb.String())
+	}
+	if _, err := input.Add(root, "tele", "note-me", "Skip the flake and ship.", io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+
+	out.Reset()
+	errb.Reset()
+	if code := openSdlcDesign("tele", "note-me", true, "", &out, &errb); code != 0 {
+		t.Fatalf("design turn exit=%d stderr=%q", code, errb.String())
+	}
+
+	prompts := readPromptDump(t, promptFile)
+	if len(prompts) != 1 {
+		t.Fatalf("got %d prompts, want 1", len(prompts))
+	}
+	if !strings.Contains(prompts[0], "Skip the flake and ship.") {
+		t.Fatalf("the first turn's prompt did not carry the note:\n%s", prompts[0])
+	}
+
+	f, err := input.Load(root, "tele", "note-me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Notes[0].DeliveredTo != "design" {
+		t.Fatalf("entry = %+v, want it stamped delivered to design", f.Notes[0])
+	}
+	if !commitExists(t, root, "MoE-Input-Delivered: tele/note-me#1 design") {
+		t.Fatal("no delivery commit landed in the journal")
+	}
+
+	// A second turn on the same doc: the note is history now, and the
+	// canvas the first turn wrote is where the direction lives on.
+	out.Reset()
+	errb.Reset()
+	if code := openSdlcDesign("tele", "note-me", true, "", &out, &errb); code != 0 {
+		t.Fatalf("second design turn exit=%d stderr=%q", code, errb.String())
+	}
+	prompts = readPromptDump(t, promptFile)
+	if len(prompts) != 2 {
+		t.Fatalf("got %d prompts, want 2", len(prompts))
+	}
+	if strings.Contains(prompts[1], "Skip the flake and ship.") {
+		t.Fatalf("a delivered note came back in the next prompt:\n%s", prompts[1])
+	}
+}
+
+// A turn that fails marks nothing, so the next attempt redelivers —
+// the guarantee that makes marking a separate post-turn commit rather
+// than a rider on the turn's own.
+func TestFailedStageTurnLeavesTheNotePending(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedSdlcOneShotProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+	suppressNextStagePrompt(t)
+	fakeClaudeOnPath(t, "#!/bin/sh\nexit 3\n")
+
+	var out, errb bytes.Buffer
+	if code := runNew("sdlc", []string{"tele/note-me"}, &out, &errb); code != 0 {
+		t.Fatalf("runNew exit=%d stderr=%q", code, errb.String())
+	}
+	if _, err := input.Add(root, "tele", "note-me", "Skip the flake and ship.", io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+
+	out.Reset()
+	errb.Reset()
+	if code := openSdlcDesign("tele", "note-me", true, "", &out, &errb); code == 0 {
+		t.Fatalf("the design turn unexpectedly succeeded; stderr=%q", errb.String())
+	}
+
+	f, err := input.Load(root, "tele", "note-me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !f.Notes[0].Pending() {
+		t.Fatalf("entry = %+v, want it still pending after a failed turn", f.Notes[0])
+	}
+}
+
+// readPromptDump splits the fake agent's appended system prompts.
+func readPromptDump(t *testing.T, path string) []string {
+	t.Helper()
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("prompt dump missing: %v", err)
+	}
+	var out []string
+	for _, p := range strings.Split(string(body), "\n--END-PROMPT--\n") {
+		if strings.TrimSpace(p) != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// commitExists reports whether any commit on HEAD's history carries the
+// given trailer line.
+func commitExists(t *testing.T, root, trailer string) bool {
+	t.Helper()
+	return strings.Contains(gittest.Output(t, root, "log", "--format=%B"), trailer)
+}
