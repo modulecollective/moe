@@ -657,10 +657,10 @@ form.new-run button:hover, form.new-run button:focus {
   overflow-x: auto;
 }
 
-/* Human inputs: the run page's question history and the inbox's rows.
-   Same list shape as the other per-run sections, plus a choice strip
-   that wraps under the question on a phone — the surface this feature
-   exists for. */
+/* Operator input: the run page's entry history and the queue's rows.
+   Same list shape as the other per-run sections, plus a reply box that
+   wraps full-width under the question on a phone — the surface this
+   feature exists for. */
 .inputs ul { list-style: none; padding: 0; margin: 0; }
 .inputs li {
   display: flex;
@@ -674,6 +674,19 @@ form.new-run button:hover, form.new-run button:focus {
 }
 .inputs li:last-child { border-bottom: none; }
 .inputs li .note { color: var(--fg); }
-.input-choices { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem; }
-.row.input-request { flex-wrap: wrap; }
-.row.input-request .input-choices { flex-basis: 100%; }
+.inputs li .note.prose { white-space: pre-wrap; flex-basis: 100%; }
+.input-reply { display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.5rem; }
+.input-reply textarea {
+  font: 0.9rem/1.4 inherit;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  padding: 0.5rem 0.6rem;
+  resize: vertical;
+  color-scheme: light dark;
+}
+.input-reply textarea:focus { border-color: var(--accent); outline: none; }
+.input-reply button { align-self: flex-start; }
+.row.input-ping { flex-wrap: wrap; }
+.row.input-ping .input-reply { flex-basis: 100%; }

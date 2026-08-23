@@ -487,51 +487,48 @@ read is the board the kick loop walks.
 ### Asking the operator a question
 
 A park says "look at this first". Sometimes you can say something
-sharper: *this run cannot proceed until someone answers one specific
-question.* Write that as a question at the run's own position.
+sharper: *the operator's own words would change what this run builds.*
+Write that as a question at the run's own position.
 
     {"runs": [
        {"run": "change-auth-defaults",
-        "park": {"question": "Which compatibility policy should this use?",
-                 "choices": ["Preserve the old default",
-                             "Adopt the new default",
-                             "Require an explicit setting"]}},
+        "ask": "Which compatibility policy should this use — preserve the old default, adopt the new one, or require an explicit setting?"},
        "follow-up-docs"
      ]}
 
-That does two things at once. It parks the whole thread for this sweep,
-exactly like a plain `park` line. And it opens a **durable** question on
-that run: it appears in `moe inbox list` and on the operator's phone,
-the harness refuses to start the thread until it is answered, and the
-answer is delivered to that run's later stage prompts. A plain park
-holds for one sweep and has to be rediscovered; a question holds until
-it is discharged.
+That opens a **durable** question on that run: it appears in
+`moe input list` and on the operator's phone, and the answer is
+delivered to that run's next stage prompt. A plain park holds for one
+sweep and has to be rediscovered; a question stays until it is
+answered.
 
-The rules are narrow on purpose:
+**Asking holds nothing.** The run keeps moving, and its next turn is
+told the question was asked and not yet answered — it proceeds on its
+best judgment and notes the call it made. If the answer really should
+precede the work, park the thread as well and name the question in the
+park's reason. The two are separate acts on purpose, so you can also
+ask something the work need not wait for.
+
+The rules are narrow:
 
 - **The `run` must already exist.** A question rides the run whose
   future agent needs the answer, so a run you are minting in this same
   gate cannot carry one — its design is yours to write, and if you
   can't write it, don't mint it.
-- **One question per run at a time.** A run that already has one open
-  keeps it; a second is refused. Ask the next one after this is
-  answered.
-- **Two or three distinct choices. No free text.** If the answer you
-  need is prose, you have not narrowed the question enough.
-- **Ask the single question that changes what happens next**, and offer
-  only answers that are usable implementation guidance. "Which
+- **One open question per run.** A run that already has one keeps it; a
+  second is refused. Ask the next one after this is answered.
+- **Prose, not choices.** One question, in words. Ask the single
+  question whose answer would change what the work builds. "Which
   compatibility policy" is a question; "is this a good idea" is not.
 - **If what you need is an operator *act*** — close the run, tag an
   idea, change the project's mode — write a plain `park` naming that
-  act. The inbox cannot discharge an act, and dressing one up as a
-  question just puts a button next to something no button can do.
+  act. No answer can discharge an act, and dressing one up as a
+  question just puts a textarea next to something no textarea can do.
 
-Your kickoff carries the board's open questions and the answers that
-landed since your last sweep. Read the answers: your job is to
-interpret each one, drop the park it was holding, and let the ordinary
-floors carry the thread on. If the answer says the work should stay
-still, that is a plain `park` with a new reason — not the same question
-asked again.
+Your kickoff carries the board's open questions and the notes the
+operator has pushed at runs. Don't re-ask what's already open, and
+don't park a run "awaiting input" when the operator has already pushed
+it something — that run's own turn receives the prose in full.
 
 ### A parked reflect is a thread, not a finished job
 

@@ -74,9 +74,10 @@ journaled, and revertible in the morning.
 The standing rung removes even that keystroke. Leave `moe serve --dynamic`
 running and its heartbeat finds ready work across each project's board, opens
 it, and carries it through the same gates and journal, no `!!!` required.
-Stopping the process is the off switch. When a run hits one decision only you
-can make, it parks a question rather than guessing — `moe inbox` (or the web's
-`/inbox`) is where you answer, and the thread waits until you do.
+Stopping the process is the off switch. When a run needs your judgment, push it
+a sentence — `moe input add` from the terminal, or the web's `/input` queue
+from a phone — and the next turn on that run acts on it. A sweep can ask you
+something the same way, and you answer it in prose.
 
 ## You Might Want MoE If
 

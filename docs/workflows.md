@@ -513,35 +513,6 @@ and not only what it filed. The section records a plan, not a promise: the
 floor is re-checked as each root is reached, so a root can still be held past
 its "queued" line. Curation sweeps stamp nothing — they start nothing.
 
-### Asking you a question
-
-A `"park"` line says "look at this first" and lasts one sweep. When the survey
-can say something sharper — *this run cannot proceed until someone answers one
-specific question* — it writes that question at the run's own position instead:
-
-```json
-{"runs": [{"run": "change-auth-defaults",
-           "park": {"question": "Which compatibility policy should this use?",
-                    "choices": ["Preserve the old default", "Adopt the new default"]}}]}
-```
-
-That parks the thread for the sweep, exactly like a plain park, *and* opens a
-durable question on the run whose later stage prompts get the answer. It shows
-up in `moe inbox list` and on the web's `/inbox`, and the harness refuses to
-start the thread until it is answered — the dynamic kick, a bang cascade, a
-chain ride, and your own stage verb all hold on it and point at
-`moe inbox answer`. One open question per run, two or three fixed choices, no
-free text; a question on a run you are minting in the same gate, on a tagged
-idea, or on a chain head is refused with a line.
-
-Answering starts nothing. It writes one journal commit, so an armed serve's
-next heartbeat offers the project to a pulse and the ordinary kick carries the
-thread on; `moe pulse new --dynamic <project>` is the expedite path. The next
-survey sees the answer, and its job is to interpret it and drop the park — not
-to ask the same question again. An answer counts as an operator mark under
-`safe` mode, but it is not an advance marker: it clears the human-input hold
-and says nothing about whether a stage was read.
-
 Grooming may move a queued run out of one thread and into another — that is how
 stray threads consolidate. One unit is off limits: any unit under a **chain
 head you minted yourself**. The head is your staging fence, so a batch you are
@@ -549,6 +520,55 @@ composing by hand is never reshaped under you. Machine-minted heads and
 headless threads stay fully groomable. Want something held, name a head; want
 it gone, close it. A ride needs no fence of its own — nothing sweeps while one
 is walking, so what you kicked is what runs.
+
+### Prose, both directions
+
+You can push a chunk of prose at any in-progress run and its next agent turn
+receives it verbatim:
+
+```
+moe input add moe/change-auth-defaults "The failing test is a known flake — skip it and ship."
+moe input add moe/change-auth-defaults          # no text: reads stdin
+```
+
+That is the stuck-run loop: from the terminal or from the web's `/input` queue
+on a phone, write a sentence, and the next turn on that run acts on it. The
+note starts nothing — it writes one journal commit, so an armed serve's next
+heartbeat offers the project to a pulse and the ordinary kick carries the
+thread on; `moe pulse new --dynamic <project>` is the expedite path. A pending
+note counts as an operator mark under `safe` mode, so the loop works on a
+project that otherwise starts nothing on its own. It is not an advance marker:
+it licenses the kick and says nothing about whether a stage was read.
+
+Delivery is once. A pending note reaches exactly one *successful* turn, then
+lives on the run page as history — the canvas that turn writes is where durable
+direction is supposed to persist. A turn that fails marks nothing, so the next
+attempt redelivers.
+
+The other direction: a dynamic survey can ask *you* something, at the run whose
+future agent needs the answer.
+
+```json
+{"runs": [{"run": "change-auth-defaults",
+           "ask": "Which compatibility policy should this use — preserve the old default or adopt the new one?"}]}
+```
+
+That opens a durable question on that run. It shows up on the dash as `· ask?`,
+in `moe input list`, and on the web's `/input` queue with a reply box;
+`moe input answer moe/change-auth-defaults "<prose>"` fills it, and the run's
+next turn gets the question and your answer as a pair. One open question per
+run; a question on a run the survey is minting in the same gate, on a tagged
+idea, or on a chain head is refused with a line.
+
+**Nothing here holds anything.** An unanswered question does not stop the run —
+its turns are told the question was asked and no reply came, and they proceed
+on their best judgment and note the call on the canvas. Stillness stays the
+park's job: a survey that needs the answer first parks the thread and names the
+question in the reason. That keeps ask and hold separate, so a survey can also
+ask a question the work need not wait for.
+
+There is no dismiss verb. A question you'd rather not answer is discharged by
+answering it — "not relevant, proceed" is prose the next turn can read.
 
 ### The heartbeat
 

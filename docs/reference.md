@@ -41,17 +41,23 @@ source of truth for the exact command surface; this page is a map.
 - `moe chore list|check|open|skip` lists due project chores, dry-runs a chore
   definition, opens the run a due chore configures, or clears a due chore until
   it is next triggered.
-- `moe inbox list [project]` shows every question a run is waiting on, oldest
-  first, with the numbered choices and the exact answer command.
-  `moe inbox answer <project>/<run> <choice-number>` records your choice. An
-  unanswered question is a harness floor, not a suggestion: the dynamic kick
-  refuses any thread with one open on a live member, and so does every stage
-  turn on that run — the operator's own stage verb, a bang cascade, a chain
-  ride. Answering starts nothing. It writes one journal commit, which is what
-  an armed serve's next heartbeat sweeps; `moe pulse new --dynamic <project>`
-  is the expedite path. Questions are written by a dynamic pulse, at a thread
-  position, one per run at a time, with two or three fixed choices — the
-  answer is delivered to that run's later stage prompts.
+- `moe input add <project>/<run> [text ...]` pushes a chunk of prose at a run;
+  with no text arguments it reads stdin, so a paragraph can be piped. The run's
+  next *successful* agent turn receives it verbatim in its prompt, once, and
+  then it lives on the run page as history — the canvas that turn writes is
+  where durable direction persists. `moe input answer <project>/<run>
+  [text ...]` fills the question a dynamic pulse asked on that run (one open
+  per run, so the run is the address). `moe input list [project]` shows both
+  halves, oldest first: what has asked you, then what you have given and no
+  turn has picked up.
+
+  Nothing here holds anything. An unanswered question does not stop the run —
+  its turns are told it was asked and no reply came, and they proceed on their
+  best judgment. Stillness stays a pulse's `park`. Writing an entry starts
+  nothing either: it lands one journal commit, which is what an armed serve's
+  next heartbeat sweeps; `moe pulse new --dynamic <project>` is the expedite
+  path. A pending entry counts as an operator mark under `safe` mode, consumed
+  once it is delivered.
 - `moe usage [--project <id>] [--since <dur>]` sums the token usage recorded in
   every mirrored stage transcript, grouped by workflow, stage and model, with a
   selected rolling-window total plus per-run and by-day breakdowns. It reads
