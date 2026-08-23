@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -406,9 +407,9 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 	// non-zero, and a sweep that concluded nothing is the shape that
 	// arrives when it doesn't — counting it clean would reset the very
 	// backoff meant to pace it.
-	gate, ok := readPulseGate(root, projectID, md.ID)
-	if !ok {
-		moePrintf(stderr, "pulse: %s/%s left an unfilled gate — leaving the run open for review\n", projectID, md.ID)
+	gate, err := readPulseGate(root, projectID, md.ID)
+	if err != nil {
+		moePrintf(stderr, "pulse: %s/%s left an unfilled gate (%v) — leaving the run open for review\n", projectID, md.ID, err)
 		return 1
 	}
 	// Mint, then groom, then kick. The order is the design's: the graph
@@ -731,51 +732,100 @@ func (e *pulseThreadEntry) UnmarshalJSON(b []byte) error {
 		e.Existing, e.Spec, e.Ask = slug, nil, nil
 		return nil
 	}
-	// The ask form first, keyed on its `run` discriminator. A mint spec
-	// has no `run`, so this decode leaves Run empty and falls through
-	// rather than shadowing it.
-	var ask struct {
-		Run  string       `json:"run"`
-		Park *pulseRunAsk `json:"park"`
+	// Probe for the `run` discriminator before committing to a branch,
+	// rather than trying each shape in sequence. Try-in-sequence let an
+	// ask form with a typo'd key drift into the spec branch and out the
+	// other side as an empty spec: the question vanished and the thread
+	// the survey meant to hold kicked anyway. An object carrying `run` is
+	// an ask form or an error — never a spec.
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(b, &keys); err != nil {
+		return fmt.Errorf("thread entry is neither a run slug nor a run spec: %w", err)
 	}
-	if err := json.Unmarshal(b, &ask); err == nil && ask.Run != "" {
+	if _, isAsk := keys["run"]; isAsk {
+		var ask struct {
+			Run  string       `json:"run"`
+			Park *pulseRunAsk `json:"park"`
+		}
+		if err := decodeStrict(b, &ask); err != nil {
+			return fmt.Errorf("%s: %w", threadEntryLabel(keys, "run"), err)
+		}
+		if ask.Run == "" {
+			return errors.New(`thread entry has an empty "run"`)
+		}
 		// `{"run": "x"}` with no park is the string form written long-hand
 		// and means exactly that: a position, no question.
 		e.Existing, e.Spec, e.Ask = ask.Run, nil, ask.Park
 		return nil
 	}
 	var spec pulseRunSpec
-	if err := json.Unmarshal(b, &spec); err != nil {
-		return fmt.Errorf("thread entry is neither a run slug nor a run spec: %w", err)
+	if err := decodeStrict(b, &spec); err != nil {
+		return fmt.Errorf("%s: %w", threadEntryLabel(keys, "slug"), err)
 	}
 	e.Existing, e.Spec, e.Ask = "", &spec, nil
 	return nil
 }
 
+// threadEntryLabel names the offending entry in a decode error using
+// whichever identifying key survived. A long thread's parse error is
+// useless if the operator can't tell which position it came from.
+func threadEntryLabel(keys map[string]json.RawMessage, key string) string {
+	var s string
+	if err := json.Unmarshal(keys[key], &s); err != nil || s == "" {
+		return "thread entry"
+	}
+	return fmt.Sprintf("thread entry %q", s)
+}
+
+// decodeStrict unmarshals one JSON value with unknown keys rejected. The
+// gate grammar is closed: a key nobody defined means the survey wrote
+// something the harness can't see, and the keys it does recognise are no
+// basis for guessing what the rest meant.
+func decodeStrict(b []byte, v any) error {
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+	if dec.More() {
+		return errors.New("unexpected trailing JSON")
+	}
+	return nil
+}
+
 // readPulseGate reads the survey canvas and parses its `## Gate` JSON
-// fence (the shared `stageGateJSON` grammar). ok is false for every
-// no-op shape the auto-close refusal keys on: a missing/unreadable
+// fence (the shared `stageGateJSON` grammar). The error is non-nil for
+// every no-op shape the auto-close refusal keys on: a missing/unreadable
 // canvas, an absent or empty fence (the skeleton placeholder),
 // unparseable JSON, or an empty status. A read error reads as unfilled —
 // the run lingers rather than auto-closing on a canvas we couldn't
-// inspect.
-func readPulseGate(root, projectID, runID string) (pulseGate, bool) {
+// inspect. The reason comes back as an error rather than flattening to a
+// bool so the refusal can name the shape it hit; the operator would
+// otherwise diff the fence by eye.
+//
+// The decode is strict, so an unknown key anywhere in the grammar
+// refuses the whole gate too. Grammar failures refuse everything —
+// nothing in the fence said what the writer meant, so there is no
+// trustworthy remainder. Semantic failures stay warn-and-continue at
+// apply time (a slug that collides, a named run that doesn't exist):
+// those are per-entry judgements the rest of the gate survives.
+func readPulseGate(root, projectID, runID string) (pulseGate, error) {
 	body, err := os.ReadFile(filepath.Join(root, run.ContentPath(projectID, runID, pulseDoc)))
 	if err != nil {
-		return pulseGate{}, false
+		return pulseGate{}, err
 	}
 	payload, ok := stageGateJSON(string(body))
 	if !ok {
-		return pulseGate{}, false
+		return pulseGate{}, errors.New("no `## Gate` json fence")
 	}
 	var g pulseGate
-	if err := json.Unmarshal(payload, &g); err != nil {
-		return pulseGate{}, false
+	if err := decodeStrict(payload, &g); err != nil {
+		return pulseGate{}, err
 	}
 	if g.Status == "" {
-		return pulseGate{}, false
+		return pulseGate{}, errors.New("gate has no status")
 	}
-	return g, true
+	return g, nil
 }
 
 // maybeSpawnReflect resolves the project's twin reflect for a pulse-side

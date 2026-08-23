@@ -249,8 +249,8 @@ func spawnWhy(root, spawner, childSlug string) string {
 	if !ok {
 		return ""
 	}
-	gate, ok := readPulseGate(root, spawnerProject, spawnerSlug)
-	if !ok {
+	gate, err := readPulseGate(root, spawnerProject, spawnerSlug)
+	if err != nil {
 		return ""
 	}
 	specs := gate.specs()

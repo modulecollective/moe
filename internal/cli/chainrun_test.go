@@ -481,9 +481,9 @@ func TestPulseGateParsesBothRunShapes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	gate, ok := readPulseGate(root, "moe", "pulse-x")
-	if !ok {
-		t.Fatal("gate did not parse")
+	gate, err := readPulseGate(root, "moe", "pulse-x")
+	if err != nil {
+		t.Fatalf("gate did not parse: %v", err)
 	}
 	if len(gate.Loose) != 1 || gate.Loose[0].Slug != "fix-ci-red-main" || gate.Loose[0].Title != "Fix red CI on main" {
 		t.Fatalf("loose = %+v, want the proposed slug and title", gate.Loose)
@@ -530,7 +530,7 @@ func TestPulseGateRejectsAMalformedThreadEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, ok := readPulseGate(root, "moe", "pulse-x"); ok {
+	if _, err := readPulseGate(root, "moe", "pulse-x"); err == nil {
 		t.Fatal("gate parsed a malformed thread entry, want a refusal")
 	}
 }
