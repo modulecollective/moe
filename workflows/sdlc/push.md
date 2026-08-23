@@ -2,10 +2,10 @@
 
 You are at the push stage. Code is written; test stage has either
 verified it, applied small fixes, or named what's outside automated
-coverage. **Your job here is synthesis, not new work** — read the
-prior canvases and curate them into the PR body the reviewer reads,
-and surface any conflict between code's draft and test's findings so
-the operator sees it before opening the PR.
+coverage; review has issued its ship verdict on both. **Your job here
+is synthesis, not new work** — read the prior canvases and curate them
+into the PR body the reviewer reads, and surface any conflict between
+them so the operator sees it before opening the PR.
 
 This stage runs inside the push command before either ship route. The
 PR route consumes `## PR body` as the reviewer-facing PR description;
@@ -23,21 +23,23 @@ Two things land on the push canvas:
 
 1. **The final PR body.** Code stage drafted a candidate body. Test
    stage may have surfaced findings — fixes applied, gaps named,
-   deliberate skips — that change what the body should say. Curate
-   the two into a single body the reviewer reads on the PR. The
-   code-stage draft is the baseline; test-stage findings amend it.
+   deliberate skips — and review may have added findings, in-place
+   fixes, or followups on top of both. Curate the three into a single
+   body the reviewer reads on the PR. The code-stage draft is the
+   baseline; test-stage findings amend it; review's layer is the
+   freshest and wins where they disagree.
    `gh pr create --body-file` reads the `## PR body` section of this
    canvas directly, so that section *is* the PR description.
 2. **A short ship-readiness narrative.** What was verified, what
    wasn't, and why this is ready to ship. Two or three sentences.
    The narrative is the operator's record of "why this was safe to
-   send for review" — it's not a re-run of the test canvas, it's
-   the synthesis of the test canvas's bottom line.
+   send for review" — it's not a re-run of the test or review
+   canvases, it's the synthesis of their bottom lines.
 
 ## What not to do
 
-- **Don't re-verify.** Test stage did that. Re-running the test
-  suite here is theater — the pre-push hooks will run it again
+- **Don't re-verify.** Test and review stages did that. Re-running
+  the suite here is theater — the pre-push hooks will run it again
   before the branch lands. If you find yourself reaching for a
   command, you've crossed into test stage's lane.
 - **Don't re-implement.** Same rule as test stage. The diff is set.
@@ -51,7 +53,7 @@ Two things land on the push canvas:
 
 ## Conflict surfacing
 
-When code's draft and test's findings disagree about what's ready,
+When the code, test, and review canvases disagree about what's ready,
 the canvas is where you surface that — explicitly, in its own
 section if it needs one. The operator reads the canvas before the
 PR opens; a conflict that lands on the reviewer's screen unannounced
@@ -74,8 +76,8 @@ the headings.
 is ready to ship — or, if it isn't, what's blocking)
 
 ## Conflicts surfaced
-(disagreements between code's draft and test's findings; empty if
-the two agree)
+(disagreements among the code, test, and review canvases; empty if
+they agree)
 ```
 
 `gh pr create --body-file` reads the `## PR body` section verbatim on
@@ -85,8 +87,8 @@ section is a draft record only; the merge commit body stays bare.
 
 ## Fix-or-escalate
 
-If your synthesis pass turns up something neither code nor test
-caught — the design contradicts an architecture invariant, the
+If your synthesis pass turns up something none of code, test, or
+review caught — the design contradicts an architecture invariant, the
 verified behavior doesn't actually match the design, the change has
 a hidden dependency the prior stages missed — **don't paper over it
 on the canvas**. Flag the issue in `Conflicts surfaced` and tell the
@@ -106,10 +108,11 @@ phase; you don't trigger them.
 The synthesis stage is ready to hand back when:
 
 1. `PR body` is the final body the operator will paste at the ship
-   prompt — curated from code's draft, amended by test's findings.
+   prompt — curated from code's draft, amended by test's findings
+   and review's.
 2. `Ship readiness` reads as a two-or-three-sentence "should I ship"
-   summary, not a re-run of the test canvas.
-3. `Conflicts surfaced` is either empty (code and test agreed) or
+   summary, not a re-run of the test or review canvases.
+3. `Conflicts surfaced` is either empty (the canvases agreed) or
    names the disagreement explicitly.
 4. **Everything is committed in the sandbox** — `git status` is
    clean.
@@ -119,13 +122,13 @@ The synthesis stage is ready to hand back when:
 
 ## Before you start
 
-Skim the code and test canvases. If either looks incomplete —
+Skim the code, test, and review canvases. If any looks incomplete —
 unresolved questions, missing sections, TODOs, or a code canvas
 without a `## Test plan` — stop and alert the operator before doing
 any synthesis. Suggest revisiting the prior stage rather than
 papering over the gap here.
 
-This is a soft check, not a gate. If both canvases look done, just
+This is a soft check, not a gate. If the canvases look done, just
 proceed.
 
 ## Only edit this run

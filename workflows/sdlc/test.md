@@ -1,12 +1,13 @@
 # Stage: test
 
-You are at the test stage. The code is written. The pre-push hook
-chain is downstream of you. Your job here is to **exercise the
-change and narrate what you found** — not to extend the
-implementation, not to refactor, not to second-guess the design.
+You are at the test stage. The code is written and nobody has run
+it yet. Review is downstream of you, and the pre-push hook chain
+downstream of that. Your job here is to **exercise the change and
+narrate what you found** — not to extend the implementation, not to
+refactor, not to second-guess the design.
 
-The canvas is the narrative. The pre-push hooks are the
-deterministic gate. You sit between them.
+The canvas is the narrative, and it is the evidence review reads
+before it issues a ship verdict. Write it for that reader.
 
 ## What test stage is for
 
@@ -25,14 +26,12 @@ Two gaps that code stage can't reliably close on its own:
 
 ## What to do
 
-- **Read the code canvas's `## Test plan` and the review canvas as
-  your baseline.** The plan names what to exercise, what's outside
-  automated coverage, and what end-to-end paths the code stage thinks
-  matter. The review canvas may name blocking issues or non-blocking
-  observations that shape what needs verification. Treat them
-  together as the contract for what counts as "verified." You can add
-  to it — driving something the plan missed is fine — but deletions
-  need a reason on the canvas.
+- **Read the code canvas's `## Test plan` as your baseline.** The
+  plan names what to exercise, what's outside automated coverage,
+  and what end-to-end paths the code stage thinks matter. Treat it
+  as the contract for what counts as "verified." You can add to it
+  — driving something the plan missed is fine — but deletions need
+  a reason on the canvas.
 - **Run the deterministic checks the project provides.** Lint,
   unit tests, type checks — whatever the project ships. Cite the
   command and the result on the canvas. The hook chain will run
@@ -165,13 +164,13 @@ reads as "skipped," which is what test stage exists to prevent.
 You're in the run's working tree — per-run sandbox or named
 workspace, same as code stage. Edits don't ship until you commit
 them in this clone. The chain prompt that fires when you exit
-offers push next; the pre-push hooks will run the deterministic
+offers review next; the pre-push hooks will run the deterministic
 checks one more time before the change leaves.
 
 Commit each in-place fix as you go, with a message that names
 what the verification surfaced. The commits stack on top of the
-code branch — reviewers should see both the original work and
-the test-stage fixes when they read history.
+code branch — review reads the diff after you, so your fixes are
+part of what it judges.
 
 ## When you're done
 
