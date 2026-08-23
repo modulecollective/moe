@@ -36,7 +36,10 @@ type Metadata struct {
 	// Mode caps what the heartbeat may start here — see mode.go. Absent
 	// means auto, so it is omitted rather than written out at the
 	// default.
-	Mode          string `json:"mode,omitempty"`
+	Mode string `json:"mode,omitempty"`
+	// Ship is how a finished run lands here — see ship.go. Absent means
+	// pr, so it is omitted rather than written out at the default.
+	Ship          string `json:"ship,omitempty"`
 	Submodule     string `json:"submodule"`
 	Remote        string `json:"remote"`
 	DefaultBranch string `json:"default_branch"`
