@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -46,5 +47,30 @@ func TestSdlcRegistersReviewStage(t *testing.T) {
 		if len(prereqs) != 1 || prereqs[0] != tc.prereq {
 			t.Fatalf("Prereqs(%q) = %v, want [%s]", tc.stage, prereqs, tc.prereq)
 		}
+	}
+}
+
+// TestSdlcHelpListsStagesInLadderOrder: the `moe sdlc` usage listing and
+// the top-level `moe help` summary both print subcommands in
+// registration order, so a ladder reorder that misses the Register
+// calls leaves the operator-facing help contradicting docs/reference.md
+// and the cascade's own "design, code, test, review, push" error text.
+// Pin the stage verbs' relative order in the rendered summary.
+func TestSdlcHelpListsStagesInLadderOrder(t *testing.T) {
+	g, err := LookupGroup("sdlc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary := g.Command().Summary
+	last := -1
+	for _, stage := range []string{"design", "code", "test", "review", "push"} {
+		at := strings.Index(summary, stage)
+		if at < 0 {
+			t.Fatalf("sdlc summary %q does not list %q", summary, stage)
+		}
+		if at < last {
+			t.Fatalf("sdlc summary %q lists %q out of ladder order", summary, stage)
+		}
+		last = at
 	}
 }

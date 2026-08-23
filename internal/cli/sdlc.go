@@ -45,16 +45,18 @@ func init() {
 		Run:     runCode,
 		argKind: argProjectRun,
 	})
-	g.Register(&Command{
-		Name:    "review",
-		Summary: "open an agent session on the run's review document — judge the coded and tested work",
-		Run:     runReview,
-		argKind: argProjectRun,
-	})
+	// Registration order is the order both help listings print, so it
+	// tracks the ladder: test before review.
 	g.Register(&Command{
 		Name:    "test",
 		Summary: "open an agent session on the run's test document — verify the code stage's work",
 		Run:     runTest,
+		argKind: argProjectRun,
+	})
+	g.Register(&Command{
+		Name:    "review",
+		Summary: "open an agent session on the run's review document — judge the coded and tested work",
+		Run:     runReview,
 		argKind: argProjectRun,
 	})
 	g.Register(pushCommand("sdlc"))
