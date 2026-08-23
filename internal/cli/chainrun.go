@@ -268,6 +268,7 @@ func chainKickRun(root, projectID, runID string, mode rideMode, stdout, stderr i
 		moePrintf(stderr, "chain kick: %s/%s is chained under %s — kick the head\n", projectID, runID, parent)
 		return 1
 	}
+
 	wf, err := LookupWorkflow(md.Workflow)
 	if err != nil {
 		moePrintf(stderr, "chain kick: %v\n", err)

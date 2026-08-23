@@ -505,8 +505,10 @@ func TestInputVerbs(t *testing.T) {
 	if strings.Contains(listing, "asked you:") {
 		t.Fatalf("listing still asks after an answer:\n%s", listing)
 	}
+	// The answered ping still lists by its question — that is what both
+	// sides recognise it by — and the bare note by its text.
 	if !strings.Contains(listing, "given, awaiting pickup:") ||
-		!strings.Contains(listing, "Adopt the new default.") ||
+		!strings.Contains(listing, "Which compatibility policy?") ||
 		!strings.Contains(listing, "Also skip the flake.") {
 		t.Fatalf("listing = %q, want both entries pending", listing)
 	}

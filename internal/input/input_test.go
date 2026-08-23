@@ -488,7 +488,13 @@ func TestScanSkipsMalformedRecordWithError(t *testing.T) {
 func TestFirstLine(t *testing.T) {
 	e := Entry{Text: "skip the flake\nit fails on ARM only\n"}
 	if got := e.FirstLine(); got != "skip the flake" {
-		t.Fatalf("FirstLine() = %q", got)
+		t.Fatalf("note FirstLine() = %q", got)
+	}
+	// A ping is identified by its question, answered or not — the answer
+	// alone reads as a fragment on a list of many runs.
+	answered := Entry{Question: "which one?", Text: "the second"}
+	if got := answered.FirstLine(); got != "which one?" {
+		t.Fatalf("answered ping FirstLine() = %q", got)
 	}
 	if got := (Entry{Question: "which one?"}).FirstLine(); got != "which one?" {
 		t.Fatalf("open ping FirstLine() = %q", got)

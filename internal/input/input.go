@@ -106,12 +106,17 @@ func (e Entry) Pending() bool { return e.Text != "" && e.DeliveredTo == "" }
 // Delivered reports whether a turn has already consumed this entry.
 func (e Entry) Delivered() bool { return e.DeliveredTo != "" }
 
-// FirstLine is the entry's prose reduced to one line, for the surfaces
-// that list many entries — the pulse kickoff, the CLI's queue view.
+// FirstLine is the entry reduced to one identifying line, for the
+// surfaces that list many at once — the pulse kickoff, the CLI's queue
+// view, the web queue's read-only half.
+//
+// A ping shows its question even once answered: the question is what
+// both sides recognise the entry by, where the answer alone ("Adopt the
+// new default.") reads as a fragment. A bare note has only its text.
 func (e Entry) FirstLine() string {
-	body := e.Text
+	body := e.Question
 	if body == "" {
-		body = e.Question
+		body = e.Text
 	}
 	line, _, _ := strings.Cut(body, "\n")
 	return strings.TrimSpace(line)

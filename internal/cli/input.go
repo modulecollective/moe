@@ -280,8 +280,18 @@ func operatorInputSection(root string, md *run.Metadata) (string, []int) {
 
 // indentContinuation keeps a multi-line note readable inside a markdown
 // bullet: the first line sits after the dash, the rest line up under it.
+// Blank lines stay blank rather than becoming two spaces — the operator
+// wrote paragraphs, not trailing whitespace.
 func indentContinuation(text string) string {
-	return strings.ReplaceAll(strings.TrimSpace(text), "\n", "\n  ")
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) != "" {
+			lines[i] = "  " + lines[i]
+		} else {
+			lines[i] = ""
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // pendingInputBlock is the pulse kickoff's view of the record: what the
