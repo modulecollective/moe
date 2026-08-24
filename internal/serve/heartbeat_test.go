@@ -841,6 +841,14 @@ func TestSweepExitLogsTheFailureTrace(t *testing.T) {
 		t.Errorf("clean-sweep log = %q, want %q", got, want)
 	}
 
+	// Failed with nothing on the PTY: the header still lands, closed
+	// with "no output" rather than a promise of a tail that never comes.
+	log.Reset()
+	s.children.onExit(heartbeatChildPrefix+"alpha", now, errors.New("exit status 2"), "")
+	if got, want := log.String(), "heartbeat: alpha sweep failed (exit status 2), no run minted — no output\n"; got != want {
+		t.Errorf("empty-tail log = %q, want %q", got, want)
+	}
+
 	// A child that is not a sweep says nothing here; its own exit line
 	// in child.read covers it.
 	log.Reset()
