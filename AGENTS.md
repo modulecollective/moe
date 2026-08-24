@@ -18,6 +18,14 @@ projects — those get their own guidance assembled from `soul.md` and
   (`HEAD`, `HasRef`, `Upstream`, `AheadOf`, `LsRemoteDefault`,
   `RevParse`, `Status`). Raw `exec.Command("git", …)` outside that
   package fails CI.
+- **Rewrap the paragraph you edit in `docs/` and `README.md`.** When
+  an edit touches a wrapped prose paragraph (a bullet's body counts),
+  reflow the whole paragraph to the file's ~80-column prose wrap —
+  not just the lines you changed. Rewriting the front of a paragraph
+  and leaving the old tail behind strands it on a stub line that
+  renders as a notch and costs a later cleanup run. Code fences,
+  tables, link targets, and command grammars don't wrap — leave them
+  alone.
 
 ## Before you say you're done
 
