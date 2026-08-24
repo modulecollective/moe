@@ -325,12 +325,17 @@ func New(opts Options) (*Server, error) {
 		// check — a sweep whose run never landed takes its link back off
 		// the row here.
 		runID := ""
-		if project := heartbeatProject(id); project != "" {
+		project := heartbeatProject(id)
+		if project != "" {
 			runID = takeSweepRun(s.opts.Root, project)
 			s.activity.recordSweepRun(project, runID)
 		}
-		s.activity.recordChildExit(id, at, exitErr, cleanTail(tail), runID)
+		clean := cleanTail(tail)
+		s.activity.recordChildExit(id, at, exitErr, clean, runID)
 		s.saveActivity()
+		if project != "" {
+			s.logSweepExit(project, exitErr, clean, runID)
+		}
 	}
 	s.registerRoutes()
 	return s, nil

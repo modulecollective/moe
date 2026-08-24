@@ -347,3 +347,39 @@ func heartbeatProject(childID string) string {
 	}
 	return p
 }
+
+// logSweepExit writes the sweep's ending to serve's log, which is the
+// only channel here that outlives the process. The exit error, the PTY
+// tail and the minted slug are held by the child registry and the
+// activity ring, both of which reset on restart — so an account of a
+// sweep that died before the last restart had to be dug out of dangling
+// commits. The log is already durable and already rotated wherever
+// serve runs under a supervisor, so the trace rides it rather than a
+// new artifact.
+//
+// Emitted as a single logf: the header and its tail lines have to stay
+// contiguous, and other goroutines are writing to the same stream.
+func (s *Server) logSweepExit(project string, exitErr error, tail, runID string) {
+	minted := "no run minted"
+	if runID != "" {
+		minted = "run " + runID
+	}
+	if exitErr == nil {
+		// The clean line is what makes the log a ledger: "what became of
+		// run X" is a grep for the slug either way it ended.
+		s.logf("heartbeat: %s swept clean, %s", project, minted)
+		return
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "heartbeat: %s sweep failed (%v), %s", project, exitErr, minted)
+	if tail == "" {
+		b.WriteString(" — no output")
+	} else {
+		b.WriteString(" — last output:")
+		for line := range strings.SplitSeq(tail, "\n") {
+			b.WriteString("\n  | ")
+			b.WriteString(line)
+		}
+	}
+	s.logf("%s", b.String())
+}

@@ -803,3 +803,49 @@ func TestMissingRunDropsTheLazyCachedLink(t *testing.T) {
 		t.Errorf("row Run=%q after the exit read found no run, want the cached link dropped", got)
 	}
 }
+
+// TestSweepExitLogsTheFailureTrace: the tail and the exit error live in
+// memory, so a restart used to erase the whole account of a failed
+// sweep. The log is the durable channel — assert the failure block
+// lands there, stripped and indented, and that a clean sweep still
+// names its run.
+func TestSweepExitLogsTheFailureTrace(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "pulse-2026-04-01", "pulse")
+	var log bytes.Buffer
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, Logger: &log})
+	now := time.Now()
+	if err := os.MkdirAll(filepath.Join(root, ".moe"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Failed, and dead before it minted anything — the case where the
+	// tail is the only trace there will ever be.
+	s.children.onExit(heartbeatChildPrefix+"alpha", now, errors.New("exit status 1"),
+		"\x1b[2Jsetting up\n\n\x1b[31mError: no such workflow: pulse\x1b[0m\n")
+	got := log.String()
+	want := "heartbeat: alpha sweep failed (exit status 1), no run minted — last output:\n" +
+		"  | setting up\n" +
+		"  | Error: no such workflow: pulse\n"
+	if got != want {
+		t.Errorf("failed-sweep log:\n%q\nwant:\n%q", got, want)
+	}
+
+	// Clean, with a run on disk: the slug, no tail.
+	log.Reset()
+	if err := os.WriteFile(sweepRunPath(root, "alpha"), []byte("pulse-2026-04-01\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.children.onExit(heartbeatChildPrefix+"alpha", now, nil, "chatter the operator does not need\n")
+	if got, want := log.String(), "heartbeat: alpha swept clean, run pulse-2026-04-01\n"; got != want {
+		t.Errorf("clean-sweep log = %q, want %q", got, want)
+	}
+
+	// A child that is not a sweep says nothing here; its own exit line
+	// in child.read covers it.
+	log.Reset()
+	s.children.onExit("run:alpha:some-run:code", now, errors.New("exit status 1"), "boom\n")
+	if got := log.String(); got != "" {
+		t.Errorf("non-heartbeat exit logged %q, want nothing", got)
+	}
+}
