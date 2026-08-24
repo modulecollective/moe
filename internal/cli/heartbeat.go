@@ -601,7 +601,9 @@ func tombstoneReap(root string, s *session.Session, now time.Time) (string, erro
 		}.String()
 	// ErrNothingToCommit means an earlier tick already landed this exact
 	// note and died before abandoning; the retry proceeds to the abandon
-	// it owes. Any other failure restores run.json — the caller keeps the
+	// it owes. Rare in practice — At has second precision, so a retry a
+	// tick later stamps a fresh commit instead, and last death wins.
+	// Any other failure restores run.json — the caller keeps the
 	// branch, so leaving the edit loose in the canonical tree would only
 	// give the next session's rebase something to trip on. From HEAD, not
 	// the index: Stage already ran, so a bare checkout would restore the
