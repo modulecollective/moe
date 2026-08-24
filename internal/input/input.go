@@ -24,9 +24,12 @@
 // address the run rather than an id. Notes are unlimited.
 //
 // Add, Ask, Answer, MarkDelivered, and Carry each write one journal
-// commit through the shared lock/pull/push pipeline. None starts an
-// agent: the commit moves the journal, and the next heartbeat sweep is
-// what picks the work back up.
+// commit through the shared lock/pull/push pipeline. Each reads the
+// record and rewrites it inside that lock — the file is rewritten
+// whole, so a read taken before the acquire would clobber whatever a
+// concurrent writer landed in between. None starts an agent: the commit
+// moves the journal, and the next heartbeat sweep is what picks the
+// work back up.
 package input
 
 import (
@@ -216,22 +219,25 @@ func Add(root, projectID, runID, text string, stdout, stderr io.Writer) (Entry, 
 	if text == "" {
 		return Entry{}, fmt.Errorf("%w: note has no text", ErrEmpty)
 	}
-	md, f, err := loadLive(root, projectID, runID)
-	if err != nil {
-		return Entry{}, err
-	}
-	e := Entry{ID: len(f.Notes) + 1, Text: text}
-	f.Notes = append(f.Notes, e)
+	var e Entry
+	err := commit(root, projectID, runID, "input-add", stdout, stderr, func() (File, string, error) {
+		md, f, err := loadLive(root, projectID, runID)
+		if err != nil {
+			return File{}, "", err
+		}
+		e = Entry{ID: len(f.Notes) + 1, Text: text}
+		f.Notes = append(f.Notes, e)
 
-	ref := fmt.Sprintf("%s/%s#%d", projectID, runID, e.ID)
-	msg := fmt.Sprintf("input: note %s\n\n", ref) +
-		trailers.Block{
-			Run:        runID,
-			Project:    projectID,
-			Workflow:   md.Workflow,
-			InputAdded: ref,
-		}.String()
-	if err := commit(root, projectID, runID, f, "input-add", msg, stdout, stderr); err != nil {
+		ref := fmt.Sprintf("%s/%s#%d", projectID, runID, e.ID)
+		return f, fmt.Sprintf("input: note %s\n\n", ref) +
+			trailers.Block{
+				Run:        runID,
+				Project:    projectID,
+				Workflow:   md.Workflow,
+				InputAdded: ref,
+			}.String(), nil
+	})
+	if err != nil {
 		return Entry{}, err
 	}
 	return e, nil
@@ -251,26 +257,29 @@ func Ask(root, projectID, runID, askedBy, question, consent string, stdout, stde
 	if question == "" {
 		return Entry{}, fmt.Errorf("%w: question has no text", ErrEmpty)
 	}
-	md, f, err := loadLive(root, projectID, runID)
-	if err != nil {
-		return Entry{}, err
-	}
-	if open, ok := f.OpenPing(); ok {
-		return Entry{}, fmt.Errorf("%w: %s/%s#%d — %s", ErrOpenPing, projectID, runID, open.ID, open.Question)
-	}
-	e := Entry{ID: len(f.Notes) + 1, AskedBy: askedBy, Question: question}
-	f.Notes = append(f.Notes, e)
+	var e Entry
+	err := commit(root, projectID, runID, "input-ask", stdout, stderr, func() (File, string, error) {
+		md, f, err := loadLive(root, projectID, runID)
+		if err != nil {
+			return File{}, "", err
+		}
+		if open, ok := f.OpenPing(); ok {
+			return File{}, "", fmt.Errorf("%w: %s/%s#%d — %s", ErrOpenPing, projectID, runID, open.ID, open.Question)
+		}
+		e = Entry{ID: len(f.Notes) + 1, AskedBy: askedBy, Question: question}
+		f.Notes = append(f.Notes, e)
 
-	ref := fmt.Sprintf("%s/%s#%d", projectID, runID, e.ID)
-	msg := fmt.Sprintf("input: ask %s\n\n", ref) +
-		trailers.Block{
-			Run:        runID,
-			Project:    projectID,
-			Workflow:   md.Workflow,
-			Consent:    consent,
-			InputAsked: ref,
-		}.String()
-	if err := commit(root, projectID, runID, f, "input-ask", msg, stdout, stderr); err != nil {
+		ref := fmt.Sprintf("%s/%s#%d", projectID, runID, e.ID)
+		return f, fmt.Sprintf("input: ask %s\n\n", ref) +
+			trailers.Block{
+				Run:        runID,
+				Project:    projectID,
+				Workflow:   md.Workflow,
+				Consent:    consent,
+				InputAsked: ref,
+			}.String(), nil
+	})
+	if err != nil {
 		return Entry{}, err
 	}
 	return e, nil
@@ -289,29 +298,32 @@ func Answer(root, projectID, runID string, id int, text string, stdout, stderr i
 	if text == "" {
 		return Entry{}, fmt.Errorf("%w: answer has no text", ErrEmpty)
 	}
-	md, f, err := loadLive(root, projectID, runID)
-	if err != nil {
-		return Entry{}, err
-	}
-	open, ok := f.OpenPing()
-	if !ok {
-		return Entry{}, fmt.Errorf("%w: %s/%s", ErrNoOpenPing, projectID, runID)
-	}
-	if id != 0 && id != open.ID {
-		return Entry{}, fmt.Errorf("%w: %s/%s has #%d open, not #%d", ErrStalePing, projectID, runID, open.ID, id)
-	}
-	f.Notes[open.ID-1].Text = text
-	answered := f.Notes[open.ID-1]
+	var answered Entry
+	err := commit(root, projectID, runID, "input-answer", stdout, stderr, func() (File, string, error) {
+		md, f, err := loadLive(root, projectID, runID)
+		if err != nil {
+			return File{}, "", err
+		}
+		open, ok := f.OpenPing()
+		if !ok {
+			return File{}, "", fmt.Errorf("%w: %s/%s", ErrNoOpenPing, projectID, runID)
+		}
+		if id != 0 && id != open.ID {
+			return File{}, "", fmt.Errorf("%w: %s/%s has #%d open, not #%d", ErrStalePing, projectID, runID, open.ID, id)
+		}
+		f.Notes[open.ID-1].Text = text
+		answered = f.Notes[open.ID-1]
 
-	ref := fmt.Sprintf("%s/%s#%d", projectID, runID, answered.ID)
-	msg := fmt.Sprintf("input: answer %s\n\n", ref) +
-		trailers.Block{
-			Run:           runID,
-			Project:       projectID,
-			Workflow:      md.Workflow,
-			InputAnswered: ref,
-		}.String()
-	if err := commit(root, projectID, runID, f, "input-answer", msg, stdout, stderr); err != nil {
+		ref := fmt.Sprintf("%s/%s#%d", projectID, runID, answered.ID)
+		return f, fmt.Sprintf("input: answer %s\n\n", ref) +
+			trailers.Block{
+				Run:           runID,
+				Project:       projectID,
+				Workflow:      md.Workflow,
+				InputAnswered: ref,
+			}.String(), nil
+	})
+	if err != nil {
 		return Entry{}, err
 	}
 	return answered, nil
@@ -330,43 +342,46 @@ func Answer(root, projectID, runID string, id int, text string, stdout, stderr i
 // pending for the following turn instead of clobbering it.
 //
 // A turn that failed calls nothing, so the next attempt redelivers. An
-// empty id list is a no-op with no commit — what nearly every turn does.
+// empty id list is a no-op with no commit and no lock — what nearly
+// every turn does; a list whose entries have all been delivered already
+// takes the lock to find that out, and still commits nothing.
 func MarkDelivered(root, projectID, runID, docID string, ids []int, stdout, stderr io.Writer) error {
 	if len(ids) == 0 {
 		return nil
-	}
-	f, err := Load(root, projectID, runID)
-	if err != nil {
-		return err
 	}
 	want := make(map[int]bool, len(ids))
 	for _, id := range ids {
 		want[id] = true
 	}
-	var marked []string
-	for i := range f.Notes {
-		e := &f.Notes[i]
-		if !want[e.ID] || !e.Pending() {
-			continue
+	return commit(root, projectID, runID, "input-delivered", stdout, stderr, func() (File, string, error) {
+		f, err := Load(root, projectID, runID)
+		if err != nil {
+			return File{}, "", err
 		}
-		e.DeliveredTo = docID
-		marked = append(marked, strconv.Itoa(e.ID))
-	}
-	if len(marked) == 0 {
-		return nil
-	}
+		var marked []string
+		for i := range f.Notes {
+			e := &f.Notes[i]
+			if !want[e.ID] || !e.Pending() {
+				continue
+			}
+			e.DeliveredTo = docID
+			marked = append(marked, strconv.Itoa(e.ID))
+		}
+		if len(marked) == 0 {
+			return File{}, "", run.ErrNothingToCommit
+		}
 
-	ref := fmt.Sprintf("%s/%s#%s", projectID, runID, strings.Join(marked, ","))
-	// No MoE-Document trailer, deliberately: that trailer is how the
-	// harness reads "this stage's doc turn happened", and a bookkeeping
-	// stamp is not a turn. The doc rides the delivered value instead.
-	msg := fmt.Sprintf("input: delivered %s to %s\n\n", ref, docID) +
-		trailers.Block{
-			Run:            runID,
-			Project:        projectID,
-			InputDelivered: ref + " " + docID,
-		}.String()
-	return commit(root, projectID, runID, f, "input-delivered", msg, stdout, stderr)
+		ref := fmt.Sprintf("%s/%s#%s", projectID, runID, strings.Join(marked, ","))
+		// No MoE-Document trailer, deliberately: that trailer is how the
+		// harness reads "this stage's doc turn happened", and a bookkeeping
+		// stamp is not a turn. The doc rides the delivered value instead.
+		return f, fmt.Sprintf("input: delivered %s to %s\n\n", ref, docID) +
+			trailers.Block{
+				Run:            runID,
+				Project:        projectID,
+				InputDelivered: ref + " " + docID,
+			}.String(), nil
+	})
 }
 
 // Carry copies a source run's undelivered input onto a destination run
@@ -394,59 +409,66 @@ func MarkDelivered(root, projectID, runID, docID string, ids []int, stdout, stde
 // consent is the caller's MoE-Consent value, empty for an operator's own
 // promote. Returns the number of entries carried; zero with no error and
 // no commit is the overwhelmingly common case (no record, or nothing
-// left undelivered).
+// left undelivered) — it costs one brief lock hold to find that out,
+// since the source read has to sit under the same lock as the write.
 func Carry(root, srcProject, srcRun, dstProject, dstRun, consent string, stdout, stderr io.Writer) (int, error) {
-	src, err := Load(root, srcProject, srcRun)
-	if err != nil {
-		return 0, err
-	}
-	var carry []Entry
-	for _, e := range src.Notes {
-		if e.Pending() || e.Open() {
-			carry = append(carry, e)
+	var carried int
+	// One prepare closure reads both records: the lock is repo-wide, so
+	// a single hold covers the source read and the destination rewrite.
+	err := commit(root, dstProject, dstRun, "input-carry", stdout, stderr, func() (File, string, error) {
+		src, err := Load(root, srcProject, srcRun)
+		if err != nil {
+			return File{}, "", err
 		}
-	}
-	if len(carry) == 0 {
-		return 0, nil
-	}
-	md, dst, err := loadLive(root, dstProject, dstRun)
-	if err != nil {
-		return 0, err
-	}
-	_, dstOpen := dst.OpenPing()
-
-	var srcIDs, dstIDs []string
-	for _, e := range carry {
-		if e.Open() {
-			if dstOpen {
-				fmt.Fprintf(stderr, "input: dropping open ping %s/%s#%d — %s/%s already has one open\n",
-					srcProject, srcRun, e.ID, dstProject, dstRun)
-				continue
+		var carry []Entry
+		for _, e := range src.Notes {
+			if e.Pending() || e.Open() {
+				carry = append(carry, e)
 			}
-			dstOpen = true
 		}
-		copied := Entry{ID: len(dst.Notes) + 1, AskedBy: e.AskedBy, Question: e.Question, Text: e.Text}
-		dst.Notes = append(dst.Notes, copied)
-		srcIDs = append(srcIDs, strconv.Itoa(e.ID))
-		dstIDs = append(dstIDs, strconv.Itoa(copied.ID))
-	}
-	if len(srcIDs) == 0 {
-		return 0, nil
-	}
+		if len(carry) == 0 {
+			return File{}, "", run.ErrNothingToCommit
+		}
+		md, dst, err := loadLive(root, dstProject, dstRun)
+		if err != nil {
+			return File{}, "", err
+		}
+		_, dstOpen := dst.OpenPing()
 
-	srcRef := fmt.Sprintf("%s/%s#%s", srcProject, srcRun, strings.Join(srcIDs, ","))
-	dstRef := fmt.Sprintf("%s/%s#%s", dstProject, dstRun, strings.Join(dstIDs, ","))
-	msg := fmt.Sprintf("input: carried %s → %s\n\n", srcRef, dstRef) +
-		trailers.Block{
-			Run:      dstRun,
-			Project:  dstProject,
-			Workflow: md.Workflow,
-			Consent:  consent,
-		}.String()
-	if err := commit(root, dstProject, dstRun, dst, "input-carry", msg, stdout, stderr); err != nil {
+		var srcIDs, dstIDs []string
+		for _, e := range carry {
+			if e.Open() {
+				if dstOpen {
+					fmt.Fprintf(stderr, "input: dropping open ping %s/%s#%d — %s/%s already has one open\n",
+						srcProject, srcRun, e.ID, dstProject, dstRun)
+					continue
+				}
+				dstOpen = true
+			}
+			copied := Entry{ID: len(dst.Notes) + 1, AskedBy: e.AskedBy, Question: e.Question, Text: e.Text}
+			dst.Notes = append(dst.Notes, copied)
+			srcIDs = append(srcIDs, strconv.Itoa(e.ID))
+			dstIDs = append(dstIDs, strconv.Itoa(copied.ID))
+		}
+		if len(srcIDs) == 0 {
+			return File{}, "", run.ErrNothingToCommit
+		}
+		carried = len(srcIDs)
+
+		srcRef := fmt.Sprintf("%s/%s#%s", srcProject, srcRun, strings.Join(srcIDs, ","))
+		dstRef := fmt.Sprintf("%s/%s#%s", dstProject, dstRun, strings.Join(dstIDs, ","))
+		return dst, fmt.Sprintf("input: carried %s → %s\n\n", srcRef, dstRef) +
+			trailers.Block{
+				Run:      dstRun,
+				Project:  dstProject,
+				Workflow: md.Workflow,
+				Consent:  consent,
+			}.String(), nil
+	})
+	if err != nil {
 		return 0, err
 	}
-	return len(srcIDs), nil
+	return carried, nil
 }
 
 // loadLive resolves a run that may still receive input: in progress, and
@@ -466,19 +488,47 @@ func loadLive(root, projectID, runID string) (*run.Metadata, File, error) {
 	return md, f, nil
 }
 
-// commit writes the record and lands it as one journal commit through
-// the shared lock/pull/push pipeline.
-func commit(root, projectID, runID string, f File, purpose, msg string, stdout, stderr io.Writer) error {
+// testLocked, if set, fires inside the lock just before prepare runs.
+// It is the seam the interleave tests use to stand in for another
+// process that won an earlier hold and rewrote the record: real
+// contention can't drive them, because repolock refuses a nested
+// acquire from the same process. Nil in production.
+var testLocked func()
+
+// commit runs prepare under the repo lock and lands what it returns as
+// one journal commit through the shared lock/pull/push pipeline.
+//
+// prepare rather than a ready File: every state-dependent read a verb
+// makes — the record, run.json, the check-then-act refusals, the id it
+// assigns — has to happen inside the lock. A read taken before the
+// acquire is a snapshot, and rewriting the whole file from it silently
+// drops whatever another writer landed in between.
+//
+// A prepare with nothing to write returns run.ErrNothingToCommit, which
+// skips the push (WithJournalPush passes it through untouched) and maps
+// back to nil here — the no-op verbs' contract.
+func commit(root, projectID, runID, purpose string, stdout, stderr io.Writer, prepare func() (File, string, error)) error {
 	rel := Path(projectID, runID)
-	return sync.WithJournalPush(root, repolock.Options{
+	err := sync.WithJournalPush(root, repolock.Options{
 		Purpose: purpose,
 		Run:     projectID + "/" + runID,
 	}, stdout, stderr, func() error {
+		if testLocked != nil {
+			testLocked()
+		}
+		f, msg, err := prepare()
+		if err != nil {
+			return err
+		}
 		if err := writeFile(filepath.Join(root, rel), f); err != nil {
 			return err
 		}
 		return run.StageAndCommit(root, msg, rel)
 	})
+	if errors.Is(err, run.ErrNothingToCommit) {
+		return nil
+	}
+	return err
 }
 
 func writeFile(path string, f File) error {
