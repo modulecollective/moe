@@ -172,13 +172,6 @@ a.banner-bar:hover, a.banner-bar:focus { color: var(--accent); }
   white-space: nowrap;
   border-bottom: 1px solid var(--hairline);
 }
-/* Header chips (new run) sit flush against the right edge of the
-   section h2. */
-.section-actions {
-  display: inline-flex;
-  gap: 0.5rem;
-  flex: 0 0 auto;
-}
 .section-action:hover, .section-action:focus {
   color: var(--fg);
   border-color: var(--muted);
