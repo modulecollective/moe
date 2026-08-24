@@ -15,6 +15,7 @@ import (
 	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/git/gittest"
+	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
@@ -1463,6 +1464,46 @@ func TestKnowledgeFixTurnSuppressesStageBanners(t *testing.T) {
 				if strings.Contains(got, want) != tc.wantSeen {
 					t.Errorf("stdout contains %q = %v, want %v; stdout:\n%s",
 						want, !tc.wantSeen, tc.wantSeen, got)
+				}
+			}
+		})
+	}
+}
+
+// TestStageLockBudgetTracksWhoIsWaiting pins the rule the stranded
+// pulse cost us: an unattended turn gets the cron budget, an
+// interactive one keeps the interactive number, and — the half that
+// actually strands runs — *both* lock windows get the same answer. A
+// headless child that waits patiently to open and then times out on
+// close has already committed its turn; it exits leaving a session
+// branch nothing retries.
+func TestStageLockBudgetTracksWhoIsWaiting(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		headless bool
+		want     time.Duration
+	}{
+		{"headless turn defers", true, repolock.CronBudget},
+		{"interactive turn is told", false, repolock.DefaultBudget},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := wikiSessionInputs{
+				Project: "moe", RunSlug: "r", DocID: "code",
+				LockPurpose: "stage", Headless: tc.headless,
+			}
+			for _, half := range []string{"open", "close"} {
+				got := stageLockOptions(in, half)
+				if got.Budget != tc.want {
+					t.Errorf("stage-%s budget = %s, want %s", half, got.Budget, tc.want)
+				}
+				if got.Purpose != "stage-"+half {
+					t.Errorf("stage-%s purpose = %q", half, got.Purpose)
+				}
+				if got.Run != "moe/r" {
+					t.Errorf("stage-%s run = %q, want moe/r", half, got.Run)
+				}
+				if !got.Heartbeat {
+					t.Errorf("stage-%s dropped the heartbeat; a long hold reads as crashed without it", half)
 				}
 			}
 		})

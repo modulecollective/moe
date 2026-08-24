@@ -450,6 +450,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		DocID:       docID,
 		Agent:       agentName,
 		LockPurpose: "stage",
+		Headless:    opts.Headless,
 		WikiBuilder: func(canonicalRoot string) (*wiki.Config, error) {
 			if opts.WikiBuilder == nil {
 				return nil, nil
@@ -909,6 +910,11 @@ type wikiSessionInputs struct {
 	// LockPurpose is the repo-lock label prefix; the helper appends
 	// "-open" / "-close" for the two short-held windows.
 	LockPurpose string
+	// Headless reports that nobody is waiting on this turn — a cascade
+	// driver, a heartbeat sweep's child. openWikiSession reads it to
+	// pick the lock budget for both windows; see the budget comment
+	// there for why an unattended caller gets the cron number.
+	Headless bool
 	// WikiBuilder, if non-nil, returns the canonical wiki cfg the
 	// helper rewrites to worktree paths. Receives the canonical
 	// bureaucracy root; resolution defers until BuildSpec has
@@ -1304,8 +1310,8 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 	}
 
 	// Close the session: land it on local main and tear the
-	// worktree down. Local-only — origin push is moe sync's job —
-	// so a short budget and no heartbeat are fine.
+	// worktree down. The lock window and its budget are
+	// openWikiSession's; see the budget comment there.
 	//
 	// closeWithAutoResolve wraps the close: on a *RebaseFailureError
 	// it launches a one-shot agent in the session worktree to
@@ -1358,11 +1364,7 @@ func openWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer
 	// The local work is just `git worktree add` (or a lookup); the
 	// auto-pull before it can sit on the network briefly.
 	var sess *session.Session
-	err := repolock.With(root, repolock.Options{
-		Purpose:   in.LockPurpose + "-open",
-		Run:       in.Project + "/" + in.RunSlug,
-		Heartbeat: true,
-	}, func() error {
+	err := repolock.With(root, stageLockOptions(in, "open"), func() error {
 		if err := sync.AutoPull(root, stdout, stderr); err != nil {
 			return err
 		}
@@ -1396,11 +1398,7 @@ func openWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer
 	}
 	closeSess := func(okToPush bool) error {
 		release()
-		return repolock.With(root, repolock.Options{
-			Purpose:   in.LockPurpose + "-close",
-			Run:       in.Project + "/" + in.RunSlug,
-			Heartbeat: true,
-		}, func() error {
+		return repolock.With(root, stageLockOptions(in, "close"), func() error {
 			if err := session.Close(sess); err != nil {
 				return err
 			}
@@ -1411,6 +1409,39 @@ func openWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer
 		})
 	}
 	return sess, closeSess, nil
+}
+
+// stageLockOptions builds the repo-lock options for one of a stage
+// session's two windows ("open" / "close"). One function for both so
+// the pair can't drift — the purpose suffix is the only thing that
+// differs, and a budget that applied to open but not close would be
+// precisely the bug this exists to prevent.
+//
+// The budget is the whole reason it takes a parameter. DefaultBudget is
+// documented as how long an *interactive* caller waits, and a headless
+// turn has no such caller, so it takes the same CronBudget every other
+// unattended entry point (`moe sync`, reconcileAtPulse) already takes.
+// Both windows here span the network — AutoPull before Open, AutoPush
+// after Close — so a herd of sweeps starting on one tick can hold the
+// lock well past thirty seconds. A headless child that times out on
+// *close* has already committed its turn: it exits non-zero leaving a
+// session branch that nothing retries, and the next tick's reap gets
+// it. Deferring costs a background process a few minutes; dying
+// stranded a finished pulse survey.
+//
+// Interactive callers keep the thirty seconds. A human staring at a
+// wedged prompt wants to be told, not made to wait.
+func stageLockOptions(in wikiSessionInputs, half string) repolock.Options {
+	budget := repolock.DefaultBudget
+	if in.Headless {
+		budget = repolock.CronBudget
+	}
+	return repolock.Options{
+		Purpose:   in.LockPurpose + "-" + half,
+		Run:       in.Project + "/" + in.RunSlug,
+		Budget:    budget,
+		Heartbeat: true,
+	}
 }
 
 // exitInterrupted is the exit code reportWikiSessionExit mints when the
