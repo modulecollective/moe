@@ -248,13 +248,24 @@ func (s *Server) heartbeatTick() {
 // awaitHeartbeat records a sweep's outcome once its child exits: the
 // gate's cursors, and the backoff ledger.
 //
-// The tip cursor moves even on failure. A sweep that died still wrote
-// its run-open commit, and leaving the cursor behind it would make the
-// next tick read that commit as fresh delta and sweep straight into the
-// same wall — the backoff would be pacing a loop it never gets to slow.
-// The exit code is what separates that case from a sweep that actually
-// surveyed the board; the gate keeps them apart, so the failure path
-// still gets retried on the parked-work leg.
+// The tip cursor moves on failure too, not only on a clean sweep. A
+// sweep that died still wrote its run-open commit, and leaving the
+// cursor behind it would make the next tick read that commit as fresh
+// delta and sweep straight into the same wall — the backoff would be
+// pacing a loop it never gets to slow. The exit code is what separates
+// that case from a sweep that actually surveyed the board; the gate
+// keeps them apart, so the failure path still gets retried on the
+// parked-work leg.
+//
+// Unless the window holds work the survey never saw: Swept declines
+// both cursors when unseenWorkIn finds commits inside the sweep's own
+// dispatch range, and a failed sweep whose rides landed work meets that
+// on the ordinary autonomous path, not only when an operator commits
+// mid-sweep. Nothing loops out of the refusal. The backoff ledger
+// recorded just below is keyed off the exit code alone, so a declined
+// cursor re-offers the board at cool-off pace rather than immediately;
+// and the next dispatching tick records its base at the tip as it
+// stands then, so the refused range is never re-walked.
 func (s *Server) awaitHeartbeat(projectID string, c *child) {
 	<-c.done
 	failed := c.exitErr != nil
