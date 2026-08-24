@@ -10,6 +10,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git/gittest"
+	"github.com/modulecollective/moe/internal/input"
 	"github.com/modulecollective/moe/internal/run"
 )
 
@@ -484,5 +485,116 @@ func TestMarkPromotedWritesTheEdgeForAnUnmintedDestination(t *testing.T) {
 	// Second call refuses: the idea is no longer in progress.
 	if err := MarkPromoted(root, "alpha", "my-idea", "alpha", "reflect-2026-05-14", "", io.Discard, io.Discard); err == nil {
 		t.Error("MarkPromoted on a promoted idea = nil error, want a refusal")
+	}
+}
+
+// A promote carries the idea's undelivered operator input onto the run
+// it opened, in its own commit after the status bump. Without this the
+// entries strand: a promoted idea is terminal, so input.Scan drops it
+// and no turn ever renders them.
+func TestPromoteCarriesTheIdeasUndeliveredInput(t *testing.T) {
+	root := newIdeaBureaucracy(t, "alpha", "my-idea", "# my idea\n")
+	if _, err := input.Add(root, "alpha", "my-idea", "Do the design pass and park.", io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout strings.Builder
+	promoted, err := Promote(root, "alpha", "my-idea", PromoteOptions{
+		Workflow:   "sdlc",
+		FirstStage: "design",
+		Consent:    "dynamic",
+	}, &stdout, io.Discard)
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+	if promoted.MarkErr != nil {
+		t.Fatalf("MarkErr = %v", promoted.MarkErr)
+	}
+	if !strings.Contains(stdout.String(), "carried 1 operator input entry from idea alpha/my-idea") {
+		t.Fatalf("promote said nothing about the carry: %q", stdout.String())
+	}
+
+	dst, err := input.Load(root, "alpha", promoted.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dst.Notes) != 1 || dst.Notes[0].Text != "Do the design pass and park." || dst.Notes[0].Delivered() {
+		t.Fatalf("destination record = %+v, want the note pending", dst.Notes)
+	}
+	src, err := input.Load(root, "alpha", "my-idea")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(src.Notes) != 1 || src.Notes[0].Delivered() {
+		t.Fatalf("source record = %+v, want it untouched", src.Notes)
+	}
+
+	// The carry is its own commit, and it lands after the status bump —
+	// while the idea is still in progress both records would list the
+	// same entries.
+	if got := gittest.Output(t, root, "log", "-1", "--format=%s"); !strings.Contains(got, "input: carried alpha/my-idea#1") {
+		t.Fatalf("HEAD = %q, want the carry commit", got)
+	}
+	if got := gittest.Output(t, root, "log", "-1", "--skip=1", "--format=%s"); !strings.Contains(got, "Promote idea alpha/my-idea") {
+		t.Fatalf("HEAD~1 = %q, want the promote commit", got)
+	}
+}
+
+// The twin path takes the same edge: an idea resolved onto a reflect run
+// the reflect core already minted carries its input too.
+func TestMarkPromotedCarriesTheIdeasUndeliveredInput(t *testing.T) {
+	root := newIdeaBureaucracy(t, "alpha", "my-idea", "# my idea\n")
+	seedRunMetadata(t, root, "alpha", "reflect-2026-05-14", "twin", run.StatusInProgress)
+	gittest.Commit(t, root, "seed reflect run")
+	if _, err := input.Add(root, "alpha", "my-idea", "The glossary entry is wrong.", io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := MarkPromoted(root, "alpha", "my-idea", "alpha", "reflect-2026-05-14", "", io.Discard, io.Discard); err != nil {
+		t.Fatalf("MarkPromoted: %v", err)
+	}
+	dst, err := input.Load(root, "alpha", "reflect-2026-05-14")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dst.Notes) != 1 || dst.Notes[0].Text != "The glossary entry is wrong." {
+		t.Fatalf("reflect record = %+v, want the carried note", dst.Notes)
+	}
+}
+
+// A carry that fails must not fail the promote: the entries stay where
+// they already were, which is the behaviour that shipped before the
+// carry existed, and the operator gets a warning instead of a rollback.
+func TestPromoteSurvivesAFailedCarry(t *testing.T) {
+	root := newIdeaBureaucracy(t, "alpha", "my-idea", "# my idea\n")
+	// A machine-written record that violates its own invariants is
+	// ErrMalformed, never repaired in place — the one failure mode the
+	// carry can hit with the destination freshly opened.
+	if err := os.WriteFile(filepath.Join(root, input.Path("alpha", "my-idea")),
+		[]byte(`{"notes":[{"id":7,"text":"stranded"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Commit(t, root, "seed malformed input record")
+
+	var stderr strings.Builder
+	promoted, err := Promote(root, "alpha", "my-idea", PromoteOptions{
+		Workflow:   "sdlc",
+		FirstStage: "design",
+	}, io.Discard, &stderr)
+	if err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+	if promoted.MarkErr != nil {
+		t.Fatalf("MarkErr = %v, want the promote to have completed", promoted.MarkErr)
+	}
+	md, err := run.Load(root, "alpha", "my-idea")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if md.Status != run.StatusPromoted {
+		t.Fatalf("idea status = %q, want promoted despite the carry failure", md.Status)
+	}
+	if !strings.Contains(stderr.String(), "could not carry its operator input") {
+		t.Fatalf("failed carry went unreported: %q", stderr.String())
 	}
 }

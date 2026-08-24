@@ -23,11 +23,10 @@
 // A run may carry at most one open ping — that is what lets a reply
 // address the run rather than an id. Notes are unlimited.
 //
-// Add, Ask, Answer, and MarkDelivered each write one journal commit
-// through the shared lock/pull/push pipeline, stamped MoE-Input-Added /
-// -Asked / -Answered / -Delivered. None starts an agent: the commit
-// moves the journal, and the next heartbeat sweep is what picks the work
-// back up.
+// Add, Ask, Answer, MarkDelivered, and Carry each write one journal
+// commit through the shared lock/pull/push pipeline. None starts an
+// agent: the commit moves the journal, and the next heartbeat sweep is
+// what picks the work back up.
 package input
 
 import (
@@ -368,6 +367,86 @@ func MarkDelivered(root, projectID, runID, docID string, ids []int, stdout, stde
 			InputDelivered: ref + " " + docID,
 		}.String()
 	return commit(root, projectID, runID, f, "input-delivered", msg, stdout, stderr)
+}
+
+// Carry copies a source run's undelivered input onto a destination run
+// as one journal commit on the destination's record. The promotion edge
+// is the only caller: an idea's entries are addressed to work that has
+// not started yet, and promoting the idea makes the destination run the
+// thing that work happens on. Without this the entries would be
+// stranded — a promoted idea is terminal, so Scan drops it and no turn
+// ever renders them.
+//
+// Copy, not move: the source record is left untouched, including its
+// delivery stamps (nothing consumed the entries there). While the
+// source is terminal its originals are invisible to every scan, so
+// nothing shows twice; and if the destination is abandoned and the idea
+// reopened, the originals are live again and the next promote re-carries
+// them.
+//
+// Pending notes, answered pings (question and answer travel together),
+// and the source's open ping all ride. Already-delivered entries do not.
+// If the source has an open ping and the destination already has one,
+// the source's is dropped with a warning: one open ping per run is what
+// lets a reply address the run, and a machine's unanswered question is
+// re-askable on the destination by the next sweep.
+//
+// consent is the caller's MoE-Consent value, empty for an operator's own
+// promote. Returns the number of entries carried; zero with no error and
+// no commit is the overwhelmingly common case (no record, or nothing
+// left undelivered).
+func Carry(root, srcProject, srcRun, dstProject, dstRun, consent string, stdout, stderr io.Writer) (int, error) {
+	src, err := Load(root, srcProject, srcRun)
+	if err != nil {
+		return 0, err
+	}
+	var carry []Entry
+	for _, e := range src.Notes {
+		if e.Pending() || e.Open() {
+			carry = append(carry, e)
+		}
+	}
+	if len(carry) == 0 {
+		return 0, nil
+	}
+	md, dst, err := loadLive(root, dstProject, dstRun)
+	if err != nil {
+		return 0, err
+	}
+	_, dstOpen := dst.OpenPing()
+
+	var srcIDs, dstIDs []string
+	for _, e := range carry {
+		if e.Open() {
+			if dstOpen {
+				fmt.Fprintf(stderr, "input: dropping open ping %s/%s#%d — %s/%s already has one open\n",
+					srcProject, srcRun, e.ID, dstProject, dstRun)
+				continue
+			}
+			dstOpen = true
+		}
+		copied := Entry{ID: len(dst.Notes) + 1, AskedBy: e.AskedBy, Question: e.Question, Text: e.Text}
+		dst.Notes = append(dst.Notes, copied)
+		srcIDs = append(srcIDs, strconv.Itoa(e.ID))
+		dstIDs = append(dstIDs, strconv.Itoa(copied.ID))
+	}
+	if len(srcIDs) == 0 {
+		return 0, nil
+	}
+
+	srcRef := fmt.Sprintf("%s/%s#%s", srcProject, srcRun, strings.Join(srcIDs, ","))
+	dstRef := fmt.Sprintf("%s/%s#%s", dstProject, dstRun, strings.Join(dstIDs, ","))
+	msg := fmt.Sprintf("input: carried %s → %s\n\n", srcRef, dstRef) +
+		trailers.Block{
+			Run:      dstRun,
+			Project:  dstProject,
+			Workflow: md.Workflow,
+			Consent:  consent,
+		}.String()
+	if err := commit(root, dstProject, dstRun, dst, "input-carry", msg, stdout, stderr); err != nil {
+		return 0, err
+	}
+	return len(srcIDs), nil
 }
 
 // loadLive resolves a run that may still receive input: in progress, and

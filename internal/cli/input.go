@@ -22,6 +22,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/input"
 	"github.com/modulecollective/moe/internal/run"
 )
@@ -322,6 +323,10 @@ func pendingInputBlock(sc *pulseScan, projectID string) string {
 		for _, w := range pending {
 			fmt.Fprintf(&b, "- `%s/%s` — %s\n", w.Project, w.Run, w.Entry.FirstLine())
 		}
+		if anyTaggedIdea(sc, pending) {
+			b.WriteString("\nA tagged idea in that list has no turn of its own: promoting it is " +
+				"what delivers the note, so read the note as signal to promote.\n")
+		}
 	}
 	if len(open) > 0 {
 		b.WriteString("\nAsked and unanswered — do not ask these again, and do not ask a second " +
@@ -338,4 +343,19 @@ func pendingInputBlock(sc *pulseScan, projectID string) string {
 		"tag an idea, change the project's mode — write a plain `park` naming that act " +
 		"instead: no answer can discharge it.\n")
 	return b.String()
+}
+
+// anyTaggedIdea reports whether any of these entries sits on an idea the
+// operator has tagged for promotion. Such a note is undeliverable where
+// it is — an idea has no machine turn — and the promote is what moves it
+// onto a run that does, which makes the note promote signal rather than
+// a pending pickup.
+func anyTaggedIdea(sc *pulseScan, waiting []input.Waiting) bool {
+	for _, w := range waiting {
+		md := sc.byKey[w.Project+"/"+w.Run]
+		if md != nil && md.Workflow == dash.IdeaWorkflow && md.PromoteTo != "" {
+			return true
+		}
+	}
+	return false
 }

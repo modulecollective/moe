@@ -379,6 +379,152 @@ func TestLoadMissingRecordIsEmpty(t *testing.T) {
 	}
 }
 
+// Carry copies every undelivered shape and leaves both source history
+// and destination-local history intact. The destination owns fresh ids:
+// an idea's ids are meaningful only within the idea's record.
+func TestCarryCopiesUndeliveredEntriesWithDenseDestinationIDs(t *testing.T) {
+	root := seedRoot(t)
+	seedRun(t, root, "idea")
+	seedRun(t, root, "destination")
+
+	add(t, root, "idea", "already consumed")
+	if err := MarkDelivered(root, "moe", "idea", "idea", []int{1}, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	add(t, root, "idea", "operator note")
+	answered := ask(t, root, "idea")
+	if _, err := Answer(root, "moe", "idea", answered.ID, "Keep the old policy.", io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	open := ask(t, root, "idea")
+	add(t, root, "destination", "destination-local note")
+
+	n, err := Carry(root, "moe", "idea", "moe", "destination", "dynamic", io.Discard, io.Discard)
+	if err != nil {
+		t.Fatalf("Carry: %v", err)
+	}
+	if n != 3 {
+		t.Fatalf("Carry count = %d, want 3", n)
+	}
+
+	dst, err := Load(root, "moe", "destination")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dst.Notes) != 4 {
+		t.Fatalf("destination notes = %+v, want its note plus three carried entries", dst.Notes)
+	}
+	for i, e := range dst.Notes {
+		if e.ID != i+1 {
+			t.Fatalf("destination entry %d has id %d", i, e.ID)
+		}
+		if e.Delivered() {
+			t.Fatalf("carried destination entry is already delivered: %+v", e)
+		}
+	}
+	if got := dst.Notes[1]; got.Text != "operator note" || got.IsPing() {
+		t.Fatalf("carried note = %+v", got)
+	}
+	if got := dst.Notes[2]; got.Question != answered.Question || got.Text != "Keep the old policy." || got.AskedBy != answered.AskedBy {
+		t.Fatalf("carried answered ping = %+v", got)
+	}
+	if got := dst.Notes[3]; got.Question != open.Question || got.Text != "" || got.AskedBy != open.AskedBy || !got.Open() {
+		t.Fatalf("carried open ping = %+v", got)
+	}
+
+	src, err := Load(root, "moe", "idea")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(src.Notes) != 4 || src.Notes[0].DeliveredTo != "idea" || src.Notes[1].ID != 2 || src.Notes[3].ID != 4 {
+		t.Fatalf("source record changed: %+v", src.Notes)
+	}
+	msg := gittest.Output(t, root, "log", "-1", "--format=%B")
+	for _, want := range []string{
+		"input: carried moe/idea#2,3,4 → moe/destination#2,3,4",
+		"MoE-Run: destination",
+		"MoE-Project: moe",
+		"MoE-Workflow: sdlc",
+		"MoE-Consent: dynamic",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("carry commit missing %q:\n%s", want, msg)
+		}
+	}
+}
+
+// No record and an all-delivered record are both ordinary no-ops: no
+// destination file rewrite and no bookkeeping-only journal commit.
+func TestCarryNoOpsWithoutUndeliveredInput(t *testing.T) {
+	root := seedRoot(t)
+	seedRun(t, root, "idea")
+	seedRun(t, root, "destination")
+
+	head := gittest.Output(t, root, "rev-parse", "HEAD")
+	if n, err := Carry(root, "moe", "no-record", "moe", "destination", "", io.Discard, io.Discard); err != nil || n != 0 {
+		t.Fatalf("Carry(no record) = %d, %v", n, err)
+	}
+	if got := gittest.Output(t, root, "rev-parse", "HEAD"); got != head {
+		t.Fatalf("no-record carry committed: before %s after %s", head, got)
+	}
+
+	add(t, root, "idea", "done")
+	if err := MarkDelivered(root, "moe", "idea", "idea", []int{1}, io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	head = gittest.Output(t, root, "rev-parse", "HEAD")
+	if n, err := Carry(root, "moe", "idea", "moe", "destination", "", io.Discard, io.Discard); err != nil || n != 0 {
+		t.Fatalf("Carry(all delivered) = %d, %v", n, err)
+	}
+	if got := gittest.Output(t, root, "rev-parse", "HEAD"); got != head {
+		t.Fatalf("all-delivered carry committed: before %s after %s", head, got)
+	}
+}
+
+// A destination can already have an open ping on the twin path. The
+// source's machine question is re-askable there, while carrying it would
+// violate the run-addressed answer invariant, so only that entry drops.
+func TestCarryDropsAnOpenPingCollisionAndCarriesTheRest(t *testing.T) {
+	root := seedRoot(t)
+	seedRun(t, root, "idea")
+	seedRun(t, root, "destination")
+
+	sourceOpen := ask(t, root, "idea")
+	add(t, root, "idea", "still carry me")
+	destinationOpen := ask(t, root, "destination")
+	add(t, root, "destination", "already here")
+
+	var stderr strings.Builder
+	n, err := Carry(root, "moe", "idea", "moe", "destination", "", io.Discard, &stderr)
+	if err != nil {
+		t.Fatalf("Carry: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("Carry count = %d, want 1", n)
+	}
+	if !strings.Contains(stderr.String(), "dropping open ping moe/idea#1") ||
+		!strings.Contains(stderr.String(), "moe/destination already has one open") {
+		t.Fatalf("collision warning = %q", stderr.String())
+	}
+
+	dst, err := Load(root, "moe", "destination")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dst.Notes) != 3 || dst.Notes[2].ID != 3 || dst.Notes[2].Text != "still carry me" {
+		t.Fatalf("destination record = %+v", dst.Notes)
+	}
+	if got, ok := dst.OpenPing(); !ok || got.ID != destinationOpen.ID || got.Question != destinationOpen.Question {
+		t.Fatalf("destination open ping = %+v, %v", got, ok)
+	}
+	if src, err := Load(root, "moe", "idea"); err != nil || len(src.Notes) != 2 || src.Notes[0] != sourceOpen {
+		t.Fatalf("source record = %+v, %v", src.Notes, err)
+	}
+	if got := gittest.Output(t, root, "log", "-1", "--format=%s"); !strings.Contains(got, "moe/idea#2 → moe/destination#3") {
+		t.Fatalf("carry subject = %q", got)
+	}
+}
+
 // Scan is the queue: everything still live on in-progress runs, oldest
 // first, with terminal runs dropped even though their history stays on
 // disk.

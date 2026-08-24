@@ -30,6 +30,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/input"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sync"
@@ -130,9 +131,9 @@ func Open(root, projectID string, opts run.Options, stdout, stderr io.Writer) (*
 }
 
 // Promote opens a destination run seeded from an idea, then marks the
-// source idea promoted in a separate commit. Two commits total — one
-// for the open, one for the status bump — keeps git history honest
-// (one event per commit).
+// source idea promoted in a separate commit (and carries its
+// undelivered operator input in a third, when it has any). One commit
+// per event keeps git history honest.
 //
 // Fails loud if ideaSlug doesn't name an in-progress idea run in
 // projectID. Once the destination opens, a markIdeaPromoted failure
@@ -240,9 +241,16 @@ func MarkPromoted(root, projectID, ideaSlug, destProjectID, destSlug, consent st
 
 // markIdeaPromoted bumps the source idea run's status to
 // StatusPromoted and commits the transition with a MoE-Promoted-To
-// trailer pointing at the destination run. Separate commit from the
-// destination's open: two short commits keep git history honest (one
-// event per commit).
+// trailer pointing at the destination run, then carries the idea's
+// undelivered operator input onto the destination. Separate commit for
+// each: short commits keep git history honest (one event per commit).
+//
+// The carry runs after the bump, not before: while the idea is still in
+// progress both records would list the same entries, and the bump is
+// what takes the originals out of every scan. It is best-effort — a
+// failure leaves the entries where they already were, which is the
+// behaviour that shipped before the carry existed, so warning beats
+// unwinding a promotion that is otherwise complete.
 //
 // consent is the caller's MoE-Consent value — the same one the
 // destination's open commit carries — and is empty for an operator's
@@ -251,6 +259,24 @@ func MarkPromoted(root, projectID, ideaSlug, destProjectID, destSlug, consent st
 // marked open beside an unmarked status bump sitting in the same sweep
 // window.
 func markIdeaPromoted(root string, md *run.Metadata, destProjectID, destSlug, consent string, stdout, stderr io.Writer) error {
+	if err := bumpIdeaPromoted(root, md, destProjectID, destSlug, consent, stdout, stderr); err != nil {
+		return err
+	}
+	n, err := input.Carry(root, md.Project, md.ID, destProjectID, destSlug, consent, stdout, stderr)
+	switch {
+	case err != nil:
+		fmt.Fprintf(stderr, "warning: promoted %s/%s but could not carry its operator input to %s/%s: %v\n",
+			md.Project, md.ID, destProjectID, destSlug, err)
+	case n == 1:
+		fmt.Fprintf(stdout, "carried 1 operator input entry from idea %s/%s\n", md.Project, md.ID)
+	case n > 1:
+		fmt.Fprintf(stdout, "carried %d operator input entries from idea %s/%s\n", n, md.Project, md.ID)
+	}
+	return nil
+}
+
+// bumpIdeaPromoted is the status flip and its commit.
+func bumpIdeaPromoted(root string, md *run.Metadata, destProjectID, destSlug, consent string, stdout, stderr io.Writer) error {
 	md.Status = run.StatusPromoted
 	runJSONRel := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
 	msg := fmt.Sprintf("Promote idea %s/%s → %s/%s\n\n", md.Project, md.ID, destProjectID, destSlug) +
