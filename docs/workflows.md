@@ -480,10 +480,10 @@ A sweep is machine-paced and has no re-open verb: a failed one is read with
 `cat` / `log`, ended with `close` (the filings still harvest), and retried by
 running another. The survey blocks with a `Ctrl-C to skip` banner; interrupting
 it abandons the sweep and leaves the run open until you close it — the next
-sweep runs fresh either way. `moe pulse new` is
-also the verb an external cron would call — the primitives are cron-safe, but
-MoE ships no cron of anyone else's. The one clock it does carry is the armed
-serve's own heartbeat, described below.
+sweep runs fresh either way. `moe pulse new` is also the verb an external cron
+would call — the primitives are cron-safe, but MoE ships no cron of anyone
+else's. The one clock it does carry is the armed serve's own heartbeat,
+described below.
 
 The survey's first turn carries a GitHub context block the harness gathered:
 PRs merged since the last pulse (marking the ones that landed outside moe, which
