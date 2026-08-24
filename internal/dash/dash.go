@@ -307,6 +307,14 @@ func BuildRows(in Inputs) ([]Row, error) {
 			if in.PendingInput[runKey] {
 				note = note + " · input"
 			}
+			// The reap's tombstone. Not a question — the sweep re-offers
+			// the thread on its own, and usually already has by the time
+			// anyone reads this — so no `?`. It is here because a row
+			// that dropped a turn and a row that was never reached look
+			// identical otherwise, and the run page has the sha.
+			if md.Reaped != nil {
+				note = note + " · died"
+			}
 		}
 		// A run bound to a named workspace surfaces it as "@<name>" on
 		// the active row so the operator can see at a glance which

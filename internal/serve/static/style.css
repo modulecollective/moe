@@ -439,7 +439,8 @@ form.new-run button:hover, form.new-run button:focus {
   border-color: var(--muted);
 }
 
-.error {
+/* Page errors and the reap tombstone: same warn box, different cause. */
+.error, .reaped {
   background: color-mix(in srgb, var(--warn) 12%, transparent);
   color: var(--warn);
   border: 1px solid var(--warn);

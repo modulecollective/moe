@@ -783,3 +783,34 @@ func TestBuildRowsMarksInputHints(t *testing.T) {
 		t.Fatalf("note = %q, want no hints on an untouched run", rows[0].Note)
 	}
 }
+
+// A run whose last machine turn died carries `· died` on its ACTIVE
+// row. No question mark: nothing is being asked of the operator — the
+// sweep re-offers the thread on its own — but a row that dropped a turn
+// and a row the loop never reached are otherwise identical, which is the
+// archaeology the tombstone exists to spare.
+func TestBuildRowsMarksAReapedRun(t *testing.T) {
+	md := &run.Metadata{ID: "fix-it", Project: "alpha", Status: run.StatusInProgress, Workflow: "sdlc"}
+	in := Inputs{
+		Runs:      []*run.Metadata{md},
+		Index:     &run.JournalIndex{},
+		NextByRun: map[string]NextDecision{"alpha/fix-it": {Stage: "design"}},
+	}
+
+	rows, err := BuildRows(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || strings.Contains(rows[0].Note, "died") {
+		t.Fatalf("note = %+v, want no death hint on an untouched run", rows)
+	}
+
+	md.Reaped = &run.ReapNote{Doc: "design", At: "2026-08-23T23:14:14Z", Tip: "81c2d5a71"}
+	rows, err = BuildRows(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(rows[0].Note, "· died") {
+		t.Fatalf("note = %q, want the death hint", rows[0].Note)
+	}
+}

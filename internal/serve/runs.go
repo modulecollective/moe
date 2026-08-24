@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/md"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
@@ -93,6 +94,20 @@ type runVM struct {
 	// follow-ups, lore, and its twin note — each landed one linked to
 	// what it became. Zero value renders no sections.
 	Traces runTracesVM
+	// Reaped is the heartbeat reap's tombstone, rendered. Nil for nearly
+	// every run: it is set only between a machine turn dying and the next
+	// session start on the run clearing it.
+	Reaped *reapedVM
+}
+
+// reapedVM is the warning line a tombstoned run carries above its meta:
+// which stage died, when the reap noticed, and the abandoned branch tip
+// the transcript is still readable at.
+type reapedVM struct {
+	Doc string
+	At  string
+	Tip string
+	Ago string
 }
 
 // RunTraces is the non-canvas residue of one run, as the run page shows
@@ -161,6 +176,22 @@ type twinNoteVM struct {
 	Status     string
 	ReflectRun string
 	ReflectURL string
+}
+
+// reapedNotice renders md.Reaped for the run page, or nil when the run
+// carries no tombstone — which is nearly always. An unparseable
+// timestamp still renders: the sha is the part that has to reach the
+// operator, and dropping the whole notice over a bad clock field would
+// lose exactly what the note exists to preserve.
+func reapedNotice(md *run.Metadata, now time.Time) *reapedVM {
+	if md == nil || md.Reaped == nil {
+		return nil
+	}
+	vm := &reapedVM{Doc: md.Reaped.Doc, At: md.Reaped.At, Tip: git.ShortSHA(md.Reaped.Tip)}
+	if t, err := time.Parse(time.RFC3339, md.Reaped.At); err == nil {
+		vm.Ago = dash.HumanAgo(now, t)
+	}
+	return vm
 }
 
 // gatherRunTraces resolves the run's non-canvas traces. No callback
@@ -726,6 +757,7 @@ func (s *Server) buildReadOnlyRunVM(projectID, slug, id string) (runVM, error) {
 		CanvasLinks: s.canvasLinks(projectID, slug, now),
 		Traces:      s.gatherRunTraces(projectID, slug),
 		Inputs:      s.gatherRunInputs(projectID, slug, md),
+		Reaped:      reapedNotice(md, now),
 	}
 	s.fillRunRow(&vm, projectID, slug, now)
 	vm.Provenance = s.gatherProvenance(projectID, slug)
@@ -901,6 +933,7 @@ func (s *Server) buildRunVM(c *child, projectID, slug, id string) runVM {
 		s.logf("run page %s: load for actions: %v", id, err)
 	} else {
 		vm.Inputs = s.gatherRunInputs(projectID, slug, md)
+		vm.Reaped = reapedNotice(md, now)
 		vm.ChainMembers = s.gatherChainMembers(md, projectID, slug, now)
 		// !exited == an agent mid-turn; composeRunActions drops the
 		// advance mark in that case. fillRunRow above populated

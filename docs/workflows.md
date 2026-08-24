@@ -647,10 +647,14 @@ vendor night wedge the project until you notice.
 
 The heartbeat also reaps: a session branch whose machine walk died — same host,
 pid gone, heartbeat stale — is abandoned so the run re-parks and the loop can
-retry it. A robot half-turn is regenerable. Sessions you started, sessions
-whose claimant might still be alive, and sessions with no record at all are
-never touched; they surface on the dash's ACTIVE row and `moe session resolve`
-/ `moe session abandon` are still yours.
+retry it. A robot half-turn is regenerable. Before the branch goes, the reap
+stamps a tombstone on the run — which stage died, when, and the abandoned
+branch tip — so a run whose turn was dropped stops reading like one the loop
+never reached; `moe dash` marks the row `· died` and the run page names the sha
+the transcript is still readable at. The next session on the run clears it.
+Sessions you started, sessions whose claimant might still be alive, and
+sessions with no record at all are never touched; they surface on the dash's
+ACTIVE row and `moe session resolve` / `moe session abandon` are still yours.
 
 ## Twin
 

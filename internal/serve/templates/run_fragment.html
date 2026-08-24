@@ -1,4 +1,10 @@
 <div class="run-fragment">
+  {{with .Reaped}}
+  <p class="reaped">the last machine turn at <strong>{{.Doc}}</strong> died before landing anything;
+    the heartbeat abandoned its session branch{{if .Ago}} <span title="{{.At}}">{{.Ago}}</span>{{end}}.
+    The turn's transcript survives at <code>{{.Tip}}</code> until git gc prunes it.
+    The sweep re-offers the thread on its own.</p>
+  {{end}}
   {{if .RowNote}}
   <p class="meta">
     <span class="note">{{.RowNote}}</span>
