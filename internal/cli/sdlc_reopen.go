@@ -202,7 +202,11 @@ func mintSDLCReopen(verb, root string, prior *run.Metadata, wsName, agentName st
 		moePrintf(stderr, "%s: read %s: %v\n", verb, canvasRel, err)
 		return nil, 1
 	}
-	designSeed := string(canvasBody)
+	// A design stage that nominated the run's close left that nomination
+	// in the very bytes this seed carries forward. Reopening is the
+	// disagreement with it, so drop the gate rather than hand the
+	// successor a canvas that closes itself.
+	designSeed := stripCloseGateSection(string(canvasBody))
 	if len(canvasBody) == 0 {
 		designSeed = renderEmptyReopenSeed(priorSlug)
 	}

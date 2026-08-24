@@ -279,3 +279,54 @@ func TestStageNominatedCloseScope(t *testing.T) {
 		})
 	}
 }
+
+// TestReopenSeedDropsCloseNomination: reopen seeds the successor's
+// design canvas from the prior run's, so a *design* stage that nominated
+// the close would otherwise hand its successor a canvas that closes
+// itself — and the operator's takeback would be a no-op. The reasoning
+// survives into the seed; the gate does not.
+func TestReopenSeedDropsCloseNomination(t *testing.T) {
+	nominated := `# Design
+
+## Problem
+
+The retry reset this run asks for already landed in foo.go:42.
+
+## Gate
+
+` + "```json" + `
+{"status":"close"}
+` + "```" + `
+`
+	got := stripCloseGateSection(nominated)
+	if strings.Contains(got, "## Gate") || strings.Contains(got, `"close"`) {
+		t.Fatalf("close gate survived the seed:\n%s", got)
+	}
+	if !strings.Contains(got, "already landed in foo.go:42") {
+		t.Fatalf("the reasoning must survive into the seed:\n%s", got)
+	}
+	if _, ok := stageGateStatus(got); ok {
+		t.Fatal("the stripped seed must carry no gate at all")
+	}
+
+	// A gate section followed by more prose keeps the tail.
+	got = stripCloseGateSection(nominated + "\n## Out of scope\n\nNothing.\n")
+	if !strings.Contains(got, "## Out of scope") {
+		t.Fatalf("prose after the gate section must survive:\n%s", got)
+	}
+	if strings.Contains(got, "## Gate") {
+		t.Fatalf("gate section not removed:\n%s", got)
+	}
+
+	// Every other canvas is returned byte-for-byte.
+	for name, body := range map[string]string{
+		"ready gate":  readyReviewCanvas,
+		"blocked":     blockedReviewCanvas,
+		"no gate":     "# Design\n\n## Problem\n\nStill open.\n",
+		"unparseable": "# Design\n\n## Gate\n\n```json\n{\"status\":\n```\n",
+	} {
+		if out := stripCloseGateSection(body); out != body {
+			t.Fatalf("%s: canvas must pass through unchanged, got:\n%s", name, out)
+		}
+	}
+}

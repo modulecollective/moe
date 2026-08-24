@@ -190,6 +190,47 @@ func stageGateJSON(body string) ([]byte, bool) {
 	return nil, false
 }
 
+// stripCloseGateSection drops the `## Gate` section from a canvas
+// carrying a close nomination, returning every other canvas unchanged.
+//
+// It exists for one path: `moe sdlc reopen` seeds the successor run's
+// design canvas from the prior run's. A *design* stage that nominated
+// the run's close leaves that nomination sitting in exactly the bytes
+// reopen carries forward — so the successor's design turn would inherit
+// a canvas that already says "close me", and the operator's takeback
+// would re-close itself on the spot. Reopening IS the disagreement with
+// the nomination; carrying it forward is never what anyone meant.
+//
+// The section runs from its heading to the next `## ` heading or EOF,
+// and first-heading-wins matches parseTestCanvasSections — so the
+// section that gets stripped is the one the gate readers would have
+// bound.
+func stripCloseGateSection(body string) string {
+	if status, ok := stageGateStatus(body); !ok || status != "close" {
+		return body
+	}
+	lines := strings.Split(body, "\n")
+	start := -1
+	for i, ln := range lines {
+		if strings.HasPrefix(ln, "## ") && strings.TrimSpace(strings.TrimPrefix(ln, "## ")) == "Gate" {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return body
+	}
+	end := len(lines)
+	for i := start + 1; i < len(lines); i++ {
+		if strings.HasPrefix(lines[i], "## ") {
+			end = i
+			break
+		}
+	}
+	kept := append(append([]string{}, lines[:start]...), lines[end:]...)
+	return strings.TrimRight(strings.Join(kept, "\n"), "\n") + "\n"
+}
+
 func stageGateStatus(body string) (string, bool) {
 	payload, ok := stageGateJSON(body)
 	if !ok {
