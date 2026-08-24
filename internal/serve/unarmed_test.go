@@ -17,12 +17,12 @@ import (
 // Unarmed is the production default, and after the spawn cull it is
 // barely a distinction: nothing serve routes starts an agent, so every
 // POST here works armed or not. What Dynamic gates is the heartbeat —
-// whether anything ever *acts* on what the web wrote.
+// unarmed, what the web wrote waits for the next hand-run sweep or
+// interactive stage instead of the next tick.
 
 // TestServeHasNoSpawnRoutes: the routes that used to run agent
 // subprocesses are gone, not gated. A bookmark or a forged POST at any
-// of them falls through the mux — there is no reachable path from the
-// listener to code exec, on an armed serve either.
+// of them falls through the mux and spawns nothing, armed or not.
 func TestServeHasNoSpawnRoutes(t *testing.T) {
 	for _, path := range []string{
 		"/run/new",
