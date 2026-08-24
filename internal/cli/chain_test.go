@@ -2,8 +2,10 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -381,6 +383,114 @@ func TestCascadeFromGateShipDoesNotRide(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), "chain: riding") {
 		t.Errorf("`!!` must not print a chain-ride preamble, stdout:\n%s", stdout.String())
+	}
+}
+
+// TestCascadeFromGateRidesPastPRShippedParent pins the batch semantics
+// chains are built on: under the `pr` ship route the parent's push
+// leaves it at StatusPushed on a branch nobody has merged, and the
+// `!!!` ride carries on into the child anyway. A chain holds unrelated
+// work — one PR per member, all open at once, mergeable in any order —
+// so a parent waiting on a merge click is not a reason to stall the
+// batch. Dependent work in one thread wants `moe project ship merge`.
+//
+// The sibling ride tests stub pushFromCascade without touching the
+// parent's status, so none of them tells the two routes apart. This
+// one's stub flips each pushed run to StatusPushed the way the PR path
+// does, and the event log records the parent's on-disk status at every
+// child dispatch — the child's whole walk must happen with the parent
+// sitting unmerged at `pushed`.
+func TestCascadeFromGateRidesPastPRShippedParent(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	// Absent already reads as `pr` (project.ShipOf), but a fixture
+	// about the ship route should say which route it is.
+	if err := os.WriteFile(filepath.Join(root, "projects", "tele", "project.json"),
+		[]byte(`{"id":"tele","ship":"pr"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, root, "commit", "-am", "project tele: ship pr")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	parentMD, err := run.New(root, "tele", run.Options{ID: "parent-run", Workflow: "sdlc"})
+	if err != nil {
+		t.Fatalf("run.New parent: %v", err)
+	}
+	if _, err := run.New(root, "tele", run.Options{ID: "child-run", Workflow: "sdlc"}); err != nil {
+		t.Fatalf("run.New child: %v", err)
+	}
+	gittest.Run(t, root, "commit", "--allow-empty", "-m",
+		"chain: edit\n\nMoE-Chained-To: tele/parent-run tele/child-run\n")
+
+	t.Chdir(root)
+
+	parentStatus := func() string {
+		md, err := run.Load(root, "tele", "parent-run")
+		if err != nil {
+			t.Fatalf("load parent: %v", err)
+		}
+		return md.Status
+	}
+
+	// One ordered log across both seams: which run each stage opened
+	// against, and where the parent stood on disk at that moment.
+	var events []string
+	stubOpenSdlcStage(t, nil) // also neutralises the stage gates
+	inner := openSdlcStage
+	openSdlcStage = func(stage, projectID, runID string, headless bool, out, errw io.Writer) int {
+		events = append(events, fmt.Sprintf("open %s:%s parent=%s", runID, stage, parentStatus()))
+		return inner(stage, projectID, runID, headless, out, errw)
+	}
+
+	// The PR route's push: opens a PR and flips the run to
+	// StatusPushed, leaving the branch unmerged. Applied to whichever
+	// run the cascade pushed, so the child ships the same way.
+	prevPush := pushFromCascade
+	pushFromCascade = func(_ string, args []string, _ pushRunOptions, _, _ io.Writer) (int, error) {
+		proj, id, err := splitProjectRun(args[0])
+		if err != nil {
+			t.Fatalf("push stub: malformed run key %q: %v", args[0], err)
+		}
+		md, err := run.Load(root, proj, id)
+		if err != nil {
+			t.Fatalf("push stub: load %s: %v", args[0], err)
+		}
+		md.Status = run.StatusPushed
+		if err := run.Save(root, md); err != nil {
+			t.Fatalf("push stub: save %s: %v", args[0], err)
+		}
+		events = append(events, "push "+id)
+		return 0, nil
+	}
+	t.Cleanup(func() { pushFromCascade = prevPush })
+
+	var stdout, stderr bytes.Buffer
+	res, code := cascadeFromGate("code", "", false, true, parentMD, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
+	}
+	if !res.shipped {
+		t.Fatalf("parent cascade must ship: %+v", res)
+	}
+	wantEvents := []string{
+		"open parent-run:code parent=in_progress",
+		"open parent-run:test parent=in_progress",
+		"open parent-run:review parent=in_progress",
+		"push parent-run",
+		"open child-run:design parent=pushed",
+		"open child-run:code parent=pushed",
+		"open child-run:test parent=pushed",
+		"open child-run:review parent=pushed",
+		"push child-run",
+	}
+	if !reflect.DeepEqual(events, wantEvents) {
+		t.Fatalf("cascade events =\n%s\nwant\n%s\nstdout=%q",
+			strings.Join(events, "\n"), strings.Join(wantEvents, "\n"), stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "chain: riding into tele/child-run at design (headless)") {
+		t.Errorf("expected chain-ride preamble in stdout, got:\n%s", stdout.String())
 	}
 }
 
