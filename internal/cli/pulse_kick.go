@@ -57,7 +57,13 @@ import (
 // There is deliberately no bound on *how many* generations this can run
 // for. Each ride's commits move the journal tip, so the next heartbeat
 // tick sweeps again and the machine walks until a survey finds nothing
-// worth chaining. Growth is clock-paced rather than recursive: a kicked
+// worth chaining. The rides run inside this child, so their commits land
+// below the tip the sweep's exit records — what keeps that sentence true
+// is the gate refusing both cursors when its window holds a ride commit
+// (heartbeatGate.Swept, rideAuthored). Without that refusal the sweep
+// stamps the post-ride board as already surveyed and the walk stops at
+// its first generation, waiting on a human. Growth is clock-paced
+// rather than recursive: a kicked
 // ride no longer sweeps at its own tail, so this loop is the only walker
 // and the board it snapshotted stays the board it walks. What holds the
 // open-ended part safe is the guard above plus the ladder itself — each

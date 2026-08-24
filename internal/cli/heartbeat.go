@@ -137,17 +137,32 @@ func (g *heartbeatGate) Due(tick time.Duration, log io.Writer) []serve.Heartbeat
 // that is what the failure backoff is pacing, and what keeps a dead
 // vendor night from wedging the project.
 //
-// And neither cursor moves at all when an operator commit landed inside
-// the sweep's own window. A survey's turn lasts minutes; a hand-commit
-// arriving after its board read but before this exit sits below the tip
-// recorded here, and recording it would mark as surveyed a board no
-// survey ever saw — a journal move the machine permanently misreads as
-// its own, and a silent wedge. So the exit walks the range the survey
-// could not have seen and refuses both cursors if anything in it is the
-// operator's. Next tick the moved leg fires (exit tip ≠ recorded tips),
-// the quiet window gets its ordinary say, and the follow-up sweep sees
-// the commit. Convergence is structural: that sweep's own range holds
-// only machine commits, so its exit advances and the board goes quiet.
+// And neither cursor moves at all when work the survey could not have
+// seen landed inside the sweep's own window. A survey's turn lasts
+// minutes; anything arriving after its board read but before this exit
+// sits below the tip recorded here, and recording it would mark as
+// surveyed a board no survey ever saw — a journal move the machine
+// permanently misreads as its own, and a silent wedge. So the exit walks
+// the range the survey could not have seen and refuses both cursors if
+// anything in it is unseen work. Next tick the moved leg fires (exit tip
+// ≠ recorded tips), the quiet window gets its ordinary say, and the
+// follow-up sweep sees it.
+//
+// Two things land in that range, and they refuse on the same terms
+// because they are the same fact. One is an operator's hand-commit. The
+// other is a ride's — a dynamic sweep runs the rides it kicks inside
+// this child, so every commit those rides land is below the exit tip
+// too. That half is the whole autonomous path: without it the survey
+// stamps the post-ride board as surveyed, and pulse_kick's walk until a
+// survey finds nothing worth chaining never takes its second step. See
+// rideAuthored for which commits count.
+//
+// Convergence is structural for both: the follow-up sweep's own range
+// holds only its own commits — machine-marked, pulse-workflow or
+// workflow-less — unless it kicks rides of its own, in which case
+// refusing again is exactly the point. The walk is clock-paced, one
+// generation per tick at most, and it ends the first time a survey kicks
+// nothing.
 //
 // Refusing tips too, not just surveyed, is what makes the mid-sweep case
 // exactly equivalent to the ordinary one — with tips advanced, only the
@@ -169,7 +184,7 @@ func (g *heartbeatGate) Swept(projectID string, clean bool) {
 	// No dispatched entry is unreachable through serve — every Swept
 	// follows a Due that recorded one — so falling through to the advance
 	// keeps a direct-call test fixture honest rather than silently wedged.
-	if dispatched && base != tip && operatorActedIn(g.root, projectID, base, tip) {
+	if dispatched && base != tip && unseenWorkIn(g.root, projectID, base, tip) {
 		return
 	}
 
@@ -582,29 +597,36 @@ func projectJournalTip(root, projectID string) (sha string, at time.Time, operat
 // (%cI), so both halves of the window agree on what "younger than one
 // tick" means.
 func operatorActedSince(root, projectID string, since time.Time) bool {
-	return operatorActed(root, projectID, "--since="+since.Format(time.RFC3339))
+	operator, _ := journalActs(root, projectID, "--since="+since.Format(time.RFC3339))
+	return operator
 }
 
-// operatorActedIn reports whether any journal commit touching the project
-// in base..tip is operator-authored. It is Swept's question — did anything
-// land inside my own sweep that the survey could not have seen.
-func operatorActedIn(root, projectID, base, tip string) bool {
-	return operatorActed(root, projectID, base+".."+tip)
+// unseenWorkIn reports whether anything landed in base..tip that the
+// sweep's own survey could not have seen. It is Swept's question, and
+// both halves reach it for the same reason: an operator commit arriving
+// after the board read, and a ride commit — work the sweep itself
+// kicked, which by construction lands after the board it was chosen
+// from.
+func unseenWorkIn(root, projectID, base, tip string) bool {
+	operator, ride := journalActs(root, projectID, base+".."+tip)
+	return operator || ride
 }
 
-// operatorActed walks the bodies of the project-scoped commits selected
-// by rev, whatever the caller's way of naming them.
+// journalActs walks the bodies of the project-scoped commits selected by
+// rev, whatever the caller's way of naming them, and reports both facts
+// its callers between them need. One walk rather than two: Swept wants
+// both answers over the same range, and a sibling log invocation is how
+// the two would drift.
 //
 // Warn-only like every other read in this file, and in the same direction
-// for both callers: an unreadable log reports no operator act, which
-// leaves the quiet window's tip answer standing and leaves Swept
-// advancing its cursors. Refusing on a persistent read failure would make
-// the moved leg fire — and sweep — every tick, the runaway rather than
-// the safe default.
-func operatorActed(root, projectID, rev string) bool {
+// for both callers: an unreadable log reports neither act, which leaves
+// the quiet window's tip answer standing and leaves Swept advancing its
+// cursors. Refusing on a persistent read failure would make the moved leg
+// fire — and sweep — every tick, the runaway rather than the safe default.
+func journalActs(root, projectID, rev string) (operator, ride bool) {
 	out, err := git.Output(root, "log", rev, "--format=%x00%B", "--", "projects/"+projectID)
 	if err != nil {
-		return false
+		return false, false
 	}
 	for body := range strings.SplitSeq(out, "\x00") {
 		if strings.TrimSpace(body) == "" {
@@ -614,6 +636,45 @@ func operatorActed(root, projectID, rev string) bool {
 			continue
 		}
 		if !machineAuthored(body) {
+			operator = true
+		}
+		if rideAuthored(body) {
+			ride = true
+		}
+		if operator && ride {
+			break
+		}
+	}
+	return operator, ride
+}
+
+// rideAuthored reports whether a commit body is a ride's: its
+// MoE-Workflow trailer names a workflow whose runs spend agent turns.
+// That is every way a ride lands work — a stage turn, a push's merge, a
+// ridden run's close, sdlc or twin alike — and it is the mark that tells
+// a sweep's window "something the survey never read is now on the board".
+//
+// Two workflows are excluded, and the sweep's whole bookkeeping falls out
+// of the two:
+//
+//   - The pulse's own. A survey's run open, work and close commits are
+//     the sweep describing itself.
+//   - The capture workflows (dash.IsCapture — ideas and intents). No
+//     agent ever runs on them, so a survey's own grooms — a tag, an
+//     untag, a promote's status bump — are the sweep acting on the board
+//     it just read, not new work landing under it. Excluding them is what
+//     keeps an ordinary groom-only sweep from earning itself a follow-up
+//     every tick.
+//
+// Commits with no MoE-Workflow trailer at all — a run mint, a harvest, a
+// sync bump — are nobody's ride and fall out by construction.
+func rideAuthored(body string) bool {
+	for line := range strings.SplitSeq(body, "\n") {
+		v, ok := strings.CutPrefix(strings.TrimSpace(line), "MoE-Workflow:")
+		if !ok {
+			continue
+		}
+		if w := strings.TrimSpace(v); w != pulseWorkflow && !dash.IsCapture(w) {
 			return true
 		}
 	}

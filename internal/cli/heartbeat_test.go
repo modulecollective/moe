@@ -336,6 +336,131 @@ func TestHeartbeatSweepsACommitThatLandedMidFailedSweep(t *testing.T) {
 	}
 }
 
+// sweptOverARideItKicked stages the autonomous path: a dispatched sweep
+// whose survey kicked a ride, the ride's own commits landing inside the
+// pulse child's lifetime, and the survey's open/close on top. The caller
+// says how the sweep ended.
+//
+// Trailer shapes are the real ones — a stage turn and a push's merge,
+// each machine-marked and workflow-stamped — because the machine mark is
+// exactly what makes this case invisible to the operator-commit refusal.
+func sweptOverARideItKicked(t *testing.T, root string, clean bool) *heartbeatGate {
+	t.Helper()
+	journalCommit(t, root, "moe", "machine: a merge", "MoE-Consent: dynamic")
+	g := newHeartbeatGate(root)
+	dueProjects(t, g) // seeds the cursor
+
+	journalCommit(t, root, "moe", "machine: another merge", "MoE-Consent: dynamic")
+	if got := dueProjects(t, g); len(got) != 1 || got[0] != "moe" {
+		t.Fatalf("due = %v, want the delta sweep", got)
+	}
+
+	journalCommit(t, root, "moe", "open: pulse-1", "MoE-Consent: dynamic")
+	journalCommit(t, root, "moe", "work: update code", "MoE-Workflow: sdlc\nMoE-Consent: dynamic")
+	journalCommit(t, root, "moe", "push: moe/a-ride merged", "MoE-Workflow: sdlc\nMoE-Consent: dynamic")
+	journalCommit(t, root, "moe", "close: pulse-1", "MoE-Consent: dynamic")
+	g.Swept("moe", clean)
+	return g
+}
+
+// TestHeartbeatSweepsWorkARideLandedMidSweep is the autonomous half of
+// the same wedge. A dynamic sweep runs the rides it kicks inside the
+// pulse child, so their commits sit below the tip the exit records — and
+// the survey read the *pre-ride* board, so nothing has seen what they
+// landed. Absorbing them is what stopped pulse_kick's walk at its first
+// generation and left the board waiting on a human.
+func TestHeartbeatSweepsWorkARideLandedMidSweep(t *testing.T) {
+	root := quietFixture(t)
+	g := sweptOverARideItKicked(t, root, true /*clean*/)
+
+	if got := dueProjectsPastTheWindow(t, g); len(got) != 1 || got[0] != "moe" {
+		t.Fatalf("due = %v, want [moe] — work a sweep's own ride landed must still get a survey", got)
+	}
+
+	// Generation 2: the follow-up sweep kicks nothing, so its window holds
+	// only its own commits and the walk ends here. Convergence is the half
+	// that keeps this from being a sweep-every-tick loop.
+	journalCommit(t, root, "moe", "open: pulse-2", "MoE-Consent: dynamic")
+	journalCommit(t, root, "moe", "close: pulse-2", "MoE-Consent: dynamic")
+	g.Swept("moe", true)
+
+	if got := dueProjectsPastTheWindow(t, g); len(got) != 0 {
+		t.Errorf("due = %v after a sweep that kicked nothing, want none", got)
+	}
+}
+
+// TestHeartbeatSweepsWorkARideLandedMidFailedSweep: same terms as the
+// operator case. The failure backoff — serve's, not the gate's — is what
+// paces the respawn, so refusing the tips cursor here costs a cool-off,
+// not a loop.
+func TestHeartbeatSweepsWorkARideLandedMidFailedSweep(t *testing.T) {
+	root := quietFixture(t)
+	g := sweptOverARideItKicked(t, root, false /*died*/)
+
+	if got := dueProjectsPastTheWindow(t, g); len(got) != 1 || got[0] != "moe" {
+		t.Errorf("due = %v after a sweep died over a ride it kicked, want [moe]", got)
+	}
+}
+
+// TestHeartbeatSweptMovesTheCursorOverItsOwnBookkeeping is the other
+// side of the ride refusal, and the one that keeps it from costing every
+// sweep a redundant follow-up. A survey that kicked nothing still writes
+// a pile of commits — the run it minted for a chore, the ideas it
+// harvested, the grooms it stamped on them, the pointer bump at the end.
+// None of them is work landing under the survey's feet, and the board
+// must go quiet.
+func TestHeartbeatSweptMovesTheCursorOverItsOwnBookkeeping(t *testing.T) {
+	root := quietFixture(t)
+	journalCommit(t, root, "moe", "machine: a merge", "MoE-Consent: dynamic")
+	g := newHeartbeatGate(root)
+	dueProjects(t, g)
+
+	journalCommit(t, root, "moe", "machine: another merge", "MoE-Consent: dynamic")
+	if got := dueProjects(t, g); len(got) != 1 {
+		t.Fatalf("due = %v, want the delta sweep", got)
+	}
+
+	journalCommit(t, root, "moe", "open: pulse-1", "MoE-Consent: dynamic")
+	journalCommit(t, root, "moe", "work: update pulse", "MoE-Workflow: pulse\nMoE-Consent: dynamic")
+	journalCommit(t, root, "moe", "Open run moe/a-chore", "MoE-Spawned-By: moe/pulse-1")
+	journalCommit(t, root, "moe", "Open run moe/an-idea", "MoE-From-Run: moe/pulse-1\nMoE-Consent: dynamic")
+	journalCommit(t, root, "moe", "Tag idea moe/an-idea (sdlc)", "MoE-Workflow: idea\nMoE-Consent: dynamic")
+	journalCommit(t, root, "moe", "sync: bump project pointers", "MoE-Consent: dynamic")
+	journalCommit(t, root, "moe", "close: pulse-1", "MoE-Workflow: pulse\nMoE-Consent: dynamic")
+	g.Swept("moe", true)
+
+	if got := dueProjectsPastTheWindow(t, g); len(got) != 0 {
+		t.Errorf("due = %v after a sweep that only did its own bookkeeping, want none", got)
+	}
+}
+
+// TestRideAuthored pins the trailer census the refusal reads. Every row
+// is a real commit shape from the journal: the top three are how a ride
+// lands work, the rest are a sweep describing itself.
+func TestRideAuthored(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want bool
+	}{
+		{"stage turn", "work: update code\n\nMoE-Workflow: sdlc\nMoE-Consent: dynamic\n", true},
+		{"push merge", "push: moe/a-ride merged\n\nMoE-Workflow: sdlc\nMoE-Merged: 1\n", true},
+		{"twin reflect", "work: update architecture\n\nMoE-Workflow: twin\nMoE-Consent: dynamic\n", true},
+		{"the sweep's own close", "Close pulse run moe/pulse-1\n\nMoE-Workflow: pulse\n", false},
+		{"a groom", "Tag idea moe/an-idea (sdlc)\n\nMoE-Workflow: idea\n", false},
+		{"an intent edit", "work: update intent\n\nMoE-Workflow: intent\n", false},
+		{"a gate mint", "Open run moe/a-chore\n\nMoE-Spawned-By: moe/pulse-1\n", false},
+		{"a harvest mint", "Open run moe/an-idea\n\nMoE-From-Run: moe/pulse-1\n", false},
+		{"a sync bump", "sync: bump project pointers\n\nMoE-Consent: dynamic\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := rideAuthored(tc.body); got != tc.want {
+				t.Errorf("rideAuthored = %v, want %v:\n%s", got, tc.want, tc.body)
+			}
+		})
+	}
+}
+
 // TestHeartbeatSettlesAfterAnOperatorTriggeredSweep guards the one place
 // the range base decides between a fix and a runaway. The commits that
 // *triggered* a sweep landed before it looked, so the survey saw them —
