@@ -107,8 +107,35 @@ type Metadata struct {
 	// spawner for cross-project coordination. Empty on operator-opened and
 	// standalone runs (`moe pulse new` passes none), which is what makes
 	// them render un-nested on the dash.
-	SpawnedBy string               `json:"spawned_by,omitempty"`
+	SpawnedBy string `json:"spawned_by,omitempty"`
+	// Reaped, when non-nil, records that the run's last machine turn
+	// died before landing anything and the heartbeat's reap destroyed
+	// its session branch. Written by the reap's abandon ending — the one
+	// choke point every dead machine session passes through — and
+	// cleared by the next session start on the run. One writer, one
+	// eraser; earlier tombstones survive in the journal's history.
+	//
+	// Without it a reaped run is byte-identical on disk to one the loop
+	// never reached, and the only copy of the dead turn's transcript
+	// goes with the branch.
+	Reaped    *ReapNote            `json:"reaped,omitempty"`
 	Documents map[string]*Document `json:"documents"`
+}
+
+// ReapNote is the tombstone Metadata.Reaped carries. Scalars only: the
+// turn's prose is not copied here, because Tip reaches all of it. A
+// reaped branch's commits become dangling objects rather than deleted
+// ones, so `git show <tip>` reads the whole transcript until gc prunes
+// them — weeks, comfortably longer than any triage latency.
+type ReapNote struct {
+	// Doc is the stage whose turn died ("design", "code", …).
+	Doc string `json:"doc"`
+	// At is when the reap ran, RFC3339. Not when the turn died — the
+	// reap is the first moment anything durable can be written about it.
+	At string `json:"at"`
+	// Tip is the full sha the session branch pointed at when it was
+	// abandoned.
+	Tip string `json:"tip"`
 }
 
 // Options carries user-supplied fields for New. Workflow is required;

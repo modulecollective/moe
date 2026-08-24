@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/serve"
 	"github.com/modulecollective/moe/internal/session"
+	"github.com/modulecollective/moe/internal/trailers"
 )
 
 // The cli half of serve's resident heartbeat: the read-only gate that
@@ -469,9 +471,10 @@ func choreClockReason(sc *pulseScan, projectID string, now time.Time) string {
 //     swept again with the landed state in view. The run stays open at
 //     its stage; landing is recovery, concluding is a sweep's job.
 //   - **CanvasUnchangedError** → the session died before writing
-//     anything, so there is nothing to keep. Abandon, and the run
-//     re-parks for the ordinary groom-and-kick loop to retry — the
-//     original behaviour, now scoped to the shape it was right for.
+//     anything, so there is nothing to keep. Record a tombstone on the
+//     run, abandon, and the run re-parks for the ordinary groom-and-kick
+//     loop to retry — the original behaviour, now scoped to the shape it
+//     was right for and no longer silent about it.
 //   - **Any other Close error** → a branch that won't land cleanly may
 //     hold real work in a broken state, and destroying it to unblock a
 //     tick is the wrong trade. Leave it, log it, let the operator's
@@ -496,6 +499,7 @@ func (g *heartbeatGate) reap(log io.Writer) {
 			continue
 		}
 		landed := false
+		tip := ""
 		err := repolock.With(g.root, repolock.Options{
 			Purpose:   "heartbeat-reap",
 			Run:       s.Project + "/" + s.Run,
@@ -508,6 +512,16 @@ func (g *heartbeatGate) reap(log io.Writer) {
 				landed = true
 				return nil
 			case errors.As(closeErr, &unchanged):
+				// Ordering rule: the note lands before the evidence is
+				// destroyed. A tombstone that fails leaves the branch
+				// exactly where it was — the outer log says so and the
+				// next tick retries — because the alternative is
+				// destroying the only copy of the turn on the way to
+				// recording that it existed.
+				var err error
+				if tip, err = tombstoneReap(g.root, s, now); err != nil {
+					return err
+				}
 				return session.Abandon(s)
 			default:
 				return closeErr
@@ -519,11 +533,11 @@ func (g *heartbeatGate) reap(log io.Writer) {
 				s.Branch, s.Branch, s.Branch)
 			continue
 		}
-		// Neither ending writes a journal commit of its own — Abandon
-		// writes nothing at all, and Close's fast-forward moves main
-		// without either cursor having looked. Clearing surveyed is what
-		// lets this tick's legs see the freed (or landed) thread, and
-		// because reap runs at the top of Due it happens in the same tick.
+		// The abandon ending writes a tombstone of its own; Close's
+		// fast-forward moves main without either cursor having looked.
+		// Clearing surveyed is what lets this tick's legs see the freed
+		// (or landed) thread, and because reap runs at the top of Due it
+		// happens in the same tick.
 		g.mu.Lock()
 		delete(g.surveyed, s.Project)
 		g.mu.Unlock()
@@ -532,8 +546,75 @@ func (g *heartbeatGate) reap(log io.Writer) {
 				s.Branch, s.Project, s.Run, s.Doc)
 			continue
 		}
-		fmt.Fprintf(log, "heartbeat: reaped dead machine session %s — %s/%s re-parks at %s\n",
-			s.Branch, s.Project, s.Run, s.Doc)
+		fmt.Fprintf(log, "heartbeat: reaped dead machine session %s — %s/%s re-parks at %s, evidence at %s\n",
+			s.Branch, s.Project, s.Run, s.Doc, git.ShortSHA(tip))
+	}
+}
+
+// tombstoneReap records a dead machine turn on its run and returns the
+// session branch tip it recorded, so the reap's log line can name the
+// evidence too. Caller holds the repolock.
+//
+// This is the whole answer to "the loop dropped my thread". A ride whose
+// turn dies leaves its account in the kick loop's stderr, which nobody
+// keeps; the reap then deletes the session branch, which held the only
+// copy of the transcript. After that a run whose ride died reads exactly
+// like one the loop never reached, and telling them apart costs an
+// archaeology session over dangling objects. The note closes that gap at
+// the one choke point every dead machine session passes through.
+//
+// It writes scalars only — see run.ReapNote. Tip is the reach: the
+// abandoned commits dangle rather than vanish, so the transcript stays
+// readable until gc prunes them.
+//
+// The commit is machine-marked deliberately: MoE-Consent is *the*
+// machine marker, and an unmarked commit at the journal tip would read
+// as the operator's, holding the project for a quiet tick — the opposite
+// of what a reap is for. `dynamic` is the honest level, because the gate
+// this runs under only ticks on an armed serve (serve.Options.Dynamic).
+//
+// No MoE-Document trailer: the doc is in the subject and in the note,
+// and stamping one would offer this commit to every reader that treats
+// MoE-Document as "a turn landed for this stage" — which is exactly what
+// did not happen.
+func tombstoneReap(root string, s *session.Session, now time.Time) (string, error) {
+	tip, err := git.RevParse(root, s.Branch)
+	if err != nil {
+		return "", fmt.Errorf("reap tombstone: read %s tip: %w", s.Branch, err)
+	}
+	md, err := run.Load(root, s.Project, s.Run)
+	if err != nil {
+		return "", fmt.Errorf("reap tombstone: %w", err)
+	}
+	md.Reaped = &run.ReapNote{Doc: s.Doc, At: now.UTC().Format(time.RFC3339), Tip: tip}
+	if err := run.Save(root, md); err != nil {
+		return "", fmt.Errorf("reap tombstone: %w", err)
+	}
+	runJSON := filepath.Join(run.Dir(s.Project, s.Run), "run.json")
+	msg := fmt.Sprintf("reap: %s/%s %s turn died — abandoned %s\n\n",
+		s.Project, s.Run, s.Doc, git.ShortSHA(tip)) +
+		trailers.Block{
+			Run:      s.Run,
+			Project:  s.Project,
+			Workflow: md.Workflow,
+			Consent:  rideDynamic.String(),
+		}.String()
+	// ErrNothingToCommit means an earlier tick already landed this exact
+	// note and died before abandoning; the retry proceeds to the abandon
+	// it owes. Any other failure restores run.json — the caller keeps the
+	// branch, so leaving the edit loose in the canonical tree would only
+	// give the next session's rebase something to trip on. From HEAD, not
+	// the index: Stage already ran, so a bare checkout would restore the
+	// staged copy of the very edit being rolled back.
+	switch err := run.StageAndCommit(root, msg, runJSON); {
+	case err == nil, errors.Is(err, run.ErrNothingToCommit):
+		return tip, nil
+	default:
+		if out, rErr := git.Combined(root, "checkout", "HEAD", "--", runJSON); rErr != nil {
+			return "", fmt.Errorf("reap tombstone: %w (and restoring %s failed: %v: %s)",
+				err, runJSON, rErr, strings.TrimSpace(out))
+		}
+		return "", fmt.Errorf("reap tombstone: %w", err)
 	}
 }
 

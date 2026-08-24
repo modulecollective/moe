@@ -479,6 +479,15 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			if err != nil {
 				return wikiTurnSpec{}, err
 			}
+			// The eraser half of the reap's tombstone: a session opening
+			// on this run is the answer to "the last machine turn died",
+			// so the note is spent. Its own reason to commit — a resume
+			// that mints no fresh session id still owes the erasure —
+			// which is why it sets mutated rather than riding one.
+			if md.Reaped != nil {
+				md.Reaped = nil
+				mutated = true
+			}
 			// Resolve sessionCwd early so the skill materialisers can
 			// write under it: claude's cwd-walkup skill discovery starts
 			// at sessionCwd post-fix, so a workRoot-only materialisation
