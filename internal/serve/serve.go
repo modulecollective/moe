@@ -7,8 +7,13 @@
 // reopen a run, mark the current stage advanced. Starting agents is the
 // resident heartbeat's job alone (heartbeat.go), which is what makes
 // those two halves compose — the web writes licences, the clock spends
-// them. It also means there is no path from the listener to code
-// execution, armed or not.
+// them.
+//
+// That is not an all-clear. No request executes code, but agents read
+// those writes in their prompts, and an armed serve's heartbeat starts
+// agents because of them: whoever can reach the listener steers the
+// machine. Reach is the only auth, so whatever sits in front of the
+// listener is the security boundary.
 //
 // The server is still the parent process of every sweep the heartbeat
 // starts, so it owns each child's TTY (via a PTY) and can show its
@@ -362,13 +367,16 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		return fmt.Errorf("serve: listen %s: %w", s.addr, err)
 	}
 	s.logf("listening on http://%s/", s.addr)
+	// Printed armed or not: unarmed only means the steering waits for the
+	// next sweep or interactive stage instead of for the next tick.
+	s.logf("security: no request here executes code, but whoever can reach http://%s/ steers the agents that do — reach is the only auth", s.addr)
 	// The state file goes down as soon as the listener is up, so `moe
 	// dash` can see an armed serve before its first tick — "up, nothing
 	// swept yet" is a different answer from "no serve at all", and both
 	// are worth telling apart.
 	s.saveActivity()
 	if s.opts.Dynamic {
-		s.logf("DYNAMIC: armed — the heartbeat may start settled work, and anything that can reach http://%s/ can execute code", s.addr)
+		s.logf("DYNAMIC: armed — the heartbeat may start settled work on its own clock, acting on what the web writes")
 	}
 	// The heartbeat lives inside the listener's lifetime, not beside it:
 	// running the armed process *is* the standing consent, so the clock

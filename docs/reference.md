@@ -25,9 +25,11 @@ source of truth for the exact command surface; this page is a map.
   **The web starts nothing.** Every action it offers writes a journal commit and
   stops there: capture or edit an idea, tag it for a workflow, close or reopen a
   run, mark the current stage advanced, answer a run's open question. Starting
-  agents is the heartbeat's job
-  alone, so there is no route from the listener to code execution at all —
-  armed or not. Interactive stage-driving happens in a terminal.
+  agents is the heartbeat's job alone. No request executes code — but agents
+  read those writes in their prompts, and an armed serve's heartbeat starts
+  agents because of them: whoever can reach the listener steers the machine.
+  Reach is the only auth, so whatever sits in front of the listener is the
+  security boundary. Interactive stage-driving happens in a terminal.
   `--dynamic` (or a non-empty `MOE_SERVE_DYNAMIC`) is the standing consent rung:
   it starts the resident heartbeat, a per-project ticker that runs `moe pulse
   new --dynamic` when the board warrants it. Unarmed, the ticker never fires and

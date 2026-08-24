@@ -347,6 +347,55 @@ func TestArmedServeTicks(t *testing.T) {
 	}
 }
 
+// TestStartupBannerDisclosesSteering pins what the listener says about
+// itself at bind time. The armed banner used to claim that anything
+// which can reach the URL "can execute code" — true before the spawn
+// routes were removed, inverted since. The claim that survives is the
+// one that doesn't hinge on arming at all: no request executes code,
+// and every request steers the agents that do. So the security line
+// prints unarmed too, and the armed line says only what arming adds —
+// the clock acting on what the web wrote.
+func TestStartupBannerDisclosesSteering(t *testing.T) {
+	for _, armed := range []bool{false, true} {
+		name := "unarmed"
+		if armed {
+			name = "armed"
+		}
+		t.Run(name, func(t *testing.T) {
+			var log syncBuf
+			opts := Options{Addr: "127.0.0.1:0", Root: t.TempDir(), Logger: &log}
+			build := newUnarmedTestServer
+			if armed {
+				build = newTestServer
+			}
+			s := build(t, opts)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			go func() {
+				settle(func() bool { return strings.Contains(log.String(), "security:") })
+				cancel()
+			}()
+			if err := s.ListenAndServe(ctx); err != nil {
+				t.Fatalf("ListenAndServe: %v", err)
+			}
+
+			out := log.String()
+			if !strings.Contains(out, "no request here executes code") ||
+				!strings.Contains(out, "steers the agents that do") {
+				t.Errorf("startup log missing the security line:\n%s", out)
+			}
+			if strings.Contains(out, "can execute code") {
+				t.Errorf("startup log still claims the listener executes code:\n%s", out)
+			}
+			banner := strings.Contains(out, "DYNAMIC: armed")
+			if banner != armed {
+				t.Errorf("armed banner printed = %v, want %v:\n%s", banner, armed, out)
+			}
+		})
+	}
+}
+
 // blockingHeartbeat is a gate that parks inside Due until the test lets
 // it go — the stand-in for a tick still mid-flight when the operator
 // stops the process.
