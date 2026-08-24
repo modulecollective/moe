@@ -90,6 +90,12 @@ are obvious.
   unwritten canvas is the system's "stage refused" signal; use it
   deliberately rather than smuggling a half-formed judgement
   through a review note.
+- **If the run is moot** — the change already landed, the premise
+  is falsified by the code — write what you checked and why, then
+  end the canvas with a `## Gate` section carrying
+  `{"status":"close"}`. The harness closes the run; `moe sdlc
+  reopen` is the takeback if the operator disagrees. That is a
+  conclusion worth recording, not a refusal.
 
 A successful design turn always leaves a canvas edit. The
 unchanged-canvas gate refuses an exit that did neither, which is

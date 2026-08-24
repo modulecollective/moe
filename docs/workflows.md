@@ -120,6 +120,17 @@ before. `!` and `!<stage>` take no recovery turn of their own: they stop at the
 blocked gate and fall through to that same chain prompt (headless, a
 back-pointing `kick back to fix` nudge prints instead).
 
+**Nominated closes.** A blocked gate says "this diff isn't ready"; a stage
+that concludes the *run* is moot — the change already landed, the premise
+doesn't survive the code — says so instead by writing its canvas normally
+and ending it with `{"status":"close"}` in the gate. MoE closes the run
+through the same `moe sdlc close` every other path uses, in the cascade and
+at the interactive chain prompt alike. The reasoning is durable (it is the
+committed canvas) and the run stops being re-offered on every sweep;
+`moe sdlc reopen` mints a successor seeded from that canvas if the operator
+disagrees. A close that fails — lock contention, a dirty tree — warns and
+leaves the run open. sdlc only: twin's ladder seals at `finalize`.
+
 ### Chains
 
 Chains are the batch version of that same forward motion for active SDLC runs.

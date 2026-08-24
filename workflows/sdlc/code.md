@@ -89,6 +89,14 @@ the operator to re-open the design stage rather than papering over it
 here. Same shape test and push enforce downstream: fix small things
 where they surface, escalate the rest deliberately.
 
+If the smallest correct diff turns out to be *no diff* — the change
+already landed, the design's premise doesn't survive contact with the
+code — say that on the canvas (what you checked, why the run is moot)
+and end it with a `## Gate` section carrying `{"status":"close"}`. The
+harness closes the run rather than walking it on to test; `moe sdlc
+reopen` is the takeback. Reserve it for "this run shouldn't proceed",
+not "this is harder than it looked".
+
 ## When you're done
 
 The code stage is ready to hand back when:
