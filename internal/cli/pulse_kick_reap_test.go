@@ -312,3 +312,92 @@ func TestParkedKickableThreadSkipsAReapHeldThreadWhole(t *testing.T) {
 		t.Fatalf("parkedKickableThread = %q, want %q — the operator's touch re-opens the board", got, want)
 	}
 }
+
+// chainJournalCommit lands one chain commit in the shape `moe chain
+// edit` and `moe chain clear` write it: MoE-Chained-To / -Removed lines
+// and no MoE-Run trailer at all, because one save touches several
+// parents and there is no single run to scope it to. That missing scope
+// is exactly why the release rule had to learn to read these.
+func chainJournalCommit(t *testing.T, root, subject, lines string, when time.Time) {
+	t.Helper()
+	stamp := when.UTC().Format(time.RFC3339)
+	gittest.RunWithEnv(t, root, []string{
+		"GIT_AUTHOR_DATE=" + stamp, "GIT_COMMITTER_DATE=" + stamp,
+	}, "commit", "--allow-empty", "-m", subject+"\n\n"+lines)
+}
+
+// TestReapHoldReleasesOnAChainEdit: reordering the thread is the touch
+// the hold's own phrase most obviously promises, and it used to be the
+// one that did nothing — a chain commit is scoped to no run, so it never
+// reached the map the release reads. Both directions, like the
+// run-scoped case.
+//
+// The `before the reap` leg carries the exclusion as well as the
+// negative: reapThread grooms after the mutation, and the groom's own
+// chain commit names both of these runs at a committer time well after
+// reapAt. It is consent-stamped, so it licenses nothing — if it did,
+// every groom would release every hold on a thread it touched.
+func TestReapHoldReleasesOnAChainEdit(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		when     time.Time
+		released bool
+	}{
+		{name: "after the reap", when: reapAfter, released: true},
+		{name: "before the reap", when: reapBefore, released: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer withRideMode(rideDynamic)()
+			root, _, _ := kickFixture(t)
+			threadRoot, groomed := reapThread(t, root, func(minted map[string]string) {
+				tombstone(t, root, "moe", minted["fix-a"], "design", reapAt)
+				a, b := "moe/"+minted["fix-a"], "moe/"+minted["fix-b"]
+				chainJournalCommit(t, root, "chain: edit",
+					"MoE-Chained-To-Removed: "+a+" "+b+"\nMoE-Chained-To: "+b+" "+a+"\n", tc.when)
+			})
+
+			got := holdOf(t, root, threadRoot, groomed)
+			if tc.released && got != "" {
+				t.Fatalf("hold = %q, want none — reordering the thread is a touch on it", got)
+			}
+			if !tc.released && got == "" {
+				t.Fatal("hold = none, want the reap hold — an edit predating the note licenses nothing," +
+					" and the groom's own chain commit is stamped")
+			}
+		})
+	}
+}
+
+// TestReapHoldReArmsAfterAChainEdit is the k-touches-buy-k-retries bound
+// on the chain arm specifically. A chain commit is the one release the
+// machine also writes the shape of, so if the groom's stamp ever stopped
+// being read, the re-groom this test runs would hand the thread a fresh
+// release every sweep and the refusal loop would be back.
+func TestReapHoldReArmsAfterAChainEdit(t *testing.T) {
+	defer withRideMode(rideDynamic)()
+	root, _, _ := kickFixture(t)
+	minted := groomFixture(t, root, "fix-a", "fix-b")
+	tombstone(t, root, "moe", minted["fix-a"], "design", reapAt)
+	a, b := "moe/"+minted["fix-a"], "moe/"+minted["fix-b"]
+	chainJournalCommit(t, root, "chain: edit",
+		"MoE-Chained-To-Removed: "+a+" "+b+"\nMoE-Chained-To: "+b+" "+a+"\n", reapAfter)
+
+	groomed := groomChains(root, "moe", "pulse-groom",
+		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
+	if got := holdOf(t, root, a, groomed); got != "" {
+		t.Fatalf("hold = %q, want the edit to buy the first retry", got)
+	}
+
+	// The retry refuses too, and the heartbeat reaps it again — after the
+	// edit that licensed it.
+	reArmed := reapAfter.Add(time.Hour)
+	tombstone(t, root, "moe", minted["fix-a"], "design", reArmed)
+	groomed = groomChains(root, "moe", "pulse-groom",
+		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
+
+	got := holdOf(t, root, a, groomed)
+	if !strings.Contains(got, reArmed.Format(time.RFC3339)) {
+		t.Fatalf("hold = %q, want the re-armed note at %s — one edit, one retry",
+			got, reArmed.Format(time.RFC3339))
+	}
+}

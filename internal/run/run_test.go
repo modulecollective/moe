@@ -1399,3 +1399,72 @@ func TestJournalIndexLastOperatorActivityExcludesTheMachinesStamps(t *testing.T)
 			got, tReap)
 	}
 }
+
+// TestJournalIndexLastOperatorActivityCountsOperatorChainCommits is the
+// index half of "rearranging a thread by hand is a touch on it". A
+// chain commit carries no MoE-Run trailer — one `moe chain edit` save
+// touches several parents, so there is no run to scope it to — and the
+// reap hold reads nothing but this map, so without attributing the
+// commit to the runs it names, the one operator act that most plainly
+// moves a thread would move nothing.
+func TestJournalIndexLastOperatorActivityCountsOperatorChainCommits(t *testing.T) {
+	root := newTestRoot(t)
+	commit := func(subject, body string, when time.Time) {
+		t.Helper()
+		stamp := when.Format(time.RFC3339)
+		gittest.RunWithEnv(t, root, []string{
+			"GIT_AUTHOR_DATE=" + stamp, "GIT_COMMITTER_DATE=" + stamp,
+		}, "commit", "--allow-empty", "-m", subject+"\n\n"+body)
+	}
+	var (
+		tOld   = time.Date(2026, 8, 19, 9, 0, 0, 0, time.UTC)
+		tGroom = time.Date(2026, 8, 20, 9, 0, 0, 0, time.UTC)
+		tClear = time.Date(2026, 8, 21, 9, 0, 0, 0, time.UTC)
+		tEdit  = time.Date(2026, 8, 22, 9, 0, 0, 0, time.UTC)
+		tNote  = time.Date(2026, 8, 23, 9, 0, 0, 0, time.UTC)
+	)
+	// Oldest first, so HEAD-first order is the reverse and first-wins
+	// reads as newest-wins.
+	commit("input: added a note", "MoE-Project: alpha\nMoE-Run: parent\nMoE-Input-Added: 1\n", tOld)
+	commit("groom: alpha", "MoE-Chained-To: alpha/groomed alpha/groomed-child\nMoE-Consent: dynamic\n", tGroom)
+	commit("chain: cleared every edge", "MoE-Chained-To-Removed: alpha/cleared alpha/cleared-child\n", tClear)
+	commit("chain: edited", "MoE-Chained-To-Removed: alpha/parent alpha/old-child\n"+
+		"MoE-Chained-To: alpha/parent alpha/new-child\n", tEdit)
+	commit("input: added a note", "MoE-Project: alpha\nMoE-Run: new-child\nMoE-Input-Added: 1\n", tNote)
+
+	idx, err := BuildJournalIndex(root)
+	if err != nil {
+		t.Fatalf("BuildJournalIndex: %v", err)
+	}
+	for _, tc := range []struct {
+		key  string
+		want time.Time
+		why  string
+	}{
+		{"alpha/parent", tEdit, "the edit's own parent, newer than its run-scoped note"},
+		{"alpha/old-child", tEdit, "the child the edit unchained — a remove names both ends"},
+		{"alpha/new-child", tNote, "a newer run-scoped touch beats the older chain commit"},
+		{"alpha/cleared", tClear, "`chain clear` is operator-typed too"},
+		{"alpha/cleared-child", tClear, "and it names both ends of every edge it strips"},
+	} {
+		if got := idx.LastOperatorActivity[tc.key]; !got.Equal(tc.want) {
+			t.Errorf("LastOperatorActivity[%s] = %v, want %v — %s", tc.key, got, tc.want, tc.why)
+		}
+	}
+	for _, key := range []string{"alpha/groomed", "alpha/groomed-child"} {
+		if got, ok := idx.LastOperatorActivity[key]; ok {
+			t.Errorf("LastOperatorActivity[%s] = %v, want absent — the groom stamps its consent", key, got)
+		}
+	}
+	// The deliberate break: a chain commit is not run-scoped, so it moves
+	// the operator map without moving LastActivity. That is the whole
+	// reason the age surfaces don't refresh ten rows on a ten-run reorder,
+	// and it means this map is no longer a narrowing of that one.
+	if got := idx.LastActivity["alpha/parent"]; !got.Equal(tOld) {
+		t.Errorf("LastActivity[alpha/parent] = %v, want the note %v — a chain edit is not activity on the run",
+			got, tOld)
+	}
+	if got, ok := idx.LastActivity["alpha/old-child"]; ok {
+		t.Errorf("LastActivity[alpha/old-child] = %v, want absent — the chain commit scopes to no run", got)
+	}
+}

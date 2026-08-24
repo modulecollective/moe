@@ -768,11 +768,21 @@ type JournalIndex struct {
 	// latest reachable commit carrying MoE-Run: <slug> for that
 	// project. Same contract as the LastActivity func for any single run.
 	LastActivity map[string]time.Time
-	// LastOperatorActivity is LastActivity narrowed to the commits the
-	// machine did not write: the latest run-scoped commit carrying
-	// neither MoE-Consent nor MoE-Spawned-By. Same key, same
+	// LastOperatorActivity is the latest commit the machine did not
+	// write that names the run: a run-scoped commit carrying neither
+	// MoE-Consent nor MoE-Spawned-By, or an equally unstamped chain
+	// commit naming the run as an edge endpoint. Same key, same
 	// first-commit-wins rule, and a missing key reads as the zero time —
 	// "nobody has touched this run by hand".
+	//
+	// The chain arm is why this is not a strict narrowing of
+	// LastActivity: `moe chain edit` and `moe chain clear` are operator
+	// acts that move a thread, and they commit without a MoE-Run trailer
+	// (one edit touches several parents), so a run's operator time can
+	// postdate its own LastActivity. Nothing compares the two —
+	// threadOperatorTouch (pulse_kick.go) is this map's only consumer,
+	// and LastActivity stays what the age surfaces mean by it: work
+	// landing on the run, not thread bookkeeping.
 	//
 	// The exclusion is machineAuthored's (heartbeat.go), which is what
 	// the quiet window already calls operator-authored, so absence of
@@ -1052,6 +1062,10 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 		// invariant says there should only be one, but pick a
 		// deterministic survivor regardless.
 		var addByParent, removeByParent map[string]string
+		// Both endpoints of every chain line on this commit, in the
+		// qualified "<project>/<slug>" form the run-scoped maps key by.
+		// Duplicates are harmless — every fold below is first-wins.
+		var chainEndpoints []string
 		for line := range strings.SplitSeq(body, "\n") {
 			line = strings.TrimSpace(line)
 			if v, ok := strings.CutPrefix(line, "MoE-Run:"); ok {
@@ -1127,10 +1141,11 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 			// MoE-Chained-To-Removed must be matched before
 			// MoE-Chained-To — the latter is a prefix of the former.
 			if v, ok := strings.CutPrefix(line, "MoE-Chained-To-Removed:"); ok {
-				parent, _, ok := splitChainPair(v)
+				parent, child, ok := splitChainPair(v)
 				if !ok {
 					continue
 				}
+				chainEndpoints = append(chainEndpoints, parent, child)
 				if removeByParent == nil {
 					removeByParent = make(map[string]string)
 				}
@@ -1144,6 +1159,7 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 				if !ok {
 					continue
 				}
+				chainEndpoints = append(chainEndpoints, parent, child)
 				if addByParent == nil {
 					addByParent = make(map[string]string)
 				}
@@ -1174,6 +1190,21 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 				continue
 			}
 			idx.ChainedChild[parent] = ""
+		}
+		// A chain commit the machine did not stamp is `moe chain edit`
+		// or `moe chain clear` — the operator rearranging the board by
+		// hand — so it counts as a touch on every run it names. Chain
+		// commits carry no MoE-Run trailer, so without this the one
+		// operator act that plainly moves a thread would leave
+		// LastOperatorActivity untouched, and the reap hold would keep
+		// holding a thread the operator had just reordered. Same
+		// exclusion and same first-wins rule as the run-scoped arm below.
+		if consent == "" && spawnedBy == "" {
+			for _, key := range chainEndpoints {
+				if _, ok := idx.LastOperatorActivity[key]; !ok {
+					idx.LastOperatorActivity[key] = time.Unix(epoch, 0).UTC()
+				}
+			}
 		}
 		for _, touched := range choreTouched {
 			if _, ok := idx.ChoreTouched[touched]; !ok {
