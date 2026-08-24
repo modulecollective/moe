@@ -785,10 +785,10 @@ func TestBuildRowsMarksInputHints(t *testing.T) {
 }
 
 // A run whose last machine turn died carries `· died` on its ACTIVE
-// row. No question mark: nothing is being asked of the operator — the
-// sweep re-offers the thread on its own — but a row that dropped a turn
-// and a row the loop never reached are otherwise identical, which is the
-// archaeology the tombstone exists to spare.
+// row. No question mark: the mark is state rather than a question — but
+// a row that dropped a turn and a row the loop never reached are
+// otherwise identical, which is the archaeology the tombstone exists to
+// spare.
 func TestBuildRowsMarksAReapedRun(t *testing.T) {
 	md := &run.Metadata{ID: "fix-it", Project: "alpha", Status: run.StatusInProgress, Workflow: "sdlc"}
 	in := Inputs{

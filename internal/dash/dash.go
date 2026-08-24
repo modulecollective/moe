@@ -307,11 +307,14 @@ func BuildRows(in Inputs) ([]Row, error) {
 			if in.PendingInput[runKey] {
 				note = note + " · input"
 			}
-			// The reap's tombstone. Not a question — the sweep re-offers
-			// the thread on its own, and usually already has by the time
-			// anyone reads this — so no `?`. It is here because a row
-			// that dropped a turn and a row that was never reached look
-			// identical otherwise, and the run page has the sha.
+			// The reap's tombstone, and the sweep will not re-offer the
+			// thread while it stands: the note is the kick floor's brake
+			// (see reapHeldThread), released by any touch of the
+			// operator's own on the thread. Still no `?`, because the
+			// mark is state rather than a question — the same slot
+			// `· input` sits in. It is here because a row that dropped a
+			// turn and a row that was never reached look identical
+			// otherwise, and the run page has the sha.
 			if md.Reaped != nil {
 				note = note + " · died"
 			}
