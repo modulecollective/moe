@@ -582,7 +582,10 @@ func pendingInputOnThread(root, threadRoot string, groomed groomResult) bool {
 // Thread-scoped rather than run-scoped because that is where operator
 // prose actually lands: the same reasoning pendingInputOnThread is
 // built on. A note added at a member queued behind the head is movement
-// on the thread the head belongs to.
+// on the thread the head belongs to. A `moe chain edit` that reorders
+// the thread lands the same way: its commit is run-scoped to nothing,
+// but the index attributes it to every run it names as an edge
+// endpoint, and every such run on this thread is a member.
 func threadOperatorTouch(threadRoot string, byKey map[string]*run.Metadata, graph *run.ChainGraph, idx *run.JournalIndex) time.Time {
 	var touched time.Time
 	if graph == nil || idx == nil {
@@ -643,10 +646,12 @@ func reapHeldReason(md *run.Metadata, touched time.Time) string {
 // Why this cannot loop is a property of what releases it, not of a
 // counter. Every journal commit the refusal cycle lands is
 // machine-stamped — the tombstone carries MoE-Consent explicitly, groom
-// placements and spawns carry theirs — so LastOperatorActivity cannot
-// move on the machine's own account (see the map's doc). And each
-// failed retry re-arms at a later Reaped.At than the movement that
-// licensed it, so k operator touches buy at most k retries.
+// placements and spawns carry theirs, and that covers the groom's chain
+// commits too, which the index would otherwise read as an operator
+// touch on both endpoints — so LastOperatorActivity cannot move on the
+// machine's own account (see the map's doc). And each failed retry
+// re-arms at a later Reaped.At than the movement that licensed it, so k
+// operator touches buy at most k retries.
 func reapHeldThread(threadRoot string, byKey map[string]*run.Metadata, graph *run.ChainGraph, idx *run.JournalIndex) string {
 	if graph == nil {
 		return ""

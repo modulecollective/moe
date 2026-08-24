@@ -29,6 +29,13 @@
 // on bureaucracy commits that carry no MoE-Run trailer — one chain
 // edit touches several parents, no single canonical run to scope it
 // to. BuildJournalIndex's grep widens to pick these up.
+//
+// Neither verb stamps MoE-Consent, and that unstamped shape is load
+// bearing downstream: BuildJournalIndex reads an unstamped chain commit
+// as an operator touch on both ends of every edge it names, which is
+// what makes rearranging a thread release the kick's reap hold. The
+// groom writes the same trailers under its own consent stamp, so the
+// machine's placements stay out of it.
 package cli
 
 import (
