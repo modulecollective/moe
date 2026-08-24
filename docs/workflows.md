@@ -472,12 +472,15 @@ Every pulse does three things:
 
 ```sh
 moe pulse new <project>                  # run the whole pulse by hand (chore auto-open + survey)
-moe pulse pulse <project>/<run>           # reopen a sweep to inspect or re-run it
+moe pulse cat <project>/<run> pulse      # read a sweep's report
 moe pulse close [--no-edit] <project>/<run>  # close a failed or interrupted sweep by hand
 ```
 
-The survey blocks with a `Ctrl-C to skip` banner; interrupting it abandons the
-sweep and leaves the run open for a manual sitting or close. `moe pulse new` is
+A sweep is machine-paced and has no re-open verb: a failed one is read with
+`cat` / `log`, ended with `close` (the filings still harvest), and retried by
+running another. The survey blocks with a `Ctrl-C to skip` banner; interrupting
+it abandons the sweep and leaves the run open until you close it — the next
+sweep runs fresh either way. `moe pulse new` is
 also the verb an external cron would call — the primitives are cron-safe, but
 MoE ships no cron of anyone else's. The one clock it does carry is the armed
 serve's own heartbeat, described below.

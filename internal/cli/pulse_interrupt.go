@@ -19,8 +19,8 @@ import (
 // normal unwind paths run — locks release via their defers, the
 // bootstrap-failure path tears the worktree down — and the pulse can
 // dispose of its own run. Its scope is exactly the whole-pulse verb
-// (runPulse, behind `moe pulse new`), never the interactive `moe pulse
-// pulse`, which stays the operator's own session.
+// (runPulse, behind `moe pulse new`), never the cascade dispatcher's
+// seam, which carries no run traffic to skip.
 //
 // A second Ctrl-C, after the first is latched, gets Go's default
 // disposition again — signal.Stop steps the watcher out of the way so
@@ -77,9 +77,8 @@ func (pi *pulseInterrupt) watch(sigCh <-chan os.Signal) {
 
 // interrupted reports whether a Ctrl-C landed inside the pulse's skip
 // window. Nil-safe so the survey and openPulse's prompt builder can
-// call it unconditionally — a nil latch (the interactive `moe pulse
-// pulse` path, or a test that passes none) reads as "never
-// interrupted".
+// call it unconditionally — a nil latch (the cascade dispatcher's seam,
+// or a test that passes none) reads as "never interrupted".
 func (pi *pulseInterrupt) interrupted() bool {
 	return pi != nil && pi.latched.Load()
 }

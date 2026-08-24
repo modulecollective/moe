@@ -36,7 +36,6 @@ func TestStageVerbAgentFlagRejectsUnknown(t *testing.T) {
 		{"twin architecture", []string{"twin", "architecture", "--agent=gpt", "moe/x"}},
 		{"twin finalize", []string{"twin", "finalize", "--agent=gpt", "moe/x"}},
 		{"chat chat", []string{"chat", "chat", "--agent=gpt", "moe/x"}},
-		{"pulse pulse", []string{"pulse", "pulse", "--agent=gpt", "moe/x"}},
 		// Group B — wiki-session verbs.
 		{"twin reflect", []string{"twin", "reflect", "--agent=gpt", "moe"}},
 		// The two edit verbs validate only on the --chat path; without

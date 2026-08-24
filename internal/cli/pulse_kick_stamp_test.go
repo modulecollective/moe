@@ -24,7 +24,7 @@ func TestPulseSurveyStampsTheKickOrder(t *testing.T) {
 	minted := groomFixture(t, root, "aa-board", "zz-gate-head", "zz-gate-tail")
 
 	orig := openPulse
-	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
 		writePulseGate(t, root, projectID, runID,
 			`{"status":"ok","threads":[{"runs":["zz-gate-head","zz-gate-tail"]}]}`)
 		return surveyOutcome{code: 0, agentStarted: true}
@@ -91,7 +91,7 @@ func TestPulseSurveyStampsNoKickWithoutDynamicConsent(t *testing.T) {
 	groomFixture(t, root, "aa-board")
 
 	orig := openPulse
-	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
 		writePulseGate(t, root, projectID, runID, `{"status":"ok"}`)
 		return surveyOutcome{code: 0, agentStarted: true}
 	}
@@ -124,7 +124,7 @@ func TestPulseSurveyKickStampFailureLeavesRunOpen(t *testing.T) {
 	groomFixture(t, root, "aa-board")
 
 	orig := openPulse
-	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
 		writePulseGate(t, root, projectID, runID, `{"status":"ok"}`)
 		// Wedge the canvas read-only after the survey's own work turn
 		// committed it, so the stamp's write is what fails.

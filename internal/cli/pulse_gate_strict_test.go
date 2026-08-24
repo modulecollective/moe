@@ -151,7 +151,7 @@ func TestPulseSurveyRefusesGateWithATypodAsk(t *testing.T) {
 	trailerstest.SeedProject(t, root, "moe")
 
 	orig := openPulse
-	openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
 		writePulseGate(t, root, projectID, runID, `{"status":"ok",`+
 			`"loose":[{"slug":"fix-a","title":"Fix a","why":"because"}],`+
 			`"threads":[{"runs":[{"run":"change-auth","sak":"Which policy?"}]}]}`)
@@ -180,6 +180,18 @@ func TestPulseSurveyRefusesGateWithATypodAsk(t *testing.T) {
 	}
 	if got := errb.String(); !strings.Contains(got, `unknown field "sak"`) {
 		t.Errorf("stderr = %q, want it to name the unknown key", got)
+	}
+	// The refusal also names the way out. There is no reopen-and-fix
+	// door for a sweep, so an operator told only "leaving the run open
+	// for review" is told to do nothing in particular; the recovery is
+	// close-then-run-another, in that order.
+	for _, want := range []string{
+		"hint: moe pulse close moe/",
+		"hint: moe pulse new moe ",
+	} {
+		if got := errb.String(); !strings.Contains(got, want) {
+			t.Errorf("stderr = %q, want it to carry %q", got, want)
+		}
 	}
 }
 

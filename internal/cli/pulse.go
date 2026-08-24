@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/chore"
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git"
@@ -129,22 +128,21 @@ func init() {
 		Summary: "run the whole pulse for a project: open due chores, then a headless survey",
 		Run:     runPulseNew,
 	})
-	// The single stage's opener — re-run a failed sweep by hand. A
-	// terminal sweep is refused here (guardPulseReentry); reading one is
-	// `cat` / `log`. The hook and `moe pulse new` drive it headless.
-	g.Register(&Command{
-		Name:    pulseDoc,
-		Summary: "open an agent session on a pulse run's survey canvas",
-		Run:     runPulseStage,
-		argKind: argProjectRun,
-	})
+	// The pulse has no stage-opener verb. A sweep is machine-paced:
+	// `moe pulse new` runs one, `cat` / `log` read it, `close` ends it.
+	// There was a `moe pulse pulse <p>/<run>` door once, sold as "re-run
+	// a failed sweep by hand", but it opened the session without applying
+	// the resulting gate — a corrected gate typed into the canvas sealed
+	// and did nothing. The retry is a fresh sweep, which is what the
+	// heartbeat does on its own next tick anyway.
+	//
 	// Pulse has no workspace and no moe/<run> branch, so close has
 	// nothing workflow-specific to clean up — pass nil and ride the
 	// shared harvest / state-guard / status-flip path. The happy-path
 	// survey auto-closes through this same registration (skipEdit, so
 	// filings promote to ideas unreviewed); the verb itself is the manual
-	// ending for interactive sittings and failed sweeps, where the
-	// editor-pop prune gate still applies.
+	// ending for a refused or failed sweep, where the editor-pop prune
+	// gate still applies.
 	g.Register(closeCommand(pulseWorkflow, "Close pulse run %s/%s", nil))
 	g.Register(&Command{
 		Name:    "cat",
@@ -356,7 +354,7 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 	// of exhausted plan limits) and tells a phone glance the sweep
 	// succeeded. Either way the run stays open on the dash's ACTIVE list
 	// for the operator, and either way the next survey is unblocked.
-	survey := openPulse(projectID, md.ID, true /*headless*/, "", pi, stdout, stderr)
+	survey := openPulse(projectID, md.ID, true /*headless*/, pi, stdout, stderr)
 	if survey.code == exitInterrupted {
 		// The Ctrl-C may have been observed only at the agent boundary, so
 		// mark the latch to propagate the skip out as the verb's own exit.
@@ -410,6 +408,14 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 	gate, err := readPulseGate(root, projectID, md.ID)
 	if err != nil {
 		moePrintf(stderr, "pulse: %s/%s left an unfilled gate (%v) — leaving the run open for review\n", projectID, md.ID, err)
+		// Name the route out. A gate refusal is the common shape of a
+		// failed sweep now that an unknown key is a strict-decode refusal
+		// — any typo lands here — and there is no reopen-and-fix door:
+		// the recovery is to end this run and run another. Harmless when
+		// the heartbeat spawned the sweep (stderr goes to serve's logs),
+		// and the whole point when the operator typed `moe pulse new`.
+		moePrintf(stderr, "hint: moe pulse close %s/%s   (end this sweep; filings still harvest)\n", projectID, md.ID)
+		moePrintf(stderr, "hint: moe pulse new %s   (run a fresh one)\n", projectID)
 		return 1
 	}
 	// Mint, then groom, then kick. The order is the design's: the graph
@@ -1473,27 +1479,27 @@ func pendingTwinObservationsLine(root, projectID string) string {
 // pre-agent skip and disposes the run.
 var errPulseSkipped = errors.New("pulse: skipped before the survey started")
 
-// openPulse is the Go-level seam behind `moe pulse pulse` and the
-// survey's headless execution. Read-only both-legs-strict sandbox (the
-// design/chat shape): the survey reads the project but never edits it,
-// and the boundary guard enforces that. It is a var so runPulseSurvey's
-// auto-close can be tested without running the agent turn.
+// openPulse is the Go-level seam behind the survey's execution — the
+// sweep's own turn, and the cascade dispatcher. Read-only
+// both-legs-strict sandbox (the design/chat shape): the survey reads the
+// project but never edits it, and the boundary guard enforces that. It
+// is a var so runPulseSurvey's auto-close can be tested without running
+// the agent turn.
 //
-// pi is the survey's Ctrl-C latch (nil on the interactive `moe pulse
-// pulse` path, which has no skip window). The prompt builder is the
-// pre-executor belt: a Ctrl-C that latched during setup returns
-// errPulseSkipped here so the agent never starts.
+// pi is the sweep's Ctrl-C latch (nil on the dispatcher seam, which has
+// no skip window). The prompt builder is the pre-executor belt: a
+// Ctrl-C that latched during setup returns errPulseSkipped here so the
+// agent never starts.
 //
 // It reports a surveyOutcome rather than a bare exit code: the two extra
 // facts are the ones the apply step can't recover afterwards.
-var openPulse = func(projectID, runID string, headless bool, agentOverride string, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+var openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
 	out := surveyOutcome{}
 	out.code = runStageSession(projectID, runID, pulseDoc,
 		stageSessionOpts{
 			NeedsSandbox:           true,
 			EnforceSandboxBoundary: true,
 			Headless:               headless,
-			Agent:                  agentOverride,
 			OnAgentStart:           func() { out.agentStarted = true },
 			// Deferred so the twin-reflect context line renders against
 			// the session worktree, the read-only copy runStageSession
@@ -1595,101 +1601,6 @@ func runPulseNew(args []string, stdout, stderr io.Writer) int {
 		return exitInterrupted
 	}
 	return code
-}
-
-func runPulseStage(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("pulse "+pulseDoc, flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	agentOverride := fs.String("agent", "", "override the run's agent for this turn (claude/codex); does not persist")
-	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe pulse "+pulseDoc+" [--agent <name>] <project>/<run>")
-		moePrintln(stderr, "")
-		moePrintln(stderr, "Opens an interactive agent session on a pulse run's survey canvas —")
-		moePrintln(stderr, "re-run a failed sweep by hand. A finished sweep is read with")
-		moePrintln(stderr, "`moe pulse cat` / `moe pulse log`, not reopened.")
-	}
-	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
-		return 2
-	}
-	if fs.NArg() != 1 {
-		fs.Usage()
-		return 2
-	}
-	if *agentOverride != "" {
-		if _, err := agent.Get(*agentOverride); err != nil {
-			moePrintf(stderr, "%v\n", err)
-			return 2
-		}
-	}
-	projectID, runID, err := splitProjectRun(fs.Arg(0))
-	if err != nil {
-		moePrintf(stderr, "pulse %s: %v\n", pulseDoc, err)
-		return 2
-	}
-	if code := guardPulseReentry(projectID, runID, stderr); code != 0 {
-		return code
-	}
-	// Interactive reopen: the operator owns this session's Ctrl-C, so no
-	// skip latch (nil pi).
-	survey := openPulse(projectID, runID, false, *agentOverride, nil /*pi*/, stdout, stderr)
-	return survey.code
-}
-
-// guardPulseReentry fences the operator door (`moe pulse pulse
-// <p>/<run>`) against a terminal run — the same class of bug the sdlc
-// stage verbs grew resolveSDLCReentry for, and sharper here: a sweep's
-// only durable output is its filings, filings promote through the close
-// harvest, and closeRunInProcess refuses an already-terminal run. So
-// everything typed into a closed sweep is silently lost. Happy-path
-// sweeps auto-close, which puts *most* pulse runs in exactly this state.
-//
-// Refusal, not chat's soft reopen: reopen-then-close would re-arm the
-// harvest on a run that already promoted its filings, and the inspect
-// use case is served read-only by `cat` / `log`. What the door is still
-// for is re-running a *failed* sweep, which is still in-progress and
-// passes through here.
-//
-// A load error refuses loud rather than passing through — unlike twin
-// there is no downstream require* that owns the message, so a
-// pass-through would surface a raw error from deep inside
-// runStageSession.
-//
-// A non-pulse run typed here refuses on workflow before status is
-// considered: a closed sdlc run should hear that it is an sdlc run, not
-// that "a sweep is not reopened". Without the check the non-terminal
-// case passed straight through and wrote a survey skeleton into the
-// other run's document tree.
-//
-// Scoped to the operator door. openPulse stays unguarded: the headless
-// survey path opens a run minted moments earlier, and openPulseStage
-// (the cascade dispatcher) is only reachable via chain rides.
-func guardPulseReentry(projectID, runID string, stderr io.Writer) int {
-	verb := "pulse " + pulseDoc
-	root, err := findRoot(stderr)
-	if err != nil {
-		return 1
-	}
-	md, err := run.Load(root, projectID, runID)
-	if err != nil {
-		if errors.Is(err, run.ErrRunNotFound) {
-			moePrintf(stderr, "%s: run not found: %s/%s\n", verb, projectID, runID)
-		} else {
-			moePrintf(stderr, "%s: %v\n", verb, err)
-		}
-		return 1
-	}
-	if md.Workflow != pulseWorkflow {
-		moePrintf(stderr, "%s: %s/%s is a %s run, not %s\n", verb, projectID, runID, md.Workflow, pulseWorkflow)
-		return 1
-	}
-	switch md.Status {
-	case run.StatusMerged, run.StatusClosed, run.StatusPromoted:
-		moePrintf(stderr, "%s: %s/%s is %s; a sweep is not reopened\n", verb, projectID, runID, md.Status)
-		moePrintf(stderr, "hint: moe pulse log %s/%s %s   (read the sweep)\n", projectID, runID, pulseDoc)
-		moePrintf(stderr, "hint: moe pulse new %s   (run a fresh one)\n", projectID)
-		return 1
-	}
-	return 0
 }
 
 // pulseScan is the one disk read a sweep's kickoff makes: the run scan
