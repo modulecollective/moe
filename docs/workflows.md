@@ -519,14 +519,15 @@ structurally kickable parked thread is kicked when the sweep finishes, the ones
 this sweep groomed first and then the rest, deduped by root. Kicking is the
 default; the survey's way out is a `"park"` line naming why the operator should
 look first, and that reason is mandatory. Either way the harness holds a root
-that has only a seed or a live session; a machine-baked, chore-authored, or
+that has only a seed, a live session, or a dead machine turn nobody has touched
+since (the reap's tombstone, below); a machine-baked, chore-authored, or
 past-first-stage root has a settled design and is ready to start. The sweep
-stamps that order onto its own canvas as a closing `## Kick` section — each
-root queued, parked with the survey's reason, or held by the floor and why — in
-the same commit as the close, so a sweep's report says what it was about to run
-and not only what it filed. The section records a plan, not a promise: the
-floor is re-checked as each root is reached, so a root can still be held past
-its "queued" line. Curation sweeps stamp nothing — they start nothing.
+stamps that order onto its own canvas as a closing `## Kick` section — each root
+queued, parked with the survey's reason, or held by the floor and why — in the
+same commit as the close, so a sweep's report says what it was about to run and
+not only what it filed. The section records a plan, not a promise: the floor is
+re-checked as each root is reached, so a root can still be held past its
+"queued" line. Curation sweeps stamp nothing — they start nothing.
 
 Grooming may move a queued run out of one thread and into another — that is how
 stray threads consolidate. One unit is off limits: any unit under a **chain
@@ -657,12 +658,22 @@ heartbeat deliberately sweeps straight past it rather than letting one dead
 vendor night wedge the project until you notice.
 
 The heartbeat also reaps: a session branch whose machine walk died — same host,
-pid gone, heartbeat stale — is abandoned so the run re-parks and the loop can
-retry it. A robot half-turn is regenerable. Before the branch goes, the reap
-stamps a tombstone on the run — which stage died, when, and the abandoned
-branch tip — so a run whose turn was dropped stops reading like one the loop
-never reached; `moe dash` marks the row `· died` and the run page names the sha
-the transcript is still readable at. The next session on the run clears it.
+pid gone, heartbeat stale — is abandoned so the run re-parks. A robot half-turn
+is regenerable. Before the branch goes, the reap stamps a tombstone on the
+run — which stage died, when, and the abandoned branch tip — so a run whose turn
+was dropped stops reading like one the loop never reached; `moe dash` marks the
+row `· died` and the run page names the sha the transcript is still readable at.
+
+The tombstone is a brake as well as a record, and that is what keeps one refusal
+from costing a stage turn every sweep: a headless stage that refuses because the
+work needs you exits with nothing written, so with no brake the next sweep kicks
+the same stage again. While the note stands the kick floor holds the whole
+thread and the heartbeat's pre-ask skips it. Any touch of your own on the
+thread — a `moe input` note, an advance, anything landing a journal commit the
+machine didn't stamp — releases it for one retry, and opening a stage there
+clears it outright. If that retry refuses too, its fresh tombstone re-arms the
+hold: each thing you do buys one attempt and no more.
+
 Sessions you started, sessions whose claimant might still be alive, and
 sessions with no record at all are never touched; they surface on the dash's
 ACTIVE row and `moe session resolve` / `moe session abandon` are still yours.
