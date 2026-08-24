@@ -646,3 +646,96 @@ func TestFirstLine(t *testing.T) {
 		t.Fatalf("open ping FirstLine() = %q", got)
 	}
 }
+
+// onceLocked installs a testLocked hook that fires the first time a verb
+// takes the repo lock. It stands in for another process that won an
+// earlier hold and rewrote the record — the interleave real contention
+// can't produce in-process, since repolock refuses a nested acquire from
+// the same pid.
+func onceLocked(t *testing.T, mutate func()) {
+	t.Helper()
+	fired := false
+	testLocked = func() {
+		if fired {
+			return
+		}
+		fired = true
+		mutate()
+	}
+	t.Cleanup(func() { testLocked = nil })
+}
+
+// commitRecord writes a run's record straight to disk and lands it, the
+// way the competing process would have.
+func commitRecord(t *testing.T, root, slug string, f File, msg string) {
+	t.Helper()
+	if err := writeFile(filepath.Join(root, Path("moe", slug)), f); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, root, "add", "-A")
+	gittest.Run(t, root, "commit", "-m", msg)
+}
+
+// The motivating race: a note added between MarkDelivered's read and its
+// write survives. Before the verbs read under the lock, the stamp
+// rewrote the file from its pre-lock snapshot and the note vanished —
+// the one artifact the channel exists to protect.
+func TestMarkDeliveredKeepsANoteAddedMidWindow(t *testing.T) {
+	root := seedRoot(t)
+	seedRun(t, root, "change-auth")
+	add(t, root, "change-auth", "the flake is known")
+
+	onceLocked(t, func() {
+		commitRecord(t, root, "change-auth", File{Notes: []Entry{
+			{ID: 1, Text: "the flake is known"},
+			{ID: 2, Text: "and the ARM build is red"},
+		}}, "input: note moe/change-auth#2")
+	})
+
+	if err := MarkDelivered(root, "moe", "change-auth", "code", []int{1}, io.Discard, io.Discard); err != nil {
+		t.Fatalf("MarkDelivered: %v", err)
+	}
+
+	f, err := Load(root, "moe", "change-auth")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Notes) != 2 {
+		t.Fatalf("notes = %+v, want the mid-window note kept", f.Notes)
+	}
+	if f.Notes[0].DeliveredTo != "code" {
+		t.Fatalf("#1 DeliveredTo = %q, want code", f.Notes[0].DeliveredTo)
+	}
+	if !f.Notes[1].Pending() || f.Notes[1].Text != "and the ARM build is red" {
+		t.Fatalf("#2 = %+v, want it still pending", f.Notes[1])
+	}
+}
+
+// The check-then-act half: a ping opened mid-window makes Ask refuse.
+// Read outside the lock, the open-ping check passed against a stale
+// empty record and Ask appended a second open ping — a file that
+// validate rejects, so every later Load reads ErrMalformed.
+func TestAskRefusesAPingOpenedMidWindow(t *testing.T) {
+	root := seedRoot(t)
+	seedRun(t, root, "change-auth")
+
+	onceLocked(t, func() {
+		commitRecord(t, root, "change-auth", File{Notes: []Entry{
+			{ID: 1, AskedBy: "moe/pulse-zero", Question: "Which compatibility policy?"},
+		}}, "input: ask moe/change-auth#1")
+	})
+
+	_, err := Ask(root, "moe", "change-auth", "moe/pulse-one",
+		"Ship behind a flag?", "dynamic", io.Discard, io.Discard)
+	if !errors.Is(err, ErrOpenPing) {
+		t.Fatalf("Ask err = %v, want ErrOpenPing", err)
+	}
+
+	f, err := Load(root, "moe", "change-auth")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(f.Notes) != 1 || f.Notes[0].Question != "Which compatibility policy?" {
+		t.Fatalf("notes = %+v, want the mid-window ping untouched", f.Notes)
+	}
+}
