@@ -295,7 +295,7 @@ func TestOperatorInputSectionDropsDeliveredEntries(t *testing.T) {
 	root := spawnFixture(t)
 	md := seedParkedRun(t, root, "change-auth")
 	addOn(t, root, "moe", "change-auth", "skip the flake")
-	if err := input.MarkDelivered(root, "moe", "change-auth", "code", []int{1}, io.Discard, io.Discard); err != nil {
+	if err := input.MarkDelivered(root, "moe", "change-auth", "code", []int{1}, "", io.Discard, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if got, ids := operatorInputSection(root, md); got != "" || ids != nil {
@@ -400,7 +400,7 @@ func TestSafeModeAdmitsAThreadWithAPendingNote(t *testing.T) {
 	})
 
 	// Delivery consumes the licence; another note re-arms it.
-	if err := input.MarkDelivered(root, "moe", id, "code", []int{1}, io.Discard, io.Discard); err != nil {
+	if err := input.MarkDelivered(root, "moe", id, "code", []int{1}, "", io.Discard, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	asClock(func() {

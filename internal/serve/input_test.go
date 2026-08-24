@@ -209,7 +209,7 @@ func TestRunPageShowsInputHistoryAndForms(t *testing.T) {
 	if _, err := input.Answer(root, "alpha", "fix-it", 1, "Adopt.", io.Discard, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if err := input.MarkDelivered(root, "alpha", "fix-it", "code", []int{1}, io.Discard, io.Discard); err != nil {
+	if err := input.MarkDelivered(root, "alpha", "fix-it", "code", []int{1}, "", io.Discard, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	askOn(t, root, "fix-it", "And the migration?")

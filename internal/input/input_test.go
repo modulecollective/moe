@@ -295,7 +295,7 @@ func TestMarkDeliveredStampsOnlyRenderedPendingIDs(t *testing.T) {
 	// The turn rendered #1 and started. #2 lands mid-turn.
 	add(t, root, "change-auth", "second")
 
-	if err := MarkDelivered(root, "moe", "change-auth", "code", []int{1}, io.Discard, io.Discard); err != nil {
+	if err := MarkDelivered(root, "moe", "change-auth", "code", []int{1}, "", io.Discard, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	f, _ := Load(root, "moe", "change-auth")
@@ -314,14 +314,38 @@ func TestMarkDeliveredStampsOnlyRenderedPendingIDs(t *testing.T) {
 	if strings.Contains(msg, "MoE-Document:") {
 		t.Fatalf("delivery commit stamped a document trailer:\n%s", msg)
 	}
+	// Empty consent is the operator's own turn: the commit stays
+	// byte-identical to what it was before the stamp landed.
+	if strings.Contains(msg, "MoE-Consent:") {
+		t.Fatalf("delivery commit stamped consent for an operator turn:\n%s", msg)
+	}
 
 	// Re-marking is a no-op: no second commit, nothing overwritten.
 	before := gittest.Output(t, root, "rev-parse", "HEAD")
-	if err := MarkDelivered(root, "moe", "change-auth", "review", []int{1}, io.Discard, io.Discard); err != nil {
+	if err := MarkDelivered(root, "moe", "change-auth", "review", []int{1}, "", io.Discard, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if after := gittest.Output(t, root, "rev-parse", "HEAD"); after != before {
 		t.Fatalf("re-marking wrote a commit: %s → %s", before, after)
+	}
+}
+
+// The delivery commit is the machine's exhaust when a walk drove the
+// stage, so it carries the walk's consent — otherwise a reader asking
+// "did the operator do this" reads a heartbeat's bookkeeping as a
+// person's.
+func TestMarkDeliveredStampsAWalksConsent(t *testing.T) {
+	root := seedRoot(t)
+	seedRun(t, root, "change-auth")
+	add(t, root, "change-auth", "first")
+
+	if err := MarkDelivered(root, "moe", "change-auth", "code", []int{1}, "dynamic", io.Discard, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+
+	msg := gittest.Output(t, root, "log", "-1", "--format=%B")
+	if !strings.Contains(msg, "MoE-Consent: dynamic") {
+		t.Fatalf("delivery commit missing the walk's consent:\n%s", msg)
 	}
 }
 
@@ -333,7 +357,7 @@ func TestMarkDeliveredIgnoresOpenPingAndEmptyList(t *testing.T) {
 	ask(t, root, "change-auth")
 	before := gittest.Output(t, root, "rev-parse", "HEAD")
 	for _, ids := range [][]int{nil, {1}} {
-		if err := MarkDelivered(root, "moe", "change-auth", "code", ids, io.Discard, io.Discard); err != nil {
+		if err := MarkDelivered(root, "moe", "change-auth", "code", ids, "", io.Discard, io.Discard); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -388,7 +412,7 @@ func TestCarryCopiesUndeliveredEntriesWithDenseDestinationIDs(t *testing.T) {
 	seedRun(t, root, "destination")
 
 	add(t, root, "idea", "already consumed")
-	if err := MarkDelivered(root, "moe", "idea", "idea", []int{1}, io.Discard, io.Discard); err != nil {
+	if err := MarkDelivered(root, "moe", "idea", "idea", []int{1}, "", io.Discard, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	add(t, root, "idea", "operator note")
@@ -469,7 +493,7 @@ func TestCarryNoOpsWithoutUndeliveredInput(t *testing.T) {
 	}
 
 	add(t, root, "idea", "done")
-	if err := MarkDelivered(root, "moe", "idea", "idea", []int{1}, io.Discard, io.Discard); err != nil {
+	if err := MarkDelivered(root, "moe", "idea", "idea", []int{1}, "", io.Discard, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	head = gittest.Output(t, root, "rev-parse", "HEAD")
@@ -583,7 +607,7 @@ func TestScanDropsDeliveredEntries(t *testing.T) {
 	root := seedRoot(t)
 	seedRun(t, root, "change-auth")
 	add(t, root, "change-auth", "ship it")
-	if err := MarkDelivered(root, "moe", "change-auth", "code", []int{1}, io.Discard, io.Discard); err != nil {
+	if err := MarkDelivered(root, "moe", "change-auth", "code", []int{1}, "", io.Discard, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if waiting, _ := Scan(root, ""); len(waiting) != 0 {
@@ -692,7 +716,7 @@ func TestMarkDeliveredKeepsANoteAddedMidWindow(t *testing.T) {
 		}}, "input: note moe/change-auth#2")
 	})
 
-	if err := MarkDelivered(root, "moe", "change-auth", "code", []int{1}, io.Discard, io.Discard); err != nil {
+	if err := MarkDelivered(root, "moe", "change-auth", "code", []int{1}, "", io.Discard, io.Discard); err != nil {
 		t.Fatalf("MarkDelivered: %v", err)
 	}
 

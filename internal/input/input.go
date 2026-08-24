@@ -345,7 +345,12 @@ func Answer(root, projectID, runID string, id int, text string, stdout, stderr i
 // empty id list is a no-op with no commit and no lock — what nearly
 // every turn does; a list whose entries have all been delivered already
 // takes the lock to find that out, and still commits nothing.
-func MarkDelivered(root, projectID, runID, docID string, ids []int, stdout, stderr io.Writer) error {
+//
+// consent is the caller's MoE-Consent value, empty for an operator-driven
+// turn. The stage that calls this is shared between a typed `moe sdlc
+// <stage>` and a heartbeat walk, so it is one of the sites walkConsent's
+// rule covers: the ride level under a walk, nothing otherwise.
+func MarkDelivered(root, projectID, runID, docID string, ids []int, consent string, stdout, stderr io.Writer) error {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -379,6 +384,7 @@ func MarkDelivered(root, projectID, runID, docID string, ids []int, stdout, stde
 			trailers.Block{
 				Run:            runID,
 				Project:        projectID,
+				Consent:        consent,
 				InputDelivered: ref + " " + docID,
 			}.String(), nil
 	})
