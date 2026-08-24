@@ -50,10 +50,10 @@ func TestProjectShipRouteRejectsAnUnknownRoute(t *testing.T) {
 	}
 }
 
-// TestProjectShipNeedsNoSpawnConsent: setting a route writes config and
-// spawns nothing, so an unarmed serve answers it like the mode switch
-// rather than 403ing through spawnAllowed.
-func TestProjectShipNeedsNoSpawnConsent(t *testing.T) {
+// TestProjectShipRouteWritesConfig: setting a route writes config and
+// spawns nothing — it is a preference the pulse reads later, so it
+// answers like the mode switch beside it.
+func TestProjectShipRouteWritesConfig(t *testing.T) {
 	gittest.SetupEnv(t)
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "fix-it", "sdlc")
@@ -61,9 +61,9 @@ func TestProjectShipNeedsNoSpawnConsent(t *testing.T) {
 	gittest.Commit(t, root, "seed")
 	gittest.Run(t, root, "add", "-A")
 	gittest.Commit(t, root, "seed projects")
-	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
 	if rec := postForm(t, s, "/projects/alpha/ship", "ship=merge"); rec.Code != http.StatusSeeOther {
-		t.Fatalf("POST ship on an unarmed serve = %d, want 303: %s", rec.Code, rec.Body.String())
+		t.Fatalf("POST ship = %d, want 303: %s", rec.Code, rec.Body.String())
 	}
 	if got := project.ReadShip(root, "alpha"); got != project.ShipMerge {
 		t.Errorf("ReadShip = %q, want merge", got)

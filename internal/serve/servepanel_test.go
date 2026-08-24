@@ -30,6 +30,8 @@ func panelServer(t *testing.T) *Server {
 		GatherDash: func(string) ([]dash.Row, int, int, []int, error) {
 			return nil, 2, 0, nil, nil
 		},
+		// The fixture models a live heartbeat, so it is armed.
+		Dynamic: true,
 	})
 	s.activity.recordTick(now.Add(-3*time.Minute), []HeartbeatDecision{
 		{Project: "alpha", Sweep: true, Reason: "the journal moved"},
@@ -84,7 +86,7 @@ func TestServeClusterRidesTheBoardHeaders(t *testing.T) {
 // exactly the confusion this exists to fix, so an unarmed serve says so
 // in the header rather than going quiet.
 func TestServeClusterRendersUnarmed(t *testing.T) {
-	s := newUnarmedTestServer(t, Options{
+	s := newTestServer(t, Options{
 		Addr: "127.0.0.1:0",
 		Root: t.TempDir(),
 		GatherDash: func(string) ([]dash.Row, int, int, []int, error) {
@@ -167,7 +169,8 @@ func TestServePageIsBoardWide(t *testing.T) {
 // not read as the empty state, which means something different: no tick
 // has ever run.
 func TestServePageRendersAnAllQuietBoard(t *testing.T) {
-	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir()})
+	// Armed: the board this renders is a heartbeat-alive one.
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), Dynamic: true})
 	s.activity.recordTick(time.Now().Add(-4*time.Minute), []HeartbeatDecision{
 		{Project: "alpha", Reason: "a sweep already surveyed the current tip"},
 		{Project: "beta", Reason: "no journal history yet"},
@@ -185,7 +188,7 @@ func TestServePageRendersAnAllQuietBoard(t *testing.T) {
 // TestServePageEmptyState: a serve that has never ticked renders a page
 // that says so rather than a blank one.
 func TestServePageEmptyState(t *testing.T) {
-	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir()})
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir()})
 	if body := getBody(t, s, "/serve"); !strings.Contains(body, "nothing yet — no tick has run") {
 		t.Error("/serve should name its empty state")
 	}
@@ -305,10 +308,10 @@ func TestProjectModeRouteRejectsAnUnknownMode(t *testing.T) {
 	}
 }
 
-// TestProjectModeNeedsNoSpawnConsent: braking is not motion. The route
-// writes config and spawns nothing, so an unarmed serve answers it like
-// any other journal-write route rather than 403ing through spawnAllowed.
-func TestProjectModeNeedsNoSpawnConsent(t *testing.T) {
+// TestProjectModeRouteWritesConfig: braking is not motion. The route
+// writes config and spawns nothing, so it answers like any other
+// journal-write route.
+func TestProjectModeRouteWritesConfig(t *testing.T) {
 	gittest.SetupEnv(t)
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "fix-it", "sdlc")
@@ -316,12 +319,12 @@ func TestProjectModeNeedsNoSpawnConsent(t *testing.T) {
 	gittest.Commit(t, root, "seed")
 	gittest.Run(t, root, "add", "-A")
 	gittest.Commit(t, root, "seed projects")
-	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root,
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root,
 		GatherDash: func(string) ([]dash.Row, int, int, []int, error) {
 			return nil, 1, 0, nil, nil
 		}})
 	if rec := postForm(t, s, "/projects/alpha/mode", "mode=paused"); rec.Code != http.StatusSeeOther {
-		t.Fatalf("POST mode on an unarmed serve = %d, want 303: %s", rec.Code, rec.Body.String())
+		t.Fatalf("POST mode = %d, want 303: %s", rec.Code, rec.Body.String())
 	}
 	if mode, _ := project.ReadMode(root, "alpha"); mode != project.ModePaused {
 		t.Errorf("ReadMode = %q, want paused", mode)

@@ -247,7 +247,7 @@ func TestBrowseMissingDocIs404(t *testing.T) {
 func TestBrowseWorksUnarmed(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "lore/x.md", "# X\n\nbody.\n")
-	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
 	mustContain(t, get(t, s, "/lore"), "lore")
 	mustContain(t, get(t, s, "/lore/x"), "<h1>X</h1>")
 }

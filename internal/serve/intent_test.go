@@ -168,7 +168,7 @@ func TestIntentCloseRouteClosesAndRedirects(t *testing.T) {
 func TestUnarmedServeKeepsIntentEditAndClose(t *testing.T) {
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "ship-faster", dash.IntentWorkflow)
-	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
 
 	mustContain(t, get(t, s, "/run/alpha/ship-faster"), `>edit intent<`, `>close intent<`)
 }

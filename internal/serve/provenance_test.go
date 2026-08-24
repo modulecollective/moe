@@ -15,7 +15,7 @@ func provenanceServer(t *testing.T, hops []ProvHop, gatherErr error) *Server {
 	t.Helper()
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "fix-ci", "sdlc")
-	return newUnarmedTestServer(t, Options{
+	return newTestServer(t, Options{
 		Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo",
 		RunProvenance: func(string, string) ([]ProvHop, error) { return hops, gatherErr },
 	})

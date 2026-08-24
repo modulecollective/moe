@@ -55,7 +55,7 @@ func postInput(t *testing.T, s *Server, path, referer string, form url.Values) *
 func TestInputQueueListsOpenQuestionsWithReplyBoxes(t *testing.T) {
 	root := seedInputRoot(t)
 	askOn(t, root, "fix-it", "Which compatibility policy?")
-	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
 
 	mustContain(t, get(t, s, "/input"),
 		"alpha/fix-it",
@@ -73,7 +73,7 @@ func TestInputQueueListsPendingNotesReadOnly(t *testing.T) {
 	if _, err := input.Add(root, "alpha", "fix-it", "Ship behind the flag.\nDetails follow.", io.Discard, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
 
 	rr := get(t, s, "/input")
 	mustContain(t, rr, "given, awaiting pickup", "Ship behind the flag.")
@@ -87,7 +87,7 @@ func TestInputQueueListsPendingNotesReadOnly(t *testing.T) {
 
 func TestInputQueueEmptyState(t *testing.T) {
 	root := seedInputRoot(t)
-	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
 	mustContain(t, get(t, s, "/input"), "(nothing waiting)")
 }
 
@@ -96,7 +96,7 @@ func TestInputQueueEmptyState(t *testing.T) {
 // something asking: it needs a turn, not a tap.
 func TestDashLinksInputOnlyWhenSomethingIsAsking(t *testing.T) {
 	root := seedInputRoot(t)
-	s := newUnarmedTestServer(t, Options{
+	s := newTestServer(t, Options{
 		Addr: "127.0.0.1:0", Root: root,
 		GatherDash: func(string) ([]dash.Row, int, int, []int, error) { return nil, 1, 0, nil, nil },
 	})

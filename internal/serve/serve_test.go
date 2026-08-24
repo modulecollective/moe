@@ -2027,27 +2027,13 @@ func TestMakeNotifierPostsJSON(t *testing.T) {
 	}
 }
 
-// newTestServer builds an in-process server for tests. It forces
-// Dynamic mode: most route and chip tests exercise the spawn surface
-// (new run, promote, advance/ship/chain, stage spawn, chore open),
-// which the production-default unarmed serve refuses with 403. Unarmed
-// behavior — the point of the --dynamic split — is asserted explicitly
-// by the tests that use newUnarmedTestServer.
+// newTestServer builds an in-process server on production defaults,
+// unarmed included: Dynamic stays false because no route consults it.
+// What arming gates is the startup banner, the heartbeat ticker, and
+// the armed cluster on the serve panel — so a test that asserts one of
+// those sets Dynamic: true in its own Options literal, where the
+// consent is visible at the call site.
 func newTestServer(t *testing.T, opts Options) *Server {
-	t.Helper()
-	opts.Dynamic = true
-	return newServerWithDefaults(t, opts)
-}
-
-// newUnarmedTestServer builds an in-process server in the
-// production-default unarmed state (Dynamic stays false). The
-// spawn-route 403s and the hidden-affordance assertions use it.
-func newUnarmedTestServer(t *testing.T, opts Options) *Server {
-	t.Helper()
-	return newServerWithDefaults(t, opts)
-}
-
-func newServerWithDefaults(t *testing.T, opts Options) *Server {
 	t.Helper()
 	if opts.Logger == nil {
 		opts.Logger = io.Discard
@@ -2328,7 +2314,7 @@ func TestIdeaPageRendersTagChips(t *testing.T) {
 func TestIdeaTagChipsRenderUnarmed(t *testing.T) {
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "my-idea", "idea")
-	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
 
 	rr := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/my-idea", nil))

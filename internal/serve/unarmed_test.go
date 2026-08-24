@@ -36,7 +36,7 @@ func TestServeHasNoSpawnRoutes(t *testing.T) {
 			// Armed on purpose: the claim is that the route is absent, not
 			// that a flag hides it.
 			s := newTestServer(t, Options{
-				Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: "/bin/echo",
+				Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: "/bin/echo", Dynamic: true,
 			})
 			req := httptest.NewRequest("POST", path, strings.NewReader("spawn=1"))
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -59,7 +59,7 @@ func TestUnarmedServeAllowsIdeaCapture(t *testing.T) {
 	root := newGitServeRoot(t)
 	seedProject(t, root, "alpha")
 	gittest.Commit(t, root, "seed project")
-	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
 
 	form := "id=alpha/new-idea&body=capture+this"
 	req := httptest.NewRequest("POST", "/idea/new", strings.NewReader(form))
@@ -84,7 +84,7 @@ func TestUnarmedServeAllowsIdeaClose(t *testing.T) {
 	root := newGitServeRoot(t)
 	seedRun(t, root, "alpha", "my-idea", "idea")
 	gittest.Commit(t, root, "seed idea")
-	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
 
 	req := httptest.NewRequest("POST", "/run/alpha/my-idea/close", strings.NewReader(""))
 	rr := httptest.NewRecorder()
@@ -113,7 +113,7 @@ func TestUnarmedServeAllowsTheAdvanceMark(t *testing.T) {
 	trailerstest.CommitWorkTurnAt(t, root, "alpha", "fix-it", "sdlc", "design",
 		time.Now().Add(-time.Hour))
 	now := time.Now().UTC()
-	s := newUnarmedTestServer(t, Options{
+	s := newTestServer(t, Options{
 		Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo",
 		GatherRunRow: func(p, slug string) (dash.Row, bool, error) {
 			return dash.Row{Project: p, Run: slug, Note: "sdlc:design", Stage: "design",
@@ -142,7 +142,7 @@ func TestUnarmedServeAllowsTheAdvanceMark(t *testing.T) {
 // capture door, and it is journal-only, so it survives being unarmed.
 func TestUnarmedServeDashKeepsTheIdeaLink(t *testing.T) {
 	gather := func(string) ([]dash.Row, int, int, []int, error) { return nil, 0, 0, nil, nil }
-	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), GatherDash: gather})
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), GatherDash: gather})
 
 	rr := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/", nil))
@@ -165,7 +165,7 @@ func TestUnarmedServeDashKeepsTheIdeaLink(t *testing.T) {
 func TestUnarmedServeIdeaPageShowsTagChips(t *testing.T) {
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "my-idea", "idea")
-	s := newUnarmedTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
 
 	rr := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/my-idea", nil))
@@ -197,7 +197,7 @@ func TestUnarmedServeSDLCPageOffersTheMarkAndClose(t *testing.T) {
 	trailerstest.CommitWorkTurnAt(t, root, "alpha", "fix-it", "sdlc", "code",
 		time.Now().Add(-time.Hour))
 	now := time.Now().UTC()
-	s := newUnarmedTestServer(t, Options{
+	s := newTestServer(t, Options{
 		Addr: "127.0.0.1:0", Root: root,
 		GatherRunRow: func(p, slug string) (dash.Row, bool, error) {
 			return dash.Row{Project: p, Run: slug, Note: "sdlc:code", Stage: "code",
@@ -232,7 +232,7 @@ func TestUnarmedServeSDLCPageOffersTheMarkAndClose(t *testing.T) {
 // run — so a button here would be a second authority on the same
 // question.
 func TestChorePageIsReadOnly(t *testing.T) {
-	s := newUnarmedTestServer(t, Options{
+	s := newTestServer(t, Options{
 		Addr: "127.0.0.1:0", Root: t.TempDir(),
 		GatherChore: func(project, name string) (chore.State, bool, error) {
 			return dueChoreState(), true, nil

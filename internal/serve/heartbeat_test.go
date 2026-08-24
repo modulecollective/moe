@@ -300,7 +300,7 @@ func TestHeartbeatChildIdCannotCollideWithARun(t *testing.T) {
 func TestUnarmedServeNeverTicks(t *testing.T) {
 	bin, argv := argvRecorder(t, 0)
 	gate := &fakeHeartbeat{due: []string{"alpha"}}
-	s := newUnarmedTestServer(t, Options{
+	s := newTestServer(t, Options{
 		Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: bin, Heartbeat: gate,
 	})
 
@@ -327,7 +327,7 @@ func TestArmedServeTicks(t *testing.T) {
 	bin, argv := argvRecorder(t, 0)
 	gate := &fakeHeartbeat{due: []string{"alpha"}}
 	s := newTestServer(t, Options{
-		Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: bin, Heartbeat: gate,
+		Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: bin, Heartbeat: gate, Dynamic: true,
 	})
 
 	heartbeatInterval = 5 * time.Millisecond
@@ -363,12 +363,7 @@ func TestStartupBannerDisclosesSteering(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			var log syncBuf
-			opts := Options{Addr: "127.0.0.1:0", Root: t.TempDir(), Logger: &log}
-			build := newUnarmedTestServer
-			if armed {
-				build = newTestServer
-			}
-			s := build(t, opts)
+			s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), Logger: &log, Dynamic: armed})
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -425,7 +420,7 @@ func TestArmedServeJoinsTheHeartbeat(t *testing.T) {
 	bin, _ := argvRecorder(t, 0)
 	gate := &blockingHeartbeat{entered: make(chan struct{}, 1), release: make(chan struct{})}
 	s := newTestServer(t, Options{
-		Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: bin, Heartbeat: gate,
+		Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: bin, Heartbeat: gate, Dynamic: true,
 	})
 
 	heartbeatInterval = 5 * time.Millisecond
