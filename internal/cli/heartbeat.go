@@ -862,7 +862,9 @@ func machineAuthored(body string) bool {
 // A root held for *occupancy* rather than design is not looked past.
 // The corpse-branch shape has its own deliberate recovery (the skip
 // line is the signpost, see openSessionStage) and nothing here changes
-// it.
+// it. A thread holding a reaped turn is skipped the same way, for the
+// same reason — its recovery is an operator touch, and it is on the
+// dash already (see reapHeldThread).
 //
 // markedOnly is the project's `safe` mode reaching the pre-ask: the
 // question narrows from "could a sweep cause motion here" to "could it
@@ -876,6 +878,17 @@ func parkedKickableThread(root string, sc *pulseScan, projectID string, markedOn
 	}
 	for _, rootKey := range kickableThreadRoots(sc.mds, sc.byKey, sc.graph, projectID) {
 		rootMd := sc.byKey[rootKey]
+		// A thread carrying a reaped turn no operator movement has
+		// released is skipped whole, members included — the same shape
+		// the occupancy hold takes. The recovery is the operator's touch
+		// and it is surfaced on the dash (`· died`) and the run page, so
+		// there is no stranded-work argument for descending past it the
+		// way the design-held leg below does. If one shows up, that
+		// incident earns the descent; the predicate takes the same
+		// arguments either way.
+		if reapHeldThread(rootKey, sc.byKey, sc.graph, sc.idx) != "" {
+			continue
+		}
 		if settled, _ := rootDesignSettled(root, rootMd, sc.idx); !settled {
 			// Chain edges only ever point at live runs (NewChainGraph drops
 			// terminal children), so in-progress is the only liveness the

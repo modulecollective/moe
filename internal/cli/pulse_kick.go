@@ -5,6 +5,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git"
@@ -289,6 +290,13 @@ func kickFloorHold(root, threadRoot string, groomed groomResult) string {
 		return "is waiting at its first stage with " + designHeldReason(turnClosed) +
 			" — the operator holds the trigger"
 	}
+	// A dead machine turn on the thread. After the design leg so a root
+	// held for an unsettled design keeps its more specific reason, and
+	// ordering against occupancy is moot — the reap deleted the session
+	// branch openSessionStage reads.
+	if hold := reapHeldThread(threadRoot, groomed.byKey, groomed.graph, groomed.idx); hold != "" {
+		return hold
+	}
 	if stage := openSessionStage(root, md); stage != "" {
 		return "has a live session at " + stage + " — skipping"
 	}
@@ -564,6 +572,95 @@ func pendingInputOnThread(root, threadRoot string, groomed groomResult) bool {
 		}
 	}
 	return false
+}
+
+// threadOperatorTouch returns the committer time of the most recent
+// commit on the thread that the machine did not write — the movement
+// the reap hold releases on. Zero time when nobody has touched any live
+// member by hand.
+//
+// Thread-scoped rather than run-scoped because that is where operator
+// prose actually lands: the same reasoning pendingInputOnThread is
+// built on. A note added at a member queued behind the head is movement
+// on the thread the head belongs to.
+func threadOperatorTouch(threadRoot string, byKey map[string]*run.Metadata, graph *run.ChainGraph, idx *run.JournalIndex) time.Time {
+	var touched time.Time
+	if graph == nil || idx == nil {
+		return touched
+	}
+	for _, key := range graph.Thread(threadRoot) {
+		if !run.ChainChildLive(key, byKey) {
+			continue
+		}
+		if t := idx.LastOperatorActivity[key]; t.After(touched) {
+			touched = t
+		}
+	}
+	return touched
+}
+
+// reapHeldReason names why a run whose last machine turn was reaped is
+// still held, in the one vocabulary every surface that reports the hold
+// uses: the kick's skip line on stderr, the `## Kick` section it
+// renders, and the chain-state block's annotation. Returns "" when the
+// thread's latest operator touch has released it, or when the run
+// carries no tombstone at all.
+//
+// A headless stage that refuses because the work needs an operator
+// exits with its canvas unwritten, the heartbeat's reap tombstones the
+// dead session, and the run parks — and before this the next sweep
+// kicked the same stage again, one full turn of burn per sweep until a
+// human noticed. So the note is a brake, and `touched` is the release.
+//
+// The comparison is strictly After on purpose. Reaped.At has second
+// precision, so a movement landing inside the reap's own second reads
+// as held — the safe direction, and the next touch releases.
+//
+// An unparseable At holds. It is the operator's brake, and the
+// fail-open direction the rest of the kick takes would spend a stage
+// turn in exactly the wrong place; the parse problem rides in the
+// phrase so the skip line says what is wrong with the note.
+func reapHeldReason(md *run.Metadata, touched time.Time) string {
+	if md == nil || md.Reaped == nil {
+		return ""
+	}
+	when := "at " + md.Reaped.At
+	if at, err := time.Parse(time.RFC3339, md.Reaped.At); err != nil {
+		when = "at an unreadable time (" + md.Reaped.At + ")"
+	} else if touched.After(at) {
+		return ""
+	}
+	return "its " + md.Reaped.Doc + " turn died and was reaped " + when +
+		" — an operator touch on the thread releases it"
+}
+
+// reapHeldThread returns the floor's phrasing for a thread holding a
+// reaped member no operator movement has released, or "" when the
+// thread clears. Any live member holds the whole thread: the kick
+// evaluates a thread at its root, and a member's dead turn is not
+// something a ride from the head may walk into.
+//
+// Why this cannot loop is a property of what releases it, not of a
+// counter. Every journal commit the refusal cycle lands is
+// machine-stamped — the tombstone carries MoE-Consent explicitly, groom
+// placements and spawns carry theirs — so LastOperatorActivity cannot
+// move on the machine's own account (see the map's doc). And each
+// failed retry re-arms at a later Reaped.At than the movement that
+// licensed it, so k operator touches buy at most k retries.
+func reapHeldThread(threadRoot string, byKey map[string]*run.Metadata, graph *run.ChainGraph, idx *run.JournalIndex) string {
+	if graph == nil {
+		return ""
+	}
+	touched := threadOperatorTouch(threadRoot, byKey, graph, idx)
+	for _, key := range graph.Thread(threadRoot) {
+		if !run.ChainChildLive(key, byKey) {
+			continue
+		}
+		if why := reapHeldReason(byKey[key], touched); why != "" {
+			return "is held — " + why
+		}
+	}
+	return ""
 }
 
 // kickModeHold asks the project's mode about one root and returns why it
