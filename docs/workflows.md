@@ -669,10 +669,11 @@ from costing a stage turn every sweep: a headless stage that refuses because the
 work needs you exits with nothing written, so with no brake the next sweep kicks
 the same stage again. While the note stands the kick floor holds the whole
 thread and the heartbeat's pre-ask skips it. Any touch of your own on the
-thread — a `moe input` note, an advance, anything landing a journal commit the
-machine didn't stamp — releases it for one retry, and opening a stage there
-clears it outright. If that retry refuses too, its fresh tombstone re-arms the
-hold: each thing you do buys one attempt and no more.
+thread — a `moe input` note, an advance, any commit the machine didn't stamp
+that is scoped to one of the thread's runs (a `moe chain edit` carries no run
+scope, so it doesn't count) — releases it for one retry, and opening a stage
+there clears it outright. If that retry refuses too, its fresh tombstone
+re-arms the hold: each thing you do buys one attempt and no more.
 
 Sessions you started, sessions whose claimant might still be alive, and
 sessions with no record at all are never touched; they surface on the dash's
