@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -443,22 +444,45 @@ func choreClockReason(sc *pulseScan, projectID string, now time.Time) string {
 	return ""
 }
 
-// reap abandons orphaned machine sessions — a session branch whose
-// claimant is provably dead — so the run behind it re-parks at its stage
-// and the ordinary groom-and-kick loop can retry it. This is the whole
-// answer to "moe itself died mid-turn": the occupancy guard correctly
-// holds a run with a live session branch, and without this nothing ever
-// clears the branch of a process that is never coming back.
+// reap clears orphaned machine sessions — a session branch whose
+// claimant is provably dead — so the run behind it stops being held by
+// the occupancy guard. This is the whole answer to "moe itself died
+// mid-turn": the guard correctly holds a run with a live session branch,
+// and without this nothing ever clears the branch of a process that is
+// never coming back.
 //
-// The rule is the operator's: a robot session that died may be abandoned
-// and retried; a human-started one may not. session.Reapable is where
-// that lives — machine-marked *and* provably dead, with every ambiguous
-// shape (no claim, another host, a live pid, a fresh heartbeat) reading
-// as untouchable. Those sessions stay exactly as they are and surface on
+// The rule is the operator's: a robot session that died may be cleared;
+// a human-started one may not. session.Reapable is where that lives —
+// machine-marked *and* provably dead, with every ambiguous shape (no
+// claim, another host, a live pid, a fresh heartbeat) reading as
+// untouchable. Those sessions stay exactly as they are and surface on
 // the dash's ACTIVE row; recovery is `moe session resolve` / `abandon`,
 // one glance and one verb.
 //
-// Under the repolock because Abandon rewrites worktree state, and
+// *How* it clears depends on whether the dead turn got anything
+// written, and session.Close is the arbiter — the same rebase +
+// ff-merge `moe session resolve` runs, not a second opinion:
+//
+//   - **Close succeeds** → the turn committed real work and it lands on
+//     main. A dead process is not a reason to destroy a finished
+//     artifact, and the journal tip moving is what gets the project
+//     swept again with the landed state in view. The run stays open at
+//     its stage; landing is recovery, concluding is a sweep's job.
+//   - **CanvasUnchangedError** → the session died before writing
+//     anything, so there is nothing to keep. Abandon, and the run
+//     re-parks for the ordinary groom-and-kick loop to retry — the
+//     original behaviour, now scoped to the shape it was right for.
+//   - **Any other Close error** → a branch that won't land cleanly may
+//     hold real work in a broken state, and destroying it to unblock a
+//     tick is the wrong trade. Leave it, log it, let the operator's
+//     recovery verbs have it.
+//
+// The motivating incident was a pulse run: the survey finished and
+// committed, the close died on a contended lock, and the next tick's
+// reap deleted the only copy of a complete report — for a workflow with
+// no retry leg that could ever have regenerated it.
+//
+// Under the repolock because both endings rewrite worktree state, and
 // warn-only because a reap that fails is a session that stays put.
 func (g *heartbeatGate) reap(log io.Writer) {
 	sessions, err := session.List(g.root)
@@ -471,24 +495,43 @@ func (g *heartbeatGate) reap(log io.Writer) {
 		if !session.Reapable(s, now) {
 			continue
 		}
+		landed := false
 		err := repolock.With(g.root, repolock.Options{
 			Purpose:   "heartbeat-reap",
 			Run:       s.Project + "/" + s.Run,
 			Heartbeat: true,
-		}, func() error { return session.Abandon(s) })
+		}, func() error {
+			closeErr := session.Close(s)
+			var unchanged *session.CanvasUnchangedError
+			switch {
+			case closeErr == nil:
+				landed = true
+				return nil
+			case errors.As(closeErr, &unchanged):
+				return session.Abandon(s)
+			default:
+				return closeErr
+			}
+		})
 		if err != nil {
 			fmt.Fprintf(log, "heartbeat: reap %s: %v\n", s.Branch, err)
+			fmt.Fprintf(log, "heartbeat: left %s in place — `moe session resolve %s` or `moe session abandon %s`\n",
+				s.Branch, s.Branch, s.Branch)
 			continue
 		}
-		// Abandon removes a branch and a worktree and writes no journal
-		// commit, so a reap changes the board invisibly to both cursors.
-		// Clearing surveyed is what lets the parked leg re-offer the freed
-		// thread — and because reap runs at the top of Due, it happens in
-		// the same tick, which is today's recovery behaviour for "moe died
-		// mid-turn".
+		// Neither ending writes a journal commit of its own — Abandon
+		// writes nothing at all, and Close's fast-forward moves main
+		// without either cursor having looked. Clearing surveyed is what
+		// lets this tick's legs see the freed (or landed) thread, and
+		// because reap runs at the top of Due it happens in the same tick.
 		g.mu.Lock()
 		delete(g.surveyed, s.Project)
 		g.mu.Unlock()
+		if landed {
+			fmt.Fprintf(log, "heartbeat: landed dead machine session %s — %s/%s keeps its committed %s turn\n",
+				s.Branch, s.Project, s.Run, s.Doc)
+			continue
+		}
 		fmt.Fprintf(log, "heartbeat: reaped dead machine session %s — %s/%s re-parks at %s\n",
 			s.Branch, s.Project, s.Run, s.Doc)
 	}

@@ -1131,8 +1131,10 @@ func TestHeartbeatStopsOfferingATaggedIdeaASweepDeclined(t *testing.T) {
 
 // TestHeartbeatReapsADeadMachineSession is the recovery half: `moe`
 // died mid-turn, the session branch it left behind holds the run under
-// the occupancy guard, and nothing else ever clears it. A robot half
-// turn is regenerable, so the branch goes and the run re-parks.
+// the occupancy guard, and nothing else ever clears it. This session
+// died *before writing anything* — Close refuses it as
+// CanvasUnchangedError — and a robot turn that produced nothing is
+// regenerable, so the branch goes and the run re-parks.
 func TestHeartbeatReapsADeadMachineSession(t *testing.T) {
 	root := quietFixture(t)
 	minted := groomFixture(t, root, "fix-a")
@@ -1151,6 +1153,94 @@ func TestHeartbeatReapsADeadMachineSession(t *testing.T) {
 	if !strings.Contains(log.String(), "reaped dead machine session") {
 		t.Errorf("log = %q, want the reap named", log.String())
 	}
+}
+
+// TestHeartbeatLandsADeadMachineSessionThatCommitted is the stranded
+// pulse in miniature: the survey finished, the turn commit landed on the
+// session branch, and only the close died. The old reap abandoned that
+// branch, destroying the one copy of a complete report — and for a pulse
+// run there is no retry leg that could ever have regenerated it.
+//
+// So the assertion that matters is the canvas text reaching main. Branch
+// gone is not enough on its own: abandon satisfies that too, which is
+// exactly how the bug hid.
+func TestHeartbeatLandsADeadMachineSessionThatCommitted(t *testing.T) {
+	root := quietFixture(t)
+	minted := groomFixture(t, root, "fix-a")
+	s, err := session.Open(root, "moe", minted["fix-a"], "design")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const survey = "# the survey nobody should lose\n"
+	commitCanvasOnSession(t, s, survey)
+	writeDeadClaim(t, s, true /*machine*/)
+
+	var log bytes.Buffer
+	newHeartbeatGate(root).Due(testTick, &log)
+
+	canvas := filepath.Join(root, run.ContentPath(s.Project, s.Run, s.Doc))
+	got, err := os.ReadFile(canvas)
+	if err != nil {
+		t.Fatalf("canvas missing from main after the reap: %v\n%s", err, log.String())
+	}
+	if string(got) != survey {
+		t.Errorf("canvas on main = %q, want the committed turn %q", got, survey)
+	}
+	if git.HasRef(root, "refs/heads/"+s.Branch) {
+		t.Errorf("session branch survived a successful close\n%s", log.String())
+	}
+	if !strings.Contains(log.String(), "landed dead machine session") {
+		t.Errorf("log = %q, want the landing named — it reads differently from a reap", log.String())
+	}
+}
+
+// TestHeartbeatLeavesADeadMachineSessionThatWontLand: a branch that
+// won't rebase cleanly may hold real work in a broken state, and
+// destroying it to unblock a tick is the wrong trade. Close fails, the
+// session stays exactly as it is, and the log names the two verbs that
+// resolve it — the same escalation-by-visibility every ambiguous session
+// shape already gets.
+func TestHeartbeatLeavesADeadMachineSessionThatWontLand(t *testing.T) {
+	root := quietFixture(t)
+	minted := groomFixture(t, root, "fix-a")
+	s, err := session.Open(root, "moe", minted["fix-a"], "design")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Divergent content at the same path on both sides: the branch's
+	// rebase onto main conflicts, which is the shape `moe session
+	// resolve` exists for.
+	commitCanvasOnSession(t, s, "# from the session\n")
+	canvasRel := run.ContentPath(s.Project, s.Run, s.Doc)
+	writeFile(t, filepath.Join(root, canvasRel), "# from main\n")
+	gittest.Run(t, root, "add", "--", canvasRel)
+	gittest.Run(t, root, "commit", "-m", "main: conflicting canvas")
+	writeDeadClaim(t, s, true /*machine*/)
+
+	var log bytes.Buffer
+	newHeartbeatGate(root).Due(testTick, &log)
+
+	if !git.HasRef(root, "refs/heads/"+s.Branch) {
+		t.Errorf("a session that wouldn't land was destroyed anyway\n%s", log.String())
+	}
+	if _, err := os.Stat(s.WorktreePath); err != nil {
+		t.Errorf("worktree %s gone: %v\n%s", s.WorktreePath, err, log.String())
+	}
+	if !strings.Contains(log.String(), "moe session resolve "+s.Branch) {
+		t.Errorf("log = %q, want the recovery verbs named", log.String())
+	}
+}
+
+// commitCanvasOnSession writes and commits a canvas on the session
+// branch — the turn commit a stage lands before it tries to close. It is
+// what makes session.Close do real work instead of refusing with
+// CanvasUnchangedError.
+func commitCanvasOnSession(t *testing.T, s *session.Session, body string) {
+	t.Helper()
+	rel := run.ContentPath(s.Project, s.Run, s.Doc)
+	writeFile(t, filepath.Join(s.WorktreePath, rel), body)
+	gittest.Run(t, s.WorktreePath, "add", "--", rel)
+	gittest.Run(t, s.WorktreePath, "commit", "-m", "work: update "+s.Doc)
 }
 
 // TestHeartbeatNeverReapsAnUnmarkedSession: absence is unknown, never
