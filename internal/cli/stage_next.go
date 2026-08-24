@@ -79,6 +79,19 @@ func promptNextStageOverride(root string, md *run.Metadata, justFinished, overri
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
+	// A stage that concluded the run itself is moot — the idea is
+	// already done, the smallest correct diff is no diff — says so with
+	// `{"status":"close"}` on its canvas. Honour the nomination before
+	// anything else here: whatever the ladder would offer next is moot
+	// too. Closing rather than prompting is deliberate — the operator
+	// watched the turn conclude, and reopen is the takeback.
+	//
+	// Gated to override == "" for the same reason the blocked reshape
+	// below is: the push-gate recovery re-enters with the stage it wants
+	// re-offered, not a fresh verdict to read.
+	if override == "" && stageNominatedClose(root, md, justFinished) {
+		return closeNominatedRun(md, justFinished, stdout, stderr)
+	}
 	var stage string
 	switch {
 	case override != "":
@@ -1038,6 +1051,22 @@ func cascadeFromGate(startStage, destination string, oneStep bool, rideChain boo
 		if code != 0 {
 			return res, code
 		}
+		// The stage concluded the run is moot and nominated its close.
+		// Honour it before the advance gate: there is nothing left to
+		// gate. Exit 0 on success — a concluded outcome, not a failure,
+		// and a non-zero here would feed the heartbeat's failure backoff
+		// for a ride that did exactly what it should. shipped marks the
+		// walk terminal so dispatchCascade's tail doesn't re-enter the
+		// chain prompt on a run that no longer exists to advance.
+		if root, err := findRoot(stderr); err == nil && stageNominatedClose(root, md, stage) {
+			closeCode := closeNominatedRun(md, stage, stdout, stderr)
+			res.ran = append(res.ran, cascadeStepResult{stage: "close", code: closeCode})
+			if closeCode != 0 {
+				return res, closeCode
+			}
+			res.shipped = true
+			return res, 0
+		}
 		steps, parked, gateCode := cascadeStageGate(wf, dispatcher, md, stage, yolo, stdout, stderr)
 		res.ran = append(res.ran, steps...)
 		if parked {
@@ -1207,6 +1236,64 @@ func cascadeStageBlocked(md *run.Metadata, stage string, stderr io.Writer) (canv
 	}
 	status, ok := stageGateStatus(canvas)
 	return canvas, ok && status == "blocked"
+}
+
+// stageNominatedClose reports whether stage's canvas closed with a
+// literal `close` gate — the stage's judgement that the run itself is
+// moot and should be closed rather than advanced. It is the durable
+// form of a refusal that would otherwise be an unwritten canvas: the
+// reasoning is the committed canvas, and the closed run is what stops
+// the next sweep re-riding the same root into the same refusal.
+//
+// Scoped to sdlc, where the gate grammar and the re-ride loop both
+// live. Twin's ladder has its own finalize seal; extending close
+// nomination there is a separate decision.
+//
+// A missing/empty canvas or an unparseable gate reads as no nomination.
+// This is permission to do something terminal, so absence of the signal
+// must never read as presence — and every existing gate reader compares
+// against a literal "ready" or "blocked", so a close gate can neither
+// advance a run nor trigger a kickback.
+func stageNominatedClose(root string, md *run.Metadata, stage string) bool {
+	if md.Workflow != "sdlc" || stage == "" {
+		return false
+	}
+	canvas := readPrintableCanvas(root, md, stage)
+	if canvas == "" {
+		return false
+	}
+	status, ok := stageGateStatus(canvas)
+	return ok && status == "close"
+}
+
+// closeNominatedRun closes md through its workflow's registered close
+// command — the same `--no-edit` dispatch the twin cascade's auto-close
+// uses, so a nominated close and an operator's `moe sdlc close` land
+// identical commits and cleanup.
+//
+// A failing close warns and leaves the run open, propagating the exit
+// code: lock contention or a dirty tree is the operator's to resolve,
+// and a half-closed run is worse than an open one.
+func closeNominatedRun(md *run.Metadata, stage string, stdout, stderr io.Writer) int {
+	g, err := LookupGroup(md.Workflow)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	closeCmd := g.Lookup("close")
+	if closeCmd == nil {
+		moePrintf(stderr, "%s nominated close, but %s registers no close command; run left open\n",
+			stage, md.Workflow)
+		return 1
+	}
+	moePrintf(stdout, "%s nominated close: the run is moot — closing it.\n", stage)
+	if code := closeCmd.Run([]string{"--no-edit", md.Project + "/" + md.ID}, stdout, stderr); code != 0 {
+		moePrintf(stderr, "warn: close failed (exit %d); %s/%s left open\n", code, md.Project, md.ID)
+		return code
+	}
+	moePrintf(stdout, "disagree? `moe %s reopen %s/%s` mints a successor seeded from this run.\n",
+		md.Workflow, md.Project, md.ID)
+	return 0
 }
 
 // cascadeShipStep runs the sdlc terminal ship for a `!!` / `!!!` cascade:
