@@ -33,8 +33,9 @@
 // per-project ticker that sweeps a project on its own clock when the
 // board warrants it. Running the armed process *is* the consent act —
 // the legible replacement for installing a crontab. Stopping it
-// retracts. Unarmed, every route still works and nothing ever acts on
-// what they wrote.
+// retracts. Unarmed, every route still works; what the web wrote simply
+// waits for the next hand-run sweep or interactive stage instead of the
+// next tick.
 //
 // Under that switch, each project carries its own cap on the clock —
 // `moe project mode <id> paused|safe|auto`, stored in project.json and
