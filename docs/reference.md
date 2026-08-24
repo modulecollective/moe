@@ -34,10 +34,9 @@ source of truth for the exact command surface; this page is a map.
   it starts the resident heartbeat, a per-project ticker that runs `moe pulse
   new --dynamic` when the board warrants it. Unarmed, the ticker never fires and
   what the web wrote simply waits. Stopping the process retracts it. A `/serve`
-  page owns that ticker's
-  status and trace — what each recent tick decided, and the output tail of any
-  sweep that failed — reachable from the menu and from the one-line status
-  cluster every board header carries.
+  page owns that ticker's status and trace — what each recent tick decided, and
+  the output tail of any sweep that failed — reachable from the menu and from
+  the one-line status cluster every board header carries.
 - `moe project mode <id> [paused|safe|auto]` caps what the heartbeat may start
   in one project, without stopping the process. See below.
 - `moe chore list|check|open|skip` lists due project chores, dry-runs a chore
