@@ -2,12 +2,14 @@ package cli
 
 import (
 	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/input"
 	"github.com/modulecollective/moe/internal/run"
 )
 
@@ -47,6 +49,30 @@ func commitsIn(t *testing.T, root, projectID, base, tip string) int {
 	return len(strings.Fields(out))
 }
 
+// pendingNoteText is the operator note the fixture below leaves pending
+// on the idea. Distinctive enough to find in a rendered prompt.
+const pendingNoteText = "Prefer the mechanical fix over the clever one."
+
+// promotedRunID returns the id of the sdlc run the sweep promoted — the
+// one sdlc run in the project that isn't the hand-built source.
+func promotedRunID(t *testing.T, root, sourceID string) string {
+	t.Helper()
+	mds, err := run.Scan(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found []string
+	for _, md := range mds {
+		if md.Project == "moe" && md.Workflow == "sdlc" && md.ID != sourceID {
+			found = append(found, md.ID)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("sdlc runs besides %s = %v, want exactly the promoted one", sourceID, found)
+	}
+	return found[0]
+}
+
 // TestSweepLandsOnlyMachineMarkedCommits is the fixture-honesty
 // regression, and the one test in this package that measures the
 // heartbeat's predicate against commits production actually writes
@@ -68,6 +94,16 @@ func commitsIn(t *testing.T, root, projectID, base, tip string) int {
 // AndKick uses — and asks the gate's own question about the range it
 // left behind. Its value is entirely in *not* being a fixture: any new
 // journal commit a sweep learns to write shows up here unstamped.
+//
+// The sweep alone is not the whole range a sweep leaves behind. A groom
+// that roots a ride owns every commit that ride's stage turns write too,
+// so the thread here goes unparked and the fixture services the kick:
+// the promoted run's design turn runs for real, delivers a note the
+// promotion carried onto it, and nominates the run's close. That puts
+// `input: carried`, `work: start session for design`, `work: update
+// design`, `input: delivered` and the close inside base..tip — commits
+// only an end-to-end dispatch can put there, and the ones a stamp
+// regression at a stage emit site would show up in.
 func TestSweepLandsOnlyMachineMarkedCommits(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -95,6 +131,14 @@ func TestSweepLandsOnlyMachineMarkedCommits(t *testing.T) {
 	if err := run.StageAndCommit(root, "test: land harvested audit line", run.FollowupsPath("moe", source.ID)); err != nil {
 		t.Fatalf("commit harvested followup: %v", err)
 	}
+	// A note pending on the idea, still below the range: `input: note` is
+	// the operator's own act and carries no consent trailer, which is
+	// exactly where an unstamped commit belongs. Promotion then carries
+	// it onto the destination run and the design turn delivers it — two
+	// more emit sites the guard gets to see, both inside the range.
+	if _, err := input.Add(root, "moe", "tagged-fix", pendingNoteText, io.Discard, io.Discard); err != nil {
+		t.Fatalf("input.Add: %v", err)
+	}
 
 	// The gate would record this tip as the sweep's dispatch base.
 	base, err := git.HEAD(root)
@@ -103,8 +147,13 @@ func TestSweepLandsOnlyMachineMarkedCommits(t *testing.T) {
 	}
 
 	// The survey promotes the tagged idea (a run open plus the idea's own
-	// status bump) and parks the thread, so the sweep grooms and closes
-	// without rooting a ride the fake claude would have to service.
+	// status bump, and the carry of the pending note) and leaves the
+	// thread unparked, so the sweep closes itself and self-kicks the
+	// promoted run. The design turn that kick dispatches nominates the
+	// run's close, which stops the cascade there — one real stage turn,
+	// serviced, and no code stage to script. The `*)` fallback stays
+	// `exit 1`: a cascade that walked past the nomination would fail the
+	// pulse, and the exit-0 assertion below is what catches it.
 	fakeClaudeOnPath(t, `#!/bin/sh
 prompt=
 next=0
@@ -116,7 +165,11 @@ canvas=$(printf '%s' "$prompt" | awk '/Your canvas for this document is the sing
 ticks=$(printf '\140\140\140')
 case "$canvas" in
   */documents/pulse/content.md)
-    printf '%s\n' '# Pulse' '' '## Gate' '' "${ticks}json" '{"status":"ok","threads":[{"park":"holding for the operator","runs":[{"slug":"tagged-fix","title":"Apply the mechanical fix","why":"captured followup clears the bar"}]}]}' "$ticks" > "$canvas"
+    printf '%s\n' '# Pulse' '' '## Gate' '' "${ticks}json" '{"status":"ok","threads":[{"runs":[{"slug":"tagged-fix","title":"Apply the mechanical fix","why":"captured followup clears the bar"}]}]}' "$ticks" > "$canvas"
+    exit 0
+    ;;
+  */documents/design/content.md)
+    printf '%s\n' '# Design' '' '## What I checked' '' 'The mechanical fix already landed upstream, so the run is moot.' '' '## Gate' '' "${ticks}json" '{"status":"close"}' "$ticks" > "$canvas"
     exit 0
     ;;
   *)
@@ -136,15 +189,44 @@ esac
 		t.Fatal(err)
 	}
 	// Guard against a vacuous pass: an empty range has no unmarked
-	// commits either. The sweep's own four plus the promotion's two are
-	// the floor.
-	if n := commitsIn(t, root, "moe", base, tip); n < 6 {
-		t.Fatalf("sweep landed %d project commits, want at least the open/start/turn/close + promote pair; stderr=%q", n, errb.String())
+	// commits either. The floor is the sweep's own four (open, start,
+	// turn, close), the promotion's two, the carry, and the ride's four
+	// (design start, design turn, delivered, close).
+	if n := commitsIn(t, root, "moe", base, tip); n < 11 {
+		t.Fatalf("sweep landed %d project commits, want at least the open/start/turn/close + promote pair + carry "+
+			"+ the ride's design start/turn/delivered/close; stderr=%q", n, errb.String())
 	}
 	if idea, err := run.Load(root, "moe", "tagged-fix"); err != nil {
 		t.Fatal(err)
 	} else if idea.Status != run.StatusPromoted {
 		t.Fatalf("idea status=%q, want promoted — the promotion commits must be inside the measured range", idea.Status)
+	}
+	// The ride really ran and really concluded. Without these a kick that
+	// silently stopped short — a tightened floor, a refused dispatch —
+	// would still pass the unmarked check, on a range with no stage-turn
+	// commits in it at all.
+	promoted := promotedRunID(t, root, source.ID)
+	if md, err := run.Load(root, "moe", promoted); err != nil {
+		t.Fatal(err)
+	} else if md.Status != run.StatusClosed {
+		t.Fatalf("promoted run status=%q, want closed — the kicked design turn never nominated its close", md.Status)
+	}
+	f, err := input.Load(root, "moe", promoted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Notes) != 1 || f.Notes[0].DeliveredTo != "design" {
+		t.Fatalf("carried input = %+v, want one note delivered to design — "+
+			"the delivery commit is the emit site this range exists to measure", f.Notes)
+	}
+	// And the delivery was substantive, not just stamped: the turn's
+	// prompt snapshot is what the agent actually read.
+	snap, err := os.ReadFile(filepath.Join(root, run.PromptPathFor("claude", "moe", promoted, "design")))
+	if err != nil {
+		t.Fatalf("design prompt snapshot: %v", err)
+	}
+	if !strings.Contains(string(snap), pendingNoteText) {
+		t.Errorf("the design turn's prompt never carried the note it was marked as delivering")
 	}
 	if unmarked := unmarkedIn(t, root, "moe", base, tip); len(unmarked) != 0 {
 		t.Errorf("the sweep's own range holds commits the gate reads as the operator's:\n  %s\n"+
