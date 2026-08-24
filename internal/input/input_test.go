@@ -739,3 +739,118 @@ func TestAskRefusesAPingOpenedMidWindow(t *testing.T) {
 		t.Fatalf("notes = %+v, want the mid-window ping untouched", f.Notes)
 	}
 }
+
+// Add assigns its id from the under-lock read, so a note that lands
+// mid-window pushes ours to the next id instead of being overwritten by
+// it. Read outside the lock, both writers computed the same id and the
+// second rewrite dropped the first note — and had validate seen the
+// duplicate id it would have refused the file outright.
+func TestAddLandsAfterANoteAddedMidWindow(t *testing.T) {
+	root := seedRoot(t)
+	seedRun(t, root, "change-auth")
+	add(t, root, "change-auth", "the flake is known")
+
+	onceLocked(t, func() {
+		commitRecord(t, root, "change-auth", File{Notes: []Entry{
+			{ID: 1, Text: "the flake is known"},
+			{ID: 2, Text: "and the ARM build is red"},
+		}}, "input: note moe/change-auth#2")
+	})
+
+	e, err := Add(root, "moe", "change-auth", "skip the integration leg", io.Discard, io.Discard)
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if e.ID != 3 {
+		t.Fatalf("Add id = %d, want 3 — the id has to come from the under-lock read", e.ID)
+	}
+
+	f, err := Load(root, "moe", "change-auth")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Notes) != 3 {
+		t.Fatalf("notes = %+v, want all three", f.Notes)
+	}
+	if f.Notes[1].Text != "and the ARM build is red" || f.Notes[2].Text != "skip the integration leg" {
+		t.Fatalf("notes = %+v, want the mid-window note kept and ours after it", f.Notes)
+	}
+}
+
+// The answer half of check-then-act: a ping answered mid-window leaves
+// nothing open, so Answer refuses rather than overwriting the answer
+// that landed first. Read outside the lock it saw a stale open ping and
+// clobbered the operator's reply.
+func TestAnswerRefusesAPingAnsweredMidWindow(t *testing.T) {
+	root := seedRoot(t)
+	seedRun(t, root, "change-auth")
+	open := ask(t, root, "change-auth")
+
+	onceLocked(t, func() {
+		commitRecord(t, root, "change-auth", File{Notes: []Entry{
+			{ID: open.ID, AskedBy: open.AskedBy, Question: open.Question, Text: "Keep the old policy."},
+		}}, "input: answer moe/change-auth#1")
+	})
+
+	_, err := Answer(root, "moe", "change-auth", open.ID, "Break it.", io.Discard, io.Discard)
+	if !errors.Is(err, ErrNoOpenPing) {
+		t.Fatalf("Answer err = %v, want ErrNoOpenPing", err)
+	}
+
+	f, err := Load(root, "moe", "change-auth")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Notes) != 1 || f.Notes[0].Text != "Keep the old policy." {
+		t.Fatalf("notes = %+v, want the mid-window answer untouched", f.Notes)
+	}
+}
+
+// Carry reads the destination under the lock too, so a ping opened there
+// mid-window is both preserved and honoured — the source's own open ping
+// drops with the collision warning. Read outside the lock, Carry rewrote
+// the destination from a snapshot that predated the new ping: it landed
+// the source's ping and the destination's vanished.
+func TestCarryHonoursAnOpenPingLandedOnTheDestinationMidWindow(t *testing.T) {
+	root := seedRoot(t)
+	seedRun(t, root, "idea")
+	seedRun(t, root, "destination")
+
+	ask(t, root, "idea")
+	add(t, root, "idea", "still carry me")
+	add(t, root, "destination", "already here")
+
+	onceLocked(t, func() {
+		commitRecord(t, root, "destination", File{Notes: []Entry{
+			{ID: 1, Text: "already here"},
+			{ID: 2, AskedBy: "moe/pulse-two", Question: "Ship behind a flag?"},
+		}}, "input: ask moe/destination#2")
+	})
+
+	var stderr strings.Builder
+	n, err := Carry(root, "moe", "idea", "moe", "destination", "", io.Discard, &stderr)
+	if err != nil {
+		t.Fatalf("Carry: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("Carry count = %d, want 1 — the source ping collides with the mid-window one", n)
+	}
+	if !strings.Contains(stderr.String(), "dropping open ping moe/idea#1") {
+		t.Fatalf("collision warning = %q", stderr.String())
+	}
+
+	dst, err := Load(root, "moe", "destination")
+	if err != nil {
+		t.Fatalf("Load destination: %v", err)
+	}
+	if len(dst.Notes) != 3 {
+		t.Fatalf("destination notes = %+v, want its note, the mid-window ping, and the carried note", dst.Notes)
+	}
+	got, ok := dst.OpenPing()
+	if !ok || got.ID != 2 || got.Question != "Ship behind a flag?" {
+		t.Fatalf("destination open ping = %+v, %v — want the mid-window one kept", got, ok)
+	}
+	if dst.Notes[2].Text != "still carry me" {
+		t.Fatalf("carried entry = %+v", dst.Notes[2])
+	}
+}
