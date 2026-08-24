@@ -1347,3 +1347,55 @@ func gitStatusPaths(t *testing.T, root string) (map[string]bool, error) {
 	}
 	return paths, nil
 }
+
+// TestJournalIndexLastOperatorActivityExcludesTheMachinesStamps is the
+// index half of the kick floor's reap hold. The release rule the floor
+// asks about is "did anyone touch this run by hand since the note",
+// and the whole reason it can be a rule is that the machine's own
+// commits are excluded — the reap's tombstone is itself a run-scoped
+// commit landing after the note it writes.
+func TestJournalIndexLastOperatorActivityExcludesTheMachinesStamps(t *testing.T) {
+	root := newTestRoot(t)
+	commit := func(subject, body string, when time.Time) {
+		t.Helper()
+		stamp := when.Format(time.RFC3339)
+		gittest.RunWithEnv(t, root, []string{
+			"GIT_AUTHOR_DATE=" + stamp, "GIT_COMMITTER_DATE=" + stamp,
+		}, "commit", "--allow-empty", "-m", subject+"\n\n"+body)
+	}
+	var (
+		tOpen  = time.Date(2026, 8, 20, 9, 0, 0, 0, time.UTC)
+		tNote  = time.Date(2026, 8, 21, 9, 0, 0, 0, time.UTC)
+		tReap  = time.Date(2026, 8, 22, 9, 0, 0, 0, time.UTC)
+		tSpawn = time.Date(2026, 8, 23, 9, 0, 0, 0, time.UTC)
+	)
+	// Oldest first, so HEAD-first order is the reverse: the walk must
+	// still land on the newest *unstamped* commit rather than the newest
+	// commit outright.
+	commit("open: alpha/held", "MoE-Project: alpha\nMoE-Run: held\n", tOpen)
+	commit("input: added a note", "MoE-Project: alpha\nMoE-Run: held\nMoE-Input-Added: 1\n", tNote)
+	commit("reap: alpha/held", "MoE-Project: alpha\nMoE-Run: held\nMoE-Consent: dynamic\n", tReap)
+	commit("open: alpha/held", "MoE-Project: alpha\nMoE-Run: held\nMoE-Spawned-By: alpha/parent\n", tSpawn)
+	// A run the machine has only ever touched has no entry at all — the
+	// absence is what "nobody has touched this by hand" reads as.
+	commit("reap: alpha/machine-only", "MoE-Project: alpha\nMoE-Run: machine-only\nMoE-Consent: dynamic\n", tReap)
+
+	idx, err := BuildJournalIndex(root)
+	if err != nil {
+		t.Fatalf("BuildJournalIndex: %v", err)
+	}
+	if got := idx.LastActivity["alpha/held"]; !got.Equal(tSpawn) {
+		t.Errorf("LastActivity[alpha/held] = %v, want the newest commit %v", got, tSpawn)
+	}
+	if got := idx.LastOperatorActivity["alpha/held"]; !got.Equal(tNote) {
+		t.Errorf("LastOperatorActivity[alpha/held] = %v, want the note %v — the reap and the spawn are the machine's",
+			got, tNote)
+	}
+	if got, ok := idx.LastOperatorActivity["alpha/machine-only"]; ok {
+		t.Errorf("LastOperatorActivity[alpha/machine-only] = %v, want absent", got)
+	}
+	if got := idx.LastActivity["alpha/machine-only"]; !got.Equal(tReap) {
+		t.Errorf("LastActivity[alpha/machine-only] = %v, want %v — the narrowing must not drop the run from LastActivity",
+			got, tReap)
+	}
+}

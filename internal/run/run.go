@@ -768,6 +768,24 @@ type JournalIndex struct {
 	// latest reachable commit carrying MoE-Run: <slug> for that
 	// project. Same contract as the LastActivity func for any single run.
 	LastActivity map[string]time.Time
+	// LastOperatorActivity is LastActivity narrowed to the commits the
+	// machine did not write: the latest run-scoped commit carrying
+	// neither MoE-Consent nor MoE-Spawned-By. Same key, same
+	// first-commit-wins rule, and a missing key reads as the zero time —
+	// "nobody has touched this run by hand".
+	//
+	// The exclusion is machineAuthored's (heartbeat.go), which is what
+	// the quiet window already calls operator-authored, so absence of
+	// both stamps folds to "operator" here exactly as it does there.
+	// The reap hold's release rule is the consumer that needs the
+	// narrowing: the reap's own tombstone is a run-scoped journal commit
+	// landing after the note it writes, so a plain LastActivity
+	// comparison would release the hold in the tick that armed it.
+	//
+	// Only as good as the stamps, same as machineAuthored: an unstamped
+	// machine emit site reads as the operator here. walkConsent
+	// (ridemode.go) is the discipline that keeps that honest.
+	LastOperatorActivity map[string]time.Time
 	// PromotedTo maps "<project>/<slug>" → MoE-Promoted-To trailer
 	// value (`<project>/<runID>`) recorded on the most recent commit
 	// scoped to the run. Replaces a per-row trailerValue fork.
@@ -981,20 +999,21 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 		return nil, fmt.Errorf("run: git log: %w", err)
 	}
 	idx := &JournalIndex{
-		LastActivity: make(map[string]time.Time),
-		PromotedTo:   make(map[string]string),
-		PRURL:        make(map[string]string),
-		WorkTurnTime: make(map[WorkTurnKey]time.Time),
-		AdvanceTime:  make(map[WorkTurnKey]time.Time),
-		ReopenedFrom: make(map[string]string),
-		SpawnedBy:    make(map[string]string),
-		SpawnConsent: make(map[string]string),
-		PushConsent:  make(map[string]string),
-		ChainedChild: make(map[string]string),
-		EdgeConsent:  make(map[string]string),
-		ChoreByRun:   make(map[string]string),
-		ChoreTouched: make(map[string]time.Time),
-		ChoreSkipped: make(map[string]time.Time),
+		LastActivity:         make(map[string]time.Time),
+		LastOperatorActivity: make(map[string]time.Time),
+		PromotedTo:           make(map[string]string),
+		PRURL:                make(map[string]string),
+		WorkTurnTime:         make(map[WorkTurnKey]time.Time),
+		AdvanceTime:          make(map[WorkTurnKey]time.Time),
+		ReopenedFrom:         make(map[string]string),
+		SpawnedBy:            make(map[string]string),
+		SpawnConsent:         make(map[string]string),
+		PushConsent:          make(map[string]string),
+		ChainedChild:         make(map[string]string),
+		EdgeConsent:          make(map[string]string),
+		ChoreByRun:           make(map[string]string),
+		ChoreTouched:         make(map[string]time.Time),
+		ChoreSkipped:         make(map[string]time.Time),
 	}
 	// dailyProjSlugs accumulates, per project, the distinct slug set active
 	// on each UTC day (project → day → set<slug>). Nesting by project
@@ -1195,6 +1214,14 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 		runKey := projectID + "/" + slug
 		if _, ok := idx.LastActivity[runKey]; !ok {
 			idx.LastActivity[runKey] = time.Unix(epoch, 0).UTC()
+		}
+		// The operator-only narrowing, read before the spawnedBy arm
+		// below re-qualifies its value: what decides it is whether the
+		// trailer was on the commit at all, not what it pointed at.
+		if consent == "" && spawnedBy == "" {
+			if _, ok := idx.LastOperatorActivity[runKey]; !ok {
+				idx.LastOperatorActivity[runKey] = time.Unix(epoch, 0).UTC()
+			}
 		}
 		if promotedTo != "" {
 			if _, ok := idx.PromotedTo[runKey]; !ok {
