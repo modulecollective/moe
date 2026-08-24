@@ -1288,6 +1288,15 @@ func cascadeShipStep(workflow string, md *run.Metadata, rideChain bool, stdout, 
 		// exit code: the parent has already shipped, and shipped=true
 		// records that honestly, but the invocation as a whole did not
 		// come out clean and its caller deserves to know.
+		//
+		// The ride fires on a clean push whatever the route said. Under
+		// `pr` that means carrying on while the parent's branch sits
+		// unmerged — decided semantics, not an oversight: a chain is a
+		// batch of unrelated work, one PR per member, all open at once
+		// and mergeable in any order. Stalling the batch on a merge
+		// click would serialise the case chains actually hold. Members
+		// that build on each other want `moe project ship merge`, which
+		// lands each parent before the next member's sandbox is cut.
 		if rideChain {
 			if rideCode := maybeRideChain(md, rideChain, stdout, stderr); rideCode != 0 {
 				return steps, true, rideCode
@@ -1305,6 +1314,15 @@ func cascadeShipStep(workflow string, md *run.Metadata, rideChain bool, stdout, 
 // construction — the child's cascadeFromGate reaches its own terminal
 // stage and re-fires this hook on its own outgoing edge, so `!!!` rides
 // the whole chain in one shot.
+//
+// Only the child's status is consulted. Whether the parent merged or
+// left an open PR is deliberately not a factor: chains are batches of
+// unrelated work, so a parent parked at StatusPushed still lets the
+// next member run — see the ride hook in cascadeShipStep for the
+// reasoning, and TestCascadeFromGateRidesPastPRShippedParent for the
+// pin. This is the one seam every ride lands on (`!!!`, `moe chain
+// kick`, the heartbeat's rides), so a route check added here would
+// change all three at once.
 //
 // Returns the child cascade's exit code verbatim, for the caller to
 // propagate. A ride that stalls is a failed invocation: `chain kick` is
