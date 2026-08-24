@@ -105,6 +105,10 @@ func SetMode(root, id string, mode Mode) error {
 	if err != nil {
 		return err
 	}
+	// This copy is the defence, not a courtesy: serve's handler keeps
+	// none of its own, and the idempotence its doc comment promises
+	// rides on this returning nil. Without it an unchanged write would
+	// stage nothing and reach the commit below with nothing to commit.
 	if ModeOf(md) == mode {
 		return nil
 	}

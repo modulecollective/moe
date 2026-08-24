@@ -164,6 +164,10 @@ func runProjectMode(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "%v\n", err)
 		return 2
 	}
+	// Not the defence — SetMode re-checks under the lock, and that is
+	// the copy serve leans on. This one buys skipping the pull-push
+	// round-trip for a no-op, and the friendlier line; deleting it
+	// costs a wasted sync, not correctness.
 	if project.ModeOf(md) == mode {
 		moePrintf(stdout, "%s: %s (unchanged)\n", id, mode)
 		return 0
@@ -227,6 +231,9 @@ func runProjectShip(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "%v\n", err)
 		return 2
 	}
+	// Not the defence either, and the same purchase as the mode copy
+	// above: SetShip re-checks under the lock, this one only skips the
+	// pull-push for a no-op.
 	if project.ShipOf(md) == ship {
 		moePrintf(stdout, "%s: %s (unchanged)\n", id, ship)
 		return 0

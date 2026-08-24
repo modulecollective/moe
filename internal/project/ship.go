@@ -97,6 +97,9 @@ func SetShip(root, id string, ship ShipMode) error {
 	if err != nil {
 		return err
 	}
+	// The defence, for the same reason as SetMode's copy: serve's
+	// handler keeps none, so an unchanged write would reach the commit
+	// below with nothing staged.
 	if ShipOf(md) == ship {
 		return nil
 	}
