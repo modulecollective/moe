@@ -162,8 +162,10 @@ harness parses once your turn exits. It carries three signals:
   opinion. They park standalone and unchained — which is not the same
   as being held back: a run with nothing ahead of it is a thread of
   one, and under a dynamic sweep it starts with the rest. Holding work
-  back takes a `park` line; see "Parking a thread". Omit the list
-  entirely when nothing clears the bar, which is the common case.
+  back takes a `park` line; see "Parking a thread". A `loose` entry may
+  also set `"design_only": true`, which buys one design turn and
+  nothing else; see "Design-only" below. Omit the list entirely when
+  nothing clears the bar, which is the common case.
 - **`threads`** — an optional list of runs in execution order. Omit it
   when you have no ordering conviction, which is often. See "Grooming
   lanes" below.
@@ -260,11 +262,69 @@ Worked examples that clear it: a red CI run on the default branch with
 a named failing test; documentation stating something the code plainly
 contradicts; a small bug with a clear repro and one obvious fix.
 
-Everything else stays a followup — including anything you would have
-marked **speculative**. Novelty never spawns. If you find yourself
-writing a `design` body that argues for an approach, you are past the
-bar: file the followup instead and let a real design stage do the
-arguing.
+Everything else stays a followup — or, when it is the kind of finding
+the next section describes, a design-only run. Novelty never spawns a
+*ride*. If you find yourself writing a `design` body that argues for an
+approach, you are past this bar: either file the followup, or ask for
+the design turn and let it do the arguing.
+
+### Design-only: a lower bar for a shorter ride
+
+A `loose` spec carrying `"design_only": true` opens the run and rides
+it **one stage** — a headless design turn — then parks it at design for
+the operator, who advances it, pushes it a note, or closes it. Nothing
+you can spawn is safer: the design stage's sandbox is strict read-only,
+so the worst outcome is a design canvas nobody wanted and one turn's
+tokens.
+
+    "loose": [
+      {"slug": "pulse-report-baseline-drifts",
+       "title": "The report baseline drifts when a sweep is skipped",
+       "why": "speculative — two skipped sweeps in a row and the delta
+               read from the wrong report; worth a design, not a fix",
+       "design_only": true,
+       "design": "<the brief: the problem, the evidence, what to decide>"}
+    ]
+
+**The bar, and it is the only one on this canvas that is not the spawn
+bar:** *a finding worth a designer's hour, not a fix worth a ride.* All
+three:
+
+- **The problem is real and you can show the evidence** — a symptom, a
+  contradiction, a capability an open intent asks for and the project
+  lacks. Not a hunch, not a tidiness itch.
+- **The answer is a judgement** — there are approaches to weigh. That is
+  exactly what keeps it below the spawn bar, and exactly what makes it
+  worth a design turn.
+- **You would bet the operator reads it** rather than closing it unread.
+
+**The `design` body is the brief, not the design.** State the problem,
+the evidence, and what you want decided. Do not argue the approach —
+the design stage does that, with the code in front of it and a sandbox
+you don't have. A spec with `design_only` and no `design` body is
+skipped: without the brief this is the one-line idea it exists to
+replace.
+
+**Mark the `why` speculative when it is.** The field says the ride is
+short; the `why` says why the finding earns a turn at all. The two are
+different claims and the operator reads both.
+
+**One per sweep is plenty and zero is the normal number.** There is no
+cap, for the same reason the spawn bar has none — the bar is yours to
+hold. A pile of design canvases the operator never opens is the failure
+mode, and it is a slow one, so it is worth avoiding before it starts.
+
+**Fresh slugs only.** `design_only` on a slug that already names a live
+run is skipped, ideas included: a tag is the licence to *ship* and an
+untagged idea is the operator's, so consuming either to buy a design
+turn goes past a brake that is there on purpose. It is also skipped at
+a thread position — a design-only root is held by definition and would
+strand everything behind it — and on a `chore` or `twin` entry, where
+there is no design stage for the bound to mean anything.
+
+**A design-only run the operator closed is a no.** It is in the
+recently-settled block. Do not re-propose the same finding under a
+fresh slug.
 
 **Why the bar is yours to hold.** There is no cap on how many specs
 the harness will take, and no harness-side judgment about which to
@@ -427,6 +487,13 @@ construction — the seed is a design you baked — so a fresh thread of
 your own spawns clears the floor on its own. When the floor holds a
 thread it says so on stderr, and the thread parks for the next pulse to
 place.
+
+The one exception is the run you marked `design_only`, and it is the
+exception because you asked for it: its seed is a brief, not a design,
+so the floor rides it one stage and then holds it exactly the way it
+holds an operator's own unadvanced run. Do not read that hold as a
+stall, and do not groom work behind such a run — the members would sit
+behind a design nobody is going to advance on your say-so.
 
 **You may be that next pulse.** The hold lands on a thread's *head*, so
 a head whose design is unwritten holds everything queued behind it —

@@ -473,8 +473,10 @@ Every pulse does three things:
   The gate may also open parked runs — fix runs and twin reflects alike —
   and order queued work into chained lanes, in one grammar: a run with no
   ordering opinion goes in `loose`, a run whose position the sweep is sure
-  of is written inline at that position in `threads`. See
-  "Grooming lanes" in the stage guidance. A clean
+  of is written inline at that position in `threads`. A `loose` entry may
+  set `"design_only": true`, which opens the run, rides it one headless
+  design turn and parks it — the sweep's rung between filing a followup
+  and proposing a fix. See "Grooming lanes" in the stage guidance. A clean
   sweep auto-closes its own run: the filed followups harvest straight into
   ideas (review them by scrapping on the dash). Every fire runs a fresh sweep
   unconditionally — a lingering open pulse run means a failed or abandoned
@@ -512,6 +514,17 @@ runs into ordinary chain threads, leave them loose when it has no ordering
 opinion, or add a chain head when a stable name helps tell the thread's story.
 A head is a naming convenience, not a container every batch receives.
 
+Between those two there is one more rung. A `loose` spec carrying
+`"design_only": true` opens the run and rides it exactly one stage — a
+headless design turn — then parks it at design. The `design` body is the
+survey's *brief* rather than a baked design, so the bar is lower: a finding
+worth a designer's hour, not a fix worth a ride. The run is then held the way
+any unadvanced run is held, and your exits are the run page's advance chip (a
+full ride follows on the next sweep), a pushed note (one more design turn), or
+close. `design_only` is skipped on a slug that already names a live run, at a
+thread position, on a chore or twin entry, and on a spec with no `design`
+body; the bit stays in `run.json` afterwards as provenance.
+
 In a hand-typed `moe pulse new`, grooming changes recorded placement and not
 execution: newly placed work parks for a later kick. Under `--dynamic`,
 placement *is* execution, and the candidate set is the whole board — every
@@ -521,7 +534,10 @@ default; the survey's way out is a `"park"` line naming why the operator should
 look first, and that reason is mandatory. Either way the harness holds a root
 that has only a seed, a live session, or a dead machine turn nobody has touched
 since (the reap's tombstone, below); a machine-baked, chore-authored, or
-past-first-stage root has a settled design and is ready to start. The sweep
+past-first-stage root has a settled design and is ready to start. A
+design-only spawn is the exception to "machine-baked": its seed is a brief, so
+it rides its one design stage and is held from then on like any unadvanced
+run. The sweep
 stamps that order onto its own canvas as a closing `## Kick` section — each root
 queued, parked with the survey's reason, or held by the floor and why — in the
 same commit as the close, so a sweep's report says what it was about to run and
