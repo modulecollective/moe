@@ -185,8 +185,43 @@ func stageLocationSection(md *run.Metadata, docID string) string {
 			}
 		}
 	}
+	if md.DesignOnly && docID == stages[0] {
+		b.WriteString(designOnlyStageNote)
+	}
 	return b.String()
 }
+
+// designOnlyStageNote is the paragraph a design-only spawn's first
+// stage gets on top of its location block. The successor line above it
+// is true — `moe sdlc code …` is exactly what the operator will be
+// offered — but nothing walks there on its own, and an agent that
+// believes a code stage is coming writes a different document: it
+// leaves the hard calls for the walk it expects, and the walk never
+// comes.
+//
+// It lives here rather than in design.md because design.md is the lens
+// for every design turn and this is one run's provenance. Same reason
+// the location block is generated at all: the ladder is data, the
+// fragment is prose.
+const designOnlyStageNote = `
+This run is **design-only**. A sweep found something worth thinking
+about, wrote you the brief on the canvas, and bought you exactly this
+one turn. When it closes the run parks — nothing walks on to the next
+stage until the operator reads what you wrote and either advances the
+run (a full ride follows on the next sweep), pushes you a note (which
+buys one more design turn), or closes it.
+
+Write for that reader. The problem in two sentences at the top. One
+recommendation, named, with the tradeoff it makes. Unknowns as a list.
+Nobody is going to walk your open questions with you, so triage them
+yourself: decide what you can decide, and for the rest say what you
+would do and why proceeding on that assumption is safe. A canvas that
+ends in questions ends the run.
+
+If the brief's premise doesn't survive contact with the code, the
+close gate still applies — say what you checked and nominate the
+close.
+`
 
 // renderStageLadder returns the workflow's stages joined with → arrows,
 // with current emphasised in **bold**. The current stage is always
