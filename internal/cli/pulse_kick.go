@@ -167,8 +167,12 @@ func pulseSelfKick(root string, groomed groomResult, stdout, stderr io.Writer) i
 			moePrintf(stderr, "pulse: kick: %s %s\n", step.Root, hold)
 			continue
 		}
-		moePrintf(stderr, "pulse: kicking %s (dynamic)\n", step.Root)
-		if code := chainKickRun(root, proj, runID, rideDynamic, stdout, stderr); code != 0 {
+		ride := "dynamic"
+		if step.OneStage {
+			ride = "dynamic, design only"
+		}
+		moePrintf(stderr, "pulse: kicking %s (%s)\n", step.Root, ride)
+		if code := chainKickRun(root, proj, runID, rideDynamic, step.OneStage, stdout, stderr); code != 0 {
 			moePrintf(stderr, "pulse: kick %s exited %d\n", step.Root, code)
 			if code == exitInterrupted {
 				return code
@@ -198,6 +202,17 @@ type kickStep struct {
 	// stderr skip line so that line and the canvas section cannot drift
 	// into two wordings for one disk fact.
 	Hold string
+	// OneStage bounds this root's ride to its first stage — the
+	// design-only spawn's single headless design turn. The ordinary
+	// ride is a `!!!`; this one is the machine's `!`, and the run parks
+	// again the moment the turn closes.
+	//
+	// Unlike Hold this is not re-asked when the loop reaches the root,
+	// so an advance landing inside that window rides one stage and
+	// leaves the rest to the next sweep. That is the safe direction for
+	// a bound, and the same window the section's "queued is a plan, not
+	// a promise" already covers.
+	OneStage bool
 }
 
 // kickPlan is the whole of a dynamic sweep's kick decision: every root
@@ -256,6 +271,7 @@ func planKick(root string, groomed groomResult) kickPlan {
 			continue
 		}
 		plan.Steps[i].Hold = kickFloorHold(root, plan.Steps[i].Root, groomed)
+		plan.Steps[i].OneStage = designOnlyRide(root, plan.Steps[i].Root, groomed)
 	}
 	return plan
 }
@@ -287,8 +303,18 @@ func kickFloorHold(root, threadRoot string, groomed groomResult) string {
 		return "heads a thread that has already settled — skipping"
 	}
 	if settled, turnClosed := rootDesignSettled(root, md, groomed.idx); !settled {
-		return "is waiting at its first stage with " + designHeldReason(turnClosed) +
-			" — the operator holds the trigger"
+		// A design-only spawn is the one unsettled root the floor lets
+		// through, and only for the single design turn its seed asked
+		// for: the fresh mint, or one more turn to carry a note the
+		// operator pushed. Falling through rather than returning "" is
+		// deliberate — the reap and occupancy legs below still apply.
+		if !md.DesignOnly {
+			return "is waiting at its first stage with " + designHeldReason(turnClosed) +
+				" — the operator holds the trigger"
+		}
+		if turnClosed && !pendingInputOnThread(root, threadRoot, groomed) {
+			return designOnlyHeldReason
+		}
 	}
 	// A dead machine turn on the thread. After the design leg so a root
 	// held for an unsettled design keeps its more specific reason, and
@@ -341,6 +367,8 @@ func kickStepOutcome(step kickStep) string {
 		return "parked by the survey — " + step.Park
 	case step.Hold != "":
 		return step.Hold
+	case step.OneStage:
+		return "queued, design only — one stage, then it parks"
 	default:
 		return "queued — floor re-checked at start"
 	}
@@ -418,7 +446,13 @@ func kickableThreadRoots(mds []*run.Metadata, byKey map[string]*run.Metadata, gr
 //     kick-side special case. The staleness rule (a marker out-dated by
 //     a re-edit) is inherited the same way.
 //   - **Machine-minted** (SpawnedBy) — the seed is a design baked by
-//     the spawning run.
+//     the spawning run. Except a design-only spawn, whose seed is a
+//     brief the spawner explicitly declined to bake: that run settles
+//     through the past-first leg above, exactly the way an operator's
+//     own `--from-idea` run does. Narrowing this leg rather than
+//     deleting it keeps the decided behaviour for ordinary spawns —
+//     the alternative, "spawned *and* no design turn yet", would
+//     start holding every spawn whose ride broke after design.
 //   - **Chore-rooted** — the seed is the chore's operator-authored
 //     prompt.md, so standing intent is a settled design by
 //     construction. Its own leg because openChoreInProcess is the one
@@ -441,7 +475,7 @@ func kickableThreadRoots(mds []*run.Metadata, byKey map[string]*run.Metadata, gr
 // comparison just resolved; deriving it at the call site would look the
 // workflow up a second time to answer half a question.
 func rootDesignSettled(root string, md *run.Metadata, idx *run.JournalIndex) (settled, turnClosed bool) {
-	if md.SpawnedBy != "" {
+	if md.SpawnedBy != "" && !md.DesignOnly {
 		return true, false
 	}
 	if idx != nil && idx.ChoreByRun[md.Project+"/"+md.ID] != "" {
@@ -715,6 +749,34 @@ func designHeldReason(turnClosed bool) string {
 		return "its turn closed but not advanced"
 	}
 	return "only a seed"
+}
+
+// designOnlyHeldReason is designHeldReason's sibling for a run whose
+// seed was a brief: the ride it was minted for has already happened, so
+// "waiting at its first stage with only a seed" would read as a stall
+// rather than as the designed resting place. Same one-vocabulary rule —
+// the kick's stderr skip line and the `## Kick` section it renders both
+// carry this string — and it names both of the operator's exits,
+// because a parked design-only run is meant to end in one of them. The
+// chain-state block phrases the same fact for its own reader (see
+// heldNote): the survey's question there is where to put work, not
+// whether to press a button.
+const designOnlyHeldReason = "is a design-only spawn parked at design — advance it to ride, or close it"
+
+// designOnlyRide reports whether this root's next ride is the bounded
+// one: a design-only spawn nobody has advanced yet, so the kick walks
+// its design stage and stops. False once the operator advances it —
+// from then on the bit is provenance and the run rides like any other.
+// The settledness question routes through rootDesignSettled rather than
+// being re-derived, so the bound and the floor's admit cannot disagree
+// about which side of the advance a run is on.
+func designOnlyRide(root, threadRoot string, groomed groomResult) bool {
+	md := groomed.byKey[threadRoot]
+	if md == nil || !md.DesignOnly {
+		return false
+	}
+	settled, _ := rootDesignSettled(root, md, groomed.idx)
+	return !settled
 }
 
 // openSessionStage returns the stage md has a live session branch at,

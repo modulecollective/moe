@@ -146,6 +146,14 @@ func chainStateBlock(sc *pulseScan, projectID string) string {
 // would refuse to move its members anyway (stagingFenced), so naming it
 // would be asking for work that cannot land.
 //
+// A design-only spawn held as a head gets its own phrase rather than
+// designHeldReason's. Its design is not something anyone is going to
+// write — the turn either has run or is about to — so "only a seed"
+// would send the survey looking for the wrong repair. The exit is the
+// operator's advance, which is why the members behind it are worth
+// moving out. Alone on its line it is still unannotated, on the same
+// rule: a held run with nothing queued behind it strands nothing.
+//
 // The reap hold is every member's, because that is the scope the floor
 // gives it: one member's unreleased tombstone holds the whole thread,
 // so a line that named only the head would send the survey looking for
@@ -154,6 +162,9 @@ func chainStateBlock(sc *pulseScan, projectID string) string {
 func heldNote(root string, md *run.Metadata, idx *run.JournalIndex, touched time.Time, annotate bool) string {
 	if annotate && md.Workflow != chainWorkflow {
 		if settled, turnClosed := rootDesignSettled(root, md, idx); !settled {
+			if md.DesignOnly {
+				return ", held: a design-only spawn — it rides one design turn and parks for the operator"
+			}
 			return ", held: " + designHeldReason(turnClosed)
 		}
 	}

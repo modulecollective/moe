@@ -224,7 +224,7 @@ func runChainKick(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return 1
 	}
-	return chainKickRun(root, projectID, runID, rideStatic, stdout, stderr)
+	return chainKickRun(root, projectID, runID, rideStatic, false /*oneStage*/, stdout, stderr)
 }
 
 // chainKickRun is the kick body, split from the verb's flag parsing so
@@ -233,7 +233,13 @@ func runChainKick(args []string, stdout, stderr io.Writer) int {
 // is the consent level the ride carries — static for a typed `moe chain
 // kick`, dynamic for every kick a sweep roots itself, which is what
 // makes those rides' commits read as the machine's.
-func chainKickRun(root, projectID, runID string, mode rideMode, stdout, stderr io.Writer) int {
+//
+// oneStage bounds the ride to the head's next stage and rides no chain:
+// the machine's `!` where the default is its `!!!`. It is what a
+// design-only spawn's single design turn goes through, so the bound
+// rides the same validation, the same consent stamp and the same
+// summary as every other kick instead of a sibling dispatch.
+func chainKickRun(root, projectID, runID string, mode rideMode, oneStage bool, stdout, stderr io.Writer) int {
 	defer withRideMode(mode)()
 	if err := requireProject(root, projectID); err != nil {
 		moePrintf(stderr, "chain kick: %v\n", err)
@@ -283,8 +289,10 @@ func chainKickRun(root, projectID, runID string, mode rideMode, stdout, stderr i
 		// A regular head with work left: a programmatic `!!!`. The
 		// cascade ships this run and then rides its children through the
 		// same seam the operator's own `!!!` uses — including the
-		// childless case, which just ships and rides nothing.
-		res, code := cascadeFromGate(next, "" /*destination*/, false /*oneStep*/, true /*rideChain*/, md, stdout, stderr)
+		// childless case, which just ships and rides nothing. Under
+		// oneStage it is a programmatic `!` instead: one stage, no ship,
+		// no chain ride, and the run back at its prompt afterwards.
+		res, code := cascadeFromGate(next, "" /*destination*/, oneStage, !oneStage /*rideChain*/, md, stdout, stderr)
 		if summary := renderCascadeSummary(projectID+"/"+runID, res); summary != "" {
 			moePrintln(stdout, summary)
 		}

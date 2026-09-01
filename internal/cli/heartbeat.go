@@ -851,6 +851,11 @@ func machineAuthored(body string) bool {
 // thread at all, the tagged-idea leg at the bottom of the walk:
 //
 //   - A root that clears the floor itself: returned, as it always was.
+//   - A design-only spawn owed its one design turn: returned as itself.
+//     It is unsettled and stays that way until the operator advances
+//     it, but the sweep can still cause motion on it — exactly one
+//     stage — so answering "nothing to do" here would strand the run
+//     the sweep just minted. Same predicate the kick admits on.
 //   - A root held for an unsettled design: the first member behind it
 //     that clears the floor on its own. Whether those members actually
 //     belong behind that head is the survey's question to answer, not
@@ -889,7 +894,18 @@ func parkedKickableThread(root string, sc *pulseScan, projectID string, markedOn
 		if reapHeldThread(rootKey, sc.byKey, sc.graph, sc.idx) != "" {
 			continue
 		}
-		if settled, _ := rootDesignSettled(root, rootMd, sc.idx); !settled {
+		if settled, turnClosed := rootDesignSettled(root, rootMd, sc.idx); !settled {
+			// A design-only spawn owed its bounded ride is motion, not a
+			// strand. kickFloorHold's own admit, minus the note leg: the
+			// pre-ask has no groomResult to read the input records
+			// through, and a note at a parked run wakes the tick through
+			// its own leg anyway.
+			if rootMd.DesignOnly && !turnClosed {
+				if openSessionStage(root, rootMd) == "" && admits(rootMd) {
+					return rootKey
+				}
+				continue
+			}
 			// Chain edges only ever point at live runs (NewChainGraph drops
 			// terminal children), so in-progress is the only liveness the
 			// walk owes on top of the floor's own two questions.
