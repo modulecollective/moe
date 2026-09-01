@@ -76,8 +76,10 @@ const pulseKickoff = "Run the pulse for this project: a delta-first, read-only s
 	"ask for a twin reflect: do that when either the cycle landed a significant twin-relevant change (a decision, a new " +
 	"component, a boundary move the twin docs don't yet describe), or twin staleness has accumulated (many small changes " +
 	"and/or pending twin observations teed up since the last reflect). Do NOT ask for a reflect when a twin run is already " +
-	"open, and never manufacture one to justify the turn. Whatever the workflow, `why` is the one line the operator reads " +
-	"next to the verdict.\n\n" +
+	"open, and never manufacture one to justify the turn. A `loose` entry may instead set `\"design_only\": true`, which " +
+	"opens the run, rides it one headless design turn and parks it for the operator — a lower bar for a shorter ride, and " +
+	"the one place a finding that needs judgment rather than a fix may go; the stage guidance holds that bar too. Whatever " +
+	"the workflow, `why` is the one line the operator reads next to the verdict.\n\n" +
 	"A `\"threads\"` list holds runs in execution order, each thread attached after an existing run (`\"onto\"`), under a " +
 	"freshly named head (`\"head\"`), or self-rooted as its own thread (neither key). A thread's `\"runs\"` entry is either a **string** " +
 	"naming any parked run in the project — naming one chained elsewhere moves it — or an **object** in the same shape as a " +
@@ -647,13 +649,24 @@ type pulseGate struct {
 // holds", and everything about the resulting run — workflow, seed,
 // cooldown — comes from the chore's own definition. Why stays the one
 // line the operator reads.
+//
+// DesignOnly lowers the bar and shortens the ride in one move: the
+// Design body is a *brief*, the harness rides the run exactly one
+// stage — a headless design turn — and then parks it for the operator
+// the way an operator-minted run whose design closed is parked. It is a
+// field on the grammar that already carried the seed rather than a
+// fifth gate key, so slug validation and the live-slug dedupe come
+// along for free. Four shapes warn and skip it (see mint and
+// applyPulseGate): a chore or twin entry, a slug matching a live idea,
+// a thread position, and a spec with no Design body.
 type pulseRunSpec struct {
-	Slug     string `json:"slug"`
-	Workflow string `json:"workflow"`
-	Title    string `json:"title"`
-	Why      string `json:"why"`
-	Design   string `json:"design"`
-	Chore    string `json:"chore"`
+	Slug       string `json:"slug"`
+	Workflow   string `json:"workflow"`
+	Title      string `json:"title"`
+	Why        string `json:"why"`
+	Design     string `json:"design"`
+	Chore      string `json:"chore"`
+	DesignOnly bool   `json:"design_only"`
 }
 
 // pulseThread is one entry in the gate's `threads` list: runs in
@@ -933,6 +946,16 @@ func applyPulseGate(root, projectID, pulseSlug string, gate pulseGate, stdout, s
 				}
 				continue
 			}
+			// Design-only is loose-only. Such a root is unsettled by
+			// definition until the operator advances it, so heading a
+			// thread with one would strand every member behind an
+			// unwritten design — the exact shape the held-head groom
+			// exists to undo, proposed on purpose. Skipped here rather
+			// than in mint because only the caller knows the position.
+			if entry.Spec.DesignOnly {
+				moePrintf(stderr, "pulse: spawn: entry %q asks for design_only at a thread position — a design-only root strands the runs behind it; put it in loose. Skipping\n", entry.Spec.Slug)
+				continue
+			}
 			// Mint in place. A spec that fails leaves a hole in the order
 			// rather than shifting the rest — the warn line names it, and
 			// the runs around it keep the positions the survey gave them.
@@ -1044,6 +1067,14 @@ func (m *pulseMinter) mint(s pulseRunSpec, stdout, stderr io.Writer) string {
 			moePrintf(stderr, "pulse: spawn: skipping entry with unusable slug %q\n", s.Slug)
 			return ""
 		}
+		// A design-only spec buys a design turn with the brief it carries.
+		// Without one the seed is a title and a why — the one-line idea
+		// this rung exists to replace — and the turn would spend itself
+		// re-deriving what the survey already knew.
+		if s.DesignOnly && strings.TrimSpace(s.Design) == "" {
+			moePrintf(stderr, "pulse: spawn: entry %q asks for design_only with no design body — the brief is the point; skipping\n", slug)
+			return ""
+		}
 	case "twin":
 		// Slug is optional here and purely a handle for these warn lines,
 		// so they name the entry only when there is something to name it by.
@@ -1057,6 +1088,9 @@ func (m *pulseMinter) mint(s pulseRunSpec, stdout, stderr io.Writer) string {
 		if strings.TrimSpace(s.Design) != "" {
 			moePrintf(stderr, "pulse: spawn: ignoring design body on %s; a reflect reads the twin, not a seed\n", entry)
 		}
+		if s.DesignOnly {
+			moePrintf(stderr, "pulse: spawn: ignoring design_only on %s; a reflect has no design stage to stop at\n", entry)
+		}
 		return maybeSpawnReflect(m.root, projectID, pulseSlug, s.Why, stdout, stderr)
 	default:
 		moePrintf(stderr, "pulse: spawn: entry %q asks for workflow %q — only sdlc and twin are spawnable; skipping\n", slug, workflow)
@@ -1066,6 +1100,16 @@ func (m *pulseMinter) mint(s pulseRunSpec, stdout, stderr io.Writer) string {
 		return ""
 	}
 	if slugBaseMatches(m.live, slug) {
+		// Design-only is for fresh slugs. The live match is either an
+		// ordinary run already in flight — nothing to design twice — or a
+		// live idea, and there the refusal is the point: a tag is the
+		// licence to *ship*, an untagged idea is human-fenced, and either
+		// way a design-only promotion would consume the capture past the
+		// operator's per-idea brake to buy a turn they never asked for.
+		if s.DesignOnly {
+			moePrintf(stderr, "pulse: spawn: entry %q asks for design_only but the slug already names a live run — design-only opens fresh slugs only; skipping\n", slug)
+			return ""
+		}
 		return m.promoteOrSkip(slug, s, stdout, stderr)
 	}
 	title := strings.TrimSpace(s.Title)
@@ -1073,10 +1117,11 @@ func (m *pulseMinter) mint(s pulseRunSpec, stdout, stderr io.Writer) string {
 		title = slug
 	}
 	md, err := runopen.Open(m.root, projectID, run.Options{
-		IDBase:    slug,
-		Workflow:  "sdlc",
-		SeedDocs:  map[string]string{"design": spawnDesignSeed(title, s)},
-		SpawnedBy: spawnedBy,
+		IDBase:     slug,
+		Workflow:   "sdlc",
+		SeedDocs:   map[string]string{"design": spawnDesignSeed(title, s)},
+		SpawnedBy:  spawnedBy,
+		DesignOnly: s.DesignOnly,
 		Trailers: trailers.Block{
 			SpawnedBy: spawnedBy,
 			Consent:   spawnConsent(spawnedBy),
@@ -1087,7 +1132,11 @@ func (m *pulseMinter) mint(s pulseRunSpec, stdout, stderr io.Writer) string {
 		return ""
 	}
 	m.live = append(m.live, md.ID)
-	moePrintf(stderr, "pulse: spawned fix run %s/%s (%s)\n", projectID, md.ID, title)
+	kind := "fix run"
+	if s.DesignOnly {
+		kind = "design-only run"
+	}
+	moePrintf(stderr, "pulse: spawned %s %s/%s (%s)\n", kind, projectID, md.ID, title)
 	return md.ID
 }
 
@@ -1113,6 +1162,9 @@ func (m *pulseMinter) nominateChore(name string, s pulseRunSpec, stdout, stderr 
 		if strings.TrimSpace(extra.value) != "" {
 			moePrintf(stderr, "pulse: chore: ignoring %s on chore entry %q; a chore run's shape comes from its own definition\n", extra.field, name)
 		}
+	}
+	if s.DesignOnly {
+		moePrintf(stderr, "pulse: chore: ignoring design_only on chore entry %q; a chore run's shape comes from its own definition\n", name)
 	}
 	res, err := openChoreInProcess(m.root, m.projectID, name, choreOpenNominated, stdout, stderr)
 	if err != nil {

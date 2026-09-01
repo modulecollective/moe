@@ -108,6 +108,18 @@ type Metadata struct {
 	// standalone runs (`moe pulse new` passes none), which is what makes
 	// them render un-nested on the dash.
 	SpawnedBy string `json:"spawned_by,omitempty"`
+	// DesignOnly, when true, says this machine-minted run's seed is a
+	// *brief* rather than a baked design: the spawner asked for one
+	// headless design turn and nothing more. It is a bound on a ride's
+	// length — the machine's `!<stage>` — written as a run field rather
+	// than a trailer because every reader of it already has run.json in
+	// hand. Set only by a pulse gate's `design_only` spec. The kick
+	// floor reads it to decline calling such a run settled until the
+	// operator advances it, and the design stage's prompt reads it to
+	// tell the agent who it is writing for. Nothing reads it once the
+	// design stage is satisfied; from then on it is provenance, like
+	// SpawnedBy.
+	DesignOnly bool `json:"design_only,omitempty"`
 	// Reaped, when non-nil, records that the run's last machine turn
 	// died before landing anything and the heartbeat's reap destroyed
 	// its session branch. Written by the reap's abandon ending — the one
@@ -232,6 +244,12 @@ type Options struct {
 	// Trailers.ReopenOf. Empty on operator-opened and standalone runs.
 	SpawnedBy string
 
+	// DesignOnly persists Metadata.DesignOnly: the seed is a brief, not
+	// a design, and the spawner is asking for exactly one design turn.
+	// Only ever set alongside SpawnedBy — an operator-opened run is held
+	// at its first stage without needing it.
+	DesignOnly bool
+
 	// AllowDirty bypasses the working-tree-clean precondition (which
 	// counts staged changes and tracked-file modifications, never
 	// untracked files). The guardrail is there so a stray edit doesn't
@@ -353,17 +371,18 @@ func New(root, projectID string, opts Options) (*Metadata, error) {
 	}
 
 	md := &Metadata{
-		ID:        id,
-		Project:   projectID,
-		Status:    StatusInProgress,
-		Workflow:  opts.Workflow,
-		Agent:     opts.Agent,
-		Created:   now().Local().Format("2006-01-02"),
-		Workspace: opts.Workspace,
-		ReopenOf:  opts.ReopenOf,
-		PromoteTo: opts.PromoteTo,
-		SpawnedBy: opts.SpawnedBy,
-		Documents: map[string]*Document{},
+		ID:         id,
+		Project:    projectID,
+		Status:     StatusInProgress,
+		Workflow:   opts.Workflow,
+		Agent:      opts.Agent,
+		Created:    now().Local().Format("2006-01-02"),
+		Workspace:  opts.Workspace,
+		ReopenOf:   opts.ReopenOf,
+		PromoteTo:  opts.PromoteTo,
+		SpawnedBy:  opts.SpawnedBy,
+		DesignOnly: opts.DesignOnly,
+		Documents:  map[string]*Document{},
 	}
 
 	runJSONRel := filepath.Join(runDirRel, "run.json")
