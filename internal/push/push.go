@@ -290,7 +290,13 @@ func CheckBranchHasCommits(clonePath, branch, base, workflow string) error {
 // EnsureOrigin makes sure origin in the sandbox clone points at
 // `remote`. Fresh clones have origin pointing at the local submodule
 // path (the clone source), which cannot be pushed to GitHub.
+//
+// It is also the first config write push makes, so the sandbox's
+// leftover config.lock is cleared here — see clearSandboxConfigLock.
 func EnsureOrigin(clonePath, remote string) error {
+	if err := clearSandboxConfigLock(clonePath); err != nil {
+		return err
+	}
 	out, err := git.Output(clonePath, "remote", "get-url", "origin")
 	if err != nil {
 		if combined, err := git.Combined(clonePath, "remote", "add", "origin", remote); err != nil {
@@ -304,6 +310,40 @@ func EnsureOrigin(clonePath, remote string) error {
 	}
 	if combined, err := git.Combined(clonePath, "remote", "set-url", "origin", remote); err != nil {
 		return fmt.Errorf("push: set-url origin: %w (%s)", err, combined)
+	}
+	return nil
+}
+
+// clearSandboxConfigLock removes a `.git/config.lock` the agent
+// sandbox left behind in the clone.
+//
+// Claude Code's Bash sandbox (2.1.257) protects git config in every
+// add-dir repo by bind-mounting masks over `.git/config` *and*
+// `.git/config.lock`, so a sandboxed command can never take the lock.
+// The mount needs a target, and config.lock does not normally exist,
+// so the runtime creates one on the real filesystem — a 0-byte file —
+// and never removes it. To git that is somebody's live lock: every
+// config write afterwards (`remote set-url` here, `push -u` two steps
+// later) dies with "could not lock config file .git/config: File
+// exists", and every sdlc push after a review or test stage hits it.
+//
+// A real git lock is empty only for the instant between create and
+// write, and git removes it on any exit short of SIGKILL, so a 0-byte
+// config.lock that is still there when push runs has no writer.
+// Anything with content is left alone — that is an in-flight config
+// write, and the git error that follows names it.
+func clearSandboxConfigLock(clonePath string) error {
+	gitDir, err := git.Output(clonePath, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return nil
+	}
+	lock := filepath.Join(strings.TrimSpace(gitDir), "config.lock")
+	info, err := os.Stat(lock)
+	if err != nil || !info.Mode().IsRegular() || info.Size() != 0 {
+		return nil
+	}
+	if err := os.Remove(lock); err != nil {
+		return fmt.Errorf("push: remove stale sandbox config.lock: %w", err)
 	}
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/modulecollective/moe/internal/git"
@@ -288,6 +289,54 @@ func TestCheckBranchHasCommits(t *testing.T) {
 		// `main`). AheadOf errors, so the guard must step aside.
 		if err := CheckBranchHasCommits(dir, "feat", "does-not-exist", "sdlc"); err != nil {
 			t.Fatalf("got %v, want nil skip when base is unresolvable", err)
+		}
+	})
+}
+
+// TestEnsureOriginClearsSandboxConfigLock: the agent sandbox leaves a
+// 0-byte `.git/config.lock` in the clone (it is the bind-mount target
+// for the sandbox's config mask), and git reads it as a live lock.
+// EnsureOrigin is push's first config write, so it clears the leftover
+// before `remote set-url` — and only the empty, writer-less kind.
+func TestEnsureOriginClearsSandboxConfigLock(t *testing.T) {
+	gittest.SetupEnv(t)
+
+	t.Run("empty lock is removed and set-url proceeds", func(t *testing.T) {
+		clone := gittest.Init(t)
+		gittest.Commit(t, clone, "base")
+		gittest.Run(t, clone, "remote", "add", "origin", "/old/path")
+		lock := filepath.Join(clone, ".git", "config.lock")
+		if err := os.WriteFile(lock, nil, 0o444); err != nil {
+			t.Fatal(err)
+		}
+		if err := EnsureOrigin(clone, "https://example.invalid/owner/repo.git"); err != nil {
+			t.Fatalf("EnsureOrigin: %v", err)
+		}
+		if _, err := os.Stat(lock); !os.IsNotExist(err) {
+			t.Fatalf("stale config.lock should be gone, stat err=%v", err)
+		}
+		if got := strings.TrimSpace(gittest.Output(t, clone, "remote", "get-url", "origin")); got != "https://example.invalid/owner/repo.git" {
+			t.Fatalf("origin = %q", got)
+		}
+	})
+
+	t.Run("a lock with content is somebody's write and stays", func(t *testing.T) {
+		clone := gittest.Init(t)
+		gittest.Commit(t, clone, "base")
+		gittest.Run(t, clone, "remote", "add", "origin", "/old/path")
+		lock := filepath.Join(clone, ".git", "config.lock")
+		if err := os.WriteFile(lock, []byte("[core]\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		err := EnsureOrigin(clone, "https://example.invalid/owner/repo.git")
+		if err == nil {
+			t.Fatal("expected set-url to fail on a live lock")
+		}
+		if !strings.Contains(err.Error(), "File exists") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if _, statErr := os.Stat(lock); statErr != nil {
+			t.Fatalf("non-empty lock must be left alone: %v", statErr)
 		}
 	})
 }
