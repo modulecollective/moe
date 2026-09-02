@@ -319,7 +319,7 @@ func TestStagePromptCarriesOperatorInput(t *testing.T) {
 	md := seedParkedRun(t, root, "change-auth")
 	addOn(t, root, "moe", "change-auth", "Ship behind the existing flag.")
 
-	prompt, ids, err := buildSystemPrompt(root, md, "code", "" /*clone*/, false, nil)
+	prompt, ids, err := buildSystemPrompt(root, md, "code", "" /*clone*/, false)
 	if err != nil {
 		t.Fatal(err)
 	}

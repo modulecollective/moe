@@ -7,7 +7,7 @@
 // wipes every edge.
 //
 // `moe chain edit` opens a rebase-style editor over every active
-// chainable run (sdlc, twin — every workflow
+// chainable run (sdlc — every workflow
 // operatorCascades admits — plus chain heads) across every
 // project, grouped into blocks that mirror the dash's chains. A blank
 // line is a chain boundary: each contiguous block of
@@ -300,7 +300,7 @@ func runChainClear(args []string, stdout, stderr io.Writer) int {
 // chainableWorkflow reports whether a run's workflow can appear in the
 // chain editor. The base set is operatorCascades — any workflow that
 // registers a cascade dispatcher and isn't perpetual/machine-paced
-// (sdlc and twin today), keyed on the predicate rather
+// (sdlc today), keyed on the predicate rather
 // than a workflow name so a new operator-paced workflow is chainable
 // the day it registers. chat (perpetual) and pulse (machine-paced)
 // stay out via that predicate.

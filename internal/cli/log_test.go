@@ -31,7 +31,7 @@ func writeThread(t *testing.T, root, project, runID, stage, agent string, lines 
 // Skipping a workflow drops the shared shape — this test is the
 // tripwire, mirroring TestCatRegisteredOnEveryWorkflow.
 func TestLogRegisteredOnEveryWorkflow(t *testing.T) {
-	for _, wf := range []string{"idea", "sdlc", "twin", "chat", "pulse"} {
+	for _, wf := range []string{"idea", "sdlc", "chat", "pulse"} {
 		g, err := LookupGroup(wf)
 		if err != nil {
 			t.Fatalf("workflow %q not registered as a group: %v", wf, err)
@@ -259,7 +259,7 @@ func TestMoeLog_WrongWorkflow(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"twin", "log", "tele/fix-it", "vision"}, &out, &errb)
+	code := Run([]string{"chat", "log", "tele/fix-it", "chat"}, &out, &errb)
 	if code != 1 {
 		t.Fatalf("expected exit=1 on wrong-workflow, got %d; stderr=%q", code, errb.String())
 	}

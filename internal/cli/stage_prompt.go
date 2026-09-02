@@ -31,14 +31,14 @@ import (
 //
 // sandboxReadOnly renders the clone paragraph in its read-only variant
 // (verify facts, don't edit) instead of the writable one. Set by
-// BuildSpec for the strict-boundary stages — design, chat, pulse, twin
-// — whose close gate refuses any tracked-file change.
+// BuildSpec for the strict-boundary stages — design, chat, pulse —
+// whose close gate refuses any tracked-file change.
 //
 // The second return is the operator-input entry ids this prompt
 // rendered. The caller stamps them delivered once the turn succeeds, so
 // what was consumed is exactly what the agent was shown. Nil for the
 // runs — nearly all of them — carrying no input record.
-func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string, sandboxReadOnly bool, wikiCfg *wiki.Config) (string, []int, error) {
+func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string, sandboxReadOnly bool) (string, []int, error) {
 	var sections []string
 
 	if soul := moe.Soul(); soul != "" {
@@ -59,10 +59,9 @@ func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string, s
 		sections = append(sections, frag)
 	}
 
-	// Twin-as-context: every wiki-aware stage gets a reference block
-	// pointing at the project's digital-twin/ dir (when one exists).
-	// Lands before any wiki-specific section so an ingest agent reads
-	// the twin first, then sees the wiki it's working on.
+	// Twin-as-context: every stage gets a reference block pointing at
+	// the project's digital-twin/ dir (when one exists). Lands early:
+	// what the project *is* frames everything that follows.
 	if ref := wiki.TwinReferenceSectionAt(root, md.Project); ref != "" {
 		sections = append(sections, ref)
 	}
@@ -121,10 +120,6 @@ func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string, s
 	// for non-reopen runs, so the common case pays zero prompt cost.
 	if priors := priorRunsSection(root, md); priors != "" {
 		sections = append(sections, priors)
-	}
-
-	if wikiCfg != nil {
-		sections = append(sections, wiki.IngestPromptSection(*wikiCfg))
 	}
 
 	banner, err := upstreamChangeBanner(root, md, docID)

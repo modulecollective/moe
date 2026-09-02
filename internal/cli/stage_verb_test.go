@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
 // TestOperatorCascadesPredicate pins the rows the whole design keys on:
@@ -21,7 +20,6 @@ func TestOperatorCascadesPredicate(t *testing.T) {
 		want     bool
 	}{
 		{"sdlc", true},
-		{"twin", true},
 		{"chat", false},   // perpetual — "ship" is meaningless
 		{"pulse", false},  // machine-paced — moe drives it
 		{"idea", false},   // no cascade dispatcher
@@ -61,58 +59,12 @@ func stubCascadeDispatcher(t *testing.T, workflow string, perStageExit map[strin
 	return &captured
 }
 
-// mintTwinReflect mints an in-progress twin reflect run for project via
-// the parked reflect path and returns its slug, so cascade-flag tests
-// have a real twin run to drive.
-func mintTwinReflect(t *testing.T, root, project string) string {
-	t.Helper()
-	var out, errb bytes.Buffer
-	if code := Run([]string{"twin", "reflect", "--park", project}, &out, &errb); code != 0 {
-		t.Fatalf("twin reflect --park exit=%d stderr=%q", code, errb.String())
-	}
-	slug, err := findInProgressTwinRun(root, project)
-	if err != nil || slug == "" {
-		t.Fatalf("no in-progress twin run after reflect: slug=%q err=%v", slug, err)
-	}
-	return slug
-}
-
-// TestStageVerbCascadeRoutesTwin: `moe twin <stage> --once` walks
-// exactly one stage headless through the twin dispatcher — the generic
-// runStageVerb body reaching a non-sdlc workflow's registered cascade,
-// proving the vocabulary follows the operatorCascades property rather
-// than an sdlc hardcoding.
-func TestStageVerbCascadeRoutesTwin(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	trailerstest.SeedProject(t, root, "tele")
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-	suppressNextStagePrompt(t)
-
-	slug := mintTwinReflect(t, root, "tele")
-	captured := stubCascadeDispatcher(t, "twin", nil)
-
-	var out, errb bytes.Buffer
-	if code := Run([]string{"twin", "vision", "--once", "tele/" + slug}, &out, &errb); code != 0 {
-		t.Fatalf("twin vision --once exit=%d stderr=%q", code, errb.String())
-	}
-	if len(*captured) != 1 {
-		t.Fatalf("twin dispatcher invocations = %d, want 1 (%+v)", len(*captured), *captured)
-	}
-	inv := (*captured)[0]
-	if inv.stage != "vision" || inv.projectID != "tele" || inv.runID != slug || !inv.headless {
-		t.Fatalf("dispatch = %+v, want {vision tele %s headless}", inv, slug)
-	}
-}
-
 // TestStageVerbMutualExclusionAcrossWorkflows: every adopting
 // workflow's stage verbs refuse two cascade flags with exit 2 and the
 // shared message — the generic runStageVerb body, not per-verb code.
 func TestStageVerbMutualExclusionAcrossWorkflows(t *testing.T) {
 	verbs := [][]string{
-		{"twin", "vision"},
-		{"twin", "finalize"},
+		{"sdlc", "design"},
 		{"sdlc", "code"},
 	}
 	for _, v := range verbs {
@@ -131,9 +83,10 @@ func TestStageVerbMutualExclusionAcrossWorkflows(t *testing.T) {
 }
 
 // TestStageVerbToNamesWorkflowLadder: a bad --to destination names the
-// verb's own workflow ladder, not sdlc's; and a --to pointed at the last
-// stage of a ladder reports "no stage follows <stage>" since nothing
-// succeeds it. Both fire before any run lookup, so no fixture is needed.
+// verb's own workflow ladder, and a --to at or behind the verb's own stage
+// names the stages that *would* work. Both fire before any run lookup,
+// so no fixture is needed.
+// Both fire before any run lookup, so no fixture is needed.
 func TestStageVerbToNamesWorkflowLadder(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -141,49 +94,22 @@ func TestStageVerbToNamesWorkflowLadder(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	if code := Run([]string{"twin", "vision", "--to=nonsense", "tele/ghost"}, &out, &errb); code != 2 {
-		t.Fatalf("twin --to=nonsense exit=%d, want 2; stderr=%q", code, errb.String())
+	if code := Run([]string{"sdlc", "design", "--to=nonsense", "tele/ghost"}, &out, &errb); code != 2 {
+		t.Fatalf("sdlc --to=nonsense exit=%d, want 2; stderr=%q", code, errb.String())
 	}
-	if !bytes.Contains(errb.Bytes(), []byte("is not a stage of twin")) {
-		t.Fatalf("expected twin ladder in error, got: %q", errb.String())
+	if !bytes.Contains(errb.Bytes(), []byte("is not a stage of sdlc")) {
+		t.Fatalf("expected sdlc ladder in error, got: %q", errb.String())
 	}
-	if !bytes.Contains(errb.Bytes(), []byte("vision, architecture, patterns, operations, glossary, finalize")) {
-		t.Fatalf("expected twin stage list, got: %q", errb.String())
+	if !bytes.Contains(errb.Bytes(), []byte("design, code, test, review, push")) {
+		t.Fatalf("expected sdlc stage list, got: %q", errb.String())
 	}
 
 	errb.Reset()
-	if code := Run([]string{"twin", "finalize", "--to=finalize", "tele/ghost"}, &out, &errb); code != 2 {
-		t.Fatalf("twin --to=finalize exit=%d, want 2; stderr=%q", code, errb.String())
+	if code := Run([]string{"sdlc", "test", "--to=design", "tele/ghost"}, &out, &errb); code != 2 {
+		t.Fatalf("sdlc --to=design exit=%d, want 2; stderr=%q", code, errb.String())
 	}
-	if !bytes.Contains(errb.Bytes(), []byte("no stage follows finalize")) {
-		t.Fatalf("expected no-successor branch for the last stage, got: %q", errb.String())
-	}
-}
-
-// TestStageVerbWrongWorkflowRefused: driving a twin stage verb against
-// an sdlc run refuses at the cascade preflight, naming both workflows —
-// the generic wrong-workflow guard in resolveAndGuardForCascade.
-func TestStageVerbWrongWorkflowRefused(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	seedSdlcOneShotProject(t, root, "tele")
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-	stubEditor(t)
-	suppressNextStagePrompt(t)
-
-	var out, errb bytes.Buffer
-	if code := runNew("sdlc", []string{"tele/wrong-wf"}, &out, &errb); code != 0 {
-		t.Fatalf("runNew exit=%d stderr=%q", code, errb.String())
-	}
-
-	out.Reset()
-	errb.Reset()
-	if code := Run([]string{"twin", "vision", "--once", "tele/wrong-wf"}, &out, &errb); code == 0 {
-		t.Fatalf("expected refusal driving a twin verb on an sdlc run; stdout=%q", out.String())
-	}
-	if !bytes.Contains(errb.Bytes(), []byte("is a sdlc run, not twin")) {
-		t.Fatalf("expected wrong-workflow refusal, got: %q", errb.String())
+	if !bytes.Contains(errb.Bytes(), []byte("is at or behind test — pick a stage past test (try: review, push)")) {
+		t.Fatalf("expected the at-or-behind branch naming the remaining stages, got: %q", errb.String())
 	}
 }
 
@@ -200,43 +126,6 @@ func TestChatNewShipRefusesPerpetual(t *testing.T) {
 	}
 	if !bytes.Contains(errb.Bytes(), []byte("perpetual")) {
 		t.Fatalf("expected perpetual refusal, got: %q", errb.String())
-	}
-}
-
-// TestTwinReflectShipCascades: `moe twin reflect --ship` mints the pass
-// and hands off to a headless cascade from the first stage (vision) —
-// the shared mint tail's `!!` dispatch, now wired into reflect. The
-// dispatcher is stubbed to halt at vision so the assertion is the
-// handoff itself, not the full six-stage walk.
-func TestTwinReflectShipCascades(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	trailerstest.SeedProject(t, root, "tele")
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-
-	captured := stubCascadeDispatcher(t, "twin", map[string]int{"vision": 1})
-
-	var out, errb bytes.Buffer
-	code := Run([]string{"twin", "reflect", "--ship", "tele"}, &out, &errb)
-	if code != 1 {
-		t.Fatalf("exit=%d, want 1 (halted at stubbed vision); stderr=%q", code, errb.String())
-	}
-	if len(*captured) != 1 || (*captured)[0].stage != "vision" || !(*captured)[0].headless {
-		t.Fatalf("reflect --ship dispatches = %+v, want one headless vision", *captured)
-	}
-}
-
-// TestTwinReflectShipParkMutuallyExclusive: --ship and --park are
-// opposite tails on reflect too, refused before the mint.
-func TestTwinReflectShipParkMutuallyExclusive(t *testing.T) {
-	var out, errb bytes.Buffer
-	code := Run([]string{"twin", "reflect", "--ship", "--park", "tele"}, &out, &errb)
-	if code != 2 {
-		t.Fatalf("exit=%d, want 2; stderr=%q", code, errb.String())
-	}
-	if !bytes.Contains(errb.Bytes(), []byte("opposite tails")) {
-		t.Fatalf("expected opposite-tails error, got: %q", errb.String())
 	}
 }
 

@@ -149,7 +149,7 @@ func TestJudgedChoreNominationRespectsCooldown(t *testing.T) {
 
 // TestJudgedChoreNominationWarnsOnFreshRunFields: a chore entry names a
 // registration, so everything describing a fresh run is meaningless on
-// it. Warned and ignored, the way a twin entry's title is.
+// it. Warned and ignored.
 func TestJudgedChoreNominationWarnsOnFreshRunFields(t *testing.T) {
 	root := judgedChoreFixture(t)
 
@@ -158,7 +158,7 @@ func TestJudgedChoreNominationWarnsOnFreshRunFields(t *testing.T) {
 	if id := m.mint(pulseRunSpec{
 		Chore:    "readme-update",
 		Slug:     "readme-refresh",
-		Workflow: "twin",
+		Workflow: "sdlc",
 		Title:    "Refresh the README",
 		Design:   "# a design the chore never reads\n",
 		Why:      "docs lie",

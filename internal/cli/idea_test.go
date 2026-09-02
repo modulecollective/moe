@@ -1039,15 +1039,15 @@ func TestIdeaMoveRefusesSlugCollision(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
 
-	if code := Run([]string{"idea", "new", "tele/twin"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"idea", "new", "tele/collide"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture A failed")
 	}
-	if code := Run([]string{"idea", "new", "moe/twin"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"idea", "new", "moe/collide"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup capture B failed")
 	}
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "move", "tele/twin", "moe"}, &out, &errb)
+	code := Run([]string{"idea", "move", "tele/collide", "moe"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on slug collision, got 0; stdout=%q", out.String())
 	}
@@ -1055,10 +1055,10 @@ func TestIdeaMoveRefusesSlugCollision(t *testing.T) {
 		t.Fatalf("expected collision error, got: %q", errb.String())
 	}
 	// Both run dirs intact.
-	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "twin")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "collide")); err != nil {
 		t.Fatalf("source dir should still exist: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "projects", "moe", "runs", "twin")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, "projects", "moe", "runs", "collide")); err != nil {
 		t.Fatalf("dest dir should still exist: %v", err)
 	}
 }

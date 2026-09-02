@@ -31,7 +31,7 @@ func TestServeRunPageChipsComposeWithRealLookup(t *testing.T) {
 		nextStage string
 		wantChips bool
 	}{
-		{workflow: "twin", nextStage: "architecture", wantChips: true},
+		{workflow: "sdlc", nextStage: "code", wantChips: true},
 		// Undeclared workflows stay read-only: no serve declaration, so
 		// no mark regardless of their CLI dispatcher.
 		{workflow: "idea", nextStage: "idea", wantChips: false},

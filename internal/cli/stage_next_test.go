@@ -552,7 +552,7 @@ func TestPromptStageNextStageNoAdvanceForNonSdlcWorkflow(t *testing.T) {
 		Name: "architecture",
 		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
 	}
-	md := &run.Metadata{ID: "twin", Project: "tele", Workflow: "twin", Status: run.StatusInProgress}
+	md := &run.Metadata{ID: "groom", Project: "tele", Workflow: "chat", Status: run.StatusInProgress}
 
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -568,7 +568,7 @@ func TestPromptStageNextStageNoAdvanceForNonSdlcWorkflow(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe twin architecture tele twin", &stdout, &stderr); code != 0 {
+	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe chat chat tele groom", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -813,7 +813,7 @@ func TestPromptStageNextStageNoSkipForNonSdlcWorkflow(t *testing.T) {
 		Name: "test",
 		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
 	}
-	md := &run.Metadata{ID: "dns-basics", Project: "tele", Workflow: "twin", Status: run.StatusInProgress}
+	md := &run.Metadata{ID: "dns-basics", Project: "tele", Workflow: "chat", Status: run.StatusInProgress}
 
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -829,7 +829,7 @@ func TestPromptStageNextStageNoSkipForNonSdlcWorkflow(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe twin architecture tele dns-basics", &stdout, &stderr); code != 0 {
+	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe chat chat tele dns-basics", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -1138,7 +1138,7 @@ func TestPromptCloseNextStageDispatchesOnAccept(t *testing.T) {
 					return 0
 				},
 			}
-			md := &run.Metadata{ID: "reflect-2026-05-17", Project: "moe", Workflow: "twin", Status: run.StatusInProgress}
+			md := &run.Metadata{ID: "groom-2026-05-17", Project: "moe", Workflow: "chat", Status: run.StatusInProgress}
 
 			r, w, err := os.Pipe()
 			if err != nil {
@@ -1161,7 +1161,7 @@ func TestPromptCloseNextStageDispatchesOnAccept(t *testing.T) {
 				t.Fatalf("close dispatched=%v, want %v (stdout=%q)", ran, tc.wantDispatch, stdout.String())
 			}
 			if tc.wantDispatch {
-				if got, want := strings.Join(gotArgs, " "), "moe/reflect-2026-05-17"; got != want {
+				if got, want := strings.Join(gotArgs, " "), "moe/groom-2026-05-17"; got != want {
 					t.Fatalf("close args = %q, want %q (no --no-edit — interactive Y opens the followups editor)", got, want)
 				}
 			}
@@ -1179,7 +1179,7 @@ func TestPromptCloseNextStageRendersLabelAndLegend(t *testing.T) {
 		Name: "close",
 		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
 	}
-	md := &run.Metadata{ID: "reflect-2026-05-17", Project: "moe", Workflow: "twin", Status: run.StatusInProgress}
+	md := &run.Metadata{ID: "groom-2026-05-17", Project: "moe", Workflow: "chat", Status: run.StatusInProgress}
 
 	r, w, err := os.Pipe()
 	if err != nil {

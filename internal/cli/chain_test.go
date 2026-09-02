@@ -852,7 +852,6 @@ func TestActiveChainItemsMembership(t *testing.T) {
 	}
 	mds := []*run.Metadata{
 		mk("s", "sdlc", run.StatusInProgress),
-		mk("t", "twin", run.StatusInProgress),
 		mk("q", chainWorkflow, run.StatusInProgress), // batch head — admitted on top of the predicate
 		mk("chat1", "chat", run.StatusInProgress),    // perpetual — excluded
 		mk("pulse1", "pulse", run.StatusInProgress),  // machine-paced — excluded
@@ -874,7 +873,7 @@ func TestActiveChainItemsMembership(t *testing.T) {
 			got[it.Key] = true
 		}
 	}
-	want := map[string]bool{"p/s": true, "p/t": true, "p/q": true}
+	want := map[string]bool{"p/s": true, "p/q": true}
 	for k := range want {
 		if !got[k] {
 			t.Errorf("chainable run %q should be offered for chaining", k)
@@ -887,37 +886,6 @@ func TestActiveChainItemsMembership(t *testing.T) {
 	}
 	if len(got) != len(want) {
 		t.Errorf("offered set = %v, want exactly %v", got, want)
-	}
-}
-
-// TestChainEditTwinEdgeSurvivesSave: a twin run can head a chain and its
-// outgoing edge survives a no-op round trip — proving twin is a
-// first-class chain member now, not just visible. Renders live state
-// (an sdlc run chained to a twin run), parses it back, and asserts the
-// diff is empty so the twin edge is neither dropped nor duplicated.
-func TestChainEditTwinEdgeSurvivesSave(t *testing.T) {
-	base := time.Date(2026, 5, 28, 14, 0, 0, 0, time.UTC)
-	mds := []*run.Metadata{
-		{ID: "code-it", Project: "p", Workflow: "sdlc", Status: run.StatusInProgress},
-		{ID: "reflect-x", Project: "p", Workflow: "twin", Status: run.StatusInProgress},
-	}
-	when := map[string]time.Time{"p/code-it": base, "p/reflect-x": base.Add(-time.Hour)}
-	chained := map[string]string{"p/code-it": "p/reflect-x"} // sdlc → twin
-	idx := &run.JournalIndex{LastActivity: when, ChainedChild: chained}
-	byKey := map[string]*run.Metadata{}
-	for _, md := range mds {
-		byKey[md.Project+"/"+md.ID] = md
-	}
-
-	body := renderChainEditFile(activeChainItems(run.NewChainGraph(idx, byKey), mds, idx))
-	parsed, err := parseChainEditFile(body)
-	if err != nil {
-		t.Fatalf("parseChainEditFile of rendered body: %v\n%s", err, body)
-	}
-	offered := map[string]bool{"p/code-it": true, "p/reflect-x": true}
-	adds, removes := diffChainEdit(parsed, offered, idx.ChainedChild)
-	if len(adds) != 0 || len(removes) != 0 {
-		t.Fatalf("twin edge must survive a no-op save: adds=%v removes=%v\n%s", adds, removes, body)
 	}
 }
 
@@ -1063,61 +1031,5 @@ func TestChainAnnotationMultipleParentsFanIn(t *testing.T) {
 	graph := run.NewChainGraph(&run.JournalIndex{ChainedChild: chainedChild}, byKey)
 	if got := chainAnnotation(graph, "p/c"); got != "chained-from p/a, p/b" {
 		t.Errorf("p/c annotation = %q, want \"chained-from p/a, p/b\"", got)
-	}
-}
-
-// TestCascadeFromGateNonSdlcRideFailureStillClosesParent pins the
-// ordering at the non-sdlc seam, where the ride runs *before* the
-// parent's auto-close. A stalled ride propagates its code — but it must
-// not skip the close on the way out: the parent's own walk succeeded,
-// and leaving it open would park a dead run on the dash to punish a
-// child's failure. (Ctrl-C is the exception and keeps its early return;
-// there the operator asked for everything to stop.)
-func TestCascadeFromGateNonSdlcRideFailureStillClosesParent(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	trailerstest.SeedProject(t, root, "tele")
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-
-	parentMD, err := run.New(root, "tele", run.Options{ID: "reflect-run", Workflow: "twin"})
-	if err != nil {
-		t.Fatalf("run.New parent: %v", err)
-	}
-	if _, err := run.New(root, "tele", run.Options{ID: "child-run", Workflow: "sdlc"}); err != nil {
-		t.Fatalf("run.New child: %v", err)
-	}
-	// After both runs exist: run.New refuses a dirty tree.
-	writeSatisfiedTwinFinalizeCanvas(t, root, parentMD)
-	gittest.Run(t, root, "commit", "--allow-empty", "-m",
-		"chain: edit\n\nMoE-Chained-To: tele/reflect-run tele/child-run\n")
-
-	t.Chdir(root)
-	stubOpenTwinStage(t, nil)
-	childCaptured := stubOpenSdlcStage(t, map[string]int{"design": 1})
-	closeCaptured := stubGroupCloseCommand(t, "twin", 0)
-
-	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("vision", "", false, true, parentMD, &stdout, &stderr)
-	if code != 1 {
-		t.Fatalf("cascade exit=%d, want 1 (the stalled child's code); stderr=%q", code, stderr.String())
-	}
-	// The close ran anyway, and the parent is recorded as shipped.
-	if len(*closeCaptured) != 1 {
-		t.Fatalf("close dispatched %d times, want 1 — a stalled ride must not skip the parent's auto-close", len(*closeCaptured))
-	}
-	if !res.shipped {
-		t.Fatalf("parent must still be recorded shipped: %+v", res)
-	}
-	// The child stopped at its failing stage.
-	gotStages := make([]string, 0, len(*childCaptured))
-	for _, inv := range *childCaptured {
-		gotStages = append(gotStages, inv.stage)
-	}
-	if !reflect.DeepEqual(gotStages, []string{"design"}) {
-		t.Fatalf("child stages = %v, want [design]", gotStages)
-	}
-	if !strings.Contains(stderr.String(), "chain ride into tele/child-run exited 1") {
-		t.Errorf("expected stalled-ride stderr line, got:\n%s", stderr.String())
 	}
 }

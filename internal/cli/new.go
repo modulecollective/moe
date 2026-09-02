@@ -17,7 +17,7 @@ import (
 
 // newRunCommand returns a Command suitable for registering under a
 // workflow as its `new` entry point (e.g., `moe sdlc new`,
-// `moe twin new`). The workflow name is baked into the closure
+// `moe chore new`). The workflow name is baked into the closure
 // so each facade is a thin wrapper — all the real work (slug
 // derivation, collision suffixing, git commit, next-stage hint) lives
 // in runNew.

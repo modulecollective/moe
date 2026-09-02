@@ -245,16 +245,15 @@ func TestCloseGateDoesNotMisfireThroughExistingReaders(t *testing.T) {
 	}
 }
 
-// TestStageNominatedCloseScope pins the reader's edges: sdlc only (twin's
-// ladder has its own finalize seal), and every absent or unreadable
-// signal reads as no nomination — this is permission to do something
-// terminal.
+// TestStageNominatedCloseScope pins the reader's edges: sdlc only, and
+// every absent or unreadable signal reads as no nomination — this is
+// permission to do something terminal.
 func TestStageNominatedCloseScope(t *testing.T) {
 	root := isolateCascadeMoeHome(t)
 	sdlcMD := &run.Metadata{ID: "already-done", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
-	twinMD := &run.Metadata{ID: "reflect-2026-05-17", Project: "moe", Workflow: "twin", Status: run.StatusInProgress}
+	chatMD := &run.Metadata{ID: "groom-2026-05-17", Project: "moe", Workflow: "chat", Status: run.StatusInProgress}
 	writeStageCanvas(t, root, sdlcMD, "code", closeGatedCodeCanvas)
-	writeStageCanvas(t, root, twinMD, "vision", closeGatedCodeCanvas)
+	writeStageCanvas(t, root, chatMD, "chat", closeGatedCodeCanvas)
 	writeStageCanvas(t, root, sdlcMD, "design", readyReviewCanvas)
 	writeStageCanvas(t, root, sdlcMD, "review", "# Review\n\n## Gate\n\n```json\n{\"status\":\n```\n")
 
@@ -265,7 +264,7 @@ func TestStageNominatedCloseScope(t *testing.T) {
 		want  bool
 	}{
 		{"sdlc close gate", sdlcMD, "code", true},
-		{"twin is out of scope", twinMD, "vision", false},
+		{"non-sdlc is out of scope", chatMD, "chat", false},
 		{"ready gate", sdlcMD, "design", false},
 		{"unparseable gate", sdlcMD, "review", false},
 		{"missing canvas", sdlcMD, "test", false},

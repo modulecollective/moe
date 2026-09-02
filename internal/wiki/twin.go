@@ -20,23 +20,14 @@ func TwinDir(root, projectID string) string {
 	return filepath.Join(root, "projects", projectID, TwinDirRel)
 }
 
-// TwinReferenceSection emits a system-prompt block that names the
+// TwinReferenceSectionAt emits a system-prompt block that names the
 // project's digital twin and tells the agent to read it before doing
 // substantive work. Reference, not splice — the agent decides what to
-// read each turn rather than the engine inflating every prompt with
-// the full twin contents.
+// read each turn rather than every prompt carrying the full twin.
 //
 // Returns "" when the project has no digital-twin/ dir on disk.
 // Stages don't need to branch on this: empty input concatenates
 // cleanly into buildSystemPrompt's section join.
-func TwinReferenceSection(cfg Config) string {
-	return TwinReferenceSectionAt(cfg.BureaucracyPath, cfg.Project)
-}
-
-// TwinReferenceSectionAt is the path-driven variant of
-// TwinReferenceSection. Useful for callers that don't have a wiki
-// Config in hand (e.g. an sdlc stage session with no wiki of its own
-// that still wants the twin reference for context).
 func TwinReferenceSectionAt(root, projectID string) string {
 	if root == "" || projectID == "" {
 		return ""

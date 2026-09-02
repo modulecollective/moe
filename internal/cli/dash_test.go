@@ -250,67 +250,6 @@ func TestDashClosedRunShowsClosed(t *testing.T) {
 	}
 }
 
-// TestDashTwinRunAfterFinalizeShowsDoneNeedsClose: a twin run that's
-// walked the full ladder has Next()==Done but Status==InProgress (twin
-// has no push). The run still needs an operator action (`moe twin
-// close`) to land in COMPLETED, so dash surfaces it in ACTIVE with a
-// `· close?` action hint — same shape as the `· reopen?` hint on closed
-// sdlc runs.
-func TestDashTwinRunAfterFinalizeShowsDoneNeedsClose(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-
-	trailerstest.SeedRun(t, root, "tele", "lookup", "twin", run.StatusInProgress)
-	t0 := time.Now().UTC().Add(-2 * 24 * time.Hour)
-	for i, stage := range twinStageOrder {
-		trailerstest.CommitWorkTurnAt(t, root, "tele", "lookup", "twin", stage, t0.Add(time.Duration(i)*time.Hour))
-	}
-	// finalize carries a stage gate, so a work turn alone leaves the run
-	// parked there. Fill the two sections it reads.
-	writeContent(t, root, "tele", "lookup", "finalize",
-		"# Finalize\n\n## What I fixed\n\nRepointed one xref.\n\n## What I left\n\nNothing.\n")
-
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
-	if !strings.Contains(got, "ACTIVE (1)") {
-		t.Fatalf("expected done twin run to surface in ACTIVE awaiting close, got:\n%s", got)
-	}
-	if !strings.Contains(got, "twin:done · close?") {
-		t.Fatalf("expected 'twin:done · close?' action hint, got:\n%s", got)
-	}
-}
-
-// TestDashTwinRunAfterVisionShowsVisionParked is the mirror-image
-// check: vision is written but architecture isn't yet. Under the
-// forward-walking rule vision has no successor turn after it, so the
-// run is parked at vision and dash renders `twin:vision` under ACTIVE —
-// same intuition as the sdlc parked-at-stage cases above.
-func TestDashTwinRunAfterVisionShowsVisionParked(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-
-	trailerstest.SeedRun(t, root, "tele", "lookup", "twin", run.StatusInProgress)
-	t0 := time.Now().UTC().Add(-2 * 24 * time.Hour)
-	trailerstest.CommitWorkTurnAt(t, root, "tele", "lookup", "twin", "vision", t0)
-
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	if got := out.String(); !containsRunRow(got, "tele", "lookup", "twin:vision") {
-		t.Fatalf("expected twin run row with stage 'twin:vision' (parked), got:\n%s", got)
-	}
-}
-
 // TestDashStaleInProgressRunSurfacesInActive: a 60-day-old in-progress
 // run shows up in ACTIVE *without* --all, carrying its real age. There
 // is no longer a dormancy filter — stale in-progress work is surfaced
@@ -728,7 +667,7 @@ func TestDashFilterByProject(t *testing.T) {
 }
 
 // TestDashFilterByWorkflow: two runs in the same project on different
-// workflows; `--workflow twin` keeps the twin row and drops the sdlc row.
+// workflows; `--workflow chat` keeps the chat row and drops the sdlc row.
 func TestDashFilterByWorkflow(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -736,22 +675,22 @@ func TestDashFilterByWorkflow(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
-	trailerstest.SeedRun(t, root, "tele", "lookup", "twin", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "lookup", "chat", run.StatusInProgress)
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"dash", "--workflow", "twin"}, &out, &errb)
+	code := Run([]string{"dash", "--workflow", "chat"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	got := out.String()
 	if !strings.Contains(got, "ACTIVE (1)") {
-		t.Fatalf("expected one active row after --workflow twin, got:\n%s", got)
+		t.Fatalf("expected one active row after --workflow chat, got:\n%s", got)
 	}
-	if !containsRunRow(got, "tele", "lookup", "twin:vision") {
+	if !containsRunRow(got, "tele", "lookup", "chat:open · resume?") {
 		t.Fatalf("expected tele/lookup row, got:\n%s", got)
 	}
 	if strings.Contains(got, "fix-it") {
-		t.Fatalf("did not expect sdlc/fix-it in --workflow twin view:\n%s", got)
+		t.Fatalf("did not expect sdlc/fix-it in --workflow chat view:\n%s", got)
 	}
 }
 
@@ -764,11 +703,11 @@ func TestDashFilterCombined(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "foo", "alpha", "sdlc", run.StatusInProgress)
-	trailerstest.SeedRun(t, root, "foo", "lookup", "twin", run.StatusInProgress)
-	trailerstest.SeedRun(t, root, "bar", "lookup", "twin", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "foo", "lookup", "chat", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "bar", "lookup", "chat", run.StatusInProgress)
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"dash", "--project", "foo", "--workflow", "twin"}, &out, &errb)
+	code := Run([]string{"dash", "--project", "foo", "--workflow", "chat"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -776,8 +715,8 @@ func TestDashFilterCombined(t *testing.T) {
 	if !strings.Contains(got, "ACTIVE (1)") {
 		t.Fatalf("expected one row at the intersection, got:\n%s", got)
 	}
-	if !containsRunRow(got, "foo", "lookup", "twin:vision") {
-		t.Fatalf("expected foo/lookup (twin) row, got:\n%s", got)
+	if !containsRunRow(got, "foo", "lookup", "chat:open · resume?") {
+		t.Fatalf("expected foo/lookup (chat) row, got:\n%s", got)
 	}
 	if strings.Contains(got, "alpha") {
 		t.Fatalf("did not expect foo/alpha (sdlc) in combined view:\n%s", got)

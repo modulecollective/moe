@@ -49,17 +49,6 @@ var stageGlyphs = map[string]string{
 	"code":           "⚙",
 	"test":           "✓",
 	"awaiting merge": "▶",
-	// Twin reflect ladder. The first five stages walk the five managed
-	// docs against the events list; finalize seals the pass. Glyphs
-	// pick legible silhouettes that read as "twin work" without
-	// duplicating the sdlc set — design's ⚒ and code's ⚙ already
-	// claim the obvious factory glyphs.
-	"vision":       "◇",
-	"architecture": "▦",
-	"patterns":     "❖",
-	"operations":   "◆",
-	"glossary":     "𝒢",
-	"finalize":     "◎",
 }
 
 const otherStageGlyph = "◉"

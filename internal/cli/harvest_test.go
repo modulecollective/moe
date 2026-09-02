@@ -28,7 +28,7 @@ func runStatus(t *testing.T, root, projectID, runID string) string {
 // workflows included, since `edit --chat` lets a session file captures
 // on a run whose close deliberately skips harvest.
 func TestHarvestCommandRegistered(t *testing.T) {
-	for _, wf := range []string{"sdlc", "chat", "twin", "idea", "intent"} {
+	for _, wf := range []string{"sdlc", "chat", "idea", "intent"} {
 		g, ok := groups[wf]
 		if !ok {
 			t.Fatalf("group %q not registered", wf)
@@ -227,11 +227,11 @@ func TestHarvestRejectsWrongWorkflow(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"twin", "harvest", "--no-edit", "tele/ship-it"}, &out, &errb)
+	code := Run([]string{"chat", "harvest", "--no-edit", "tele/ship-it"}, &out, &errb)
 	if code == 0 {
-		t.Fatalf("expected refusal harvesting a sdlc run as twin, stdout=%q", out.String())
+		t.Fatalf("expected refusal harvesting a sdlc run as chat, stdout=%q", out.String())
 	}
-	if !strings.Contains(errb.String(), "is a sdlc run, not twin") {
+	if !strings.Contains(errb.String(), "is a sdlc run, not chat") {
 		t.Fatalf("expected wrong-workflow error, got: %q", errb.String())
 	}
 }

@@ -128,7 +128,7 @@ func TestBuildSystemPromptInjectsSdlcDesignFragment(t *testing.T) {
 	root := newTestBureaucracy(t)
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
-	got, _, err := buildSystemPrompt(root, md, "design", "", false, nil)
+	got, _, err := buildSystemPrompt(root, md, "design", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestBuildSystemPromptInjectsSdlcCodeFragment(t *testing.T) {
 	root := newTestBureaucracy(t)
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
-	got, _, err := buildSystemPrompt(root, md, "code", "", false, nil)
+	got, _, err := buildSystemPrompt(root, md, "code", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +223,7 @@ func TestBuildSystemPromptMissingFragmentIsNotAnError(t *testing.T) {
 	wf := registerThrowawayWorkflow(t, "noFragment")
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: wf.Name}
-	got, _, err := buildSystemPrompt(root, md, "ghost", "", false, nil)
+	got, _, err := buildSystemPrompt(root, md, "ghost", "", false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestBuildSystemPromptOrdersSoulBeforeStageBeforeOperational(t *testing.T) {
 	root := newTestBureaucracy(t)
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
-	got, _, err := buildSystemPrompt(root, md, "design", "", false, nil)
+	got, _, err := buildSystemPrompt(root, md, "design", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,10 +297,10 @@ func assertPromptSectionsEndWithNewline(t *testing.T, got string, minSections in
 
 // TestBuildSystemPromptSectionsEndWithNewline is the originating
 // caller of assertPromptSectionsEndWithNewline. Every existing
-// optional section is wired in (soul, stage, twin reference,
-// operational core, wiki ingest); the upstream-change banner has its
-// own dedicated tests above and would require a prereq+prior-turn
-// fixture to fire here for marginal coverage.
+// optional section is wired in (soul, stage, twin reference, followups
+// reference, operational core); the upstream-change banner has its own
+// dedicated tests above and would require a prereq+prior-turn fixture
+// to fire here for marginal coverage.
 func TestBuildSystemPromptSectionsEndWithNewline(t *testing.T) {
 	root := newTestBureaucracy(t)
 
@@ -314,27 +314,12 @@ func TestBuildSystemPromptSectionsEndWithNewline(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Closed-schema wiki config → IngestPromptSection fires. Closed
-	// requires a non-empty ManagedDocs set; the contents don't matter
-	// for this test, only that the section is emitted.
-	wikiCfg := &wiki.Config{
-		Name:            "twin",
-		ContentDir:      twinDir,
-		Project:         "tele",
-		BureaucracyPath: root,
-		ManagedDocs: []wiki.ManagedDoc{
-			{Filename: "vision.md", Title: "Vision", Purpose: "what this is."},
-		},
-	}
-
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
-	got, _, err := buildSystemPrompt(root, md, "code", "", false, wikiCfg)
+	got, _, err := buildSystemPrompt(root, md, "code", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Five sections expected: soul, stage, twin reference, operational
-	// core, wiki ingest.
 	assertPromptSectionsEndWithNewline(t, got, 5)
 }
 
@@ -349,7 +334,7 @@ func TestBannerFiresWhenPrereqDocMovedAfterWorkTurn(t *testing.T) {
 	trailerstest.CommitWorkTurnAt(t, root, "tele", runID, "sdlc", "design", t0.Add(20*time.Second))
 
 	md := &run.Metadata{ID: runID, Project: "tele", Workflow: "sdlc"}
-	got, _, err := buildSystemPrompt(root, md, "code", "", false, nil)
+	got, _, err := buildSystemPrompt(root, md, "code", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +360,7 @@ func TestBannerSilentBeforeFirstWorkTurn(t *testing.T) {
 	trailerstest.CommitWorkTurnAt(t, root, "tele", runID, "sdlc", "design", time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC))
 
 	md := &run.Metadata{ID: runID, Project: "tele", Workflow: "sdlc"}
-	got, _, err := buildSystemPrompt(root, md, "code", "", false, nil)
+	got, _, err := buildSystemPrompt(root, md, "code", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +379,7 @@ func TestBannerSilentWhenPrereqDocMovedBeforeLastTurn(t *testing.T) {
 	trailerstest.CommitWorkTurnAt(t, root, "tele", runID, "sdlc", "code", t0.Add(20*time.Second))
 
 	md := &run.Metadata{ID: runID, Project: "tele", Workflow: "sdlc"}
-	got, _, err := buildSystemPrompt(root, md, "code", "", false, nil)
+	got, _, err := buildSystemPrompt(root, md, "code", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -412,7 +397,7 @@ func TestBannerSilentAtDesignStage(t *testing.T) {
 	trailerstest.CommitWorkTurnAt(t, root, "tele", runID, "sdlc", "design", time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC))
 
 	md := &run.Metadata{ID: runID, Project: "tele", Workflow: "sdlc"}
-	got, _, err := buildSystemPrompt(root, md, "design", "", false, nil)
+	got, _, err := buildSystemPrompt(root, md, "design", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -464,8 +449,8 @@ func TestRunStageSessionBannerShowsResolvedAgent(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			code := runStageSession("tele", "fix-it", "design", stageSessionOpts{
 				Agent: tc.explicit,
-				WikiBuilder: func(root string, md *run.Metadata) (*wiki.Config, error) {
-					return nil, errors.New("stop before executor")
+				InitialPromptBuilder: func(string) (string, error) {
+					return "", errors.New("stop before executor")
 				},
 			}, &stdout, &stderr)
 			if code == 0 {
@@ -820,66 +805,18 @@ func TestCommitTurnNoOpTurnReturnsErrNothingToCommit(t *testing.T) {
 	}
 }
 
-// TestReportWikiSessionExitNonZeroOnFinalizeError pins the contract
-// the twin-dash-never-reflected-bug run was opened against: when
-// FinalizeIngest fails, the session exits non-zero so the operator
-// notices, but the per-turn commit is still reported as having
-// landed. Before the fix, finalize errors only logged a stderr line
-// and the session exited 0 — silently letting checkpoint.json /
-// log.md drift from disk and producing the dash's "never reflected"
-// misreport hours later.
-func TestReportWikiSessionExitNonZeroOnFinalizeError(t *testing.T) {
-	in := wikiSessionInputs{Project: "moe", RunSlug: "r", DocID: "reflect"}
-	finalizeErr := errors.New("wiki: closed-schema has unexpected top-level doc history-summary.md")
-	var stdout, stderr bytes.Buffer
-	code := reportWikiSessionExit(in, nil, nil, nil, finalizeErr, nil, &stdout, &stderr)
-	if code != 1 {
-		t.Errorf("exit code = %d, want 1 on finalize error", code)
-	}
-	// Per-turn commit succeeded (commitErr nil), so the operator still
-	// sees the "committed turn" line — finalize failure is loud but
-	// doesn't masquerade as a commit failure.
-	if !strings.Contains(stdout.String(), "committed reflect turn for moe/r") {
-		t.Errorf("stdout missing committed-turn line: %q", stdout.String())
-	}
-}
-
 // TestReportWikiSessionExitZeroOnHappyPath is the negative control:
 // no errors → exit 0. Without it the previous test could pass
 // trivially against a function that always returns 1.
 func TestReportWikiSessionExitZeroOnHappyPath(t *testing.T) {
 	in := wikiSessionInputs{Project: "moe", RunSlug: "r", DocID: "reflect"}
 	var stdout, stderr bytes.Buffer
-	code := reportWikiSessionExit(in, nil, nil, nil, nil, nil, &stdout, &stderr)
+	code := reportWikiSessionExit(in, nil, nil, nil, &stdout, &stderr)
 	if code != 0 {
 		t.Errorf("exit code = %d, want 0 on clean run", code)
 	}
 	if stderr.Len() != 0 {
 		t.Errorf("stderr non-empty on clean run: %q", stderr.String())
-	}
-}
-
-// TestReportWikiSessionExitGateBlocksWithoutCommit pins reflect's
-// post-flight gate contract: a non-nil gateErr forces exit 1, the
-// "no commit happened" branch fires (we deliberately skipped both
-// FinalizeIngest and CommitStager), and the misleading "committed
-// turn" line is suppressed. Catches a regression where a future
-// refactor wires the gate up but forgets to teach the exit reporter
-// that gateErr means "no commit was attempted" rather than "commit
-// succeeded."
-func TestReportWikiSessionExitGateBlocksWithoutCommit(t *testing.T) {
-	in := wikiSessionInputs{Project: "moe", RunSlug: "r", DocID: "reflect"}
-	gateErr := errors.New("reflect: post-flight scan found 2 unresolved findings")
-	var stdout, stderr bytes.Buffer
-	code := reportWikiSessionExit(in, nil, nil, nil, nil, gateErr, &stdout, &stderr)
-	if code != 1 {
-		t.Errorf("exit code = %d, want 1 when gate fires", code)
-	}
-	if strings.Contains(stdout.String(), "committed reflect turn for moe r") {
-		t.Errorf("gate fired but stdout claims commit landed: %q", stdout.String())
-	}
-	if strings.Contains(stdout.String(), "no document changes") {
-		t.Errorf("gate fired but stdout claims no-op: %q", stdout.String())
 	}
 }
 
@@ -904,7 +841,7 @@ func TestReportWikiSessionExitNamesAgentInExitLine(t *testing.T) {
 			in := wikiSessionInputs{Project: "moe", RunSlug: "r", DocID: "push", Agent: tc.agent}
 			runErr := errors.New("turn.failed")
 			var stdout, stderr bytes.Buffer
-			code := reportWikiSessionExit(in, runErr, nil, nil, nil, nil, &stdout, &stderr)
+			code := reportWikiSessionExit(in, runErr, nil, nil, &stdout, &stderr)
 			if code != 1 {
 				t.Errorf("exit code = %d, want 1 on run error", code)
 			}
@@ -934,7 +871,7 @@ func TestReportWikiSessionExitInterruptedReturns130(t *testing.T) {
 	// Wrap the sentinel to prove errors.Is, not ==, is the check —
 	// runErr threads through several layers before reaching here.
 	runErr := fmt.Errorf("execute turn: %w", agent.ErrInterrupted)
-	code := reportWikiSessionExit(in, runErr, nil, nil, nil, nil, &stdout, &stderr)
+	code := reportWikiSessionExit(in, runErr, nil, nil, &stdout, &stderr)
 	if code != exitInterrupted {
 		t.Errorf("exit code = %d, want %d (exitInterrupted) on operator Ctrl-C", code, exitInterrupted)
 	}
@@ -944,7 +881,7 @@ func TestReportWikiSessionExitInterruptedReturns130(t *testing.T) {
 	// A genuine non-interrupt failure must still be the bare 1 — the
 	// negative control so the test can't pass against a function that
 	// always returns 130.
-	plain := reportWikiSessionExit(in, errors.New("turn.failed"), nil, nil, nil, nil, &stdout, &stderr)
+	plain := reportWikiSessionExit(in, errors.New("turn.failed"), nil, nil, &stdout, &stderr)
 	if plain != 1 {
 		t.Errorf("exit code = %d, want 1 on an ordinary run failure", plain)
 	}
@@ -958,7 +895,7 @@ func TestReportWikiSessionExitInterruptedReturns130(t *testing.T) {
 func TestReportWikiSessionExitNothingToCommitIsCleanExit(t *testing.T) {
 	in := wikiSessionInputs{Project: "moe", RunSlug: "r", DocID: "reflect"}
 	var stdout, stderr bytes.Buffer
-	code := reportWikiSessionExit(in, nil, run.ErrNothingToCommit, nil, nil, nil, &stdout, &stderr)
+	code := reportWikiSessionExit(in, nil, run.ErrNothingToCommit, nil, &stdout, &stderr)
 	if code != 0 {
 		t.Errorf("exit code = %d, want 0 on nothing-to-commit", code)
 	}
@@ -987,7 +924,7 @@ func TestReportWikiSessionExitPrintsBothCommitAndCloseErrors(t *testing.T) {
 		CanvasPath:   "projects/moe/runs/r/documents/design/content.md",
 	}
 	var stdout, stderr bytes.Buffer
-	code := reportWikiSessionExit(in, nil, commitErr, closeErr, nil, nil, &stdout, &stderr)
+	code := reportWikiSessionExit(in, nil, commitErr, closeErr, &stdout, &stderr)
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1 when commit and close both fail", code)
 	}
@@ -1024,7 +961,7 @@ func TestReportWikiSessionExitInterruptWinsOverCommitAndClose(t *testing.T) {
 		CanvasPath:   "projects/moe/runs/r/documents/design/content.md",
 	}
 	var stdout, stderr bytes.Buffer
-	code := reportWikiSessionExit(in, runErr, commitErr, closeErr, nil, nil, &stdout, &stderr)
+	code := reportWikiSessionExit(in, runErr, commitErr, closeErr, &stdout, &stderr)
 	if code != exitInterrupted {
 		t.Errorf("exit code = %d, want %d — the interrupt is the dominant intent", code, exitInterrupted)
 	}
@@ -1054,7 +991,7 @@ func TestCloseErrorPrintsOneSessionClosePrefix(t *testing.T) {
 	t.Run("reportWikiSessionExit", func(t *testing.T) {
 		in := wikiSessionInputs{Project: "moe", RunSlug: "r", DocID: "code"}
 		var stdout, stderr bytes.Buffer
-		if code := reportWikiSessionExit(in, nil, nil, closeErr, nil, nil, &stdout, &stderr); code != 1 {
+		if code := reportWikiSessionExit(in, nil, nil, closeErr, &stdout, &stderr); code != 1 {
 			t.Errorf("exit code = %d, want 1 on close error", code)
 		}
 		assertOneSessionClosePrefix(t, stderr.String())
@@ -1071,146 +1008,6 @@ func assertOneSessionClosePrefix(t *testing.T, stderr string) {
 	t.Helper()
 	if n := strings.Count(stderr, "session close:"); n != 1 {
 		t.Errorf("stderr has %d %q prefixes, want exactly 1: %q", n, "session close:", stderr)
-	}
-}
-
-// TestRunWikiSessionFailsFastOnBootstrapError pins the contract this
-// run was opened to restore: when EnsureManagedDocs returns a real
-// error (here, the synchronous "closed-schema requires ManagedDocs to
-// be non-empty" guard at bootstrap.go:24), runWikiSession must surface
-// it as exit 1, tear the session worktree down via closeSess, and
-// never reach the executor / commit / finalize. Before the fix, the
-// error was logged to stderr and the session continued anyway, so the
-// operator saw a downstream invariant breach at finalize instead of
-// the bootstrap root cause.
-func TestRunWikiSessionFailsFastOnBootstrapError(t *testing.T) {
-	root := newTestBureaucracy(t)
-
-	var reachedAfterBootstrap bool
-	in := wikiSessionInputs{
-		Project:     "moe",
-		RunSlug:     "bootstrap-fail",
-		DocID:       "design",
-		LockPurpose: "stage",
-		WikiBuilder: func(canonicalRoot string) (*wiki.Config, error) {
-			// Empty ManagedDocs is the cleanest trigger: bootstrap
-			// returns the error before any I/O, so the test doesn't
-			// need permission games.
-			return &wiki.Config{
-				Name:            "twin",
-				ContentDir:      filepath.Join(canonicalRoot, "projects", "moe", "twin"),
-				BureaucracyPath: canonicalRoot,
-			}, nil
-		},
-		BuildSpec: func(workRoot string) (wikiTurnSpec, error) {
-			return wikiTurnSpec{
-				BuildPrompt: func(workRoot string, worktreeWiki *wiki.Config) (string, error) {
-					reachedAfterBootstrap = true
-					return "", errors.New("BuildPrompt should not be reached after bootstrap failure")
-				},
-				CommitStager: func(workRoot, wikiRel string) error {
-					reachedAfterBootstrap = true
-					return nil
-				},
-			}, nil
-		},
-	}
-
-	var stdout, stderr bytes.Buffer
-	code := runWikiSession(root, in, &stdout, &stderr)
-	if code != 1 {
-		t.Fatalf("exit code = %d, want 1 on bootstrap failure (stderr=%q)", code, stderr.String())
-	}
-	if reachedAfterBootstrap {
-		t.Error("session continued past failed bootstrap; fail-fast didn't fire")
-	}
-	if !strings.Contains(stderr.String(), "ManagedDocs to be non-empty") {
-		t.Errorf("stderr missing bootstrap root cause: %q", stderr.String())
-	}
-	// closeSess fires, but its canvas-unchanged gate refuses the
-	// fast-forward (the session never wrote a canvas — same shape
-	// as the cascade footgun this run targets) and leaves the
-	// worktree intact so the operator can recover. The previous
-	// silent-Abandon behavior on zero-commit branches is by design
-	// gone — the operator should see the loud refusal alongside the
-	// bootstrap root cause.
-	if !strings.Contains(stderr.String(), "unchanged from main") {
-		t.Errorf("stderr missing canvas-unchanged refusal from closeSess: %q", stderr.String())
-	}
-	branch := "session/moe/bootstrap-fail/design"
-	out := gittest.Output(t, root, "worktree", "list")
-	if !strings.Contains(out, branch) {
-		t.Errorf("worktree for %s should remain after canvas-unchanged refusal:\n%s", branch, out)
-	}
-}
-
-// TestRunWikiSessionBuildsInitialPromptAgainstWorktree pins the fix the
-// twin-pooped-in-bureaucracy run was opened against: a deferred
-// InitialPromptBuilder must receive the *worktree-rewritten* wiki cfg,
-// not the canonical one. Reflect bakes absolute bureaucracy paths (the
-// history summary, the managed docs) into the agent's first instruction;
-// before this fix the kickoff was assembled against the canonical root
-// before the worktree existed, the agent followed the canonical path,
-// and a reflect pass edited the operator's live checkout. The builder
-// now runs after the rewrite, so the cfg it sees must point inside
-// <root>/.moe/worktrees/<uuid>/ and never at the canonical content dir.
-func TestRunWikiSessionBuildsInitialPromptAgainstWorktree(t *testing.T) {
-	root := newTestBureaucracy(t)
-	canonicalContentDir := filepath.Join(root, "projects", "moe", "digital-twin")
-
-	var gotWorkRoot string
-	var gotCfg *wiki.Config
-	in := wikiSessionInputs{
-		Project:     "moe",
-		RunSlug:     "kickoff-binding",
-		DocID:       "vision",
-		LockPurpose: "stage",
-		WikiBuilder: func(canonicalRoot string) (*wiki.Config, error) {
-			// One managed doc, no fixture on disk: EnsureManagedDocs
-			// stubs it inside the worktree and the turn reaches the
-			// builder — which is exactly the path under test.
-			return &wiki.Config{
-				Name:            "twin",
-				ContentDir:      canonicalContentDir,
-				BureaucracyPath: canonicalRoot,
-				ManagedDocs:     []wiki.ManagedDoc{{Filename: "vision.md", Title: "Vision"}},
-			}, nil
-		},
-		BuildSpec: func(workRoot string) (wikiTurnSpec, error) {
-			return wikiTurnSpec{
-				InitialPromptBuilder: func(workRoot string, worktreeWiki *wiki.Config, stubbed bool) (string, error) {
-					gotWorkRoot = workRoot
-					gotCfg = worktreeWiki
-					return "kickoff", nil
-				},
-				// Fail fast right after the builder captures so the test
-				// never needs a real agent / executor.
-				BuildPrompt: func(string, *wiki.Config) (string, error) {
-					return "", errors.New("stop before executor")
-				},
-			}, nil
-		},
-	}
-
-	var stdout, stderr bytes.Buffer
-	runWikiSession(root, in, &stdout, &stderr)
-
-	if gotCfg == nil {
-		t.Fatalf("InitialPromptBuilder never ran (stderr=%q)", stderr.String())
-	}
-	if !strings.Contains(gotWorkRoot, filepath.Join(".moe", "worktrees")) {
-		t.Errorf("builder workRoot %q is not a session worktree", gotWorkRoot)
-	}
-	// The whole point: the cfg the builder renders against lives inside
-	// the worktree, not the operator's canonical checkout.
-	if gotCfg.ContentDir == canonicalContentDir {
-		t.Errorf("builder got the canonical ContentDir %q; want the worktree copy", gotCfg.ContentDir)
-	}
-	if !strings.HasPrefix(gotCfg.ContentDir, gotWorkRoot) {
-		t.Errorf("builder ContentDir %q not under worktree %q", gotCfg.ContentDir, gotWorkRoot)
-	}
-	if gotCfg.BureaucracyPath != gotWorkRoot {
-		t.Errorf("builder BureaucracyPath = %q, want worktree root %q", gotCfg.BureaucracyPath, gotWorkRoot)
 	}
 }
 

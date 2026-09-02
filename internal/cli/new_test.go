@@ -716,12 +716,12 @@ func TestRunNewShipRefusedWithoutDispatcher(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	prev := cascadeDispatchers["twin"]
-	delete(cascadeDispatchers, "twin")
-	t.Cleanup(func() { cascadeDispatchers["twin"] = prev })
+	prev := cascadeDispatchers[sdlcWorkflow]
+	delete(cascadeDispatchers, sdlcWorkflow)
+	t.Cleanup(func() { cascadeDispatchers[sdlcWorkflow] = prev })
 
 	var out, errb bytes.Buffer
-	code := runNew("twin", []string{"--ship", "tele/no-cascade"}, &out, &errb)
+	code := runNew(sdlcWorkflow, []string{"--ship", "tele/no-cascade"}, &out, &errb)
 	if code != 2 {
 		t.Fatalf("expected usage exit (2), got %d stderr=%q", code, errb.String())
 	}

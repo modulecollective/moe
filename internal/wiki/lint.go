@@ -278,7 +278,7 @@ const xrefPathSeparator = "→"
 // heading"` in managed docs whose quoted span names nothing in the
 // cited doc. Twin docs cite each other by quoted section heading
 // rather than line number, and a heading rename is the cheapest edit a
-// reflect pass makes — nothing in that pass's own diff shows the
+// twin-touching turn makes — nothing in that turn's own diff shows the
 // pointers it stranded. This is the check that makes "a rename strands
 // no pointers" enforceable — for renames and for section moves alike
 // (see xrefResolves), and for continuation citations that name their
@@ -406,8 +406,8 @@ type xrefCitation struct {
 // twin's prose quotes ("operator", "What was verified") all sit ahead
 // of any citation on their logical line, so they stay unbound and
 // unchecked. A prose quote written *after* a citation on one logical
-// line would flag; the finding lands in the reflect kickoff, where
-// rephrasing it is an inline edit.
+// line would flag; the finding lands in the hygiene gate's report,
+// where rephrasing it is an inline edit.
 func xrefCitations(pattern *regexp.Regexp, line string) []xrefCitation {
 	type bound struct {
 		start, end int // byte range of the quoted span, quotes included
@@ -487,7 +487,7 @@ func xrefCatalogue(body string) []xrefEntry {
 // segment must name an entry *inside* the previous segment's section.
 //
 // Section scoping is what catches the failure this check exists for. A
-// reflect pass moved architecture.md's `internal/…` package leads out
+// past pass moved architecture.md's `internal/…` package leads out
 // of `## Components` into a new `## Domain packages`; both sections
 // survived, so twelve glossary pointers reading "Components →
 // internal/dash" still resolved segment-by-segment against a doc where

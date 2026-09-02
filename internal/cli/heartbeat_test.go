@@ -445,7 +445,7 @@ func TestRideAuthored(t *testing.T) {
 	}{
 		{"stage turn", "work: update code\n\nMoE-Workflow: sdlc\nMoE-Consent: dynamic\n", true},
 		{"push merge", "push: moe/a-ride merged\n\nMoE-Workflow: sdlc\nMoE-Merged: 1\n", true},
-		{"twin reflect", "work: update architecture\n\nMoE-Workflow: twin\nMoE-Consent: dynamic\n", true},
+		{"chat turn", "work: update architecture\n\nMoE-Workflow: chat\nMoE-Consent: dynamic\n", true},
 		{"the sweep's own close", "Close pulse run moe/pulse-1\n\nMoE-Workflow: pulse\n", false},
 		{"a groom", "Tag idea moe/an-idea (sdlc)\n\nMoE-Workflow: idea\n", false},
 		{"an intent edit", "work: update intent\n\nMoE-Workflow: intent\n", false},
@@ -1030,17 +1030,6 @@ func TestParkedLegSeesATaggedIdea(t *testing.T) {
 
 	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe", false); got != want {
 		t.Errorf("parkedKickableThread = %q, want %q — a tagged idea is licensed work, not an empty board", got, want)
-	}
-}
-
-// TestParkedLegSeesATwinTaggedIdea: a `(twin)` tag resolves through the
-// reflect nomination rather than a promotion, and that is still motion.
-func TestParkedLegSeesATwinTaggedIdea(t *testing.T) {
-	root := quietFixture(t)
-	want := parkTaggedIdea(t, root, "boundary-moved", "twin")
-
-	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe", false); got != want {
-		t.Errorf("parkedKickableThread = %q, want %q", got, want)
 	}
 }
 

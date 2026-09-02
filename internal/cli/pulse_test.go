@@ -461,7 +461,7 @@ func TestBuildSystemPromptInjectsPulseFragment(t *testing.T) {
 		Project:  "moe",
 		Workflow: pulseWorkflow,
 	}
-	got, _, err := buildSystemPrompt(root, md, pulseDoc, "", false, nil)
+	got, _, err := buildSystemPrompt(root, md, pulseDoc, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -705,28 +705,10 @@ func TestPulseSurveyFailureLeavesRunOpenButDoesNotBlock(t *testing.T) {
 	}
 }
 
-// twinRuns returns id→status for a project's twin-workflow runs — the
-// reflect runs the pulse gate can auto-spawn.
-func twinRuns(t *testing.T, root, projectID string) map[string]string {
-	t.Helper()
-	mds, err := run.Scan(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	out := map[string]string{}
-	for _, md := range mds {
-		if md.Project == projectID && md.Workflow == "twin" {
-			out[md.ID] = md.Status
-		}
-	}
-	return out
-}
-
 // TestPulseSurveyUnfilledGateLeavesRunOpen: a survey that exits 0 but
 // leaves the gate on its unparsable skeleton placeholder (a no-op turn,
 // or a crash after writing nothing) must NOT auto-close. The run lingers
-// on the dash's ACTIVE list — escalation by visibility — and no reflect
-// is spawned off a sweep that never concluded.
+// on the dash's ACTIVE list — escalation by visibility.
 //
 // It reports out non-zero too: a vendor that hangs up mid-turn doesn't
 // reliably exit non-zero, so this is the shape a plan-limit night can
@@ -752,115 +734,8 @@ func TestPulseSurveyUnfilledGateLeavesRunOpen(t *testing.T) {
 	if open := openPulseRuns(t, root, "moe"); len(open) != 1 {
 		t.Fatalf("open pulse runs = %v, want one left open by the unfilled gate", open)
 	}
-	if tw := twinRuns(t, root, "moe"); len(tw) != 0 {
-		t.Fatalf("twin runs = %v, want none minted off an unfilled gate", tw)
-	}
 	if !strings.Contains(errb.String(), "unfilled gate") {
 		t.Errorf("stderr = %q, want an unfilled-gate warning", errb.String())
-	}
-}
-
-// TestPulseSurveyTwinSpawnMintsReflect: a spawn entry asking for
-// workflow "twin" mints a parked twin reflect run stamped with the pulse
-// as its spawner, and the pulse still auto-closes — opening rides the
-// pulse, execution stays a human pull.
-func TestPulseSurveyTwinSpawnMintsReflect(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	trailerstest.SeedProject(t, root, "moe")
-
-	orig := openPulse
-	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
-		writePulseGate(t, root, projectID, runID,
-			`{"status": "ok", "loose": [{"slug": "reflect", "workflow": "twin", "why": "boundary move the twin docs miss"}]}`)
-		return surveyOutcome{code: 0, agentStarted: true}
-	}
-	t.Cleanup(func() { openPulse = orig })
-
-	if code := runPulseSurvey(root, "moe", "" /*emitRun*/, nil /*pi*/, io.Discard, io.Discard); code != 0 {
-		t.Fatalf("survey exit=%d, want 0", code)
-	}
-
-	// The pulse auto-closed…
-	if open := openPulseRuns(t, root, "moe"); len(open) != 0 {
-		t.Fatalf("open pulse runs = %v, want none — a due verdict must not block auto-close", open)
-	}
-	// …and a single parked reflect run was minted.
-	tw := twinRuns(t, root, "moe")
-	if len(tw) != 1 {
-		t.Fatalf("twin runs = %v, want exactly one auto-spawned reflect", tw)
-	}
-	var reflectID string
-	for id, status := range tw {
-		reflectID = id
-		if status != run.StatusInProgress {
-			t.Errorf("reflect run %s status=%q, want in_progress (parked)", id, status)
-		}
-	}
-	// Find the pulse run's slug so we can assert the spawn edge points at it.
-	var pulseID string
-	mds, err := run.Scan(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, md := range mds {
-		if md.Project == "moe" && md.Workflow == pulseWorkflow {
-			pulseID = md.ID
-		}
-	}
-	if pulseID == "" {
-		t.Fatal("no pulse run found")
-	}
-	var reflectMD *run.Metadata
-	for i := range mds {
-		if mds[i].ID == reflectID {
-			reflectMD = mds[i]
-		}
-	}
-	wantSpawner := "moe/" + pulseID
-	if reflectMD.SpawnedBy != wantSpawner {
-		t.Fatalf("reflect SpawnedBy = %q, want the qualified pulse slug %q", reflectMD.SpawnedBy, wantSpawner)
-	}
-	idx, err := run.BuildJournalIndex(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := idx.SpawnedBy["moe/"+reflectID]; got != wantSpawner {
-		t.Fatalf("index SpawnedBy[moe/%s] = %q, want %q (MoE-Spawned-By trailer missing?)", reflectID, got, wantSpawner)
-	}
-}
-
-// TestPulseSurveyTwinSpawnSkipsWhenTwinInProgress: a twin spawn entry is
-// a silent no-op when a twin pass is already open (a parked prior reflect
-// counts — parked runs are in_progress). No second reflect is minted, and
-// the pulse still auto-closes.
-func TestPulseSurveyTwinSpawnSkipsWhenTwinInProgress(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	trailerstest.SeedProject(t, root, "moe")
-	// A reflect already parked for this project.
-	writeRunMeta(t, root, "moe", "reflect-2026-05-14", "twin")
-
-	orig := openPulse
-	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
-		writePulseGate(t, root, projectID, runID,
-			`{"status": "ok", "loose": [{"slug": "reflect", "workflow": "twin", "why": "drift piled up"}]}`)
-		return surveyOutcome{code: 0, agentStarted: true}
-	}
-	t.Cleanup(func() { openPulse = orig })
-
-	if code := runPulseSurvey(root, "moe", "" /*emitRun*/, nil /*pi*/, io.Discard, io.Discard); code != 0 {
-		t.Fatalf("survey exit=%d, want 0", code)
-	}
-	if open := openPulseRuns(t, root, "moe"); len(open) != 0 {
-		t.Fatalf("open pulse runs = %v, want none — the skip must not block auto-close", open)
-	}
-	tw := twinRuns(t, root, "moe")
-	if len(tw) != 1 {
-		t.Fatalf("twin runs = %v, want the single pre-existing reflect (no second mint)", tw)
-	}
-	if _, ok := tw["reflect-2026-05-14"]; !ok {
-		t.Fatalf("twin runs = %v, want the pre-seeded reflect-2026-05-14 untouched", tw)
 	}
 }
 

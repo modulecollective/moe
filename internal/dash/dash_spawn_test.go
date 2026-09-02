@@ -135,7 +135,7 @@ func TestSpawnDepth2ChainRendersThreeRows(t *testing.T) {
 	runs := []*run.Metadata{
 		closedRun("p", "ship-it", "sdlc"),
 		closedRun("p", "pulse-1", "pulse"),
-		closedRun("p", "reflect-1", "twin"),
+		closedRun("p", "reflect-1", "chat"),
 	}
 	when := map[string]time.Time{
 		"p/ship-it":   base.Add(-3 * time.Hour),
@@ -207,7 +207,7 @@ func TestSpawnOpenMidChainNestsUnderActivePulse(t *testing.T) {
 	runs := []*run.Metadata{
 		closedRun("p", "ship-it", "sdlc"),
 		{ID: "pulse-1", Project: "p", Workflow: "pulse", Status: run.StatusInProgress},
-		closedRun("p", "reflect-1", "twin"),
+		closedRun("p", "reflect-1", "chat"),
 	}
 	when := map[string]time.Time{
 		"p/ship-it":   base.Add(-3 * time.Hour),
@@ -250,7 +250,7 @@ func TestSpawnChainWithSiblingKeepsLineageOrder(t *testing.T) {
 	runs := []*run.Metadata{
 		closedRun("p", "ship-it", "sdlc"),
 		closedRun("p", "pulse-old", "pulse"),
-		closedRun("p", "reflect-1", "twin"),
+		closedRun("p", "reflect-1", "chat"),
 		closedRun("p", "pulse-new", "pulse"),
 	}
 	when := map[string]time.Time{
@@ -409,7 +409,7 @@ func TestSpawnOpenGrandchildHintsOnNestedRow(t *testing.T) {
 	runs := []*run.Metadata{
 		closedRun("p", "ship-it", "sdlc"),
 		closedRun("p", "pulse-1", "pulse"),
-		{ID: "reflect-1", Project: "p", Workflow: "twin", Status: run.StatusInProgress},
+		{ID: "reflect-1", Project: "p", Workflow: "chat", Status: run.StatusInProgress},
 	}
 	when := map[string]time.Time{
 		"p/ship-it":   base.Add(-3 * time.Hour),
@@ -516,7 +516,7 @@ func TestTailSweepSplicesIntoChainFlow(t *testing.T) {
 		closedRun("p", "hop-one", "sdlc"),
 		closedRun("p", "hop-two", "sdlc"),
 		closedRun("p", "pulse-1", "pulse"),
-		closedRun("p", "reflect-1", "twin"),
+		closedRun("p", "reflect-1", "chat"),
 	}
 	when := map[string]time.Time{
 		"p/hop-one":   base.Add(-4 * time.Hour),

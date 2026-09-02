@@ -226,8 +226,7 @@ type choreNotOpenableError struct {
 	Reason string
 	// OpenRun is the run already holding this chore, when that is what
 	// forbade the open, and "" otherwise. The pulse's judged nomination
-	// maps onto it — the same shape reflectRefusal.slug carries for a
-	// reflect nomination — so a `chore` spec written at a thread position
+	// maps onto it — so a `chore` spec written at a thread position
 	// places the existing run instead of dropping.
 	OpenRun string
 }

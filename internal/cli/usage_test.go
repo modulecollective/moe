@@ -148,7 +148,7 @@ func TestUsageByRunGroupsQualifiedRunsAndConservesTotals(t *testing.T) {
 	root := newTestBureaucracy(t)
 	now := time.Now().Local()
 	seedRun(t, root, "alpha", "shared", "sdlc", run.StatusMerged, now, nil)
-	seedRun(t, root, "beta", "shared", "twin", run.StatusClosed, now, nil)
+	seedRun(t, root, "beta", "shared", "chat", run.StatusClosed, now, nil)
 	seedRun(t, root, "gamma", "small", "sdlc", run.StatusMerged, now, nil)
 	gittest.Commit(t, root, "seed runs")
 	seedThread(t, root, "alpha", "shared", "design", "claude",

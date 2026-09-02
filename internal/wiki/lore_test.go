@@ -164,15 +164,3 @@ func TestLoreReferenceSectionStripsQuotes(t *testing.T) {
 		t.Errorf("expected unquoted applies-when in output, got:\n%s", got)
 	}
 }
-
-// LoreReferenceSection (Config-flavored) defers to the path-flavored
-// variant, same shape as TwinReferenceSection / TwinReferenceSectionAt.
-func TestLoreReferenceSectionFromConfig(t *testing.T) {
-	root := t.TempDir()
-	writeFile(t, filepath.Join(root, "lore", "x.md"),
-		"---\ntitle: From Config\napplies-when: always\n---\n")
-	got := LoreReferenceSection(Config{BureaucracyPath: root})
-	if !strings.Contains(got, "From Config") {
-		t.Errorf("LoreReferenceSection(cfg) missed entry, got:\n%s", got)
-	}
-}

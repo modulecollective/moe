@@ -107,16 +107,14 @@ func TestIdeaUntagClearsPromoteTo(t *testing.T) {
 	}
 }
 
-// TestIdeaTagOverwritesExistingTag: re-tagging is a legitimate operator
-// correction — a filer's `(twin)` nomination that should have been an
-// sdlc run — so the verb overwrites rather than refusing.
-func TestIdeaTagOverwritesExistingTag(t *testing.T) {
+// TestIdeaTagRetagIsIdempotent: re-tagging is a legitimate operator
+// correction, so the verb overwrites rather than refusing. Only one
+// staged chainable workflow exists to name, so the correction under
+// test is a re-stamp of the same tag.
+func TestIdeaTagRetagIsIdempotent(t *testing.T) {
 	root := tagFixture(t, "moe", "wrong-destination")
-	if code := Run([]string{"idea", "tag", "moe/wrong-destination", "twin"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
-		t.Fatal("setup twin tag failed")
-	}
-	if md := runJSON(t, root, "moe", "wrong-destination"); !strings.Contains(md, `"promote_to": "twin"`) {
-		t.Fatalf("setup did not stamp twin:\n%s", md)
+	if code := Run([]string{"idea", "tag", "moe/wrong-destination", "sdlc"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatal("setup tag failed")
 	}
 
 	var out, errb bytes.Buffer
@@ -124,7 +122,7 @@ func TestIdeaTagOverwritesExistingTag(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	if md := runJSON(t, root, "moe", "wrong-destination"); !strings.Contains(md, `"promote_to": "sdlc"`) {
-		t.Fatalf("promote_to not overwritten:\n%s", md)
+		t.Fatalf("promote_to not stamped:\n%s", md)
 	}
 }
 

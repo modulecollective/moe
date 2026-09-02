@@ -27,15 +27,6 @@ import (
 // content directory).
 var slugRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
-// twinEngineFiles are the non-doc files the wiki engine maintains under
-// digital-twin/; they're filtered out of the browsable twin doc list.
-// checkpoint.json isn't .md so it's already excluded, but log.md and
-// history-summary.md are.
-var twinEngineFiles = map[string]bool{
-	"log.md":             true,
-	"history-summary.md": true,
-}
-
 // crumb is one breadcrumb in a doc page's trail.
 type crumb struct {
 	Label string
@@ -178,8 +169,8 @@ func (s *Server) handleProjectsIndex(w http.ResponseWriter, r *http.Request) {
 			Ship:     string(project.ShipOf(p)),
 			Runs:     runCounts[p.ID],
 			Chores:   choreCounts[p.ID],
-			Topics:   countMarkdown(s.knowledgeTopicsDir(p.ID), nil),
-			TwinDocs: countMarkdown(wiki.TwinDir(s.opts.Root, p.ID), twinEngineFiles),
+			Topics:   countMarkdown(s.knowledgeTopicsDir(p.ID)),
+			TwinDocs: countMarkdown(wiki.TwinDir(s.opts.Root, p.ID)),
 		})
 	}
 	s.render(w, r, "projects_index.html", vm)
@@ -277,13 +268,13 @@ func (s *Server) handleProjectHub(w http.ResponseWriter, r *http.Request) {
 	for _, sh := range project.Ships {
 		vm.Ships = append(vm.Ships, string(sh))
 	}
-	vm.TopicCount = countMarkdown(s.knowledgeTopicsDir(projectID), nil)
+	vm.TopicCount = countMarkdown(s.knowledgeTopicsDir(projectID))
 	if _, err := os.Stat(filepath.Join(s.knowledgeDir(projectID), "index.md")); err == nil {
 		vm.HasKnowledge = true
 	}
 
 	twinDir := wiki.TwinDir(s.opts.Root, projectID)
-	for _, name := range listMarkdown(twinDir, twinEngineFiles) {
+	for _, name := range listMarkdown(twinDir) {
 		slug := strings.TrimSuffix(name, ".md")
 		vm.Twin = append(vm.Twin, twinDocVM{Name: slug})
 	}
@@ -398,7 +389,7 @@ func (s *Server) handleKnowledge(w http.ResponseWriter, r *http.Request) {
 	// Names + links only: no per-topic git provenance. gatherFileMeta is an
 	// N+1 of git subprocesses that does not belong on an index page; the
 	// "updated · run" badge lives on each topic's detail page instead.
-	for _, name := range listMarkdown(s.knowledgeTopicsDir(projectID), nil) {
+	for _, name := range listMarkdown(s.knowledgeTopicsDir(projectID)) {
 		slug := strings.TrimSuffix(name, ".md")
 		vm.Topics = append(vm.Topics, topicItemVM{Name: slug})
 	}
@@ -599,9 +590,9 @@ func readFileString(path string) string {
 	return string(b)
 }
 
-// listMarkdown returns the sorted .md filenames in dir, minus skip and
+// listMarkdown returns the sorted .md filenames in dir, minus
 // dot/underscore-prefixed files. Missing dir → nil.
-func listMarkdown(dir string, skip map[string]bool) []string {
+func listMarkdown(dir string) []string {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil
@@ -612,7 +603,7 @@ func listMarkdown(dir string, skip map[string]bool) []string {
 		if e.IsDir() || !strings.HasSuffix(name, ".md") {
 			continue
 		}
-		if strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") || skip[name] {
+		if strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") {
 			continue
 		}
 		names = append(names, name)
@@ -621,6 +612,6 @@ func listMarkdown(dir string, skip map[string]bool) []string {
 	return names
 }
 
-func countMarkdown(dir string, skip map[string]bool) int {
-	return len(listMarkdown(dir, skip))
+func countMarkdown(dir string) int {
+	return len(listMarkdown(dir))
 }

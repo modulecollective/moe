@@ -27,22 +27,15 @@ type loreEntry struct {
 	AppliesWhen string
 }
 
-// LoreReferenceSection emits a system-prompt block that catalogs the
+// LoreReferenceSectionAt emits a system-prompt block that catalogs the
 // bureaucracy's lore/ entries: one line per entry with title and
 // "applies-when" hint. The agent opens a specific file only when its
 // hint matches the current task — bodies stay on disk, not in the
 // prompt budget.
 //
-// Mirrors TwinReferenceSection's shape. Returns "" when lore/ doesn't
+// Mirrors TwinReferenceSectionAt's shape. Returns "" when lore/ doesn't
 // exist or has zero entries, so the empty case slots cleanly into the
 // section join in buildSystemPrompt.
-func LoreReferenceSection(cfg Config) string {
-	return LoreReferenceSectionAt(cfg.BureaucracyPath)
-}
-
-// LoreReferenceSectionAt is the path-driven variant of
-// LoreReferenceSection. Useful for callers (stage_prompt) that don't
-// hold a wiki Config.
 func LoreReferenceSectionAt(root string) string {
 	if root == "" {
 		return ""

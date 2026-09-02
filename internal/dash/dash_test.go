@@ -469,10 +469,10 @@ func TestMergedSDLCSuppressesReopenHintOnceReopened(t *testing.T) {
 // merged run of another workflow would advertise an action the operator
 // can't take.
 func TestMergedNonSDLCHasNoReopenHint(t *testing.T) {
-	md := &run.Metadata{ID: "reflect", Project: "moe", Workflow: "twin", Status: run.StatusMerged}
-	r := rowsByKey(t, []*run.Metadata{md}, nil, nil)["moe/reflect"]
-	if r.Note != "twin:merged" {
-		t.Fatalf("note=%q want %q", r.Note, "twin:merged")
+	md := &run.Metadata{ID: "groom", Project: "moe", Workflow: "chat", Status: run.StatusMerged}
+	r := rowsByKey(t, []*run.Metadata{md}, nil, nil)["moe/groom"]
+	if r.Note != "chat:merged" {
+		t.Fatalf("note=%q want %q", r.Note, "chat:merged")
 	}
 }
 

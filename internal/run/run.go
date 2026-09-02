@@ -480,7 +480,7 @@ func FollowupsPath(projectID, id string) string {
 
 // FeedbackDir returns the path (relative to the bureaucracy root) of a
 // run's feedback/ directory: sibling of run.json that holds free-form
-// notes workflow agents leave for downstream recipients (twin reflect,
+// notes workflow agents leave for downstream recipients (twin,
 // …). The directory is optional — a run that
 // never produces feedback never has one on disk.
 func FeedbackDir(projectID, id string) string {
@@ -489,7 +489,7 @@ func FeedbackDir(projectID, id string) string {
 
 // FeedbackPath returns the path (relative to the bureaucracy root) of a
 // per-recipient feedback file under a run's feedback/ directory. v1
-// callers pass "twin" so reflect picks the notes up on its next pass;
+// callers pass "twin" so the close-time harvest picks the notes up;
 // the recipient axis is the wedge that lets a future "moe" recipient
 // slot in without restructuring.
 func FeedbackPath(projectID, id, recipient string) string {

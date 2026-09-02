@@ -260,15 +260,8 @@ func spawnWhy(root, spawner, childSlug string) string {
 		}
 		// The harness dates a slug on collision ("foo" → "foo-2026-07-20"),
 		// so an exact match is the common case and a dated suffix is the
-		// collision case. A `twin` spec asks for a harness-minted
-		// `reflect-YYYY-MM-DD`, which matches neither — hence the
-		// workflow-keyed fallback below.
+		// collision case.
 		if s.Slug == childSlug || strings.HasPrefix(childSlug, s.Slug+"-") {
-			return strings.TrimSpace(s.Why)
-		}
-	}
-	for _, s := range specs {
-		if s.Workflow == "twin" && strings.HasPrefix(childSlug, "reflect") {
 			return strings.TrimSpace(s.Why)
 		}
 	}

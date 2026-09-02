@@ -37,7 +37,6 @@ import (
 	"github.com/modulecollective/moe/internal/stylesheet"
 	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/transcript"
-	"github.com/modulecollective/moe/internal/wiki"
 )
 
 // oneShotPromptDelimiter separates the assembled stage system prompt
@@ -54,9 +53,7 @@ const headlessTurnTimeout = 60 * time.Minute
 
 // stageSessionOpts carries the per-stage knobs runStageSession needs
 // beyond the run identifiers. Most stages just set NeedsSandbox and
-// InitialPrompt. Wiki-aware ingest stages (the twin's six)
-// supply WikiBuilder so the engine's prompt section, per-turn
-// staging, and FinalizeIngest hook all wire up automatically.
+// InitialPrompt.
 type stageSessionOpts struct {
 	// NeedsSandbox switches the per-run sandbox clone on. Code stages
 	// require it; document-only stages leave it false. Design stage
@@ -91,18 +88,14 @@ type stageSessionOpts struct {
 	// `claude -p` — typically the run title.
 	InitialPrompt string
 	// InitialPromptBuilder, when non-nil, supersedes InitialPrompt:
-	// runStageSession invokes it after the session worktree is open and
-	// the wiki cfg has been rewritten to worktree paths, handing it the
-	// worktree root, the rewritten cfg, and the seed signal (stubbed is
-	// true when EnsureManagedDocs created at least one managed-doc stub
-	// this turn — a fresh-wiki pass the builder can frame as a seed).
-	// Callers that bake absolute bureaucracy paths into the kickoff must
-	// use this instead of InitialPrompt so those paths resolve inside the
-	// worktree — twin reflect assembling its kickoff against the canonical
-	// root *before* the worktree existed is what walked a reflect pass
-	// into the operator's live checkout. Mirrors PreFinalizeGate's
-	// (workRoot, worktreeWiki) shape and runs at the same lifecycle point.
-	InitialPromptBuilder func(workRoot string, worktreeWiki *wiki.Config, stubbed bool) (string, error)
+	// runStageSession invokes it once the session worktree is open,
+	// handing it the worktree root. Callers that bake absolute
+	// bureaucracy paths into the kickoff must use this instead of
+	// InitialPrompt so those paths resolve inside the worktree — a
+	// kickoff assembled against the canonical root *before* the worktree
+	// existed is what once walked a session into the operator's live
+	// checkout.
+	InitialPromptBuilder func(workRoot string) (string, error)
 	// OnAgentStart, when non-nil, fires immediately before the executor
 	// is dispatched. See wikiTurnSpec.OnAgentStart.
 	OnAgentStart func()
@@ -157,13 +150,6 @@ type stageSessionOpts struct {
 	// fill, instead of relying on the prompt fragment alone. Skipped on
 	// resume turns.
 	CanvasSkeleton string
-	// WikiBuilder, when non-nil, is invoked after the bureaucracy
-	// root and run metadata are resolved. It returns the wiki engine
-	// config for this stage; nil means the stage is not an ingest
-	// stage and the wiki integration is skipped. The builder takes
-	// the resolved root rather than asking callers to discover it
-	// themselves — runStageSession owns root discovery.
-	WikiBuilder func(root string, md *run.Metadata) (*wiki.Config, error)
 	// ExtraStagePaths, when non-nil, runs after the agent session
 	// ends and before commitTurn. It receives the session worktree
 	// root and the run metadata; it may write files inside the
@@ -173,22 +159,6 @@ type stageSessionOpts struct {
 	// chores/, and knowledge/ dirs alongside the canvas, so the
 	// edits the agent made there ride in one commit.
 	ExtraStagePaths func(workRoot string, md *run.Metadata) ([]string, error)
-	// SkipFinalize, when true, skips wiki.FinalizeIngest at session
-	// close. The per-stage twin stages (vision, architecture, …,
-	// glossary) commit their managed-doc edits but don't bump the
-	// checkpoint or write a log.md entry — the finalize stage owns
-	// both at the end of the pass. Without this flag, every per-stage
-	// commit would advance `LastIngestAt`, and stage two's kickoff
-	// would compute a shorter events list than stage one's — the
-	// drift the design forbids.
-	SkipFinalize bool
-	// PreFinalizeGate, when non-nil, runs after the executor returns
-	// and before FinalizeIngest. A non-nil return short-circuits both
-	// FinalizeIngest and the per-turn commit. Used by the finalize
-	// stage's hygiene re-scan: leftover findings refuse to seal the
-	// pass. Routed straight through to wikiTurnSpec.PreFinalizeGate;
-	// see that field for the contract.
-	PreFinalizeGate func(workRoot string, worktreeWiki *wiki.Config) error
 	// projectDocFixTurn marks a turn the project-doc hygiene gate itself
 	// dispatched to clear its findings. It suppresses the gate for that
 	// turn — enforceProjectDocHygiene re-scans when the fix turn returns,
@@ -366,7 +336,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	}
 
 	// Materialize the project's submodule before anything else. Every
-	// stage either reads source directly (twin wiki ingest), drives
+	// stage either reads source directly, drives
 	// a sandbox clone (code/review/test), or kicks off an agent whose first
 	// action is usually a project-side read. Cold projects hit one
 	// `git submodule update --init --recursive`; warm projects pay one
@@ -451,12 +421,6 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		Agent:       agentName,
 		LockPurpose: "stage",
 		Headless:    opts.Headless,
-		WikiBuilder: func(canonicalRoot string) (*wiki.Config, error) {
-			if opts.WikiBuilder == nil {
-				return nil, nil
-			}
-			return opts.WikiBuilder(canonicalRoot, md)
-		},
 		// md is pre-loaded at runStageSession entry from the canonical
 		// root, *before* openWikiSession pulled origin/main under the
 		// repolock. Reload it here from the session worktree — which
@@ -731,18 +695,15 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				Headless:             opts.Headless,
 				Model:                opts.Model,
 				Agent:                agentName,
-				FinalizeRunID:        md.ID,
-				FinalizeRunTitle:     "",
-				SkipFinalize:         opts.SkipFinalize,
 				ExtraEnv:             mapToEnv(devEnv),
 				AddDirs:              devEnvWritableDirs(devEnv),
-				BuildPrompt: func(workRoot string, worktreeWiki *wiki.Config) (string, error) {
+				BuildPrompt: func(workRoot string) (string, error) {
 					// Read-only wording for the strict-boundary stages,
 					// but not for review: it enforces the boundary *and*
 					// commits its own fixes (BoundaryAllowsCommits), so
 					// the writable paragraph is the true one there.
 					readOnly := opts.EnforceSandboxBoundary && !opts.BoundaryAllowsCommits
-					p, inputIDs, err := buildSystemPrompt(workRoot, md, docID, clonePath, readOnly, worktreeWiki)
+					p, inputIDs, err := buildSystemPrompt(workRoot, md, docID, clonePath, readOnly)
 					if err != nil {
 						return "", err
 					}
@@ -765,17 +726,14 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 					}
 					return p, nil
 				},
-				CommitStager: func(workRoot, wikiRel string) error {
+				CommitStager: func(workRoot string) error {
 					// cwd-inversion shape: the agent writes the canvas,
-					// followups, and twin feedback at their natural
+					// followups, and feedback files at their natural
 					// absolute bureaucracy paths under the session
 					// worktree. No clone-to-bureaucracy shuttle to run
 					// here — commitTurn reads the same paths the agent
 					// just wrote.
 					var extras []string
-					if wikiRel != "" {
-						extras = append(extras, wikiRel)
-					}
 					if opts.ExtraStagePaths != nil {
 						more, err := opts.ExtraStagePaths(workRoot, md)
 						if err != nil {
@@ -792,7 +750,6 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 					projectDocsTouched = commitTouchedProjectDocs(workRoot, md.Project)
 					return nil
 				},
-				PreFinalizeGate: opts.PreFinalizeGate,
 			}, nil
 		},
 	}
@@ -934,13 +891,6 @@ type wikiSessionInputs struct {
 	// pick the lock budget for both windows; see the budget comment
 	// there for why an unattended caller gets the cron number.
 	Headless bool
-	// WikiBuilder, if non-nil, returns the canonical wiki cfg the
-	// helper rewrites to worktree paths. Receives the canonical
-	// bureaucracy root; resolution defers until BuildSpec has
-	// populated run metadata.
-	// May return nil to opt out of the wiki integration entirely
-	// (no FinalizeIngest, no wiki dir staging).
-	WikiBuilder func(canonicalRoot string) (*wiki.Config, error)
 	// BuildSpec resolves the per-turn parameters once the worktree is
 	// open. Errors abort with a stderr report and exit code 1.
 	BuildSpec func(workRoot string) (wikiTurnSpec, error)
@@ -976,14 +926,12 @@ type wikiTurnSpec struct {
 	// message of the turn. In Headless mode it is the entire `claude
 	// -p` user prompt.
 	InitialPrompt string
-	// InitialPromptBuilder, when non-nil, is invoked after the wiki cfg
-	// is rewritten to worktree paths and supersedes InitialPrompt with
-	// its result. Lets a caller defer kickoff assembly until the
-	// worktree root and the rewritten cfg are known, so any absolute
-	// bureaucracy paths it renders resolve inside the worktree. The
-	// stubbed argument carries the EnsureManagedDocs seed signal. See
-	// stageSessionOpts.InitialPromptBuilder for the why.
-	InitialPromptBuilder func(workRoot string, worktreeWiki *wiki.Config, stubbed bool) (string, error)
+	// InitialPromptBuilder, when non-nil, is invoked once the session
+	// worktree is open and supersedes InitialPrompt with its result.
+	// Lets a caller defer kickoff assembly until the worktree root is
+	// known, so any absolute bureaucracy paths it renders resolve inside
+	// the worktree. See stageSessionOpts.InitialPromptBuilder for the why.
+	InitialPromptBuilder func(workRoot string) (string, error)
 	// OnAgentStart, when non-nil, is invoked immediately before the
 	// executor is dispatched — after every bootstrap step that can
 	// fail. It is the "the agent turn actually began" signal; the
@@ -1003,41 +951,20 @@ type wikiTurnSpec struct {
 	// (ExecuteOneShot) paths. Routes stageSessionOpts.Model through to the
 	// executor; see that field for usage notes.
 	Model string
-	// FinalizeRunID + FinalizeRunTitle drive the log.md entry header.
-	FinalizeRunID    string
-	FinalizeRunTitle string
-	// SkipFinalize, when true, skips wiki.FinalizeIngest at session
-	// close — the per-stage twin stages commit their managed-doc
-	// edits but leave checkpoint advancement and log.md to the
-	// finalize stage. The gate / commit / close sequence is
-	// otherwise unchanged.
-	SkipFinalize bool
 	// Agent names the backend the executor should dispatch to. Always
 	// non-empty in production paths (runStageSession resolves it via
 	// stageAgentName before populating this struct); test callers
 	// that build wikiTurnSpec directly leave it empty and runWikiSession
 	// falls back to resolveAgentName("", "", "") at dispatch time.
 	Agent string
-	// BuildPrompt assembles the --append-system-prompt payload.
-	// Receives the worktree root and the worktree-rewritten wiki cfg
-	// (nil if the session has no wiki).
-	BuildPrompt func(workRoot string, worktreeWiki *wiki.Config) (string, error)
-	// PreFinalizeGate, when non-nil, runs after the executor returns
-	// and before FinalizeIngest. Returning a non-nil error skips
-	// FinalizeIngest *and* CommitStager (no log entry, no commit, no
-	// checkpoint bump) and forces a non-zero exit code. Used by
-	// reflect to enforce a clean post-execute hygiene scan before the
-	// engine seals the pass — same shape as a pre-push hook. The
-	// callback owns its own stderr formatting; runWikiSession only
-	// uses the error to decide whether to short-circuit.
-	PreFinalizeGate func(workRoot string, worktreeWiki *wiki.Config) error
-	// CommitStager runs after a successful FinalizeIngest. It
-	// receives the worktree root and the wiki dir's path relative to
-	// it (or "" if there is no wiki). It owns staging the
-	// caller-specific paths and committing with an appropriate
-	// message. Returning run.ErrNothingToCommit is treated as a soft
-	// empty turn — reported but not fatal.
-	CommitStager func(workRoot, wikiRel string) error
+	// BuildPrompt assembles the --append-system-prompt payload for the
+	// worktree root.
+	BuildPrompt func(workRoot string) (string, error)
+	// CommitStager runs after the executor returns. It owns staging the
+	// caller-specific paths and committing with an appropriate message.
+	// Returning run.ErrNothingToCommit is treated as a soft empty turn —
+	// reported but not fatal.
+	CommitStager func(workRoot string) error
 	// ExtraEnv is the merged dev-env exports (parsed from the
 	// project's `hooks/dev-env.d/*` setup scripts) that should ride
 	// the claude subprocess as additional KEY=VALUE entries. Empty
@@ -1099,57 +1026,15 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 	}
 
 	// Wiki integration — built after BuildSpec so callers that need
-	// run metadata (e.g. the twin wiki builder reads md.Project) can
-	// resolve it first. The canonical config's ContentDir gets
-	// rewritten to live inside the session worktree so prompt paths
-	// and engine git-status calls reference the active worktree.
-	var wikiCfg *wiki.Config
-	// docsStubbed is the EnsureManagedDocs seed signal, handed to the
-	// kickoff builder below. False for non-wiki stages and for a reflect
-	// against an already-seeded twin; true on the first reflect, where
-	// every managed doc is freshly stubbed and the builder frames the
-	// pass as a seed-and-author rather than a walk-against-events.
-	var docsStubbed bool
-	if in.WikiBuilder != nil {
-		canonical, err := in.WikiBuilder(root)
-		if err != nil {
-			moePrintf(stderr, "wiki: %v\n", err)
-			closeBootstrapFailedSession(closeSess, stderr)
-			return 1
-		}
-		if canonical != nil {
-			worktreeCfg := *canonical
-			if rel, relErr := filepath.Rel(root, canonical.ContentDir); relErr == nil && !strings.HasPrefix(rel, "..") {
-				worktreeCfg.ContentDir = filepath.Join(workRoot, rel)
-			}
-			worktreeCfg.BureaucracyPath = workRoot
-			wikiCfg = &worktreeCfg
-			// Bootstrap: create stubs for any managed doc that doesn't
-			// yet exist, so the rest of the turn sees a populated
-			// content dir. Failures here are real I/O or config errors
-			// — bail before the executor runs so the operator sees the
-			// root cause instead of a downstream invariant breach at
-			// finalize.
-			stubbed, err := wiki.EnsureManagedDocs(*wikiCfg)
-			if err != nil {
-				moePrintf(stderr, "wiki: %v\n", err)
-				closeBootstrapFailedSession(closeSess, stderr)
-				return 1
-			}
-			docsStubbed = stubbed
-		}
-	}
-
-	// Assemble the kickoff now that the worktree exists and wikiCfg
-	// points at it. Callers that bake absolute bureaucracy paths into
-	// the first user message (twin reflect) defer to this builder so
-	// those paths land inside the worktree instead of the canonical
-	// checkout — assembling the kickoff before the worktree existed is
-	// what walked a reflect pass into the operator's live tree. Runs at
-	// the same post-rewrite point as BuildPrompt and supersedes any
-	// static spec.InitialPrompt.
+	// Assemble the kickoff now that the worktree exists. Callers that
+	// bake absolute bureaucracy paths into the first user message defer
+	// to this builder so those paths land inside the worktree instead of
+	// the canonical checkout — assembling the kickoff before the
+	// worktree existed is what once walked a session into the operator's
+	// live tree. Runs at the same point as BuildPrompt and supersedes
+	// any static spec.InitialPrompt.
 	if spec.InitialPromptBuilder != nil {
-		ip, err := spec.InitialPromptBuilder(workRoot, wikiCfg, docsStubbed)
+		ip, err := spec.InitialPromptBuilder(workRoot)
 		if err != nil {
 			moePrintf(stderr, "%v\n", err)
 			closeBootstrapFailedSession(closeSess, stderr)
@@ -1161,7 +1046,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 	// Prompt paths point at the session worktree, where Claude's
 	// edits land. When the session closes, those edits rebase +
 	// ff-merge into main at the canonical root.
-	prompt, err := spec.BuildPrompt(workRoot, wikiCfg)
+	prompt, err := spec.BuildPrompt(workRoot)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		closeBootstrapFailedSession(closeSess, stderr)
@@ -1280,52 +1165,11 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 		}
 	}
 
-	// Pre-finalize gate (reflect's hygiene scan). Runs after the
-	// executor and before FinalizeIngest; a non-nil return short-
-	// circuits both FinalizeIngest and CommitStager so the pass
-	// produces no log entry, no commit, and no checkpoint bump —
-	// the operator re-runs the command to try again.
-	var gateErr error
-	if spec.PreFinalizeGate != nil {
-		gateErr = spec.PreFinalizeGate(workRoot, wikiCfg)
-	}
-
-	// Wiki finalize runs before the commit so its writes (log.md
-	// and checkpoint.json) ride along in the same per-turn commit
-	// as the agent's wiki edits. A no-change session is a no-op —
-	// finalize returns without touching disk if the wiki dir is
-	// clean. Errors do not block the commit (the agent's content
-	// edits should land regardless), but they do surface in the
-	// exit-code waterfall so the operator notices instead of the
-	// drift quietly accumulating across reflect passes.
-	wikiRel := ""
-	var finalizeErr error
+	// Commit any document changes even if Claude exited non-zero — the
+	// operator may have chosen to bail mid-edit but kept the edits.
 	var commitErr error
-	if gateErr == nil {
-		if wikiCfg != nil {
-			if !spec.SkipFinalize {
-				_, ferr := wiki.FinalizeIngest(*wikiCfg, wiki.FinalizeContext{
-					RunID:    spec.FinalizeRunID,
-					RunTitle: spec.FinalizeRunTitle,
-				}, stderr)
-				if ferr != nil {
-					moePrintf(stderr, "wiki: finalize failed: %v\n", ferr)
-					moePrintln(stderr, "  agent edits will commit; checkpoint and "+
-						"log.md were NOT written. Re-run the session or fix the "+
-						"underlying issue before the next reflect.")
-					finalizeErr = ferr
-				}
-			}
-			if rel, err := filepath.Rel(workRoot, wikiCfg.ContentDir); err == nil && !strings.HasPrefix(rel, "..") {
-				wikiRel = rel
-			}
-		}
-		// Commit any document changes even if Claude exited
-		// non-zero — the operator may have chosen to bail mid-edit
-		// but kept the edits.
-		if spec.CommitStager != nil {
-			commitErr = spec.CommitStager(workRoot, wikiRel)
-		}
+	if spec.CommitStager != nil {
+		commitErr = spec.CommitStager(workRoot)
 	}
 
 	// Close the session: land it on local main and tear the
@@ -1340,18 +1184,15 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 	//
 	// okToPush gates the in-closure sync.AutoPush: the bureaucracy
 	// per-turn commit only races to origin when the agent's turn
-	// genuinely succeeded. runErr / gateErr both mean the turn didn't
-	// produce shippable output (codex turn.failed; reflect hygiene
-	// scan caught residue), so we keep the local commit but suppress
-	// the push — origin won't see it until a later successful turn.
-	// commitErr / finalizeErr are not gates here: a finalize failure
-	// leaves real agent edits on disk that the operator may want
-	// mirrored to other machines, and a CanvasUnchangedError surfaces
-	// through closeErr below regardless of the push toggle.
-	okToPush := runErr == nil && gateErr == nil
+	// genuinely succeeded. runErr means it didn't (codex turn.failed),
+	// so we keep the local commit but suppress the push — origin won't
+	// see it until a later successful turn. commitErr is not a gate
+	// here: a CanvasUnchangedError surfaces through closeErr below
+	// regardless of the push toggle.
+	okToPush := runErr == nil
 	closeErr := closeWithAutoResolve(closeSess, okToPush, stdout, stderr)
 
-	return reportWikiSessionExit(in, runErr, commitErr, closeErr, finalizeErr, gateErr, stdout, stderr)
+	return reportWikiSessionExit(in, runErr, commitErr, closeErr, stdout, stderr)
 }
 
 // openWikiSession opens the session worktree under the repo lock and
@@ -1475,24 +1316,19 @@ const exitInterrupted = 130
 
 // reportWikiSessionExit prints the closing per-turn messages and
 // returns the exit code for runWikiSession. It is the one place that
-// decides how the possible failures (claude run, gate, commit, close,
-// finalize) compose into a single exit status. Every error it holds
-// gets printed, and the exit code is decided once at the bottom —
-// no branch returns early, because the failures travel together and
-// each one carries recovery information the others don't. Run /
-// finalize / gate errors each independently force a non-zero exit
-// even when the per-turn commit landed cleanly — finalize failure means
-// checkpoint.json / log.md weren't written, and a 0 exit there would
-// let the operator move on without noticing. Gate failure means we
-// deliberately skipped both finalize and commit; the gate's own
-// stderr block carries the explanation.
+// decides how the possible failures (claude run, commit, close)
+// compose into a single exit status. Every error it holds gets
+// printed, and the exit code is decided once at the bottom — no branch
+// returns early, because the failures travel together and each one
+// carries recovery information the others don't. A run error forces a
+// non-zero exit even when the per-turn commit landed cleanly.
 //
 // An operator Ctrl-C is the one runErr that exits 130 (exitInterrupted)
 // rather than 1: the turn's commit is kept (the work is on disk, and
 // push is already suppressed upstream because okToPush gates on
 // runErr == nil), but the distinct code lets the cascade halt the whole
 // chain instead of mistaking the interrupt for a failed stage.
-func reportWikiSessionExit(in wikiSessionInputs, runErr, commitErr, closeErr, finalizeErr, gateErr error, stdout, stderr io.Writer) int {
+func reportWikiSessionExit(in wikiSessionInputs, runErr, commitErr, closeErr error, stdout, stderr io.Writer) int {
 	if runErr != nil {
 		// in.Agent is populated by runWikiSession after agent resolution.
 		// Empty falls back to "agent" — callers that bypass the resolver
@@ -1507,8 +1343,6 @@ func reportWikiSessionExit(in wikiSessionInputs, runErr, commitErr, closeErr, fi
 	}
 	commitFailed := false
 	switch {
-	case gateErr != nil:
-		// Gate already explained itself on stderr; no commit happened.
 	case errors.Is(commitErr, run.ErrNothingToCommit):
 		moePrintln(stdout, "no document changes; nothing committed")
 	case commitErr != nil:
@@ -1527,12 +1361,11 @@ func reportWikiSessionExit(in wikiSessionInputs, runErr, commitErr, closeErr, fi
 		// Bare %v — close errors self-describe. See closeWithAutoResolve.
 		moePrintf(stderr, "%v\n", closeErr)
 	}
-	if runErr != nil || commitFailed || closeErr != nil || finalizeErr != nil || gateErr != nil {
+	if runErr != nil || commitFailed || closeErr != nil {
 		// An operator Ctrl-C during the turn is a stop, not a failure:
 		// surface it as exitInterrupted so the cascade halts the chain
-		// rather than reacting as if the stage barfed. Commit / close /
-		// finalize / gate collateral of an interrupted turn rides under
-		// the same code — the interrupt is the dominant intent, and a
+		// rather than reacting as if the stage barfed. Commit and close
+		// collateral of an interrupted turn rides under the same code — the interrupt is the dominant intent, and a
 		// Ctrl-C before the agent writes routinely produces exactly that
 		// collateral (unwritten canvas → commit and close both refuse).
 		if errors.Is(runErr, agent.ErrInterrupted) {

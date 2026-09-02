@@ -17,7 +17,7 @@ import (
 // run-scoped canvas grows a `cat` subcommand on its group. Skipping a
 // workflow drops the shared shape — this test is the tripwire.
 func TestCatRegisteredOnEveryWorkflow(t *testing.T) {
-	for _, wf := range []string{"idea", "sdlc", "twin", "chat", "pulse"} {
+	for _, wf := range []string{"idea", "sdlc", "chat", "pulse"} {
 		g, err := LookupGroup(wf)
 		if err != nil {
 			t.Fatalf("workflow %q not registered as a group: %v", wf, err)
@@ -104,7 +104,7 @@ func TestCatWrongWorkflow(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var errb bytes.Buffer
-	code := Run([]string{"twin", "cat", "tele/fix-it", "vision"}, &bytes.Buffer{}, &errb)
+	code := Run([]string{"chat", "cat", "tele/fix-it", "chat"}, &bytes.Buffer{}, &errb)
 	if code != 1 {
 		t.Fatalf("expected exit=1 on wrong-workflow, got %d; stderr=%q", code, errb.String())
 	}

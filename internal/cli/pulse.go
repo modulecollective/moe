@@ -22,7 +22,6 @@ import (
 	"github.com/modulecollective/moe/internal/runopen"
 	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/trailers"
-	"github.com/modulecollective/moe/internal/wiki"
 )
 
 // The pulse workflow is the level-3 "gather" primitive: a headless,
@@ -72,14 +71,10 @@ const pulseKickoff = "Run the pulse for this project: a delta-first, read-only s
 	"The gate opens runs and orders them in one grammar: you write each run where it goes.\n\n" +
 	"A `\"loose\"` list holds runs to open with no ordering opinion — they park standalone. Each entry is an object: " +
 	"`{\"slug\": ..., \"title\": ..., \"why\": ..., \"design\": ...}`, defaulting to a `sdlc` fix run — the bar is mechanical, " +
-	"bounded, and verifiable, all three, and the stage guidance holds it. An entry may instead set `\"workflow\": \"twin\"` to " +
-	"ask for a twin reflect: do that when either the cycle landed a significant twin-relevant change (a decision, a new " +
-	"component, a boundary move the twin docs don't yet describe), or twin staleness has accumulated (many small changes " +
-	"and/or pending twin observations teed up since the last reflect). Do NOT ask for a reflect when a twin run is already " +
-	"open, and never manufacture one to justify the turn. A `loose` entry may instead set `\"design_only\": true`, which " +
-	"opens the run, rides it one headless design turn and parks it for the operator — a lower bar for a shorter ride, and " +
-	"the one place a finding that needs judgment rather than a fix may go; the stage guidance holds that bar too. Whatever " +
-	"the workflow, `why` is the one line the operator reads next to the verdict.\n\n" +
+	"bounded, and verifiable, all three, and the stage guidance holds it. A `loose` entry may instead set " +
+	"`\"design_only\": true`, which opens the run, rides it one headless design turn and parks it for the operator — a " +
+	"lower bar for a shorter ride, and the one place a finding that needs judgment rather than a fix may go; the stage " +
+	"guidance holds that bar too. Either way, `why` is the one line the operator reads next to the verdict.\n\n" +
 	"A `\"threads\"` list holds runs in execution order, each thread attached after an existing run (`\"onto\"`), under a " +
 	"freshly named head (`\"head\"`), or self-rooted as its own thread (neither key). A thread's `\"runs\"` entry is either a **string** " +
 	"naming any parked run in the project — naming one chained elsewhere moves it — or an **object** in the same shape as a " +
@@ -842,53 +837,6 @@ func readPulseGate(root, projectID, runID string) (pulseGate, error) {
 	return g, nil
 }
 
-// maybeSpawnReflect resolves the project's twin reflect for a pulse-side
-// ask — a spawn entry asking for workflow "twin", or an idea tagged
-// `(twin)`. Every pulse-side ask is a *nomination*, not a create: with no
-// reflect open one is minted; with one already open the mint is a noop and
-// the nomination maps to the open run's id. Chain grooming then treats a
-// mapped nomination like any other member, so a gate writing a twin spec at
-// a thread's tail repositions the open run instead of dropping it.
-//
-// The one ask that resolves to nothing is unrecorded out-of-band twin
-// edits with no reflect open: there is nothing to map to and minting is
-// refused until the operator lands or reverts them, so it warns and skips.
-//
-// Warn-only throughout — a guard refusal or a mint failure never blocks
-// the pulse's auto-close, since the report and filings are already durable
-// on disk.
-//
-// Returns the resolved run's id, or "" when the ask resolved to nothing.
-func maybeSpawnReflect(root, projectID, pulseSlug, why string, stdout, stderr io.Writer) string {
-	canonical, err := twinWikiBuilder(root, projectID)
-	if err != nil {
-		moePrintf(stderr, "pulse: reflect spawn: build twin wiki for %s: %v\n", projectID, err)
-		return ""
-	}
-	// Qualify the spawner to "<project>/<slug>" before minting: the
-	// journal index treats these edges as always qualified. pulseSlug is
-	// the pulse run's own slug and is never empty here, so no empty-guard
-	// is needed.
-	md, err := mintReflectRun(root, projectID, projectID+"/"+pulseSlug, "" /*agent*/, canonical, stdout, stderr)
-	if err != nil {
-		if refusal, ok := errors.AsType[*reflectRefusal](err); ok {
-			if refusal.kind == reflectRefusalInProgress {
-				// The nomination resolves to the open pass. Logged rather
-				// than silent so the sweep output stays honest about which
-				// run the nomination — and the thread position holding it — landed on.
-				moePrintf(stderr, "pulse: reflect already open for %s — mapped to %s/%s (%s)\n", projectID, projectID, refusal.slug, why)
-				return refusal.slug
-			}
-			moePrintf(stderr, "pulse: reflect not spawned for %s — %v; the operator lands those first\n", projectID, refusal)
-			return ""
-		}
-		moePrintf(stderr, "pulse: reflect spawn for %s: %v\n", projectID, err)
-		return ""
-	}
-	moePrintf(stderr, "pulse: drift flagged — opened twin reflect %s/%s (%s)\n", projectID, md.ID, why)
-	return md.ID
-}
-
 // applyPulseGate opens every run the gate's specs describe and hands
 // back the groom groups its threads imply. Two walks over one minter, in
 // document order — `loose` first, then each thread's `runs` — so a slug
@@ -1053,14 +1001,8 @@ func (m *pulseMinter) mint(s pulseRunSpec, stdout, stderr io.Writer) string {
 		return m.nominateChore(choreName, s, stdout, stderr)
 	}
 	slug := strings.TrimSpace(s.Slug)
-	// Dispatch on workflow before anything else — including the slug
-	// check, the same way a chore entry dispatches ahead of it. The steps
-	// below (slug validation, live-slug dedupe, tagged-idea promotion) are
-	// all sdlc's: they name the run being minted. A twin spec names
-	// nothing — the reflect's slug is harness-minted and its dedupe
-	// semantics are "one twin run in flight per project", enforced inside
-	// mintReflectRun — so requiring a slug there was a trap that dropped
-	// whole threads over a field the fragment itself calls meaningless.
+	// Dispatch on workflow before the slug check, the same way a chore
+	// entry dispatches ahead of it.
 	switch workflow := strings.TrimSpace(s.Workflow); workflow {
 	case "", "sdlc":
 		if slug == "" || run.Slugify(slug) != slug {
@@ -1075,25 +1017,8 @@ func (m *pulseMinter) mint(s pulseRunSpec, stdout, stderr io.Writer) string {
 			moePrintf(stderr, "pulse: spawn: entry %q asks for design_only with no design body — the brief is the point; skipping\n", slug)
 			return ""
 		}
-	case "twin":
-		// Slug is optional here and purely a handle for these warn lines,
-		// so they name the entry only when there is something to name it by.
-		entry := "twin entry"
-		if slug != "" {
-			entry = fmt.Sprintf("twin entry %q", slug)
-		}
-		if t := strings.TrimSpace(s.Title); t != "" {
-			moePrintf(stderr, "pulse: spawn: ignoring title on %s; the reflect's slug is harness-minted\n", entry)
-		}
-		if strings.TrimSpace(s.Design) != "" {
-			moePrintf(stderr, "pulse: spawn: ignoring design body on %s; a reflect reads the twin, not a seed\n", entry)
-		}
-		if s.DesignOnly {
-			moePrintf(stderr, "pulse: spawn: ignoring design_only on %s; a reflect has no design stage to stop at\n", entry)
-		}
-		return maybeSpawnReflect(m.root, projectID, pulseSlug, s.Why, stdout, stderr)
 	default:
-		moePrintf(stderr, "pulse: spawn: entry %q asks for workflow %q — only sdlc and twin are spawnable; skipping\n", slug, workflow)
+		moePrintf(stderr, "pulse: spawn: entry %q asks for workflow %q — only sdlc is spawnable; skipping\n", slug, workflow)
 		return ""
 	}
 	if !m.ensureLive(stderr) {
@@ -1227,25 +1152,6 @@ func (m *pulseMinter) promoteIfTaggedIdea(slug string, s pulseRunSpec, stdout, s
 		moePrintf(stderr, "pulse: spawn: idea %s/%s is untagged and requires operator triage — skipping\n", projectID, idea.ID)
 		return "", false
 	}
-	if idea.PromoteTo == "twin" {
-		// A `(twin)` tag nominates a reflect; it does not name a
-		// destination to mint. Route it through the same resolve the
-		// gate's twin specs take — mint if no pass is open, map onto the
-		// open one otherwise — and record the promotion edge onto
-		// whichever run that was. No seed doc: a reflect reads the
-		// managed docs, `feedback/twin.md` and the journal, never a
-		// promoted idea's canvas, which stays on the idea and is
-		// reachable through the MoE-Promoted-To edge.
-		id := maybeSpawnReflect(m.root, projectID, pulseSlug, s.Why, stdout, stderr)
-		if id == "" {
-			return "", false
-		}
-		if markErr := runopen.MarkPromoted(m.root, projectID, idea.ID, projectID, id, walkConsent(), stdout, stderr); markErr != nil {
-			moePrintf(stderr, "pulse: warning: resolved twin-tagged idea %s/%s to %s/%s but could not mark the idea: %v\n", projectID, idea.ID, projectID, id, markErr)
-		}
-		moePrintf(stderr, "pulse: promoted twin-tagged idea %s/%s to reflect %s/%s\n", projectID, idea.ID, projectID, id)
-		return id, false
-	}
 	wf, lookupErr := LookupWorkflow(idea.PromoteTo)
 	if lookupErr != nil || !chainableWorkflow(idea.PromoteTo) || len(wf.Stages()) == 0 {
 		moePrintf(stderr, "pulse: spawn: idea %s/%s has unusable workflow tag %q — skipping\n", projectID, idea.ID, idea.PromoteTo)
@@ -1377,16 +1283,13 @@ func slugBaseMatches(slugs []string, base string) bool {
 }
 
 // pulseKickoffWithContext appends the harness-computed context blocks to
-// the static kickoff — the twin-reflect line, the GitHub block, the
-// recently-settled-runs block, and the chain-state block. Wired
-// as InitialPromptBuilder, so root is the session worktree
-// runStageSession hands the builder. Best-effort throughout: a gather
-// that fails drops its own block rather than failing the sweep.
+// the static kickoff — the GitHub block, the recently-settled-runs
+// block, and the chain-state block. Wired as InitialPromptBuilder, so
+// root is the session worktree runStageSession hands the builder.
+// Best-effort throughout: a gather that fails drops its own block
+// rather than failing the sweep.
 func pulseKickoffWithContext(root, projectID, runID string, stderr io.Writer) (string, map[string]string) {
 	blocks := []string{pulseKickoff}
-	if line := pendingTwinObservationsLine(root, projectID); line != "" {
-		blocks = append(blocks, line)
-	}
 	// Four of the five blocks want the same two reads. Doing them once
 	// here is not just cheaper — it means the blocks describe one
 	// consistent moment rather than four successive ones.
@@ -1476,51 +1379,6 @@ func judgedChoresBlock(sc *pulseScan, projectID string) string {
 		"Quiet is normal.\n" + strings.Join(lines, "\n")
 }
 
-// pendingTwinObservationsLine reports how many twin observations are
-// teed up for the next reflect and which runs they came from — the one
-// computed input behind the "staleness accumulated" criterion, which the
-// agent can't cheaply derive itself (loadTwinFeedback filters against the
-// reflect checkpoint's LastIngestAt). Returns "" when the feedback read
-// fails; a project with no twin checkpoint reads as a first reflect, so
-// with no committed feedback it gets the quiet "none pending" line.
-//
-// When an open twin run already exists, the line names it. Counting the
-// observations without naming their destination is what let a pulse
-// read a parked reflect as a finished job: it had the count, it had the
-// run, and nothing connected the two to an action it could take. The
-// slug turns the count into a thread the agent can groom or kick — the
-// vocabulary the fragment teaches beside this.
-func pendingTwinObservationsLine(root, projectID string) string {
-	cfg, err := twinWikiBuilder(root, projectID)
-	if err != nil || cfg == nil {
-		return ""
-	}
-	feedback, err := loadTwinFeedback(root, projectID, *cfg)
-	if err != nil {
-		return ""
-	}
-	if len(feedback) == 0 {
-		return "Twin-reflect context: no twin observations pending since the last reflect."
-	}
-	seen := map[string]bool{}
-	var runs []string
-	for _, fb := range feedback {
-		if seen[fb.runID] {
-			continue
-		}
-		seen[fb.runID] = true
-		runs = append(runs, fb.runID)
-	}
-	line := fmt.Sprintf("Twin-reflect context: %d twin observation(s) pending since the last reflect, from %s.",
-		len(feedback), strings.Join(runs, ", "))
-	// Read failure is silent: the count is the load-bearing half, and a
-	// scan that failed is not evidence that no twin run is open.
-	if open, err := findInProgressTwinRun(root, projectID); err == nil && open != "" {
-		line += fmt.Sprintf(" They are waiting on open twin run `%s/%s`, which stays parked until something rides it.", projectID, open)
-	}
-	return line
-}
-
 // errPulseSkipped is the sentinel openPulse's prompt builder returns
 // when the operator's Ctrl-C latched between the post-Open checkpoint
 // and the agent executor — a millisecond gap between setup children
@@ -1553,11 +1411,9 @@ var openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt,
 			EnforceSandboxBoundary: true,
 			Headless:               headless,
 			OnAgentStart:           func() { out.agentStarted = true },
-			// Deferred so the twin-reflect context line renders against
-			// the session worktree, the read-only copy runStageSession
-			// hands the builder — the same deferral the twin stages use to
-			// keep a pass off the operator's live checkout.
-			InitialPromptBuilder: func(workRoot string, _ *wiki.Config, _ bool) (string, error) {
+			// Deferred so the context blocks render against the session
+			// worktree, the copy runStageSession hands the builder.
+			InitialPromptBuilder: func(workRoot string) (string, error) {
 				if pi.interrupted() {
 					return "", errPulseSkipped
 				}

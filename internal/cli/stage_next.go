@@ -103,7 +103,7 @@ func promptNextStageOverride(root string, md *run.Metadata, justFinished, overri
 			// has a close command and the run is still in_progress,
 			// offer the operator the same `[Y/n/x]` shape every other
 			// chain prompt uses, with `Y` dispatching close. Non-TTY
-			// callers (`moe twin reflect ... < /dev/null`) keep the
+			// callers (`moe sdlc design ... < /dev/null`) keep the
 			// print-only nudge — anti-silent-close, same rule the
 			// cascade's auto-close honours.
 			if md.Status == run.StatusInProgress {
@@ -342,7 +342,7 @@ func renderPromptLegend(opts []promptOption) string {
 // (the skip shortcut jumps straight to the review prompt), and optional
 // /x and /b suffixes when scuttle / back are non-nil. Y still defaults
 // so a reflex Enter chains the next stage interactively, the same as
-// before. Workflows with a registered cascade dispatcher (sdlc, twin)
+// before. Workflows with a registered cascade dispatcher (sdlc)
 // also surface `!` as a peer in the bracket and main legend — single
 // keystroke, dispatch one stage headless — while `!<stage>` / `!!` /
 // `!!!` stay on a second cascade-extras line below. `b` re-invokes the
@@ -416,7 +416,7 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 	// advance marker satisfies that stage so the next pickup starts at the
 	// successor instead. Gated to sdlc's gates (design→code, code→test,
 	// test→review), where priorCanvas names the stage to mark; other gates
-	// (the twin ladder, idea) keep the plain decline.
+	// (idea) keep the plain decline.
 	offerAdvance := md.Workflow == "sdlc" && priorCanvas != ""
 	if offerAdvance {
 		opts = append(opts, promptOption{key: 'a', hint: "decline, advance to " + next.Name})
@@ -643,7 +643,7 @@ func runKickbackSession(md *run.Metadata, document, blockedStage, canvas string,
 //
 // Caller responsibility: gate on stdinIsTerminal() before invoking. The
 // non-TTY branch retains the print-only nudge so headless callers
-// (`moe twin reflect ... < /dev/null`) never close silently.
+// (`moe sdlc design ... < /dev/null`) never close silently.
 func promptCloseNextStage(closeCmd *Command, justFinished string, md *run.Metadata, stdout, stderr io.Writer) int {
 	opts := []promptOption{
 		{key: 'Y', hint: "close"},
@@ -1000,10 +1000,9 @@ func cascadeFromGate(startStage, destination string, oneStep bool, rideChain boo
 	yolo := !oneStep && destination == ""
 	switch {
 	case oneStep:
-		// Dispatch exactly one stage. The terminal-stage case (twin's
-		// finalize from post-glossary) falls through naturally: endIdx
-		// = startIdx + 1 still walks one stage and the !yolo gate
-		// below skips the post-loop auto-close.
+		// Dispatch exactly one stage. The terminal-stage case falls
+		// through naturally: endIdx = startIdx + 1 still walks one stage
+		// and the !yolo gate below skips the post-loop auto-close.
 		endIdx = startIdx + 1
 	case !yolo:
 		destIdx := indexOfString(stages, destination)
@@ -1021,11 +1020,6 @@ func cascadeFromGate(startStage, destination string, oneStep bool, rideChain boo
 	dispatcher := lookupCascadeDispatcher(md.Workflow)
 	if dispatcher == nil {
 		moePrintf(stderr, "cascade: workflow %q has no cascade dispatcher\n", md.Workflow)
-		return res, 1
-	}
-	g, err := LookupGroup(md.Workflow)
-	if err != nil {
-		moePrintf(stderr, "%v\n", err)
 		return res, 1
 	}
 	for i := startIdx; i < endIdx; i++ {
@@ -1079,47 +1073,6 @@ func cascadeFromGate(startStage, destination string, oneStep bool, rideChain boo
 		if gateCode != 0 {
 			return res, gateCode
 		}
-	}
-	// `!!` / `!!!` for a workflow without push (twin today) auto-closes the run
-	// after the last stage commits — same operator intent as the sdlc
-	// push branch above ("cascade and terminate"), just routed through
-	// close instead of push. sdlc set res.shipped=true in the push branch
-	// already, so the gate skips it there. --no-edit keeps the close
-	// non-interactive (followups.md harvests as-is); a hands-off cascade
-	// should never block on an editor.
-	if yolo && !res.shipped {
-		// Chain ride (`!!!` only) fires before the synthetic auto-close
-		// — per design, the ride sits between "all real stages
-		// committed" and the terminal action. For sdlc the analogous
-		// slot is "after push success" in the loop above; this branch is
-		// the non-sdlc analogue. `!!` stops here — rideChain is the gate.
-		// A Ctrl-C inside the ride halts the chain before the
-		// auto-close, same as the sdlc push branch.
-		//
-		// An ordinary ride failure does not: this parent's own walk
-		// succeeded, and skipping its close would park a dead run on the
-		// dash to punish a child's failure. So remember the code, close,
-		// and propagate below.
-		var rideCode int
-		if rideChain {
-			rideCode = maybeRideChain(md, rideChain, stdout, stderr)
-			if rideCode == exitInterrupted {
-				return res, rideCode
-			}
-		}
-		if closeCmd := g.Lookup("close"); closeCmd != nil {
-			moePrintf(stdout, "cascade: close (headless)\n")
-			code := closeCmd.Run([]string{"--no-edit", md.Project + "/" + md.ID}, stdout, stderr)
-			res.ran = append(res.ran, cascadeStepResult{stage: "close", code: code})
-			if code != 0 {
-				return res, code
-			}
-			res.shipped = true
-		}
-		// The close's own code already returned above if non-zero — it is
-		// this run's own failure and the nearer of the two. Otherwise the
-		// stalled ride is what's left to report.
-		return res, rideCode
 	}
 	return res, 0
 }
@@ -1267,7 +1220,7 @@ func stageNominatedClose(root string, md *run.Metadata, stage string) bool {
 }
 
 // closeNominatedRun closes md through its workflow's registered close
-// command — the same `--no-edit` dispatch the twin cascade's auto-close
+// command — the same `--no-edit` dispatch the cascade's auto-close
 // uses, so a nominated close and an operator's `moe sdlc close` land
 // identical commits and cleanup.
 //

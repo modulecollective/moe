@@ -4,8 +4,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/modulecollective/moe/internal/git/gittest"
 )
 
 func TestScanManagedDocs(t *testing.T) {
@@ -20,10 +18,7 @@ func TestScanManagedDocs(t *testing.T) {
 		"# Operations\n\nSee [missing](missing.md) for details.\n")
 
 	cfg := Config{
-
-		ContentDir:      twinDir,
-		BureaucracyPath: root,
-		Project:         "p",
+		ContentDir: twinDir,
 		ManagedDocs: []ManagedDoc{
 			{Filename: "vision.md", Title: "Vision"},
 			{Filename: "architecture.md", Title: "Architecture"},
@@ -43,174 +38,6 @@ func TestScanManagedDocs(t *testing.T) {
 	}
 	if len(f.BrokenLinks) != 1 || f.BrokenLinks[0].From != "operations.md" || f.BrokenLinks[0].Target != "missing.md" {
 		t.Errorf("BrokenLinks: got %+v", f.BrokenLinks)
-	}
-}
-
-func TestDetectUnrecordedEditsNoCheckpoint(t *testing.T) {
-	root := newGitRepo(t)
-	twinDir := filepath.Join(root, "projects", "p", "digital-twin")
-	writeFile(t, filepath.Join(twinDir, "vision.md"), "# Vision\n")
-	cfg := Config{
-
-		ContentDir:      twinDir,
-		BureaucracyPath: root,
-		Project:         "p",
-		ManagedDocs:     []ManagedDoc{{Filename: "vision.md", Title: "Vision"}},
-	}
-	det, err := DetectUnrecordedEdits(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(det.UnrecordedDocs) != 0 {
-		t.Errorf("expected no unrecorded edits without checkpoint, got %v", det.UnrecordedDocs)
-	}
-}
-
-func TestDetectUnrecordedEditsFlagsPostCheckpointEdits(t *testing.T) {
-	root := newGitRepo(t)
-	twinDir := filepath.Join(root, "projects", "p", "digital-twin")
-	writeFile(t, filepath.Join(twinDir, "vision.md"), "# Vision\n")
-	writeFile(t, filepath.Join(twinDir, "architecture.md"), "# Architecture\n")
-
-	// architecture.md's latest commit carries a `MoE-Workflow: twin`
-	// trailer (recorded). vision.md's latest commit doesn't (operator
-	// edit → unrecorded). Trailer presence is the discriminator; commit
-	// times are irrelevant.
-	gittest.Run(t, root, "add", "projects/p/digital-twin/architecture.md")
-	gittest.Run(t, root, "commit", "-m", "reflect updates architecture\n\nMoE-Workflow: twin")
-
-	gittest.Run(t, root, "add", "projects/p/digital-twin/vision.md")
-	gittest.Run(t, root, "commit", "-m", "operator edits vision")
-
-	cp := Checkpoint{
-		Version:       CheckpointVersion,
-		LastIngestAt:  "2026-04-01T18:00:00Z",
-		LastIngestRun: "claim-test",
-		Project:       "p",
-	}
-	if err := WriteCheckpoint(twinDir, cp); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg := Config{
-
-		ContentDir:      twinDir,
-		BureaucracyPath: root,
-		Project:         "p",
-		ManagedDocs: []ManagedDoc{
-			{Filename: "vision.md", Title: "Vision"},
-			{Filename: "architecture.md", Title: "Architecture"},
-		},
-	}
-	det, err := DetectUnrecordedEdits(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(det.UnrecordedDocs) != 1 || det.UnrecordedDocs[0] != "vision.md" {
-		t.Errorf("expected vision.md as unrecorded, got %v", det.UnrecordedDocs)
-	}
-}
-
-// TestDetectUnrecordedEditsTrailerOverridesLaterCommitTime pins the
-// production failure roadmap-edits diagnosed: FinalizeIngest stamps
-// `last_ingest_at = time.Now()`, the per-turn CommitStager that
-// follows lands ~1s later, and the next reflect mis-flags the engine's
-// own commit. Trailer-based attribution makes that race vanish — a
-// twin commit ahead of `last_ingest_at` is still recorded. This test
-// pins the override against the exact production failure.
-func TestDetectUnrecordedEditsTrailerOverridesLaterCommitTime(t *testing.T) {
-	root := newGitRepo(t)
-	twinDir := filepath.Join(root, "projects", "p", "digital-twin")
-	writeFile(t, filepath.Join(twinDir, "vision.md"), "# Vision\n")
-
-	// Engine's commit lands one second after `last_ingest_at`. Under
-	// the old timestamp comparison this would trip; the trailer says
-	// otherwise.
-	t.Setenv("GIT_AUTHOR_DATE", "2026-05-02T12:00:01Z")
-	t.Setenv("GIT_COMMITTER_DATE", "2026-05-02T12:00:01Z")
-	gittest.Run(t, root, "add", "projects/p/digital-twin/vision.md")
-	gittest.Run(t, root, "commit", "-m", "reflect updates vision\n\nMoE-Workflow: twin")
-
-	cp := Checkpoint{
-		Version:       CheckpointVersion,
-		LastIngestAt:  "2026-05-02T12:00:00Z",
-		LastIngestRun: "reflect-prior",
-		Project:       "p",
-	}
-	if err := WriteCheckpoint(twinDir, cp); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg := Config{
-
-		ContentDir:      twinDir,
-		BureaucracyPath: root,
-		Project:         "p",
-		ManagedDocs:     []ManagedDoc{{Filename: "vision.md", Title: "Vision"}},
-	}
-	det, err := DetectUnrecordedEdits(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(det.UnrecordedDocs) != 0 {
-		t.Errorf("twin-trailered commit should not be flagged even when newer than last_ingest_at, got %v",
-			det.UnrecordedDocs)
-	}
-}
-
-// TestDetectUnrecordedEditsIgnoresNetNoopRevert pins the design
-// promise that a post-checkpoint commit reverted by a later commit
-// (so the doc's tree state at HEAD matches the checkpoint SHA) does
-// NOT trip the unrecorded-edits guardrail. Without this, every revert
-// of a managed-doc commit would itself trip the guardrail, telling
-// the operator to revert what is already reverted.
-func TestDetectUnrecordedEditsIgnoresNetNoopRevert(t *testing.T) {
-	root := newGitRepo(t)
-	twinDir := filepath.Join(root, "projects", "p", "digital-twin")
-	writeFile(t, filepath.Join(twinDir, "vision.md"), "# Vision\n")
-
-	t.Setenv("GIT_AUTHOR_DATE", "2026-04-01T12:00:00Z")
-	t.Setenv("GIT_COMMITTER_DATE", "2026-04-01T12:00:00Z")
-	gittest.Run(t, root, "add", "projects/p/digital-twin/vision.md")
-	gittest.Run(t, root, "commit", "-m", "seed twin")
-
-	checkpointSHA := gittest.HeadSHA(t, root)
-
-	t.Setenv("GIT_AUTHOR_DATE", "2026-04-02T12:00:00Z")
-	t.Setenv("GIT_COMMITTER_DATE", "2026-04-02T12:00:00Z")
-	writeFile(t, filepath.Join(twinDir, "vision.md"), "# Vision\n\nedited\n")
-	gittest.Run(t, root, "add", "projects/p/digital-twin/vision.md")
-	gittest.Run(t, root, "commit", "-m", "edit vision")
-
-	t.Setenv("GIT_AUTHOR_DATE", "2026-04-03T12:00:00Z")
-	t.Setenv("GIT_COMMITTER_DATE", "2026-04-03T12:00:00Z")
-	gittest.Run(t, root, "revert", "--no-edit", "HEAD")
-
-	cp := Checkpoint{
-		Version:        CheckpointVersion,
-		LastIngestAt:   "2026-04-01T18:00:00Z",
-		LastIngestRun:  "reflect-prior",
-		BureaucracySHA: &checkpointSHA,
-		Project:        "p",
-	}
-	if err := WriteCheckpoint(twinDir, cp); err != nil {
-		t.Fatal(err)
-	}
-
-	cfg := Config{
-
-		ContentDir:      twinDir,
-		BureaucracyPath: root,
-		Project:         "p",
-		ManagedDocs:     []ManagedDoc{{Filename: "vision.md", Title: "Vision"}},
-	}
-	det, err := DetectUnrecordedEdits(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(det.UnrecordedDocs) != 0 {
-		t.Errorf("net-noop revert should not be flagged as unrecorded, got %v",
-			det.UnrecordedDocs)
 	}
 }
 

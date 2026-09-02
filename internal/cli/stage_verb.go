@@ -81,7 +81,7 @@ func parkCascadeExclusive(verb string, park bool, cascade string, stderr io.Writ
 }
 
 // preflightMintTail is the parse-time mint-verb check for the verbs
-// that know their workflow up front (new, twin reflect): the --park /
+// that know their workflow up front (new): the --park /
 // cascade exclusion, plus a cascade refusal on a workflow that can't
 // cascade — so a run we couldn't ship is never minted. chore open,
 // whose target workflow is only known after the open, uses
@@ -109,7 +109,7 @@ func preflightMintTail(verb, workflow string, park bool, cascade string, stderr 
 // ride whatever the run chains onto. Same seam either way — the answer
 // string is all that differs.
 //
-// Callers that know their workflow at parse time (new, reflect) have
+// Callers that know their workflow at parse time (new) have
 // already refused a non-cascading tail via preflightMintTail; the guard
 // here re-checks for chore open, whose workflow is only known now.
 func mintTail(root string, md *run.Metadata, park bool, cascade string, stdout, stderr io.Writer) int {
@@ -167,7 +167,7 @@ func plainRunSlug(_, _, runID string, _, _ io.Writer) (string, int) {
 // (sdlc's lineage walk vs. plainRunSlug) and persistAgent (sdlc writes
 // --agent to run.json; everyone else applies it per-turn). reentryGuard
 // is the third: the no-cascade-flag leg's status guard — sdlc wires
-// resolveSDLCReentry (which also forwards or reopens), twin wires
+// resolveSDLCReentry (which also forwards or reopens); other groups wire
 // guardTwinReentry (a plain refusal). A workflow may leave it nil, but
 // only deliberately: an unguarded interactive door walks onto terminal
 // runs, which is the bug this hook exists to fence.
@@ -183,7 +183,7 @@ type stageVerbCfg struct {
 }
 
 // runStageVerb is the shared body behind every workflow's stage verbs
-// (sdlc design/code/review/test, twin's six): parse the per-stage
+// (sdlc design/code/review/test): parse the per-stage
 // flags, branch to interactive
 // (no cascade flag) or cascade (one of --once / --to / --ship /
 // --chain), and surface cascade-mode mutual exclusion at parse time.

@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/modulecollective/moe/internal/dash"
-	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
 )
 
@@ -357,31 +356,6 @@ func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 	}
 }
 
-// openTwinStageInvocation mirrors openSdlcStageInvocation for the
-// twin cascade dispatcher: stage name, (project, run), headless flag,
-// suppression.
-type openTwinStageInvocation struct {
-	stage     string
-	projectID string
-	runID     string
-	headless  bool
-}
-
-// stubOpenTwinStage swaps openTwinStage for a recorder so cascade tests
-// can drive twin cascades without invoking real stage sessions.
-// perStageExit pins a non-zero exit for a named stage when needed.
-func stubOpenTwinStage(t *testing.T, perStageExit map[string]int) *[]openTwinStageInvocation {
-	t.Helper()
-	var captured []openTwinStageInvocation
-	prev := openTwinStage
-	openTwinStage = func(stage, projectID, runID string, headless bool, _ string, _, _ io.Writer) int {
-		captured = append(captured, openTwinStageInvocation{stage, projectID, runID, headless})
-		return perStageExit[stage]
-	}
-	t.Cleanup(func() { openTwinStage = prev })
-	return &captured
-}
-
 // closeCommandInvocation records one cascade-side close dispatch — the
 // args the cascade passed (today: ["--no-edit", project, run]) and the
 // stub's chosen exit.
@@ -434,164 +408,6 @@ func isolateCascadeMoeHome(t *testing.T) string {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	return root
-}
-
-func writeSatisfiedTwinFinalizeCanvas(t *testing.T, root string, md *run.Metadata) {
-	t.Helper()
-	writeStageCanvas(t, root, md, "finalize", `# Finalize
-
-## What I fixed
-
-- verified the reflect pass left no inline cleanup.
-
-## What I left
-
-- nothing left.
-
-## History-summary delta
-
-- no history changes in this fixture.
-`)
-}
-
-// TestCascadeFromGateTwinYoloAutoCloses pins the twin `!!` shape: a
-// twin cascade walks every reflect stage and then auto-closes the run.
-// sdlc's push branch is the equivalent terminator; twin has no push, so
-// the post-loop close dispatch handles "cascade and terminate" for
-// workflows where `done → close` is the only path. --no-edit keeps
-// the close non-interactive (followups harvested as-is).
-func TestCascadeFromGateTwinYoloAutoCloses(t *testing.T) {
-	root := isolateCascadeMoeHome(t)
-	stageCaptured := stubOpenTwinStage(t, nil)
-	closeCaptured := stubGroupCloseCommand(t, "twin", 0)
-	md := &run.Metadata{ID: "reflect-2026-05-17", Project: "moe", Workflow: "twin", Status: run.StatusInProgress}
-	writeSatisfiedTwinFinalizeCanvas(t, root, md)
-
-	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("vision", "", false, false, md, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
-	}
-	if !res.shipped {
-		t.Fatalf("twin !! cascade must ship via close: %+v", res)
-	}
-	wantSteps := []string{"vision", "architecture", "patterns", "operations", "glossary", "finalize", "close"}
-	if len(res.ran) != len(wantSteps) {
-		t.Fatalf("ran %d steps, want %d (%+v)", len(res.ran), len(wantSteps), res.ran)
-	}
-	for i, s := range wantSteps {
-		if res.ran[i].stage != s {
-			t.Fatalf("ran[%d].stage = %q, want %q", i, res.ran[i].stage, s)
-		}
-	}
-	// Each reflect stage dispatched once via openTwinStage.
-	for _, stage := range wantSteps[:len(wantSteps)-1] {
-		got := 0
-		for _, inv := range *stageCaptured {
-			if inv.stage == stage {
-				got++
-			}
-		}
-		if got != 1 {
-			t.Fatalf("stage %s dispatched %d times via openTwinStage, want 1", stage, got)
-		}
-	}
-	// close must NOT go through openTwinStage — it's not a reflect stage.
-	for _, inv := range *stageCaptured {
-		if inv.stage == "close" {
-			t.Fatalf("close must not dispatch via openTwinStage: %+v", inv)
-		}
-	}
-	// close received --no-edit plus the (project, run) tuple.
-	if len(*closeCaptured) != 1 {
-		t.Fatalf("close dispatched %d times, want 1: %+v", len(*closeCaptured), *closeCaptured)
-	}
-	if got, want := strings.Join((*closeCaptured)[0].args, " "), "--no-edit moe/reflect-2026-05-17"; got != want {
-		t.Fatalf("close args = %q, want %q", got, want)
-	}
-	// Summary ends with the close step and the shipped marker.
-	wantSummary := "cascade moe/reflect-2026-05-17: vision ok · architecture ok · patterns ok · operations ok · glossary ok · finalize ok · close ok — shipped"
-	if got := renderCascadeSummary("moe/reflect-2026-05-17", res); got != wantSummary {
-		t.Fatalf("summary = %q, want %q", got, wantSummary)
-	}
-}
-
-// TestCascadeTwinAutoCloseReallyCloses is the wiring the stubbed sibling
-// above can't see. TestCascadeFromGateTwinYoloAutoCloses swaps the
-// group's close command for a recorder, so nothing there proves the
-// cascade's close reaches disk. Same walk, but with the real close and a
-// full close fixture.
-func TestCascadeTwinAutoCloseReallyCloses(t *testing.T) {
-	root := seedCloseFixture(t, "moe", "reflect-2026-05-17", "twin", run.StatusInProgress)
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-	stubOpenTwinStage(t, nil)
-	md, err := run.Load(root, "moe", "reflect-2026-05-17")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The finalize gate reads this canvas, and the real close refuses a
-	// dirty tree — so unlike the stubbed sibling it has to be committed.
-	writeSatisfiedTwinFinalizeCanvas(t, root, md)
-	gittest.Run(t, root, "add", "-A")
-	gittest.Run(t, root, "commit", "-m", "work: finalize canvas for the cascade close")
-
-	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("vision", "", false, false, md, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
-	}
-	if !res.shipped {
-		t.Fatalf("twin !! cascade must ship via close: %+v", res)
-	}
-	if reloaded, err := run.Load(root, "moe", "reflect-2026-05-17"); err != nil {
-		t.Fatal(err)
-	} else if reloaded.Status != run.StatusClosed {
-		t.Fatalf("run status = %q, want closed — the cascade's close did not land", reloaded.Status)
-	}
-}
-
-// TestCascadeFromGateTwinBangStageDoesNotClose: a non-yolo
-// `!<stage>` cascade for twin must not dispatch close — the operator
-// asked for a partial walk, not a "complete the run" gesture. close is
-// reserved for `!!`.
-func TestCascadeFromGateTwinBangStageDoesNotClose(t *testing.T) {
-	stubOpenTwinStage(t, nil)
-	closeCaptured := stubGroupCloseCommand(t, "twin", 0)
-	md := &run.Metadata{ID: "reflect-2026-05-17", Project: "moe", Workflow: "twin", Status: run.StatusInProgress}
-
-	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("vision", "finalize", false, false, md, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
-	}
-	if res.shipped {
-		t.Fatalf("!<stage> cascade must not ship: %+v", res)
-	}
-	if len(*closeCaptured) != 0 {
-		t.Fatalf("close must not dispatch on !<stage>: %+v", *closeCaptured)
-	}
-}
-
-// TestCascadeFromGateTwinYoloStopsOnStageFailure: a failing reflect
-// stage stops the cascade — close must not fire. Mirrors the
-// sdlc-stops-on-failure invariant one workflow over.
-func TestCascadeFromGateTwinYoloStopsOnStageFailure(t *testing.T) {
-	stubOpenTwinStage(t, map[string]int{"patterns": 1})
-	closeCaptured := stubGroupCloseCommand(t, "twin", 0)
-	md := &run.Metadata{ID: "reflect-2026-05-17", Project: "moe", Workflow: "twin", Status: run.StatusInProgress}
-
-	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("vision", "", false, false, md, &stdout, &stderr)
-	if code != 1 {
-		t.Fatalf("cascade exit=%d, want 1; stderr=%q", code, stderr.String())
-	}
-	if res.shipped {
-		t.Fatalf("a stopped cascade must not mark shipped: %+v", res)
-	}
-	if len(*closeCaptured) != 0 {
-		t.Fatalf("close must not dispatch after a stage failure: %+v", *closeCaptured)
-	}
 }
 
 // TestCascadeFromGateStopsOnFailure: the first non-zero exit stops
@@ -717,44 +533,6 @@ func TestCascadeFromGateOneStepDispatchesStartStageOnly(t *testing.T) {
 	}
 }
 
-// TestCascadeFromGateOneStepAtTerminalStage pins the terminal-stage
-// edge case: bare `!` at twin's post-glossary gate (next=finalize)
-// dispatches finalize once and does NOT auto-close — that's the
-// `!!`-only terminator. Distinguishes oneStep from yolo at the last
-// stage, where successor-name math would otherwise reinterpret one
-// as the other.
-func TestCascadeFromGateOneStepAtTerminalStage(t *testing.T) {
-	root := isolateCascadeMoeHome(t)
-	stageCaptured := stubOpenTwinStage(t, nil)
-	closeCaptured := stubGroupCloseCommand(t, "twin", 0)
-	md := &run.Metadata{ID: "reflect-2026-05-17", Project: "moe", Workflow: "twin", Status: run.StatusInProgress}
-	writeSatisfiedTwinFinalizeCanvas(t, root, md)
-
-	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("finalize", "", true, false, md, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
-	}
-	if res.shipped {
-		t.Fatalf("oneStep at terminal stage must not ship: %+v", res)
-	}
-	if len(res.ran) != 1 || res.ran[0].stage != "finalize" {
-		t.Fatalf("ran = %+v, want one step at finalize", res.ran)
-	}
-	dispatched := 0
-	for _, inv := range *stageCaptured {
-		if inv.stage == "finalize" {
-			dispatched++
-		}
-	}
-	if dispatched != 1 {
-		t.Fatalf("finalize dispatched %d times, want 1", dispatched)
-	}
-	if len(*closeCaptured) != 0 {
-		t.Fatalf("oneStep must not dispatch close: %+v", *closeCaptured)
-	}
-}
-
 // TestPromptStageNextStageBangAdvancesOneStage: typing bare `!` at
 // the design→code gate dispatches code once (headless, so the
 // post-turn prompt is skipped) and re-prompts at the test gate. The
@@ -796,45 +574,6 @@ func TestPromptStageNextStageBangAdvancesOneStage(t *testing.T) {
 		if !inv.headless {
 			t.Fatalf("bare `!` dispatch must be headless (skips the post-turn prompt), got: %+v", inv)
 		}
-	}
-}
-
-// TestPromptStageNextStageBangForTwin: bare `!` works for twin too —
-// the cascade legend and the oneStep dispatch reach both registered
-// workflows via the headless-dispatcher registry, no sdlc hard-wiring.
-func TestPromptStageNextStageBangForTwin(t *testing.T) {
-	captured := stubOpenTwinStage(t, nil)
-	next := &Command{Name: "architecture", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
-	md := &run.Metadata{ID: "reflect-2026-05-17", Project: "moe", Workflow: "twin", Status: run.StatusInProgress}
-
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-	if _, err := io.WriteString(w, "!\n"); err != nil {
-		t.Fatal(err)
-	}
-	w.Close()
-	oldStdin := os.Stdin
-	os.Stdin = r
-	t.Cleanup(func() { os.Stdin = oldStdin })
-
-	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, nil, nil, cascadeFixtureRoot(t, md), md, "moe twin architecture moe reflect-2026-05-17", &stdout, &stderr); code != 0 {
-		t.Fatalf("prompt exit=%d stderr=%q", code, stderr.String())
-	}
-	if got := stdout.String(); !strings.Contains(got, "cascade moe/reflect-2026-05-17: architecture ok") {
-		t.Fatalf("expected `cascade moe/reflect-2026-05-17: architecture ok` summary, got: %q", got)
-	}
-	dispatched := 0
-	for _, inv := range *captured {
-		if inv.stage == "architecture" {
-			dispatched++
-		}
-	}
-	if dispatched != 1 {
-		t.Fatalf("architecture dispatched %d times, want 1 (twin invocations: %+v)", dispatched, *captured)
 	}
 }
 

@@ -61,7 +61,7 @@ func lookupCloseRegistration(workflow string) (closeRegistration, bool) {
 // subject is the commit subject template — a fmt.Sprintf string taking
 // two %s args (projectID, runID). It stays a parameter rather than a
 // derived string so existing commit-history shapes stay stable: idea
-// close lands `Close idea <p>/<r>`, while sdlc/twin land `Close <wf> run
+// close lands `Close idea <p>/<r>`, while sdlc lands `Close <wf> run
 // <p>/<r>` per the design doc.
 //
 // Building the command also records (subject, cleanup) into the close

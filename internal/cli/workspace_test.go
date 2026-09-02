@@ -233,9 +233,9 @@ func TestRunNewWithWorkspaceFlagRejectedOnNonSdlc(t *testing.T) {
 	stubEditor(t)
 
 	var out, errb bytes.Buffer
-	code := runNew("twin", []string{"--workspace=dev", "tele/dns-basics"}, &out, &errb)
+	code := runNew(chatWorkflow, []string{"--workspace=dev", "tele/dns-basics"}, &out, &errb)
 	if code == 0 {
-		t.Fatalf("expected non-zero on --workspace with twin, got 0; stdout=%q", out.String())
+		t.Fatalf("expected non-zero on --workspace with a non-sdlc workflow, got 0; stdout=%q", out.String())
 	}
 	if !strings.Contains(errb.String(), "--workspace") {
 		t.Fatalf("expected error to name the flag, got: %q", errb.String())

@@ -58,7 +58,7 @@ func init() {
 
 // runDash is the cli/handler. Loads the inputs the dash package
 // needs (run scan, journal index, open-session list, per-run
-// next-stage decisions, per-project twin configs) and hands them to
+// next-stage decisions) and hands them to
 // dash for assembly + render.
 func runDash(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("dash", flag.ContinueOnError)

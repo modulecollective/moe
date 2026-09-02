@@ -20,7 +20,7 @@ import (
 // by hand, a red CI run on the default branch — is invisible to a
 // journal-only sweep. This file is the harness-side gather that closes
 // that gap: two `gh` reads rendered as one context block appended to the
-// survey kickoff, the same shape as the twin-observations line (compute
+// survey kickoff, the same shape the other context blocks take (compute
 // what the agent can't cheaply or reliably derive, hand it in).
 //
 // Deliberately harness-side rather than "let the survey shell out to

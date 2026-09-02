@@ -91,7 +91,7 @@ type runVM struct {
 	// open. Zero value renders no section, which is nearly every run.
 	Inputs runInputsVM
 	// Traces is what the run left behind outside its canvases —
-	// follow-ups, lore, and its twin note — each landed one linked to
+	// follow-ups, lore, and twin notes — each landed one linked to
 	// what it became. Zero value renders no sections.
 	Traces runTracesVM
 	// Reaped is the heartbeat reap's tombstone, rendered. Nil for nearly
@@ -889,7 +889,7 @@ func (s *Server) buildRunVM(c *child, projectID, slug, id string) runVM {
 	s.fillRunRow(&vm, projectID, slug, now)
 	vm.Provenance = s.gatherProvenance(projectID, slug)
 	// A live-parented run is usually sdlc, but opening a chore can spawn
-	// any configured workflow (e.g. a chore whose `workflow` is `twin`), so don't
+	// any configured workflow (e.g. a chore's own workflow), so don't
 	// assume the workflow here — gate the action chips on the on-disk
 	// metadata (composeRunActions keys off the workflow's declaration).
 	// A load failure just drops the chips.

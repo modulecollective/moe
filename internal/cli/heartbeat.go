@@ -777,7 +777,7 @@ func journalActs(root, projectID, rev string) (operator, ride bool) {
 // rideAuthored reports whether a commit body is a ride's: its
 // MoE-Workflow trailer names a workflow whose runs spend agent turns.
 // That is every way a ride lands work — a stage turn, a push's merge, a
-// ridden run's close, sdlc or twin alike — and it is the mark that tells
+// ridden run's close — and it is the mark that tells
 // a sweep's window "something the survey never read is now on the board".
 //
 // Two workflows are excluded, and the sweep's whole bookkeeping falls out
@@ -940,8 +940,7 @@ func parkedKickableThread(root string, sc *pulseScan, projectID string, markedOn
 	// tag. The tag is the whole predicate — it is the licence to start
 	// (untagged means human), an idea has no thread and no design floor
 	// to clear, and validatePromoteTag already guaranteed at write time
-	// that the tag names a usable workflow. A `(twin)` tag counts: the
-	// sweep resolves it through the reflect nomination, which is motion.
+	// that the tag names a usable workflow.
 	//
 	// Without this leg a tag stamped while serve was down is swallowed
 	// for good — the cursors seed lazily and read as "not moved", and the

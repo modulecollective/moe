@@ -69,7 +69,7 @@ type groomGroup struct {
 //
 // This pairing is what replaced the alias map. The old gate split
 // spawning and ordering into two lists that named each other through one
-// shared slug namespace, written last-write-wins: a twin entry's
+// shared slug namespace, written last-write-wins: an entry's
 // agent-chosen alias could shadow an sdlc entry or a real parked run's
 // slug, and the resolver consulted the map before disk — so the wrong
 // run got ordered, silently. A minted run now carries its identity from

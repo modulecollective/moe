@@ -20,7 +20,7 @@ import (
 //  2. has a stage ladder Next can walk
 //  3. shows up in `moe dash`
 //
-// Verbs that miss any leg of the test (project, session, twin)
+// Verbs that miss any leg of the test (project, session)
 // live as plain CommandGroups; they have no Workflow at all.
 type Workflow struct {
 	Name         string
@@ -45,7 +45,7 @@ type Workflow struct {
 	docsOnly []string
 	// stageGates lets a stage layer an additional satisfiability check
 	// on top of the default "has a work-turn newer than upstream" rule.
-	// sdlc's test stage and twin's finalize use it: a committed canvas
+	// sdlc's test stage uses it: a committed canvas
 	// that left the structural sections empty must not advance the
 	// stage. The gate runs *after* the default work-turn check, only
 	// when that check passed — so a stage with no work-turn stays

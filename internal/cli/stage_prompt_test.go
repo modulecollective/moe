@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	moe "github.com/modulecollective/moe"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/wiki"
 )
@@ -126,7 +125,7 @@ func TestBuildSystemPromptInjectsLoreAfterTwin(t *testing.T) {
 	}
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
-	got, _, err := buildSystemPrompt(root, md, "code", "", false, nil)
+	got, _, err := buildSystemPrompt(root, md, "code", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +241,7 @@ func TestBuildSystemPromptInjectsIntentsBetweenTwinAndLore(t *testing.T) {
 	seedIntentRun(t, root, "tele", "aim-here", run.StatusInProgress, "# Aim here\n")
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
-	got, _, err := buildSystemPrompt(root, md, "code", "", false, nil)
+	got, _, err := buildSystemPrompt(root, md, "code", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +262,7 @@ func TestBuildSystemPromptInjectsIntentsBetweenTwinAndLore(t *testing.T) {
 func TestBuildSystemPromptOmitsIntentsWhenNone(t *testing.T) {
 	root := newTestBureaucracy(t)
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
-	got, _, err := buildSystemPrompt(root, md, "code", "", false, nil)
+	got, _, err := buildSystemPrompt(root, md, "code", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +318,7 @@ func TestFollowupsReferenceSection(t *testing.T) {
 func TestBuildSystemPromptIncludesFollowupsNudge(t *testing.T) {
 	root := newTestBureaucracy(t)
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
-	got, _, err := buildSystemPrompt(root, md, "code", "", false, nil)
+	got, _, err := buildSystemPrompt(root, md, "code", "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,10 +397,10 @@ func TestOperationalCoreCanvasPathIsAbsoluteAcrossStages(t *testing.T) {
 // writable wording.
 func TestOperationalCoreReadOnlySandboxParagraph(t *testing.T) {
 	root := newTestBureaucracy(t)
-	md := &run.Metadata{ID: "pass", Project: "moe", Workflow: "twin"}
+	md := &run.Metadata{ID: "pass", Project: "moe", Workflow: "sdlc"}
 	clone := "/sandbox/clones/moe/pass"
 
-	readOnly := operationalCore(root, md, "architecture", clone, true)
+	readOnly := operationalCore(root, md, "design", clone, true)
 	if !strings.Contains(readOnly, clone) {
 		t.Fatalf("read-only prompt must still name the clone path:\n%s", readOnly)
 	}
@@ -423,7 +422,7 @@ func TestOperationalCoreReadOnlySandboxParagraph(t *testing.T) {
 	if strings.Contains(writable, "exposed read-only") {
 		t.Errorf("writable prompt leaked the read-only wording:\n%s", writable)
 	}
-	documentOnly := operationalCore(root, md, "architecture", "", true)
+	documentOnly := operationalCore(root, md, "design", "", true)
 	for name, got := range map[string]string{
 		"document-only": documentOnly,
 		"read-only":     readOnly,
@@ -442,22 +441,6 @@ func TestOperationalCoreReadOnlySandboxParagraph(t *testing.T) {
 	// Document-only stages have no clone, so neither paragraph renders.
 	if strings.Contains(documentOnly, "exposed read-only") {
 		t.Errorf("no clone means no sandbox paragraph:\n%s", documentOnly)
-	}
-}
-
-// TestTwinStageGuidesLeaveCommitsToHarness pins the workflow-local half
-// of the no-commit instruction. These fragments previously described
-// the resulting commit in passive voice, which an agent read as work it
-// should perform inside the bureaucracy worktree.
-func TestTwinStageGuidesLeaveCommitsToHarness(t *testing.T) {
-	for _, stage := range []string{"vision", "architecture", "patterns", "operations", "glossary", "finalize"} {
-		body := moe.Stage("twin", stage)
-		normalized := strings.Join(strings.Fields(body), " ")
-		for _, want := range []string{"harness", "don't run", "`git add`", "`git commit`", "yourself"} {
-			if !strings.Contains(normalized, want) {
-				t.Errorf("twin %s guide missing %q in no-commit instruction:\n%s", stage, want, body)
-			}
-		}
 	}
 }
 
@@ -776,7 +759,7 @@ func TestBuildSystemPromptIncludesPriorRunsAfterProjectGuidance(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(clone, "AGENTS.md"), []byte("stdlib only\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, _, err := buildSystemPrompt(root, md, "code", clone, false, nil)
+	got, _, err := buildSystemPrompt(root, md, "code", clone, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -820,13 +803,13 @@ func TestOperationalCoreNamesProjectCommitDirs(t *testing.T) {
 				"feedback/twin.md",
 				"feedback/lore.md",
 			}},
-		// Twin stages write the twin through the reflect pass, not a
-		// stage commit — no carve-out sentence.
-		{workflow: "twin", docID: "vision", absent: true},
+		// Every other workflow stages nothing under projects/<p>/ —
+		// no carve-out sentence.
+		{workflow: chatWorkflow, docID: "chat", absent: true},
 	}
 	for _, tc := range cases {
 		md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: tc.workflow}
-		got, _, err := buildSystemPrompt(root, md, tc.docID, "", false, nil)
+		got, _, err := buildSystemPrompt(root, md, tc.docID, "", false)
 		if err != nil {
 			t.Fatal(err)
 		}

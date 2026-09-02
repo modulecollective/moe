@@ -475,7 +475,7 @@ func TestPulseGateParsesBothRunShapes(t *testing.T) {
 	body := "# Pulse\n\n## Gate\n\n```json\n" +
 		`{"status":"ok",` +
 		`"loose":[{"slug":"fix-ci-red-main","title":"Fix red CI on main","why":"TestX failing","design":"# seed\n"}],` +
-		`"threads":[{"onto":"already-parked","park":"the ordering here is a guess","runs":["tidy-1",{"slug":"reflect","workflow":"twin","why":"drift"}]}]}` +
+		`"threads":[{"onto":"already-parked","park":"the ordering here is a guess","runs":["tidy-1",{"slug":"second-fix","workflow":"sdlc","why":"drift"}]}]}` +
 		"\n```\n"
 	if err := os.WriteFile(canvas, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
@@ -501,13 +501,13 @@ func TestPulseGateParsesBothRunShapes(t *testing.T) {
 	if th.Runs[0].Existing != "tidy-1" || th.Runs[0].Spec != nil {
 		t.Errorf("runs[0] = %+v, want the string form naming tidy-1", th.Runs[0])
 	}
-	if th.Runs[1].Spec == nil || th.Runs[1].Spec.Workflow != "twin" || th.Runs[1].Existing != "" {
-		t.Errorf("runs[1] = %+v, want an inline twin spec", th.Runs[1])
+	if th.Runs[1].Spec == nil || th.Runs[1].Spec.Workflow != "sdlc" || th.Runs[1].Existing != "" {
+		t.Errorf("runs[1] = %+v, want an inline sdlc spec", th.Runs[1])
 	}
 
 	// Every spec the gate proposed, whichever list it sat in.
 	specs := gate.specs()
-	if len(specs) != 2 || specs[0].Slug != "fix-ci-red-main" || specs[1].Workflow != "twin" {
+	if len(specs) != 2 || specs[0].Slug != "fix-ci-red-main" || specs[1].Workflow != "sdlc" {
 		t.Errorf("specs() = %+v, want the loose spec then the inline one", specs)
 	}
 }

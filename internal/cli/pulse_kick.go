@@ -17,7 +17,7 @@ import (
 
 // The harness-owned step that follows grooming: whether the pulse kicks
 // anything itself. Where a spawned run *lands* is not here — that is a
-// `chain` claim the survey makes, twin reflects included.
+// `chain` claim the survey makes.
 
 // pulseSelfKick is the last step of a pulse: under a dynamic sweep,
 // start every kickable parked thread on the board — the ones this sweep
