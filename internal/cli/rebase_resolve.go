@@ -9,7 +9,7 @@ import (
 )
 
 // rebaseAutoResolveTimeout caps the chain-back agent's wall-time.
-// 5min matches wiki finalize's budget — the failure mode this targets
+// Five minutes is generous — the failure mode this targets
 // (submodule pointer bump on main while a session was open, canonical
 // main moved forward while a workspace held a branch) is sub-30-seconds
 // work; longer timeouts only help genuinely ambiguous conflicts the
