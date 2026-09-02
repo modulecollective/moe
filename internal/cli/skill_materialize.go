@@ -100,7 +100,7 @@ func materializeMoeContextSkill(workRoot, sessionCwd string, md *run.Metadata, c
 // carries no per-run template — the body is project-agnostic command
 // guidance — so it plants the embedded body verbatim. Chat is the only
 // caller; a workflow gate in BuildSpec keeps it off every other stage,
-// so a coding or reflect agent never sees the grooming verbs.
+// so a coding agent never sees the grooming verbs.
 func materializeMoeHowtoSkill(workRoot, sessionCwd string) error {
 	return writeSkill(workRoot, sessionCwd, "moe-howto", []byte(moe.MoeHowtoSkill()))
 }

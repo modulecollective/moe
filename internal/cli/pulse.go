@@ -393,7 +393,7 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 	// — the skeleton placeholder, or a turn that exited 0 without writing
 	// a real conclusion — means the sweep didn't actually conclude:
 	// refuse the auto-close so the run lingers on the dash's ACTIVE list
-	// (escalation by visibility), and skip the reflect spawn. Any parsed
+	// (escalation by visibility), and skip the gate's spawns. Any parsed
 	// non-empty status passes; a pulse has no ready/blocked vocabulary,
 	// only close-or-linger.
 	//
@@ -632,12 +632,10 @@ type pulseGate struct {
 // the survey's findings instead of re-deriving them.
 //
 // Workflow picks the mint path and defaults to "sdlc" when empty. The
-// allowlist is sdlc + twin: the only two workflows a pulse has a reason
-// to propose fresh (chat is perpetual, pulse would be recursion). A twin
-// spec is a reflect *nomination* — its real slug stays harness-minted
-// (reflect-YYYY-MM-DD) and nothing dedupes on Slug there, so it is
-// optional and only ever read back in a warn line; Title and Design are
-// meaningless and warn-ignored.
+// allowlist is sdlc alone: the only workflow a pulse has a reason to
+// propose fresh (chat is perpetual, pulse would be recursion). The
+// field survives the twin reflect it once also named, because a survey
+// that writes one is told so rather than having the key ignored.
 //
 // Chore names a judged chore instead, and is exclusive with every other
 // field: the survey's claim is only "the condition the operator wrote
@@ -652,7 +650,7 @@ type pulseGate struct {
 // field on the grammar that already carried the seed rather than a
 // fifth gate key, so slug validation and the live-slug dedupe come
 // along for free. Four shapes warn and skip it (see mint and
-// applyPulseGate): a chore or twin entry, a slug matching a live idea,
+// applyPulseGate): a chore entry, a slug matching a live idea,
 // a thread position, and a spec with no Design body.
 type pulseRunSpec struct {
 	Slug       string `json:"slug"`

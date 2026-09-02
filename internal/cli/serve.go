@@ -152,10 +152,10 @@ func serveOptions(root string, stderr io.Writer) serve.Options {
 		RunProvenance: func(project, runID string) ([]serve.ProvHop, error) {
 			return runProvenance(root, project, runID)
 		},
-		// The followup/lore checklist grammar and the reflect ingestion
-		// rule both live in cli; the run page needs to read them the way
-		// harvest and reflect do, so they cross as one gather rather than
-		// as a re-implementation on the serve side.
+		// The checklist grammar all three harvest pipelines share lives
+		// in cli; the run page needs to read it the way harvest does, so
+		// it crosses as one gather rather than as a re-implementation on
+		// the serve side.
 		GatherRunTraces: func(project, runID string) (serve.RunTraces, error) {
 			return GatherRunTraces(root, project, runID)
 		},

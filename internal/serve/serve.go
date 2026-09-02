@@ -158,12 +158,11 @@ type Options struct {
 	RunProvenance func(project, run string) (hops []ProvHop, err error)
 
 	// GatherRunTraces returns what a run left behind outside its
-	// canvases: its followups.md and feedback/lore.md checklist entries
-	// (each harvested one resolved to the idea run or lore entry it
-	// became) and its feedback/twin.md note with the reflect pass that
-	// folded it in. The checklist grammar is unexported cli state and
-	// serve can't import cli, so it crosses the seam as a callback
-	// rather than by moving the parser.
+	// canvases: the checklist entries in its followups.md,
+	// feedback/lore.md, and feedback/twin.md, each harvested one
+	// resolved to the idea run or lore entry it became. The checklist
+	// grammar is unexported cli state and serve can't import cli, so it
+	// crosses the seam as a callback rather than by moving the parser.
 	//
 	// Absent — or erroring — leaves the run page as it was: no traces
 	// sections. A broken trace file degrades its section, not the page.

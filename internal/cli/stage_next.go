@@ -832,10 +832,9 @@ func promptPushCascadeShip(md *run.Metadata, rideChain bool, mode rideMode, stdo
 // Bare `!` dispatches exactly one stage (startStage) headless and
 // re-prompts at the resulting gate. `!<stage>` walks headless up to
 // but not including the named stage. `!!` walks every remaining stage
-// headless and ships **this run** (or auto-closes, for workflows
-// without push), then stops. `!!!` is the same walk as `!!` but rides
-// the whole chain — after this run ships it cascades into the next
-// live chained child.
+// headless and ships **this run**, then stops. `!!!` is the same walk
+// as `!!` but rides the whole chain — after this run ships it cascades
+// into the next live chained child.
 //
 // Returns the exit code to bubble up: the failing stage's code on a
 // cascade failure, 0 on a successful park-at-gate or ship.
@@ -1322,12 +1321,12 @@ func cascadeShipStep(workflow string, md *run.Metadata, rideChain bool, stdout, 
 		// ships, if a live chain edge points at an unresolved child,
 		// cascade into it. `!!` stops here — rideChain is the gate.
 		// Recursive by construction — the child's cascadeFromGate reaches
-		// its own push (sdlc) or auto-close (non-sdlc) and re-fires this
-		// hook on its own outgoing edge. A ride that stalls — Ctrl-C or
-		// an ordinary stage failure — propagates back as this cascade's
-		// exit code: the parent has already shipped, and shipped=true
-		// records that honestly, but the invocation as a whole did not
-		// come out clean and its caller deserves to know.
+		// its own push and re-fires this hook on its own outgoing edge.
+		// A ride that stalls — Ctrl-C or an ordinary stage failure —
+		// propagates back as this cascade's exit code: the parent has
+		// already shipped, and shipped=true records that honestly, but
+		// the invocation as a whole did not come out clean and its
+		// caller deserves to know.
 		//
 		// The ride fires on a clean push whatever the route said. Under
 		// `pr` that means carrying on while the parent's branch sits

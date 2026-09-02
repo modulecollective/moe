@@ -109,9 +109,9 @@ func commitTurn(root string, md *run.Metadata, docID string, extraPaths ...strin
 	if followupsRel, ok := stageableFollowups(root, md); ok {
 		allPaths = append(allPaths, followupsRel)
 	}
-	// feedback/*.md is the sibling directory for notes addressed to
-	// downstream recipients (twin reflect today). v1 picks up twin.md;
-	// another feedback/*.md lands here for free. Same conditional-stage
+	// feedback/*.md is the sibling directory for notes a run leaves for
+	// something downstream to harvest — twin.md and lore.md today,
+	// another feedback/*.md here for free. Same conditional-stage
 	// pattern as followups so a turn that touched neither still trips
 	// ErrNothingToCommit cleanly.
 	allPaths = append(allPaths, stageableFeedback(root, md)...)
