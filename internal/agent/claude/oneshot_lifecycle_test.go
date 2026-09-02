@@ -4,6 +4,7 @@ package claude
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -98,6 +99,15 @@ func TestExecuteOneShotDeadlineKillsProcessGroup(t *testing.T) {
 	}
 	if err == nil || !strings.Contains(err.Error(), "claude: -p timed out") {
 		t.Fatalf("err = %v, want a claude timeout error", err)
+	}
+	// Typed, carrying the cap: the stage commit reads the duration back
+	// off this error to stamp MoE-Timed-Out.
+	var toErr *agent.TimeoutError
+	if !errors.As(err, &toErr) {
+		t.Fatalf("err = %v (%T), want *agent.TimeoutError", err, err)
+	}
+	if toErr.Timeout != 500*time.Millisecond {
+		t.Errorf("TimeoutError.Timeout = %s, want the request's 500ms cap", toErr.Timeout)
 	}
 
 	pid := readPID(t, pidFile)
