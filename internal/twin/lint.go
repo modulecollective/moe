@@ -585,7 +585,7 @@ func readMaybe(path string) (string, bool, error) {
 		if os.IsNotExist(err) {
 			return "", false, nil
 		}
-		return "", false, fmt.Errorf("wiki: read %s: %w", path, err)
+		return "", false, fmt.Errorf("twin: read %s: %w", path, err)
 	}
 	return string(body), true, nil
 }
