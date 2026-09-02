@@ -37,8 +37,9 @@ func TwinReferenceSectionAt(root, projectID string) string {
 	if err != nil || !info.IsDir() {
 		return ""
 	}
-	// Empty dir → no twin to reference. (Bootstrapped twins always
-	// have the managed-doc set stubbed on disk.)
+	// Empty dir → no twin to reference. Any .md counts: the managed
+	// docs are the only thing that lives here now that nothing
+	// generates a log alongside them.
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return ""
@@ -49,9 +50,6 @@ func TwinReferenceSectionAt(root, projectID string) string {
 			continue
 		}
 		if !strings.HasSuffix(e.Name(), ".md") {
-			continue
-		}
-		if e.Name() == "log.md" {
 			continue
 		}
 		hasManagedDoc = true
