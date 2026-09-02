@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modulecollective/moe/internal/lore"
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/wiki"
 )
 
 // TestScanChecklistDisplayIsLenient pins the display scan's contract
@@ -136,7 +136,7 @@ func TestGatherRunTracesResolvesLandedFollowups(t *testing.T) {
 func TestGatherRunTracesResolvesLore(t *testing.T) {
 	root := newTestBureaucracy(t)
 	seedTraceRun(t, root, "alpha", "src", run.StatusClosed)
-	writeTraceFile(t, root, filepath.Join(wiki.LoreDirRel, "promoted-fact.md"), "# Promoted\n")
+	writeTraceFile(t, root, filepath.Join(lore.DirRel, "promoted-fact.md"), "# Promoted\n")
 	writeTraceFile(t, root, run.FeedbackPath("alpha", "src", "lore"), `- [x] `+"`promoted-fact`"+` — A portable fact
 - [x] `+"`never-promoted`"+` — Checked but no file
 - [ ] `+"`pending-fact`"+` — Not promoted yet

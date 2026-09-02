@@ -9,11 +9,11 @@ import (
 	"path/filepath"
 
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/lore"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/trailers"
-	"github.com/modulecollective/moe/internal/wiki"
 )
 
 // harvestCommand builds the `harvest` subcommand for a workflow —
@@ -142,7 +142,7 @@ func harvestRunInProcess(root, workflow, projectID, runID string, skipEdit bool,
 	followupsRel := run.FollowupsPath(projectID, runID)
 	loreRel := run.FeedbackPath(projectID, runID, "lore")
 	twinRel := run.FeedbackPath(projectID, runID, "twin")
-	dirty, derr := dirtyOutsidePaths(root, followupsRel, loreRel, twinRel, wiki.LoreDirRel+"/")
+	dirty, derr := dirtyOutsidePaths(root, followupsRel, loreRel, twinRel, lore.DirRel+"/")
 	if derr != nil {
 		return derr
 	}
@@ -185,7 +185,7 @@ func harvestRunInProcess(root, workflow, projectID, runID string, skipEdit bool,
 		// lore/ goes in as a dir so every newly-promoted slug rides along
 		// without enumerating them.
 		var paths []string
-		for _, rel := range []string{followupsRel, loreRel, twinRel, wiki.LoreDirRel} {
+		for _, rel := range []string{followupsRel, loreRel, twinRel, lore.DirRel} {
 			if _, statErr := os.Stat(filepath.Join(root, rel)); statErr == nil {
 				paths = append(paths, rel)
 			}

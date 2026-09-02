@@ -9,8 +9,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/modulecollective/moe/internal/lore"
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/wiki"
 )
 
 // feedback/lore.md is the run-scoped scratch file harvested at close
@@ -246,7 +246,7 @@ func renderLoreFile(title, appliesWhen, discoveredIn, updatedIn, prose string) s
 // always written before superseded files are deleted, leaving visible
 // junk rather than invisible absence if the operation is interrupted.
 func promoteLoreEntry(root, projectID, runID string, p parsedLore) (string, error) {
-	loreDir := wiki.LoreDir(root)
+	loreDir := lore.Dir(root)
 	if err := os.MkdirAll(loreDir, 0o755); err != nil {
 		return "", fmt.Errorf("mkdir %s: %w", loreDir, err)
 	}
@@ -291,7 +291,7 @@ func promoteLoreEntry(root, projectID, runID string, p parsedLore) (string, erro
 		// append this run to updated-in. The append is deduped so a
 		// retry over an already-patched file reproduces an identical
 		// body — the idempotency the partial-progress recovery relies on.
-		fm := wiki.LoreFrontmatter(abs)
+		fm := lore.Frontmatter(abs)
 		discoveredIn := fm["discovered-in"]
 		updatedIn := appendUpdatedIn(fm["updated-in"], discoveredIn, thisRun)
 		body = renderLoreFile(p.title, p.appliesWhen, discoveredIn, updatedIn, p.body)
@@ -366,7 +366,7 @@ func harvestLore(root, projectID, runID, workflow string, skipEdit bool) error {
 		relPath:                  relPath,
 		header:                   loreHeader,
 		progressSubject:          fmt.Sprintf("harvest: capture lore for %s/%s", projectID, runID),
-		progressPaths:            []string{wiki.LoreDirRel},
+		progressPaths:            []string{lore.DirRel},
 		writeErrorLeavesProgress: loreWriteErrorLeavesProgress,
 		writeErrPrefix:           "promote lore",
 		parse: func(body []byte) ([]string, []scratchItem[parsedLore], error) {

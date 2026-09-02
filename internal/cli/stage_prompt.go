@@ -11,6 +11,7 @@ import (
 
 	moe "github.com/modulecollective/moe"
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/lore"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/wiki"
@@ -80,7 +81,7 @@ func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string, s
 	// Lore-as-context: portable, cross-project facts catalog. Lands
 	// right after the intents so project-specific intent is read before
 	// the project-agnostic operational facts that build on it.
-	if ref := wiki.LoreReferenceSectionAt(root); ref != "" {
+	if ref := lore.ReferenceSectionAt(root); ref != "" {
 		sections = append(sections, ref)
 	}
 

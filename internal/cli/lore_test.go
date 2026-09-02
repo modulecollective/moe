@@ -10,8 +10,8 @@ import (
 
 	moegit "github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/git/gittest"
+	"github.com/modulecollective/moe/internal/lore"
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/wiki"
 )
 
 // writeLoreFeedback drops a feedback/lore.md alongside run.json
@@ -42,7 +42,7 @@ func readLoreFeedback(t *testing.T, root, projectID, runID string) string {
 
 func readLoreEntry(t *testing.T, root, slug string) string {
 	t.Helper()
-	body, err := os.ReadFile(filepath.Join(root, wiki.LoreDirRel, slug+".md"))
+	body, err := os.ReadFile(filepath.Join(root, lore.DirRel, slug+".md"))
 	if err != nil {
 		t.Fatalf("read lore/%s.md: %v", slug, err)
 	}
@@ -405,7 +405,7 @@ func TestSDLCCloseHarvestsFollowupsAndLoreTogether(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "idea-next", "run.json")); err != nil {
 		t.Fatalf("expected harvested idea: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(root, wiki.LoreDirRel, "fact-next.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, lore.DirRel, "fact-next.md")); err != nil {
 		t.Fatalf("expected harvested lore: %v", err)
 	}
 	if got := readFollowups(t, root, "tele", "ship-it"); !strings.Contains(got, "- [x] `idea-next` — Idea next") {
@@ -446,7 +446,7 @@ func TestSDLCCloseHarvestsNonCanonicalLore(t *testing.T) {
 		t.Fatalf("close: exit=%d stderr=%q", code, errb.String())
 	}
 
-	if _, err := os.Stat(filepath.Join(root, wiki.LoreDirRel, "fact-next.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, lore.DirRel, "fact-next.md")); err != nil {
 		t.Fatalf("expected lore promoted from non-canonical entry: %v", err)
 	}
 	if got := readLoreFeedback(t, root, "tele", "ship-it"); !strings.Contains(got, "- [x] `fact-next` — Fact next") {
@@ -464,7 +464,7 @@ func TestSDLCCloseAutoDisambiguatesLoreCollision(t *testing.T) {
 
 	// Pre-seed lore/foo.md (and commit it, so the clean-tree gate
 	// doesn't refuse on the seed) so the harvester has to bump.
-	loreDir := filepath.Join(root, wiki.LoreDirRel)
+	loreDir := filepath.Join(root, lore.DirRel)
 	if err := os.MkdirAll(loreDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -473,7 +473,7 @@ func TestSDLCCloseAutoDisambiguatesLoreCollision(t *testing.T) {
 		0o644); err != nil {
 		t.Fatal(err)
 	}
-	gittest.Run(t, root, "add", filepath.Join(wiki.LoreDirRel, "foo.md"))
+	gittest.Run(t, root, "add", filepath.Join(lore.DirRel, "foo.md"))
 	gittest.Run(t, root, "commit", "-m", "seed lore/foo.md for collision test")
 
 	writeLoreFeedback(t, root, "tele", "ship-it", strings.Join([]string{
@@ -502,7 +502,7 @@ func TestSDLCCloseAutoDisambiguatesLoreCollision(t *testing.T) {
 
 func TestPromoteLoreEntrySupersedesAfterWritingReplacement(t *testing.T) {
 	root := t.TempDir()
-	loreDir := filepath.Join(root, wiki.LoreDirRel)
+	loreDir := filepath.Join(root, lore.DirRel)
 	if err := os.MkdirAll(filepath.Join(loreDir, "old-b.md"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -561,7 +561,7 @@ func TestPromoteLoreEntrySupersedesAfterWritingReplacement(t *testing.T) {
 
 func TestPromoteLoreEntrySupportsInPlaceAmendment(t *testing.T) {
 	root := t.TempDir()
-	loreDir := filepath.Join(root, wiki.LoreDirRel)
+	loreDir := filepath.Join(root, lore.DirRel)
 	if err := os.MkdirAll(loreDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -596,7 +596,7 @@ func TestPromoteLoreEntrySupportsInPlaceAmendment(t *testing.T) {
 // appends a second ref in chronological order.
 func TestPromoteLoreEntryAmendPreservesProvenance(t *testing.T) {
 	root := t.TempDir()
-	loreDir := filepath.Join(root, wiki.LoreDirRel)
+	loreDir := filepath.Join(root, lore.DirRel)
 	if err := os.MkdirAll(loreDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -655,7 +655,7 @@ func TestPromoteLoreEntryAmendPreservesProvenance(t *testing.T) {
 // no duplicate ref.
 func TestPromoteLoreEntryAmendIsIdempotent(t *testing.T) {
 	root := t.TempDir()
-	loreDir := filepath.Join(root, wiki.LoreDirRel)
+	loreDir := filepath.Join(root, lore.DirRel)
 	if err := os.MkdirAll(loreDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -692,7 +692,7 @@ func TestPromoteLoreEntryAmendIsIdempotent(t *testing.T) {
 // still recording the amending run in updated-in.
 func TestPromoteLoreEntryAmendHandAuthoredOmitsDiscoveredIn(t *testing.T) {
 	root := t.TempDir()
-	loreDir := filepath.Join(root, wiki.LoreDirRel)
+	loreDir := filepath.Join(root, lore.DirRel)
 	if err := os.MkdirAll(loreDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -743,7 +743,7 @@ func TestPromoteLoreEntryFreshOmitsUpdatedIn(t *testing.T) {
 
 func TestHarvestLoreCommitsFirstEntryPartialProgressForRetry(t *testing.T) {
 	root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
-	loreDir := filepath.Join(root, wiki.LoreDirRel)
+	loreDir := filepath.Join(root, lore.DirRel)
 	if err := os.MkdirAll(filepath.Join(loreDir, "old-b.md"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -753,7 +753,7 @@ func TestHarvestLoreCommitsFirstEntryPartialProgressForRetry(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(loreDir, "old-a.md"), []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gittest.Run(t, root, "add", wiki.LoreDirRel)
+	gittest.Run(t, root, "add", lore.DirRel)
 	gittest.Run(t, root, "commit", "-m", "seed partial-delete lore")
 
 	writeLoreFeedback(t, root, "tele", "ship-it", strings.Join([]string{
@@ -782,7 +782,7 @@ func TestHarvestLoreCommitsFirstEntryPartialProgressForRetry(t *testing.T) {
 	if err := os.RemoveAll(filepath.Join(loreDir, "old-b.md")); err != nil {
 		t.Fatal(err)
 	}
-	gittest.Run(t, root, "add", "-A", wiki.LoreDirRel)
+	gittest.Run(t, root, "add", "-A", lore.DirRel)
 	gittest.Run(t, root, "commit", "-m", "remove deletion blocker")
 	if err := harvestLore(root, "tele", "ship-it", "sdlc", true); err != nil {
 		t.Fatalf("retry harvest: %v", err)
@@ -797,10 +797,10 @@ func TestHarvestLoreCommitsFirstEntryPartialProgressForRetry(t *testing.T) {
 
 func TestHarvestLoreDoesNotCommitFirstEntryPreWriteFailure(t *testing.T) {
 	root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
-	if err := os.WriteFile(filepath.Join(root, wiki.LoreDirRel), []byte("blocks lore dir"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, lore.DirRel), []byte("blocks lore dir"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gittest.Run(t, root, "add", wiki.LoreDirRel)
+	gittest.Run(t, root, "add", lore.DirRel)
 	gittest.Run(t, root, "commit", "-m", "block lore directory")
 	writeLoreFeedback(t, root, "tele", "ship-it",
 		"- [ ] `fact` — Fact\n\n  applies-when: always\n\n  body\n")
@@ -864,7 +864,7 @@ func TestSDLCCloseSkipsAlreadyCheckedLore(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 
-	loreDir := filepath.Join(root, wiki.LoreDirRel)
+	loreDir := filepath.Join(root, lore.DirRel)
 	if _, err := os.Stat(filepath.Join(loreDir, "new-fact.md")); err != nil {
 		t.Fatalf("expected lore/new-fact.md: %v", err)
 	}

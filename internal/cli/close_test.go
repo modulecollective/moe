@@ -8,10 +8,10 @@ import (
 	"testing"
 
 	"github.com/modulecollective/moe/internal/git/gittest"
+	"github.com/modulecollective/moe/internal/lore"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
-	"github.com/modulecollective/moe/internal/wiki"
 )
 
 // seedCloseFixture composes the test setup every close test wants: a
@@ -503,7 +503,7 @@ func TestIntentCloseSkipsHarvest(t *testing.T) {
 			t.Fatalf("harvest minted a run: %s", e.Name())
 		}
 	}
-	if _, err := os.Stat(filepath.Join(root, wiki.LoreDirRel)); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, lore.DirRel)); !os.IsNotExist(err) {
 		t.Fatalf("harvest promoted lore, stat err=%v", err)
 	}
 

@@ -16,6 +16,7 @@ import (
 	"github.com/modulecollective/moe/internal/repolock"
 	// Aliased: serve.go in this package imports the stdlib sync, and one
 	// package can't spell the same identifier two ways.
+	"github.com/modulecollective/moe/internal/lore"
 	moesync "github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/wiki"
 )
@@ -58,7 +59,7 @@ type loreItemVM struct {
 // handleLoreIndex lists lore/*.md. Cheap: a frontmatter read per file,
 // no git calls (provenance lives on the entry page).
 func (s *Server) handleLoreIndex(w http.ResponseWriter, r *http.Request) {
-	dir := wiki.LoreDir(s.opts.Root)
+	dir := lore.Dir(s.opts.Root)
 	entries, err := os.ReadDir(dir)
 	if err != nil && !os.IsNotExist(err) {
 		http.Error(w, "lore read: "+err.Error(), http.StatusInternalServerError)
@@ -96,7 +97,7 @@ func (s *Server) handleLoreEntry(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	rel := filepath.Join(wiki.LoreDirRel, name+".md")
+	rel := filepath.Join(lore.DirRel, name+".md")
 	src, ok := s.readDoc(w, r, rel)
 	if !ok {
 		return

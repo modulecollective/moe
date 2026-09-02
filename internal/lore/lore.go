@@ -1,4 +1,12 @@
-package wiki
+// Package lore holds the path helpers and the prompt-side catalog for
+// the bureaucracy's cross-project lore/ tree: portable, hard-won facts
+// discovered in one project and true in many.
+//
+// It lived in internal/wiki while the digital twin was an engine,
+// because the two shared a reference-section shape and nothing else.
+// The engine is gone; the shape is still shared, and now so is nothing
+// else, so lore stands on its own.
+package lore
 
 import (
 	"bufio"
@@ -9,14 +17,14 @@ import (
 	"strings"
 )
 
-// LoreDirRel is the bureaucracy-root-relative path where cross-project
+// DirRel is the bureaucracy-root-relative path where cross-project
 // "lore" lives: portable, hard-won operational facts that don't belong
 // to any one project. Sibling of projects/ and .moe/.
-const LoreDirRel = "lore"
+const DirRel = "lore"
 
-// LoreDir returns the absolute path to the bureaucracy's lore/ dir.
-func LoreDir(root string) string {
-	return filepath.Join(root, LoreDirRel)
+// Dir returns the absolute path to the bureaucracy's lore/ dir.
+func Dir(root string) string {
+	return filepath.Join(root, DirRel)
 }
 
 // loreEntry is one parsed entry from lore/. Title and AppliesWhen come
@@ -27,20 +35,20 @@ type loreEntry struct {
 	AppliesWhen string
 }
 
-// LoreReferenceSectionAt emits a system-prompt block that catalogs the
+// ReferenceSectionAt emits a system-prompt block that catalogs the
 // bureaucracy's lore/ entries: one line per entry with title and
 // "applies-when" hint. The agent opens a specific file only when its
 // hint matches the current task — bodies stay on disk, not in the
 // prompt budget.
 //
-// Mirrors TwinReferenceSectionAt's shape. Returns "" when lore/ doesn't
+// Mirrors twin.ReferenceSectionAt's shape. Returns "" when lore/ doesn't
 // exist or has zero entries, so the empty case slots cleanly into the
 // section join in buildSystemPrompt.
-func LoreReferenceSectionAt(root string) string {
+func ReferenceSectionAt(root string) string {
 	if root == "" {
 		return ""
 	}
-	dir := LoreDir(root)
+	dir := Dir(root)
 	info, err := os.Stat(dir)
 	if err != nil || !info.IsDir() {
 		return ""
@@ -110,7 +118,7 @@ notes or grep across other projects for a similar fact, use
 	return b.String()
 }
 
-// LoreFrontmatter reads a lore entry's YAML frontmatter into a
+// Frontmatter reads a lore entry's YAML frontmatter into a
 // key→value map. Fail-soft: any I/O error, a missing opening fence, or
 // a malformed file yields an empty (but non-nil) map, so callers can
 // index without a nil check and fall back to their own placeholders — a
@@ -119,7 +127,7 @@ notes or grep across other projects for a similar fact, use
 // Stdlib only: we read just enough lines to clear the second `---`
 // fence, collect every `key: value` pair, and stop. No YAML parser
 // needed for the flat, quoted-scalar schema lore entries carry.
-func LoreFrontmatter(path string) map[string]string {
+func Frontmatter(path string) map[string]string {
 	out := map[string]string{}
 	f, err := os.Open(path)
 	if err != nil {
@@ -148,9 +156,9 @@ func LoreFrontmatter(path string) map[string]string {
 // readLoreFrontmatter pulls `title:` and `applies-when:` out of a lore
 // entry's frontmatter, falling back to ("", "") for either missing key
 // so the catalog can substitute the filename + "(missing)" placeholders.
-// Thin wrapper over LoreFrontmatter.
+// Thin wrapper over Frontmatter.
 func readLoreFrontmatter(path string) (title, appliesWhen string) {
-	fm := LoreFrontmatter(path)
+	fm := Frontmatter(path)
 	return fm["title"], fm["applies-when"]
 }
 

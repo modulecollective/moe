@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/lore"
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/wiki"
 )
 
 // enterTerminal advances md to newStatus (merged or closed), running
@@ -56,8 +56,8 @@ func enterTerminal(root string, md *run.Metadata, newStatus string, skipEdit boo
 		if _, err := os.Stat(filepath.Join(root, loreRel)); err == nil {
 			paths = append(paths, loreRel)
 		}
-		if _, err := os.Stat(filepath.Join(root, wiki.LoreDirRel)); err == nil {
-			paths = append(paths, wiki.LoreDirRel)
+		if _, err := os.Stat(filepath.Join(root, lore.DirRel)); err == nil {
+			paths = append(paths, lore.DirRel)
 		}
 		// Twin feedback is the third pop, and the third destination:
 		// notes about the project's own twin fan out into ideas so a

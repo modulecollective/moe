@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modulecollective/moe/internal/lore"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/wiki"
 )
@@ -114,7 +115,7 @@ func TestBuildSystemPromptInjectsLoreAfterTwin(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	loreDir := wiki.LoreDir(root)
+	loreDir := lore.Dir(root)
 	if err := os.MkdirAll(loreDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +231,7 @@ func TestBuildSystemPromptInjectsIntentsBetweenTwinAndLore(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(twinDir, "vision.md"), []byte("# vision\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	loreDir := wiki.LoreDir(root)
+	loreDir := lore.Dir(root)
 	if err := os.MkdirAll(loreDir, 0o755); err != nil {
 		t.Fatal(err)
 	}

@@ -9,12 +9,12 @@ import (
 	"path/filepath"
 
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/lore"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
 	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/trailers"
-	"github.com/modulecollective/moe/internal/wiki"
 )
 
 // isCaptureWorkflow reports whether a workflow is one of the cheap
@@ -175,7 +175,7 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 		followupsRel := run.FollowupsPath(projectID, runID)
 		loreRel := run.FeedbackPath(projectID, runID, "lore")
 		twinRel := run.FeedbackPath(projectID, runID, "twin")
-		dirty, derr := dirtyOutsidePaths(root, followupsRel, loreRel, twinRel, wiki.LoreDirRel+"/")
+		dirty, derr := dirtyOutsidePaths(root, followupsRel, loreRel, twinRel, lore.DirRel+"/")
 		if derr != nil {
 			return derr
 		}

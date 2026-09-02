@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/modulecollective/moe/internal/git/gittest"
+	"github.com/modulecollective/moe/internal/lore"
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/wiki"
 )
 
 // TestSDLCCloseCommitsInPlaceLoreAmendment covers the amend arm of the
@@ -23,7 +23,7 @@ func TestSDLCCloseCommitsInPlaceLoreAmendment(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	loreDir := filepath.Join(root, wiki.LoreDirRel)
+	loreDir := filepath.Join(root, lore.DirRel)
 	if err := os.MkdirAll(loreDir, 0o755); err != nil {
 		t.Fatal(err)
 	}

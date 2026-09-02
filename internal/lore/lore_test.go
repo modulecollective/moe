@@ -1,4 +1,4 @@
-package wiki
+package lore
 
 import (
 	"fmt"
@@ -9,7 +9,7 @@ import (
 
 func TestLoreReferenceSectionEmptyWithoutDir(t *testing.T) {
 	root := t.TempDir()
-	if got := LoreReferenceSectionAt(root); got != "" {
+	if got := ReferenceSectionAt(root); got != "" {
 		t.Errorf("expected empty for missing lore dir, got %q", got)
 	}
 }
@@ -17,7 +17,7 @@ func TestLoreReferenceSectionEmptyWithoutDir(t *testing.T) {
 func TestLoreReferenceSectionEmptyDir(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "lore", ".gitkeep"), "")
-	if got := LoreReferenceSectionAt(root); got != "" {
+	if got := ReferenceSectionAt(root); got != "" {
 		t.Errorf("expected empty for lore dir with no .md entries, got %q", got)
 	}
 }
@@ -28,7 +28,7 @@ func TestLoreReferenceSectionRendersEntries(t *testing.T) {
 		"---\ntitle: Reaching compose ports\napplies-when: fly + compose + tailscale\n---\n\nbody\n")
 	writeFile(t, filepath.Join(root, "lore", "codex-sandbox.md"),
 		"---\ntitle: Interactive codex blocks .git/\napplies-when: codex under a submodule\n---\n\nbody\n")
-	got := LoreReferenceSectionAt(root)
+	got := ReferenceSectionAt(root)
 	for _, want := range []string{
 		"## Lore (cross-project)",
 		filepath.Join(root, "lore"),
@@ -56,7 +56,7 @@ func TestLoreReferenceSectionOrderingByFilename(t *testing.T) {
 		"---\ntitle: Alpha\napplies-when: a\n---\n")
 	writeFile(t, filepath.Join(root, "lore", "mid.md"),
 		"---\ntitle: Mid\napplies-when: m\n---\n")
-	got := LoreReferenceSectionAt(root)
+	got := ReferenceSectionAt(root)
 	ai := strings.Index(got, "alpha.md")
 	mi := strings.Index(got, "mid.md")
 	zi := strings.Index(got, "zeta.md")
@@ -78,7 +78,7 @@ func TestLoreReferenceSectionFallsBackForMissingFrontmatter(t *testing.T) {
 		"# Plain markdown, no frontmatter at all\n\nbody\n")
 	writeFile(t, filepath.Join(root, "lore", "title-only.md"),
 		"---\ntitle: Just A Title\n---\n\nbody\n")
-	got := LoreReferenceSectionAt(root)
+	got := ReferenceSectionAt(root)
 	for _, want := range []string{
 		"no-frontmatter",
 		"(missing)",
@@ -103,7 +103,7 @@ func TestLoreReferenceSectionSkipsHiddenAndDraftFiles(t *testing.T) {
 		"---\ntitle: SENTINEL-draft-title\napplies-when: never\n---\n")
 	writeFile(t, filepath.Join(root, "lore", "real.md"),
 		"---\ntitle: Real Entry\napplies-when: always\n---\n")
-	got := LoreReferenceSectionAt(root)
+	got := ReferenceSectionAt(root)
 	if !strings.Contains(got, "Real Entry") {
 		t.Errorf("real entry missing in:\n%s", got)
 	}
@@ -130,7 +130,7 @@ func TestLoreReferenceSectionAlwaysCarriesPruneProse(t *testing.T) {
 				filepath.Join(root, "lore", fmt.Sprintf("entry-%02d.md", i)),
 				fmt.Sprintf("---\ntitle: Entry %d\napplies-when: test %d\n---\n", i, i))
 		}
-		got := LoreReferenceSectionAt(root)
+		got := ReferenceSectionAt(root)
 		if !strings.Contains(got, "stays small\nby prunes, not just adds") {
 			t.Errorf("%d entries: prune prose missing, got:\n%s", count, got)
 		}
@@ -156,7 +156,7 @@ func TestLoreReferenceSectionStripsQuotes(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "lore", "quoted.md"),
 		"---\ntitle: \"Quoted Title\"\napplies-when: 'single quoted'\n---\n")
-	got := LoreReferenceSectionAt(root)
+	got := ReferenceSectionAt(root)
 	if !strings.Contains(got, "Quoted Title") || strings.Contains(got, `"Quoted Title"`) {
 		t.Errorf("expected unquoted title in output, got:\n%s", got)
 	}

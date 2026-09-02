@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/modulecollective/moe/internal/git/gittest"
+	"github.com/modulecollective/moe/internal/lore"
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/wiki"
 )
 
 // failCloseCommits points root's core.hooksPath at a commit-msg hook
@@ -116,7 +116,7 @@ func TestCloseCommitFailureLeavesRunOpen(t *testing.T) {
 	if got := readLoreFeedback(t, root, "tele", "ship-it"); !strings.Contains(got, "- [x] `portable-fact`") {
 		t.Errorf("feedback/lore.md rewrite should survive the rollback:\n%s", got)
 	}
-	if _, err := os.Stat(filepath.Join(root, wiki.LoreDirRel, "portable-fact.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, lore.DirRel, "portable-fact.md")); err != nil {
 		t.Errorf("promoted lore file should survive the rollback: %v", err)
 	}
 }
@@ -158,7 +158,7 @@ func TestCloseRetriesAfterCommitFailure(t *testing.T) {
 		filepath.Join(run.Dir("tele", "ship-it"), "run.json"),
 		run.FollowupsPath("tele", "ship-it"),
 		run.FeedbackPath("tele", "ship-it", "lore"),
-		filepath.Join(wiki.LoreDirRel, "portable-fact.md"),
+		filepath.Join(lore.DirRel, "portable-fact.md"),
 	} {
 		if !strings.Contains(head, want) {
 			t.Errorf("close commit missing %q:\n%s", want, head)

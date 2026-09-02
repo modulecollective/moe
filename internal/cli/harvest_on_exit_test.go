@@ -9,9 +9,9 @@ import (
 
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git/gittest"
+	"github.com/modulecollective/moe/internal/lore"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
-	"github.com/modulecollective/moe/internal/wiki"
 )
 
 // capturingFakeClaudeScript writes the canvas and then files one
@@ -91,7 +91,7 @@ func assertHarvested(t *testing.T, root, runID, followupSlug, loreSlug string) {
 	if _, err := os.Stat(filepath.Join(root, run.Dir("tele", followupSlug), "run.json")); err != nil {
 		t.Errorf("followup never reached an idea run: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(root, wiki.LoreDirRel, loreSlug+".md")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, lore.DirRel, loreSlug+".md")); err != nil {
 		t.Errorf("lore entry never reached lore/: %v", err)
 	}
 	if got := readFollowups(t, root, "tele", runID); !strings.Contains(got, "- [x] `"+followupSlug+"`") {

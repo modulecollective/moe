@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/modulecollective/moe/internal/lore"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/serve"
-	"github.com/modulecollective/moe/internal/wiki"
 )
 
 // A run leaves traces beyond its stage canvases: followups.md entries
@@ -137,16 +137,16 @@ func GatherRunTraces(root, projectID, runID string) (serve.RunTraces, error) {
 		out.Followups = append(out.Followups, t)
 	}
 
-	lore, err := readDisplayChecklist(root, run.FeedbackPath(projectID, runID, "lore"))
+	loreEntries, err := readDisplayChecklist(root, run.FeedbackPath(projectID, runID, "lore"))
 	if err != nil {
 		return serve.RunTraces{}, err
 	}
-	for _, e := range lore {
+	for _, e := range loreEntries {
 		t := traceOf(e)
 		// Lore slugs are bare filenames (parseLore rejects a `/`), so a
 		// prefixed one never promoted and has nothing to link to.
 		if e.done && e.slug != "" && !strings.Contains(e.slug, "/") {
-			if st, err := os.Stat(filepath.Join(root, wiki.LoreDirRel, e.slug+".md")); err == nil && !st.IsDir() {
+			if st, err := os.Stat(filepath.Join(root, lore.DirRel, e.slug+".md")); err == nil && !st.IsDir() {
 				t.TargetURL = "/lore/" + e.slug
 			}
 		}
