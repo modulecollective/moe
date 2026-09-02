@@ -109,7 +109,7 @@ func TestDesignOnlyIsSkippedOrIgnored(t *testing.T) {
 			[]pulseRunSpec{designOnlySpec("baseline-drift")}, io.Discard, &errb); len(minted) != 0 {
 			t.Errorf("minted %v, want nothing — design-only opens fresh slugs only", minted)
 		}
-		if !strings.Contains(errb.String(), "already names a live run") {
+		if !strings.Contains(errb.String(), "already names live work") {
 			t.Errorf("stderr = %q, want the skip named", errb.String())
 		}
 		// The capture is untouched: the refusal exists so a design-only

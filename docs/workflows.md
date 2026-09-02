@@ -521,9 +521,10 @@ survey's *brief* rather than a baked design, so the bar is lower: a finding
 worth a designer's hour, not a fix worth a ride. The run is then held the way
 any unadvanced run is held, and your exits are the run page's advance chip (a
 full ride follows on the next sweep), a pushed note (one more design turn), or
-close. `design_only` is skipped on a slug that already names a live run, at a
-thread position, on a chore or twin entry, and on a spec with no `design`
-body; the bit stays in `run.json` afterwards as provenance.
+close. `design_only` is skipped on a slug that already names live work — a run
+in flight or a captured idea, whose triage is the operator's — at a thread
+position, on a chore or twin entry, and on a spec with no `design` body; the
+bit stays in `run.json` afterwards as provenance.
 
 In a hand-typed `moe pulse new`, grooming changes recorded placement and not
 execution: newly placed work parks for a later kick. Under `--dynamic`,

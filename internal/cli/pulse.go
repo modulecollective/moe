@@ -1107,7 +1107,7 @@ func (m *pulseMinter) mint(s pulseRunSpec, stdout, stderr io.Writer) string {
 		// way a design-only promotion would consume the capture past the
 		// operator's per-idea brake to buy a turn they never asked for.
 		if s.DesignOnly {
-			moePrintf(stderr, "pulse: spawn: entry %q asks for design_only but the slug already names a live run — design-only opens fresh slugs only; skipping\n", slug)
+			moePrintf(stderr, "pulse: spawn: entry %q asks for design_only but the slug already names live work — design-only opens fresh slugs only; skipping\n", slug)
 			return ""
 		}
 		return m.promoteOrSkip(slug, s, stdout, stderr)
