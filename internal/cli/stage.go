@@ -47,9 +47,19 @@ const oneShotPromptDelimiter = "\n---\n\n"
 // headlessTurnTimeout hard-caps a headless stage turn's wall-clock.
 // Headless turns have no operator on stdin to Ctrl-C a wedge, so without
 // a cap an agent that backgrounds a long-lived subprocess (the dominant
-// failure mode) hangs the turn indefinitely. 60min clears any legitimate
-// well-scoped stage turn with margin while still bounding the wedge.
-const headlessTurnTimeout = 60 * time.Minute
+// failure mode) hangs the turn indefinitely.
+//
+// The number errs long because the two failure modes it trades between
+// are not symmetric. Killing a legitimate turn burns every token that
+// turn spent, and the re-drive spends them again from scratch — one-shot
+// carries no session resume. A wedge is idle by construction — no model
+// calls, no tokens — so it costs only wall-clock and one held serve slot.
+// The longest legitimate turn in the transcript record is 59min, so 3h
+// keeps headroom as turns lengthen instead of inviting a later doubling.
+// If a turn ever does cross it, cap idle time since the last stream
+// event rather than doubling again: that targets the wedge directly and
+// has a natural size, where doubling has no end.
+const headlessTurnTimeout = 180 * time.Minute
 
 // stageSessionOpts carries the per-stage knobs runStageSession needs
 // beyond the run identifiers. Most stages just set NeedsSandbox and
@@ -1078,10 +1088,10 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 		// no operator on stdin to Ctrl-C a wedged turn, and the dominant
 		// wedge is an agent backgrounding a long-lived subprocess (e.g.
 		// `moe serve`): a Claude Code turn won't end while a background
-		// task is alive, so the turn hangs forever. 60min is well clear of
-		// any legitimate well-scoped stage turn while still bounding the
-		// wedge — model-independent, and a net under every future
-		// "agent wedged a turn" variant, not just serve.
+		// task is alive, so the turn hangs forever. The cap is
+		// model-independent — a net under every future "agent wedged a
+		// turn" variant, not just serve. See headlessTurnTimeout for how
+		// it is sized against a legitimate long turn.
 		// ThreadPath enables transcript mirroring on one-shot so the
 		// post-Wait auto-tail has something to render. Empty for
 		// run-less callers (e.g. the rebase-resolve fallback).
