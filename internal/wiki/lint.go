@@ -52,17 +52,20 @@ type BrokenLink struct {
 	Target string // path the link resolves to, relative to ContentDir
 }
 
-// HasBlocking reports whether f contains a structural finding that
-// must be cleared before a reflect pass can seal. Every finding the
-// scan produces is structural and blocking, so this doubles as the
-// "is there anything to render" predicate for the known-issues block.
-func (f Findings) HasBlocking() bool {
-	return len(f.BrokenLinks) > 0 ||
-		len(f.EmptyDocs) > 0 ||
-		len(f.MissingManagedDocs) > 0 ||
-		len(f.GlossaryOrphans) > 0 ||
-		len(f.DanglingXrefs) > 0
+// Count is the total number of findings across every category. Every
+// finding the scan produces is structural and blocking, so a non-zero
+// count doubles as the "is there anything to render" predicate for the
+// known-issues block.
+func (f Findings) Count() int {
+	return len(f.BrokenLinks) +
+		len(f.EmptyDocs) +
+		len(f.MissingManagedDocs) +
+		len(f.GlossaryOrphans) +
+		len(f.DanglingXrefs)
 }
+
+// HasBlocking reports whether f carries any finding at all.
+func (f Findings) HasBlocking() bool { return f.Count() > 0 }
 
 // Scan walks the wiki content directory and returns the structural
 // findings. The catalogue is cfg.ManagedDocs (flat, no topics/);

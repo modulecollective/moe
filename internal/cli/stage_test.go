@@ -1451,9 +1451,9 @@ func TestKnowledgeFixTurnSuppressesStageBanners(t *testing.T) {
 
 			var stdout, stderr bytes.Buffer
 			code := runStageSession("tele", "fix-it", "design", stageSessionOpts{
-				Agent:            tc.fake,
-				Headless:         true,
-				knowledgeFixTurn: tc.fixTurn,
+				Agent:             tc.fake,
+				Headless:          true,
+				projectDocFixTurn: tc.fixTurn,
 			}, &stdout, &stderr)
 			if code != 0 {
 				t.Fatalf("design turn exited %d\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())

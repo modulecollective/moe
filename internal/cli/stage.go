@@ -189,12 +189,12 @@ type stageSessionOpts struct {
 	// pass. Routed straight through to wikiTurnSpec.PreFinalizeGate;
 	// see that field for the contract.
 	PreFinalizeGate func(workRoot string, worktreeWiki *wiki.Config) error
-	// knowledgeFixTurn marks a turn the knowledge-hygiene gate itself
+	// projectDocFixTurn marks a turn the project-doc hygiene gate itself
 	// dispatched to clear its findings. It suppresses the gate for that
-	// turn — enforceKnowledgeHygiene re-scans when the fix turn returns,
+	// turn — enforceProjectDocHygiene re-scans when the fix turn returns,
 	// so the recovery stays bounded at one attempt instead of recursing.
-	// Set only by enforceKnowledgeHygiene; never by a stage caller.
-	knowledgeFixTurn bool
+	// Set only by enforceProjectDocHygiene; never by a stage caller.
+	projectDocFixTurn bool
 	// Agent names the backend (claude / codex) that should drive this
 	// turn. Empty falls through resolveAgentName's precedence ladder:
 	// the model stylesheet, then "claude". Stage
@@ -419,11 +419,11 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	sheetAgent, sheetModel := sheet.Resolve(md.Workflow, docID)
 	agentName := stageAgentName(opts, md, sheetAgent)
 	opts.Model = stageModel(opts.Model, sheetAgent, sheetModel, agentName, stderr)
-	// A knowledge-fix turn runs *inside* an outer stage's banner pair, so
+	// A project-doc fix turn runs *inside* an outer stage's banner pair, so
 	// framing it as a stage of its own reads as two stages having run.
 	// The gate already announces it on one line; that line is the whole
 	// header the inner turn needs. Same guard on StageExit below.
-	if !opts.knowledgeFixTurn {
+	if !opts.projectDocFixTurn {
 		banner.StageEntry(stdout, agentName, md.Workflow, docID, md.Project, md.ID)
 	}
 
@@ -437,7 +437,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	// Set by the CommitStager when this turn's commit actually touched
 	// projects/<p>/knowledge/. The knowledge-hygiene gate below reads it
 	// so turns that didn't write knowledge pay nothing.
-	var knowledgeTouched bool
+	var projectDocsTouched []string
 
 	// The operator-input entries this turn's prompt actually rendered,
 	// captured by BuildPrompt and stamped delivered below once the turn
@@ -787,9 +787,9 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 						return err
 					}
 					// HEAD is this turn's commit and the worktree is still
-					// open — the one moment the "did this turn write
-					// knowledge?" question is cheap to answer exactly.
-					knowledgeTouched = commitTouchedKnowledge(workRoot, md.Project)
+					// open — the one moment the "which project doc trees did
+					// this turn write?" question is cheap to answer exactly.
+					projectDocsTouched = commitTouchedProjectDocs(workRoot, md.Project)
 					return nil
 				},
 				PreFinalizeGate: opts.PreFinalizeGate,
@@ -832,14 +832,14 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			return 1
 		}
 	}
-	// Knowledge-hygiene gate, same slot and same reasoning as the
-	// boundary check above: after the bureaucracy commit (the agent's
-	// topic edits ride it regardless), before the cascade prompt, so a
-	// turn that broke the index can't drag the chain forward. Skipped on
-	// a fix turn — that's the gate's own recovery attempt, and it
-	// re-scans on return instead of recursing.
-	if knowledgeTouched && !opts.knowledgeFixTurn {
-		if code := enforceKnowledgeHygiene(root, md, docID, opts, stdout, stderr); code != 0 {
+	// Project-doc hygiene gate, same slot and same reasoning as the
+	// boundary check above: after the bureaucracy commit (the agent's doc
+	// edits ride it regardless), before the cascade prompt, so a turn
+	// that broke the index or invented a cross-reference can't drag the
+	// chain forward. Skipped on a fix turn — that's the gate's own
+	// recovery attempt, and it re-scans on return instead of recursing.
+	if len(projectDocsTouched) > 0 && !opts.projectDocFixTurn {
+		if code := enforceProjectDocHygiene(root, md, projectDocsTouched, docID, opts, stdout, stderr); code != 0 {
 			return code
 		}
 	}
@@ -860,7 +860,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			return 1
 		}
 	}
-	if !opts.knowledgeFixTurn {
+	if !opts.projectDocFixTurn {
 		banner.StageExit(stdout, docID, md.Project, md.ID)
 	}
 	if skipPostTurnPrompt(opts) {
