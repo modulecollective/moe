@@ -334,6 +334,40 @@ func TestDesignOnlySpecOnADesignOnlyTaggedIdeaIsIgnored(t *testing.T) {
 	}
 }
 
+// TestDesignOnlySpecWithNoBodyOnADesignOnlyTaggedIdeaPromotes is the
+// same quote with the survey's other half followed: the guidance says
+// omit `design` for a tagged idea, and the board says "design only", so
+// the honest spec is a bare slug plus the marker. The no-body refusal
+// exists because a fresh mint would have nothing but a title and a why
+// for a seed — an idea's canvas *is* that brief, so there is nothing
+// missing here to refuse over.
+func TestDesignOnlySpecWithNoBodyOnADesignOnlyTaggedIdeaPromotes(t *testing.T) {
+	root := spawnFixture(t)
+	seedDesignOnlyIdea(t, root, "moe", "worth-a-think")
+
+	var errb bytes.Buffer
+	spec := designOnlySpec("worth-a-think")
+	spec.Design = ""
+	minted := mintSpecs(root, "moe", "pulse-one", []pulseRunSpec{spec}, io.Discard, &errb)
+	id := minted["worth-a-think"]
+	if id == "" {
+		t.Fatalf("nothing promoted; stderr=%q", errb.String())
+	}
+	if strings.Contains(errb.String(), "no design body") {
+		t.Errorf("stderr = %q, want no no-body refusal — the idea canvas is the brief", errb.String())
+	}
+	if !strings.Contains(errb.String(), "ignoring design_only for tagged idea moe/worth-a-think; the tag carries it") {
+		t.Errorf("stderr = %q, want the redundant flag named and ignored", errb.String())
+	}
+	dest, err := run.Load(root, "moe", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !dest.DesignOnly {
+		t.Errorf("run.json design_only = false, want the tag's bit on the run")
+	}
+}
+
 // TestDesignOnlyTaggedIdeaSkippedAtAThreadPosition applies the spec
 // rule to the tag that carries the bit: a design-only root is unsettled
 // by definition until the operator advances it, so every member queued

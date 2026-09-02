@@ -253,9 +253,10 @@ three:
 **The `design` body is the brief, not the design.** State the problem,
 the evidence, and what you want decided. Do not argue the approach —
 the design stage does that, with the code in front of it and a sandbox
-you don't have. A spec with `design_only` and no `design` body is
-skipped: without the brief this is the one-line idea it exists to
-replace.
+you don't have. On a fresh slug, a spec with `design_only` and no
+`design` body is skipped: without the brief this is the one-line idea
+it exists to replace. On a tagged idea the body is never the seed —
+its canvas is the brief — so omit it there and nothing is lost.
 
 **Mark the `why` speculative when it is.** The field says the ride is
 short; the `why` says why the finding earns a turn at all. The two are

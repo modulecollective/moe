@@ -90,7 +90,7 @@ func TestDesignOnlySpecMintsTheBitOntoTheRun(t *testing.T) {
 // tagged idea is the one live shape the spec may agree with, and that
 // case lives in TestDesignOnlySpecOnADesignOnlyTaggedIdeaIsIgnored.
 func TestDesignOnlyIsSkippedOrIgnored(t *testing.T) {
-	t.Run("no design body", func(t *testing.T) {
+	t.Run("no design body on a fresh slug", func(t *testing.T) {
 		root := spawnFixture(t)
 		spec := designOnlySpec("baseline-drift")
 		spec.Design = ""
@@ -146,6 +146,24 @@ func TestDesignOnlyIsSkippedOrIgnored(t *testing.T) {
 		}
 		if md.Status != run.StatusInProgress {
 			t.Errorf("idea status = %q, want it left alone", md.Status)
+		}
+	})
+
+	t.Run("slug names a plain-tagged idea, no design body", func(t *testing.T) {
+		root := spawnFixture(t)
+		seedTaggedIdea(t, root, "moe", "baseline-drift")
+		spec := designOnlySpec("baseline-drift")
+		spec.Design = ""
+		var errb bytes.Buffer
+
+		if minted := mintSpecs(root, "moe", "pulse-one", []pulseRunSpec{spec}, io.Discard, &errb); len(minted) != 0 {
+			t.Errorf("minted %v, want nothing — the spec would narrow the operator's ship licence", minted)
+		}
+		// Same refusal as the row above, on purpose: what stopped this
+		// entry is the slug, not the missing body, and the warn line has
+		// to say so or the survey fixes the wrong half of its spec.
+		if !strings.Contains(errb.String(), "the tag is the operator's licence to spend") {
+			t.Errorf("stderr = %q, want the licence refusal, not the no-body one", errb.String())
 		}
 	})
 

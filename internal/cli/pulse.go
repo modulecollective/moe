@@ -652,7 +652,10 @@ type pulseGate struct {
 // fifth gate key, so slug validation and the live-slug dedupe come
 // along for free. Four shapes warn and skip it (see mint and
 // applyPulseGate): a chore entry, a slug matching a live idea,
-// a thread position, and a spec with no Design body.
+// a thread position, and — on a fresh slug only — a spec with no
+// Design body. A slug matching a design-only *tagged* idea is the one
+// live match that promotes: the idea's canvas is the brief, so the
+// missing body costs nothing.
 type pulseRunSpec struct {
 	Slug       string `json:"slug"`
 	Workflow   string `json:"workflow"`
@@ -999,14 +1002,6 @@ func (m *pulseMinter) mint(s pulseRunSpec, stdout, stderr io.Writer) string {
 			moePrintf(stderr, "pulse: spawn: skipping entry with unusable slug %q\n", s.Slug)
 			return ""
 		}
-		// A design-only spec buys a design turn with the brief it carries.
-		// Without one the seed is a title and a why — the one-line idea
-		// this rung exists to replace — and the turn would spend itself
-		// re-deriving what the survey already knew.
-		if s.DesignOnly && strings.TrimSpace(s.Design) == "" {
-			moePrintf(stderr, "pulse: spawn: entry %q asks for design_only with no design body — the brief is the point; skipping\n", slug)
-			return ""
-		}
 	default:
 		moePrintf(stderr, "pulse: spawn: entry %q asks for workflow %q — only sdlc is spawnable; skipping\n", slug, workflow)
 		return ""
@@ -1021,6 +1016,17 @@ func (m *pulseMinter) mint(s pulseRunSpec, stdout, stderr io.Writer) string {
 		// own licence, so the refusal lives in promoteIfTaggedIdea, where
 		// the idea has been identified.
 		return m.promoteOrSkip(slug, s, stdout, stderr)
+	}
+	// A design-only spec buys a design turn with the brief it carries.
+	// Without one the seed is a title and a why — the one-line idea
+	// this rung exists to replace — and the turn would spend itself
+	// re-deriving what the survey already knew. Checked below the
+	// live-slug dispatch because only a fresh mint makes the spec the
+	// seed: a tagged idea supplies its own brief on its canvas, and
+	// every other live match is a duplicate skip.
+	if s.DesignOnly && strings.TrimSpace(s.Design) == "" {
+		moePrintf(stderr, "pulse: spawn: entry %q asks for design_only with no design body — the brief is the point; skipping\n", slug)
+		return ""
 	}
 	title := strings.TrimSpace(s.Title)
 	if title == "" {
