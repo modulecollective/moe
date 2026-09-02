@@ -142,15 +142,15 @@ func TestDesignOnlyIsSkippedOrIgnored(t *testing.T) {
 		}
 	})
 
-	t.Run("on a twin entry", func(t *testing.T) {
+	t.Run("on a non-sdlc entry", func(t *testing.T) {
 		root := spawnFixture(t)
 		var errb bytes.Buffer
 		mintSpecs(root, "moe", "pulse-one", []pulseRunSpec{{
-			Workflow: "twin", Why: "the boundary moved", DesignOnly: true,
+			Workflow: "twin", Slug: "boundary-moved", Why: "the boundary moved", DesignOnly: true,
 		}}, io.Discard, &errb)
 
-		if !strings.Contains(errb.String(), "ignoring design_only") {
-			t.Errorf("stderr = %q, want the bit warned and ignored on a reflect", errb.String())
+		if !strings.Contains(errb.String(), "only sdlc is spawnable") {
+			t.Errorf("stderr = %q, want the entry skipped as unspawnable", errb.String())
 		}
 	})
 

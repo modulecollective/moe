@@ -5,9 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/wiki"
 )
@@ -187,18 +185,6 @@ func writeTraceFile(t *testing.T, root, rel, body string) {
 	if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-}
-
-// commitAt commits everything staged in root with a fixed committer
-// date, so LastFileActivity (which reads %ct) is deterministic.
-func commitAt(t *testing.T, root, msg string, when time.Time) {
-	t.Helper()
-	stamp := when.Format(time.RFC3339)
-	gittest.Run(t, root, "add", "-A")
-	gittest.RunWithEnv(t, root, []string{
-		"GIT_AUTHOR_DATE=" + stamp,
-		"GIT_COMMITTER_DATE=" + stamp,
-	}, "commit", "-m", msg)
 }
 
 // TestGatherRunTracesResolvesTwinNotes: a harvested twin note links to

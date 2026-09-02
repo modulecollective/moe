@@ -143,20 +143,13 @@ func mintTail(root string, md *run.Metadata, park bool, cascade string, stdout, 
 }
 
 // slugResolver resolves a typed <project>/<run> slug to the actual run
-// id for a cascade-flag invocation. sdlc uses resolveSDLCRunSlug (the
-// promoted/reopened descendant walk); every other workflow uses
-// plainRunSlug (pass-through — resolveAndGuardForCascade does the load
-// and the workflow check). Returns the resolved id and a process exit
-// code (0 to proceed; non-zero with stderr already written).
+// id for a cascade-flag invocation. sdlc, the only staged workflow, uses
+// resolveSDLCRunSlug (the promoted/reopened descendant walk); a workflow
+// with no such lineage would pass the slug through, since
+// resolveAndGuardForCascade does the load and the workflow check.
+// Returns the resolved id and a process exit code (0 to proceed;
+// non-zero with stderr already written).
 type slugResolver func(verb, projectID, runID string, stdout, stderr io.Writer) (string, int)
-
-// plainRunSlug is the no-lineage slug resolver every workflow but sdlc
-// uses: pass the typed slug through unchanged. Existence, workflow, and
-// status are checked by resolveAndGuardForCascade's load; a workflow
-// with no promoted/reopened lineage has nothing to walk here.
-func plainRunSlug(_, _, runID string, _, _ io.Writer) (string, int) {
-	return runID, 0
-}
 
 // stageVerbCfg holds the per-stage knobs runStageVerb threads through:
 // the owning workflow, the operator-facing verb label (for error
@@ -164,13 +157,13 @@ func plainRunSlug(_, _, runID string, _, _ io.Writer) (string, int) {
 // cascade's start when a mode flag is set), the multi-line usage
 // preamble (printed above the flag list), and the typed-CLI opener the
 // no-flag path falls into. The two per-workflow hooks are resolveSlug
-// (sdlc's lineage walk vs. plainRunSlug) and persistAgent (sdlc writes
-// --agent to run.json; everyone else applies it per-turn). reentryGuard
-// is the third: the no-cascade-flag leg's status guard — sdlc wires
-// resolveSDLCReentry (which also forwards or reopens); other groups wire
-// guardTwinReentry (a plain refusal). A workflow may leave it nil, but
-// only deliberately: an unguarded interactive door walks onto terminal
-// runs, which is the bug this hook exists to fence.
+// (sdlc wires its lineage walk) and persistAgent (sdlc writes --agent to
+// run.json; a workflow that left it false would apply it per-turn).
+// reentryGuard is the third: the no-cascade-flag leg's status guard —
+// sdlc wires resolveSDLCReentry, which also forwards or reopens. A
+// workflow may leave it nil, but only deliberately: an unguarded
+// interactive door walks onto terminal runs, which is the bug this hook
+// exists to fence.
 type stageVerbCfg struct {
 	workflow     string
 	verb         string

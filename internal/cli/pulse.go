@@ -968,14 +968,8 @@ type pulseMinter struct {
 // run of the survey's design, only the one the operator already
 // registered. Everything below is the fresh-run path.
 //
-// Dispatch is per-workflow. sdlc (the default) is the fix-run path.
-// twin routes through maybeSpawnReflect → mintReflectRun, the same core
-// `moe twin reflect` uses, so the closed-schema check and the
-// unrecorded-edits refusal ride along — but where the verb refuses a
-// concurrent pass, the pulse's ask is a nomination that *resolves*: mint
-// if no reflect is open, map onto the open one otherwise. Two twin specs
-// in one gate therefore land on the same run instead of the second going
-// nowhere. Anything else warns and skips.
+// Dispatch is per-workflow, and sdlc (the default) is the only one that
+// spawns. Anything else warns and skips.
 //
 // No numeric cap. The harness has no basis for judging which proposals
 // to trim, and parked is itself the review gate: spawned runs are
@@ -986,11 +980,8 @@ type pulseMinter struct {
 //
 // The one mechanical exception to dedupe is a live idea carrying a
 // harvested follow-up's workflow tag: the pulse promotes that capture
-// through the same seam as `--from-idea` — except a `(twin)` tag, which
-// is a reflect nomination like any other and resolves through the
-// reflect core, taking the promotion edge but no seed. Untagged ideas
-// remain behind a structural human-triage fence. Every other live match
-// still skips.
+// through the same seam as `--from-idea`. Untagged ideas remain behind a
+// structural human-triage fence. Every other live match still skips.
 func (m *pulseMinter) mint(s pulseRunSpec, stdout, stderr io.Writer) string {
 	projectID, pulseSlug := m.projectID, m.pulseSlug
 	spawnedBy := projectID + "/" + pulseSlug
