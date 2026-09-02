@@ -120,8 +120,16 @@ func runProvenance(root, projectID, slug string) ([]serve.ProvHop, error) {
 
 		md, _ := run.Load(root, curProject, curSlug)
 		gone[cur] = md == nil
+		// The index is the source of truth for the spawn edge because it
+		// qualifies a legacy bare trailer with the spawned run's own
+		// project; 21 runs minted before writers qualified at the source
+		// still carry the bare value in run.json, and a bare key can't be
+		// loaded or linked. run.json stays the backstop for a spawn the
+		// journal doesn't carry — never seen on a real run, since both
+		// values are written together, but the honesty rule wants a named
+		// spawner over an invented operator.
 		spawner := idx.SpawnedBy[cur]
-		if md != nil && md.SpawnedBy != "" {
+		if spawner == "" && md != nil {
 			spawner = md.SpawnedBy
 		}
 

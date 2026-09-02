@@ -615,3 +615,48 @@ func TestRunProvenanceRetiredChoreIsNamedWithoutALink(t *testing.T) {
 		t.Errorf("root hop SubjectURL = %q, want no link to a chore page that 404s", hops[0].SubjectURL)
 	}
 }
+
+// TestRunProvenanceLinksALegacyBareSpawner: 21 runs minted before
+// writers qualified `spawned_by` at the source carry a bare slug in
+// both run.json and their open commit's trailer. The journal index
+// qualifies the trailer with the run's own project; the walk has to
+// take that answer rather than the raw field, or the spawn root is a
+// key it can't load and so a name with no link.
+func TestRunProvenanceLinksALegacyBareSpawner(t *testing.T) {
+	root := spawnFixture(t)
+	if _, err := run.New(root, "moe", run.Options{ID: "pulse-2026-07-17", Workflow: "pulse"}); err != nil {
+		t.Fatal(err)
+	}
+	// Bare in the field and in the trailer: exactly what the pre-July-18
+	// pulse mint wrote.
+	if _, err := run.New(root, "moe", run.Options{
+		ID:        "legacy-bare-spawn",
+		Workflow:  "sdlc",
+		SpawnedBy: "pulse-2026-07-17",
+		Trailers:  trailers.Block{SpawnedBy: "pulse-2026-07-17"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	hops, err := runProvenance(root, "moe", "legacy-bare-spawn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hops) != 3 {
+		t.Fatalf("hops = %+v, want 3 (root actor, spawner, this run)", hops)
+	}
+	if hops[0].Subject != "operator" {
+		t.Errorf("root hop = %+v, want the operator who opened the spawner", hops[0])
+	}
+	if hops[1].Object != "moe/pulse-2026-07-17" {
+		t.Errorf("hop 1 Object = %q, want the spawner qualified with its project", hops[1].Object)
+	}
+	// The point of the fix: a bare key loads nothing, so the spawner
+	// would be named without a link even though its page is right there.
+	if hops[1].ObjectURL != "/run/moe/pulse-2026-07-17" {
+		t.Errorf("hop 1 ObjectURL = %q, want the spawner's run page", hops[1].ObjectURL)
+	}
+	if !hops[2].Agent {
+		t.Error("the spawn hop must still be marked agent")
+	}
+}
