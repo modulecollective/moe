@@ -157,9 +157,9 @@ func TestSDLCDesignNoOpSessionRefusesAndBlocksCascade(t *testing.T) {
 	errb.Reset()
 	code := openSdlcDesign("tele", "noop-cascade", true, "", &out, &errb)
 	// Non-zero exit is the cascade-blocking signal: runStageSession
-	// short-circuits before promptNextStage when the inner runWiki
-	// session returns non-zero, so the chain prompt never fires and
-	// `!!` has no follow-on.
+	// short-circuits before promptNextStage when the inner
+	// runStageTurn returns non-zero, so the chain prompt never fires
+	// and `!!` has no follow-on.
 	if code == 0 {
 		t.Fatalf("expected non-zero exit when agent never touches the canvas; stderr=%q stdout=%q", errb.String(), out.String())
 	}

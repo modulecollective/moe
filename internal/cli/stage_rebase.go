@@ -19,7 +19,7 @@ import (
 //
 // okToPush is threaded through to both attempts so the in-closure
 // sync.AutoPush is suppressed when the turn that triggered the close
-// didn't succeed. See openWikiSession's closeSess for the rationale.
+// didn't succeed. See openStageSession's closeSess for the rationale.
 func closeWithAutoResolve(closeSess func(okToPush bool) error, okToPush bool, stdout, stderr io.Writer) error {
 	err := closeSess(okToPush)
 	var rebaseFail *session.RebaseFailureError

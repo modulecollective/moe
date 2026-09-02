@@ -75,7 +75,7 @@ func TestCloseWithAutoResolveLaunchesAgentOnRebaseFailure(t *testing.T) {
 // TestCloseWithAutoResolveRetriesOnceThenSurfacesTypedError: the
 // chain-back is single-shot. If the second close also returns a
 // typed *RebaseFailureError, closeWithAutoResolve returns that error
-// untouched so the caller's reportWikiSessionExit prints today's
+// untouched so the caller's reportStageTurnExit prints today's
 // "resolve by hand" message.
 func TestCloseWithAutoResolveRetriesOnceThenSurfacesTypedError(t *testing.T) {
 	rfe := &session.RebaseFailureError{

@@ -805,13 +805,13 @@ func TestCommitTurnNoOpTurnReturnsErrNothingToCommit(t *testing.T) {
 	}
 }
 
-// TestReportWikiSessionExitZeroOnHappyPath is the negative control:
+// TestReportStageTurnExitZeroOnHappyPath is the negative control:
 // no errors → exit 0. Without it the previous test could pass
 // trivially against a function that always returns 1.
-func TestReportWikiSessionExitZeroOnHappyPath(t *testing.T) {
-	in := wikiSessionInputs{Project: "moe", RunSlug: "r", DocID: "reflect"}
+func TestReportStageTurnExitZeroOnHappyPath(t *testing.T) {
+	in := stageTurnInputs{Project: "moe", RunSlug: "r", DocID: "reflect"}
 	var stdout, stderr bytes.Buffer
-	code := reportWikiSessionExit(in, nil, nil, nil, &stdout, &stderr)
+	code := reportStageTurnExit(in, nil, nil, nil, &stdout, &stderr)
 	if code != 0 {
 		t.Errorf("exit code = %d, want 0 on clean run", code)
 	}
@@ -820,13 +820,13 @@ func TestReportWikiSessionExitZeroOnHappyPath(t *testing.T) {
 	}
 }
 
-// TestReportWikiSessionExitNamesAgentInExitLine pins the silent-
+// TestReportStageTurnExitNamesAgentInExitLine pins the silent-
 // failure-at-push fix: when codex is the dispatched agent and its
 // turn fails, the run-error stderr line must name codex, not claude.
 // The bug it guards against: a hardcoded "claude exited:" lying to
 // the operator about which agent died (and burying the failure
 // under a misleading attribution).
-func TestReportWikiSessionExitNamesAgentInExitLine(t *testing.T) {
+func TestReportStageTurnExitNamesAgentInExitLine(t *testing.T) {
 	cases := []struct {
 		name      string
 		agent     string
@@ -838,10 +838,10 @@ func TestReportWikiSessionExitNamesAgentInExitLine(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			in := wikiSessionInputs{Project: "moe", RunSlug: "r", DocID: "push", Agent: tc.agent}
+			in := stageTurnInputs{Project: "moe", RunSlug: "r", DocID: "push", Agent: tc.agent}
 			runErr := errors.New("turn.failed")
 			var stdout, stderr bytes.Buffer
-			code := reportWikiSessionExit(in, runErr, nil, nil, &stdout, &stderr)
+			code := reportStageTurnExit(in, runErr, nil, nil, &stdout, &stderr)
 			if code != 1 {
 				t.Errorf("exit code = %d, want 1 on run error", code)
 			}
@@ -857,21 +857,21 @@ func TestReportWikiSessionExitNamesAgentInExitLine(t *testing.T) {
 	}
 }
 
-// TestReportWikiSessionExitInterruptedReturns130 pins the interrupt
+// TestReportStageTurnExitInterruptedReturns130 pins the interrupt
 // classification: an operator Ctrl-C surfaces as agent.ErrInterrupted in
-// runErr, and reportWikiSessionExit must exit 130 (exitInterrupted), not
+// runErr, and reportStageTurnExit must exit 130 (exitInterrupted), not
 // the bare 1 a failed turn returns — that distinct code is what lets the
 // cascade halt the chain instead of mistaking the interrupt for a stage
 // failure. The turn's commit is kept (commitErr nil here), so the
 // "committed turn" line still prints: the work is on disk, push is
 // suppressed upstream, the run stays at its stage.
-func TestReportWikiSessionExitInterruptedReturns130(t *testing.T) {
-	in := wikiSessionInputs{Project: "moe", RunSlug: "r", DocID: "test", Agent: "claude"}
+func TestReportStageTurnExitInterruptedReturns130(t *testing.T) {
+	in := stageTurnInputs{Project: "moe", RunSlug: "r", DocID: "test", Agent: "claude"}
 	var stdout, stderr bytes.Buffer
 	// Wrap the sentinel to prove errors.Is, not ==, is the check —
 	// runErr threads through several layers before reaching here.
 	runErr := fmt.Errorf("execute turn: %w", agent.ErrInterrupted)
-	code := reportWikiSessionExit(in, runErr, nil, nil, &stdout, &stderr)
+	code := reportStageTurnExit(in, runErr, nil, nil, &stdout, &stderr)
 	if code != exitInterrupted {
 		t.Errorf("exit code = %d, want %d (exitInterrupted) on operator Ctrl-C", code, exitInterrupted)
 	}
@@ -881,21 +881,21 @@ func TestReportWikiSessionExitInterruptedReturns130(t *testing.T) {
 	// A genuine non-interrupt failure must still be the bare 1 — the
 	// negative control so the test can't pass against a function that
 	// always returns 130.
-	plain := reportWikiSessionExit(in, errors.New("turn.failed"), nil, nil, &stdout, &stderr)
+	plain := reportStageTurnExit(in, errors.New("turn.failed"), nil, nil, &stdout, &stderr)
 	if plain != 1 {
 		t.Errorf("exit code = %d, want 1 on an ordinary run failure", plain)
 	}
 }
 
-// TestReportWikiSessionExitNothingToCommitIsCleanExit guards the
+// TestReportStageTurnExitNothingToCommitIsCleanExit guards the
 // "no document changes" branch: the operator opens the session,
 // looks around, exits without edits. ErrNothingToCommit is reported
 // to stdout, exit is 0, and a finalize-error-style fallthrough
 // doesn't accidentally promote it to non-zero.
-func TestReportWikiSessionExitNothingToCommitIsCleanExit(t *testing.T) {
-	in := wikiSessionInputs{Project: "moe", RunSlug: "r", DocID: "reflect"}
+func TestReportStageTurnExitNothingToCommitIsCleanExit(t *testing.T) {
+	in := stageTurnInputs{Project: "moe", RunSlug: "r", DocID: "reflect"}
 	var stdout, stderr bytes.Buffer
-	code := reportWikiSessionExit(in, nil, run.ErrNothingToCommit, nil, &stdout, &stderr)
+	code := reportStageTurnExit(in, nil, run.ErrNothingToCommit, nil, &stdout, &stderr)
 	if code != 0 {
 		t.Errorf("exit code = %d, want 0 on nothing-to-commit", code)
 	}
@@ -904,7 +904,7 @@ func TestReportWikiSessionExitNothingToCommitIsCleanExit(t *testing.T) {
 	}
 }
 
-// TestReportWikiSessionExitPrintsBothCommitAndCloseErrors is the
+// TestReportStageTurnExitPrintsBothCommitAndCloseErrors is the
 // regression pin for this run's incident: a headless turn that never
 // wrote its canvas failed to commit *and* failed to close, and the
 // early return on commitErr swallowed the close error — the only
@@ -912,8 +912,8 @@ func TestReportWikiSessionExitNothingToCommitIsCleanExit(t *testing.T) {
 // `moe session abandon` recovery. The operator saw a one-line commit
 // error; the stranded session surfaced later as an unrelated-looking
 // gate failure.
-func TestReportWikiSessionExitPrintsBothCommitAndCloseErrors(t *testing.T) {
-	in := wikiSessionInputs{Project: "moe", RunSlug: "r", DocID: "design"}
+func TestReportStageTurnExitPrintsBothCommitAndCloseErrors(t *testing.T) {
+	in := stageTurnInputs{Project: "moe", RunSlug: "r", DocID: "design"}
 	commitErr := errors.New("commit: canvas projects/moe/runs/r/documents/design/content.md does not exist — agent did not write to its canvas this turn")
 	closeErr := &session.CanvasUnchangedError{
 		Project:      "moe",
@@ -924,7 +924,7 @@ func TestReportWikiSessionExitPrintsBothCommitAndCloseErrors(t *testing.T) {
 		CanvasPath:   "projects/moe/runs/r/documents/design/content.md",
 	}
 	var stdout, stderr bytes.Buffer
-	code := reportWikiSessionExit(in, nil, commitErr, closeErr, &stdout, &stderr)
+	code := reportStageTurnExit(in, nil, commitErr, closeErr, &stdout, &stderr)
 	if code != 1 {
 		t.Errorf("exit code = %d, want 1 when commit and close both fail", code)
 	}
@@ -941,15 +941,15 @@ func TestReportWikiSessionExitPrintsBothCommitAndCloseErrors(t *testing.T) {
 	}
 }
 
-// TestReportWikiSessionExitInterruptWinsOverCommitAndClose pins the
+// TestReportStageTurnExitInterruptWinsOverCommitAndClose pins the
 // widening that came with printing both errors: with the single exit
 // point, an operator Ctrl-C dominates its own collateral. A Ctrl-C
 // before the agent writes leaves the canvas untouched, so commit and
 // close both refuse — that cascade must still read as an interrupt
 // (130), not a stage failure (1), or the chain reacts as if the stage
 // barfed.
-func TestReportWikiSessionExitInterruptWinsOverCommitAndClose(t *testing.T) {
-	in := wikiSessionInputs{Project: "moe", RunSlug: "r", DocID: "design", Agent: "claude"}
+func TestReportStageTurnExitInterruptWinsOverCommitAndClose(t *testing.T) {
+	in := stageTurnInputs{Project: "moe", RunSlug: "r", DocID: "design", Agent: "claude"}
 	runErr := fmt.Errorf("execute turn: %w", agent.ErrInterrupted)
 	commitErr := errors.New("commit: canvas does not exist — agent did not write to its canvas this turn")
 	closeErr := &session.CanvasUnchangedError{
@@ -961,7 +961,7 @@ func TestReportWikiSessionExitInterruptWinsOverCommitAndClose(t *testing.T) {
 		CanvasPath:   "projects/moe/runs/r/documents/design/content.md",
 	}
 	var stdout, stderr bytes.Buffer
-	code := reportWikiSessionExit(in, runErr, commitErr, closeErr, &stdout, &stderr)
+	code := reportStageTurnExit(in, runErr, commitErr, closeErr, &stdout, &stderr)
 	if code != exitInterrupted {
 		t.Errorf("exit code = %d, want %d — the interrupt is the dominant intent", code, exitInterrupted)
 	}
@@ -988,10 +988,10 @@ func TestCloseErrorPrintsOneSessionClosePrefix(t *testing.T) {
 		CanvasPath:   "projects/moe/runs/r/documents/code/content.md",
 	}
 
-	t.Run("reportWikiSessionExit", func(t *testing.T) {
-		in := wikiSessionInputs{Project: "moe", RunSlug: "r", DocID: "code"}
+	t.Run("reportStageTurnExit", func(t *testing.T) {
+		in := stageTurnInputs{Project: "moe", RunSlug: "r", DocID: "code"}
 		var stdout, stderr bytes.Buffer
-		if code := reportWikiSessionExit(in, nil, nil, closeErr, &stdout, &stderr); code != 1 {
+		if code := reportStageTurnExit(in, nil, nil, closeErr, &stdout, &stderr); code != 1 {
 			t.Errorf("exit code = %d, want 1 on close error", code)
 		}
 		assertOneSessionClosePrefix(t, stderr.String())
@@ -1284,7 +1284,7 @@ func TestStageLockBudgetTracksWhoIsWaiting(t *testing.T) {
 		{"interactive turn is told", false, repolock.DefaultBudget},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			in := wikiSessionInputs{
+			in := stageTurnInputs{
 				Project: "moe", RunSlug: "r", DocID: "code",
 				LockPurpose: "stage", Headless: tc.headless,
 			}

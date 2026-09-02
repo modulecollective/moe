@@ -209,7 +209,7 @@ func TestTwoTurnInteractiveResumePreflightsSameCwd(t *testing.T) {
 
 // TestStageTurnPreservesPulledRunState is the regression for the
 // reload-after-auto-pull fix. runStageSession loads run.json from the
-// canonical root at entry — before openWikiSession takes the repolock
+// canonical root at entry — before openStageSession takes the repolock
 // and runs sync.AutoPull. A pull that brings newer run state from
 // another machine used to be silently clobbered: BuildSpec rode the
 // pre-pull struct and the turn commit wrote it back over the pulled

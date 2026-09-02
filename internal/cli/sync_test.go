@@ -784,26 +784,26 @@ func TestAutoPullHaltsOnRebaseConflict(t *testing.T) {
 	}
 }
 
-// TestOpenWikiSessionRunsAutoPullBeforeSessionOpen pins the
-// session-open wiring: openWikiSession must auto-pull from origin
+// TestOpenStageSessionRunsAutoPullBeforeSessionOpen pins the
+// session-open wiring: openStageSession must auto-pull from origin
 // before it lays the session worktree down, so the agent's first turn
 // starts from current state. Setup advances origin beyond what's local;
-// after openWikiSession, local main must have caught up.
-func TestOpenWikiSessionRunsAutoPullBeforeSessionOpen(t *testing.T) {
+// after openStageSession, local main must have caught up.
+func TestOpenStageSessionRunsAutoPullBeforeSessionOpen(t *testing.T) {
 	f := newSyncFixture(t)
 	f.initBureaucracyOrigin()
 	remoteSHA := f.advanceBureaucracyOrigin("remote.txt", "remote\n", "remote: add remote.txt")
 
-	in := wikiSessionInputs{
+	in := stageTurnInputs{
 		Project:     "moe",
 		RunSlug:     "auto-pull-test",
 		DocID:       "design",
 		LockPurpose: "stage",
 	}
 	var stdout, stderr bytes.Buffer
-	sess, closeSess, err := openWikiSession(f.root, in, &stdout, &stderr)
+	sess, closeSess, err := openStageSession(f.root, in, &stdout, &stderr)
 	if err != nil {
-		t.Fatalf("openWikiSession: %v\nstderr=%s", err, stderr.String())
+		t.Fatalf("openStageSession: %v\nstderr=%s", err, stderr.String())
 	}
 	// Tear the session worktree down. The session never produced a
 	// commit, so closeSess will refuse via CanvasUnchangedError —
@@ -837,16 +837,16 @@ func TestCloseSessSuppressesAutoPushWhenTurnFailed(t *testing.T) {
 	f.initBureaucracyOrigin()
 	originBefore := f.originHead()
 
-	in := wikiSessionInputs{
+	in := stageTurnInputs{
 		Project:     "moe",
 		RunSlug:     "no-autopush-on-fail",
 		DocID:       "code",
 		LockPurpose: "stage",
 	}
 	var stdout, stderr bytes.Buffer
-	sess, closeSess, err := openWikiSession(f.root, in, &stdout, &stderr)
+	sess, closeSess, err := openStageSession(f.root, in, &stdout, &stderr)
 	if err != nil {
-		t.Fatalf("openWikiSession: %v\nstderr=%s", err, stderr.String())
+		t.Fatalf("openStageSession: %v\nstderr=%s", err, stderr.String())
 	}
 
 	// Land a canvas commit on the session branch so session.Close has a
@@ -890,16 +890,16 @@ func TestCloseSessRunsAutoPushWhenTurnSucceeded(t *testing.T) {
 	f := newSyncFixture(t)
 	f.initBureaucracyOrigin()
 
-	in := wikiSessionInputs{
+	in := stageTurnInputs{
 		Project:     "moe",
 		RunSlug:     "autopush-on-success",
 		DocID:       "code",
 		LockPurpose: "stage",
 	}
 	var stdout, stderr bytes.Buffer
-	sess, closeSess, err := openWikiSession(f.root, in, &stdout, &stderr)
+	sess, closeSess, err := openStageSession(f.root, in, &stdout, &stderr)
 	if err != nil {
-		t.Fatalf("openWikiSession: %v", err)
+		t.Fatalf("openStageSession: %v", err)
 	}
 
 	canvasRel := run.ContentPath("moe", "autopush-on-success", "code")
@@ -926,11 +926,11 @@ func TestCloseSessRunsAutoPushWhenTurnSucceeded(t *testing.T) {
 	}
 }
 
-// TestOpenWikiSessionRefusesOnRebaseConflict pins the halt-loud
+// TestOpenStageSessionRefusesOnRebaseConflict pins the halt-loud
 // contract: if auto-pull hits a rebase conflict, the session never
 // opens. No worktree, no branch — the operator resolves the conflict
 // before any turn starts.
-func TestOpenWikiSessionRefusesOnRebaseConflict(t *testing.T) {
+func TestOpenStageSessionRefusesOnRebaseConflict(t *testing.T) {
 	f := newSyncFixture(t)
 	f.initBureaucracyOrigin()
 
@@ -947,16 +947,16 @@ func TestOpenWikiSessionRefusesOnRebaseConflict(t *testing.T) {
 	gittest.Run(t, f.root, "commit", "-m", "local: shared")
 	f.advanceBureaucracyOrigin("shared.txt", "remote\n", "remote: shared")
 
-	in := wikiSessionInputs{
+	in := stageTurnInputs{
 		Project:     "moe",
 		RunSlug:     "auto-pull-conflict",
 		DocID:       "design",
 		LockPurpose: "stage",
 	}
 	var stdout, stderr bytes.Buffer
-	_, _, err := openWikiSession(f.root, in, &stdout, &stderr)
+	_, _, err := openStageSession(f.root, in, &stdout, &stderr)
 	if err == nil {
-		t.Fatal("openWikiSession: expected refusal on rebase conflict")
+		t.Fatal("openStageSession: expected refusal on rebase conflict")
 	}
 	if !strings.Contains(err.Error(), "rebase --continue") {
 		t.Fatalf("error missing recovery prose: %v", err)

@@ -107,7 +107,7 @@ type stageSessionOpts struct {
 	// checkout.
 	InitialPromptBuilder func(workRoot string) (string, error)
 	// OnAgentStart, when non-nil, fires immediately before the executor
-	// is dispatched. See wikiTurnSpec.OnAgentStart.
+	// is dispatched. See stageTurnSpec.OnAgentStart.
 	OnAgentStart func()
 	// Headless drives the stage as a one-turn `claude -p` call instead
 	// of an interactive REPL. Output streams to the operator's
@@ -357,7 +357,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	// Run-scoped state captured by closure. md is pre-loaded from the
 	// canonical root only to feed the pre-session, pre-pull surface:
 	// the entry banner (md.Workflow), stylesheet resolution, and the
-	// agent ladder, all of which run before openWikiSession takes the
+	// agent ladder, all of which run before openStageSession takes the
 	// repolock and pulls. This entry copy is deliberately not trusted
 	// past that point — BuildSpec reloads run.json from the session
 	// worktree (post-pull) into this same pointer, so every downstream
@@ -421,7 +421,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	// succeeds. Nil for nearly every turn.
 	var deliveredInputIDs []int
 
-	in := wikiSessionInputs{
+	in := stageTurnInputs{
 		Project:     projectID,
 		RunSlug:     runID,
 		DocID:       docID,
@@ -429,7 +429,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		LockPurpose: "stage",
 		Headless:    opts.Headless,
 		// md is pre-loaded at runStageSession entry from the canonical
-		// root, *before* openWikiSession pulled origin/main under the
+		// root, *before* openStageSession pulled origin/main under the
 		// repolock. Reload it here from the session worktree — which
 		// session.Open created from post-pull main — so this turn's
 		// write-backs ride the pulled run state, not the stale entry
@@ -440,15 +440,15 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		// run.json can be ahead of main, and it's what this turn commits
 		// against. If the pull deleted the run on the other machine the
 		// load fails and the turn refuses, rather than resurrecting it.
-		BuildSpec: func(workRoot string) (wikiTurnSpec, error) {
+		BuildSpec: func(workRoot string) (stageTurnSpec, error) {
 			fresh, err := run.Load(workRoot, md.Project, md.ID)
 			if err != nil {
-				return wikiTurnSpec{}, err
+				return stageTurnSpec{}, err
 			}
 			*md = *fresh
 			doc, mutated, err := run.EnsureDocument(workRoot, md, docID)
 			if err != nil {
-				return wikiTurnSpec{}, err
+				return stageTurnSpec{}, err
 			}
 			// The eraser half of the reap's tombstone: a session opening
 			// on this run is the answer to "the last machine turn died",
@@ -466,7 +466,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			// stable-cwd rationale.
 			sessionCwd := sessionDocCwd(root, md.Project, md.ID, docID)
 			if err := os.MkdirAll(sessionCwd, 0o755); err != nil {
-				return wikiTurnSpec{}, fmt.Errorf("session: mkdir %s: %w", sessionCwd, err)
+				return stageTurnSpec{}, fmt.Errorf("session: mkdir %s: %w", sessionCwd, err)
 			}
 			// Materialise the moe-bureaucracy skill into the sessionCwd
 			// .claude/skills/ (claude runs cwd=sessionCwd and finds it
@@ -475,11 +475,11 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			// cheap; the paths are session-stable but rewriting is
 			// faster than reasoning about staleness across resumes.
 			if err := materializeMoeBureaucracySkill(workRoot, sessionCwd, md); err != nil {
-				return wikiTurnSpec{}, err
+				return stageTurnSpec{}, err
 			}
 			if mutated {
 				if err := run.Save(workRoot, md); err != nil {
-					return wikiTurnSpec{}, err
+					return stageTurnSpec{}, err
 				}
 				// Seed the canvas skeleton on first open if requested —
 				// stages with a fixed structural shape (test stage) want
@@ -492,14 +492,14 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 					canvasAbs := filepath.Join(workRoot, canvasRel)
 					if _, statErr := os.Stat(canvasAbs); errors.Is(statErr, fs.ErrNotExist) {
 						if err := os.WriteFile(canvasAbs, []byte(opts.CanvasSkeleton), 0o644); err != nil {
-							return wikiTurnSpec{}, fmt.Errorf("session: seed canvas skeleton: %w", err)
+							return stageTurnSpec{}, fmt.Errorf("session: seed canvas skeleton: %w", err)
 						}
 					}
 				}
 				// Commit on the session branch — no repo lock needed
 				// because the branch has a single writer (this session).
 				if err := commitSessionStart(workRoot, md, docID); err != nil {
-					return wikiTurnSpec{}, err
+					return stageTurnSpec{}, err
 				}
 				moePrintf(stderr, "opened %s canvas (session %s)\n  %s\n", docID, doc.Session, filepath.Join(workRoot, run.ContentPath(md.Project, md.ID, docID)))
 			}
@@ -516,11 +516,11 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			var devEnv map[string]string
 			if opts.NeedsSandbox {
 				if _, err := os.Stat(filepath.Join(root, project.SubmoduleDir(md.Project))); err != nil {
-					return wikiTurnSpec{}, fmt.Errorf("project %q has no submodule on disk; cannot run %q without code to edit", md.Project, docID)
+					return stageTurnSpec{}, fmt.Errorf("project %q has no submodule on disk; cannot run %q without code to edit", md.Project, docID)
 				}
 				clonePath, err = attachRunWorkspace(root, md, branchPrefix+md.ID)
 				if err != nil {
-					return wikiTurnSpec{}, err
+					return stageTurnSpec{}, err
 				}
 				// Dev-env hooks fire on every code/review/test stage open
 				// against this working tree. First touch runs the
@@ -533,7 +533,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				// no warning, no refusal.
 				env, _, err := devEnvSetupEnv(root, clonePath, md, stdout, stderr)
 				if err != nil {
-					return wikiTurnSpec{}, fmt.Errorf("dev-env: %w", err)
+					return stageTurnSpec{}, fmt.Errorf("dev-env: %w", err)
 				}
 				devEnv = env
 				if opts.EnforceSandboxBoundary {
@@ -551,7 +551,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 					if !opts.BoundaryAllowsCommits {
 						head, err := git.HEAD(clonePath)
 						if err != nil {
-							return wikiTurnSpec{}, fmt.Errorf("sandbox boundary: snapshot HEAD: %w", err)
+							return stageTurnSpec{}, fmt.Errorf("sandbox boundary: snapshot HEAD: %w", err)
 						}
 						sandboxBoundaryEntryHEAD = head
 					}
@@ -573,7 +573,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			// branch when there's no clone). Same lifecycle: worktree-
 			// only, refreshed every BuildSpec, never staged.
 			if err := materializeMoeContextSkill(workRoot, sessionCwd, md, clonePath); err != nil {
-				return wikiTurnSpec{}, err
+				return stageTurnSpec{}, err
 			}
 
 			// Two workflow-scoped skills, one gate each, per "tool
@@ -589,12 +589,12 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			// is the point to reconsider.
 			if md.Workflow == chatWorkflow {
 				if err := materializeMoeHowtoSkill(workRoot, sessionCwd); err != nil {
-					return wikiTurnSpec{}, err
+					return stageTurnSpec{}, err
 				}
 			}
 			if md.Workflow == sdlcWorkflow {
 				if err := materializeMoeTwinSkill(workRoot, sessionCwd); err != nil {
-					return wikiTurnSpec{}, err
+					return stageTurnSpec{}, err
 				}
 			}
 
@@ -619,11 +619,11 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				if sessionCwd != "" {
 					a, agentErr := agent.Get(agentName)
 					if agentErr != nil {
-						return wikiTurnSpec{}, agentErr
+						return stageTurnSpec{}, agentErr
 					}
 					switch found, err := a.TranscriptExists(doc.Session, sessionCwd); {
 					case err != nil:
-						return wikiTurnSpec{}, fmt.Errorf("session: stat transcript: %w", err)
+						return stageTurnSpec{}, fmt.Errorf("session: stat transcript: %w", err)
 					case found:
 						// Transcript present — normal --resume path.
 					default:
@@ -636,7 +636,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 						mirrorPath := filepath.Join(workRoot, run.ThreadPathFor(agentName, md.Project, md.ID, docID))
 						outcome, err := a.RestoreTranscript(doc.Session, sessionCwd, mirrorPath)
 						if err != nil {
-							return wikiTurnSpec{}, fmt.Errorf("session: restore transcript: %w", err)
+							return stageTurnSpec{}, fmt.Errorf("session: restore transcript: %w", err)
 						}
 						switch outcome.Result {
 						case agent.RestoreFromCache:
@@ -654,15 +654,15 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 						case agent.RestoreMissing:
 							sid, err := run.NewSessionID()
 							if err != nil {
-								return wikiTurnSpec{}, err
+								return stageTurnSpec{}, err
 							}
 							moePrintf(stderr, "session %s not found anywhere; starting fresh as %s (prior chat history not recoverable)\n", doc.Session, sid)
 							doc.Session = sid
 							if err := run.Save(workRoot, md); err != nil {
-								return wikiTurnSpec{}, err
+								return stageTurnSpec{}, err
 							}
 							if err := commitSessionStart(workRoot, md, docID); err != nil {
-								return wikiTurnSpec{}, err
+								return stageTurnSpec{}, err
 							}
 							newSession = true
 						}
@@ -676,7 +676,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			// marker; see the field doc on stageSessionOpts.
 			if opts.CanvasOnOpen != nil {
 				if err := opts.CanvasOnOpen(workRoot, md, agentName); err != nil {
-					return wikiTurnSpec{}, err
+					return stageTurnSpec{}, err
 				}
 			}
 
@@ -689,7 +689,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				initialPrompt = md.ID
 			}
 
-			return wikiTurnSpec{
+			return stageTurnSpec{
 				Metadata:             md,
 				DocID:                docID,
 				ClonePath:            clonePath,
@@ -761,7 +761,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		},
 	}
 
-	code := runWikiSession(root, in, stdout, stderr)
+	code := runStageTurn(root, in, stdout, stderr)
 	if code != 0 {
 		// Error exit — skip the footer. Pairing every error with a
 		// "complete" footer would be worse than the asymmetry, and the
@@ -771,7 +771,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	}
 	// The turn consumed whatever operator input its prompt carried, so
 	// stamp those entries delivered — its own journal commit, taken here
-	// because runWikiSession has returned: the turn's commit is on main,
+	// because runStageTurn has returned: the turn's commit is on main,
 	// the session worktree is gone, and the repo lock is free.
 	//
 	// Only on a zero exit. A failed or interrupted turn marks nothing, so
@@ -808,7 +808,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		}
 	}
 	// Session-end harvest for the conversational surfaces. This slot is
-	// the whole point: runWikiSession has returned, so the turn's commit
+	// the whole point: runStageTurn has returned, so the turn's commit
 	// is on main, the session worktree is torn down, and the repo lock is
 	// free for the harvest's own journal push to take. Running any
 	// earlier would deadlock on the lock and harvest a scratch file the
@@ -870,12 +870,11 @@ func serveAgentSuppress() bool {
 	return os.Getenv("MOE_SERVE_AGENT") == "1"
 }
 
-// wikiSessionInputs is everything runWikiSession needs to drive a stage
+// stageTurnInputs is everything runStageTurn needs to drive a stage
 // session through its full lifecycle: open the session worktree, run
 // the executor, commit, and close. The BuildSpec callback defers the
-// work that depends on the worktree path. (The wiki- names are the
-// engine's, and outlived it; nothing here knows about a wiki.)
-type wikiSessionInputs struct {
+// work that depends on the worktree path.
+type stageTurnInputs struct {
 	// Project / RunSlug / DocID identify the session worktree branch
 	// (`session/<project>/<runslug>/<doc>`); RunSlug is the run's real
 	// id.
@@ -884,7 +883,7 @@ type wikiSessionInputs struct {
 	DocID   string
 	// Agent is the resolved backend name (claude / codex) the executor
 	// will dispatch to. Populated by runStageSession before
-	// runWikiSession runs so reportWikiSessionExit can attribute the
+	// runStageTurn runs so reportStageTurnExit can attribute the
 	// "<agent> exited" line honestly. Empty falls back to "agent" in
 	// the reporter.
 	Agent string
@@ -892,20 +891,20 @@ type wikiSessionInputs struct {
 	// "-open" / "-close" for the two short-held windows.
 	LockPurpose string
 	// Headless reports that nobody is waiting on this turn — a cascade
-	// driver, a heartbeat sweep's child. openWikiSession reads it to
+	// driver, a heartbeat sweep's child. openStageSession reads it to
 	// pick the lock budget for both windows; see the budget comment
 	// there for why an unattended caller gets the cron number.
 	Headless bool
 	// BuildSpec resolves the per-turn parameters once the worktree is
 	// open. Errors abort with a stderr report and exit code 1.
-	BuildSpec func(workRoot string) (wikiTurnSpec, error)
+	BuildSpec func(workRoot string) (stageTurnSpec, error)
 }
 
-// wikiTurnSpec is the data BuildSpec hands back to runWikiSession.
+// stageTurnSpec is the data BuildSpec hands back to runStageTurn.
 // Carries everything the executor and commit step need plus the
 // pluggable callbacks for prompt assembly and per-turn staging that
 // differ per stage.
-type wikiTurnSpec struct {
+type stageTurnSpec struct {
 	// Metadata is the run state; nil is tolerated for test callers
 	// that build the spec directly. Drives transcript mirroring in
 	// the executor.
@@ -945,7 +944,7 @@ type wikiTurnSpec struct {
 	// it (leave the run open for review), without inferring either
 	// from an exit code.
 	OnAgentStart func()
-	// Headless flips runWikiSession from the interactive REPL path
+	// Headless flips runStageTurn from the interactive REPL path
 	// (executor.Execute) to the one-shot streaming path
 	// (executor.ExecuteOneShot): no stdin, no transcript mirror, exits
 	// after one turn. The rest of the lifecycle — open session
@@ -959,7 +958,7 @@ type wikiTurnSpec struct {
 	// Agent names the backend the executor should dispatch to. Always
 	// non-empty in production paths (runStageSession resolves it via
 	// stageAgentName before populating this struct); test callers
-	// that build wikiTurnSpec directly leave it empty and runWikiSession
+	// that build stageTurnSpec directly leave it empty and runStageTurn
 	// falls back to resolveAgentName("", "", "") at dispatch time.
 	Agent string
 	// BuildPrompt assembles the --append-system-prompt payload for the
@@ -1004,15 +1003,15 @@ func closeBootstrapFailedSession(closeSess func(okToPush bool) error, stderr io.
 	}
 }
 
-// runWikiSession owns the full session lifecycle: open the session
+// runStageTurn owns the full session lifecycle: open the session
 // worktree under the repo lock, ask the caller for the per-turn spec,
 // run the executor, commit the turn (via the caller's CommitStager),
 // and close the session worktree. Run-scoped extras
 // (run.json, EnsureDocument, sandbox, promptNextStage) layer on top
 // in runStageSession, its only caller. Returns the exit code to
 // bubble up.
-func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer) int {
-	sess, closeSess, err := openWikiSession(root, in, stdout, stderr)
+func runStageTurn(root string, in stageTurnInputs, stdout, stderr io.Writer) int {
+	sess, closeSess, err := openStageSession(root, in, stdout, stderr)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -1057,12 +1056,12 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 	}
 
 	// spec.Agent is populated by runStageSession via stageAgentName;
-	// test callers that build wikiTurnSpec directly may leave it empty.
+	// test callers that build stageTurnSpec directly may leave it empty.
 	// Fall back through the same ladder with no run default so the
 	// dispatch never sees an empty key.
 	//
 	// Also reflect the resolved name back into `in` so
-	// reportWikiSessionExit attributes the "<agent> exited" line
+	// reportStageTurnExit attributes the "<agent> exited" line
 	// honestly even when the caller (lint) didn't pre-populate
 	// in.Agent.
 	agentName := spec.Agent
@@ -1177,7 +1176,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 
 	// Close the session: land it on local main and tear the
 	// worktree down. The lock window and its budget are
-	// openWikiSession's; see the budget comment there.
+	// openStageSession's; see the budget comment there.
 	//
 	// closeWithAutoResolve wraps the close: on a *RebaseFailureError
 	// it launches a one-shot agent in the session worktree to
@@ -1195,13 +1194,13 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 	okToPush := runErr == nil
 	closeErr := closeWithAutoResolve(closeSess, okToPush, stdout, stderr)
 
-	return reportWikiSessionExit(in, runErr, commitErr, closeErr, stdout, stderr)
+	return reportStageTurnExit(in, runErr, commitErr, closeErr, stdout, stderr)
 }
 
-// openWikiSession opens the session worktree under the repo lock and
+// openStageSession opens the session worktree under the repo lock and
 // returns a closeSess closure already bound to the matching `-close`
 // lock options. Centralising both halves means each early-failure path
-// in runWikiSession is one `_ = closeSess(...)` line, and adding a new
+// in runStageTurn is one `_ = closeSess(...)` line, and adding a new
 // path can't drift the lock purpose / Run key away from the open side.
 //
 // Auto-sync is woven into both lock windows: an auto-pull runs before
@@ -1222,7 +1221,7 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 // incident: a failed push synthesis turn auto-pushed an empty "work:
 // update push" commit to origin while the moe branch never reached its
 // remote, leaving bureaucracy claiming the ship landed.
-func openWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer) (*session.Session, func(okToPush bool) error, error) {
+func openStageSession(root string, in stageTurnInputs, stdout, stderr io.Writer) (*session.Session, func(okToPush bool) error, error) {
 	// Open (or resume) the session worktree under the repo lock.
 	// The local work is just `git worktree add` (or a lookup); the
 	// auto-pull before it can sit on the network briefly.
@@ -1294,7 +1293,7 @@ func openWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer
 //
 // Interactive callers keep the thirty seconds. A human staring at a
 // wedged prompt wants to be told, not made to wait.
-func stageLockOptions(in wikiSessionInputs, half string) repolock.Options {
+func stageLockOptions(in stageTurnInputs, half string) repolock.Options {
 	budget := repolock.DefaultBudget
 	if in.Headless {
 		budget = repolock.CronBudget
@@ -1307,7 +1306,7 @@ func stageLockOptions(in wikiSessionInputs, half string) repolock.Options {
 	}
 }
 
-// exitInterrupted is the exit code reportWikiSessionExit mints when the
+// exitInterrupted is the exit code reportStageTurnExit mints when the
 // turn was cut short by an operator Ctrl-C (runErr is
 // agent.ErrInterrupted) rather than a genuine stage failure. 130 is the
 // conventional 128+SIGINT — distinct from the bare 1 a failed turn
@@ -1317,8 +1316,8 @@ func stageLockOptions(in wikiSessionInputs, half string) repolock.Options {
 // reacting as if a stage barfed.
 const exitInterrupted = 130
 
-// reportWikiSessionExit prints the closing per-turn messages and
-// returns the exit code for runWikiSession. It is the one place that
+// reportStageTurnExit prints the closing per-turn messages and
+// returns the exit code for runStageTurn. It is the one place that
 // decides how the possible failures (claude run, commit, close)
 // compose into a single exit status. Every error it holds gets
 // printed, and the exit code is decided once at the bottom — no branch
@@ -1331,11 +1330,11 @@ const exitInterrupted = 130
 // push is already suppressed upstream because okToPush gates on
 // runErr == nil), but the distinct code lets the cascade halt the whole
 // chain instead of mistaking the interrupt for a failed stage.
-func reportWikiSessionExit(in wikiSessionInputs, runErr, commitErr, closeErr error, stdout, stderr io.Writer) int {
+func reportStageTurnExit(in stageTurnInputs, runErr, commitErr, closeErr error, stdout, stderr io.Writer) int {
 	if runErr != nil {
-		// in.Agent is populated by runWikiSession after agent resolution.
+		// in.Agent is populated by runStageTurn after agent resolution.
 		// Empty falls back to "agent" — callers that bypass the resolver
-		// (test stubs constructing wikiSessionInputs by hand) still get
+		// (test stubs constructing stageTurnInputs by hand) still get
 		// a readable line.
 		agentLabel := in.Agent
 		if agentLabel == "" {
