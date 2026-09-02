@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/modulecollective/moe/internal/chore"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/serve"
 )
@@ -20,9 +21,12 @@ const provenanceMaxHops = 10
 // this — see the emit loop in runProvenance — so the walk and the render
 // don't have to agree on direction.
 type provEdge struct {
-	child   string // qualified run this edge explains
-	kind    provKind
-	source  string // qualified run or idea; empty for provOperator
+	child string // qualified run this edge explains
+	kind  provKind
+	// source is a qualified run or idea, the chore key "<project>/<chore>"
+	// for provChore, and empty for the two kinds that name no source:
+	// provOperator and provMachineOpen.
+	source  string
 	agent   bool
 	consent string
 	why     string
@@ -32,8 +36,11 @@ type provKind int
 
 const (
 	provSpawn provKind = iota
+	provCapture
 	provReopen
 	provPromote
+	provChore
+	provMachineOpen
 	provOperator
 )
 
@@ -42,11 +49,15 @@ const (
 // so every verb here points the other way.
 func (k provKind) verb() string {
 	switch k {
+	case provCapture:
+		// The harvest's own word: `moe close` prints "captured idea p/s"
+		// as it lifts a followup out of the run's scratch file.
+		return "captured"
 	case provReopen:
 		return "reopened as"
 	case provPromote:
 		return "promoted to"
-	case provOperator:
+	case provChore, provMachineOpen, provOperator:
 		return "opened"
 	default:
 		return "spawned"
@@ -69,11 +80,13 @@ func (k provKind) verb() string {
 // no longer exists — each degrades to a hop that says less, never to an
 // error. The one hard rule is the honesty rule: absence is never
 // rendered as a claim. A commit written before the MoE-Consent trailer
-// landed has unknown consent, so the hop shows no consent word; only an
-// absent spawned_by supports the positive "opened by operator" claim,
-// and only because no operator verb has ever written that field. A link
-// is a claim too — that the page it points at exists — so a run the
-// walk could name but not load is named without one.
+// landed has unknown consent, so the hop shows no consent word; the
+// positive "opened by operator" claim is earned only by an open commit
+// carrying no machine mark at all — no spawner, no harvest source, no
+// chore key, no consent — because every one of those marks is written by
+// a machine verb and none by an operator's. A link is a claim too — that
+// the page it points at exists — so a run the walk could name but not
+// load, or a chore that has since been retired, is named without one.
 func runProvenance(root, projectID, slug string) ([]serve.ProvHop, error) {
 	idx, err := run.BuildJournalIndex(root)
 	if err != nil {
@@ -125,37 +138,87 @@ func runProvenance(root, projectID, slug string) ([]serve.ProvHop, error) {
 			})
 			cur = spawner
 			continue
+		case idx.FromRun[cur] != "":
+			source := idx.FromRun[cur]
+			edges = append(edges, provEdge{
+				child: cur, kind: provCapture, source: source,
+				// MoE-From-Run is only ever written by a harvest, and what a
+				// harvest lifts is an entry an agent wrote into the run's
+				// scratch file. The operator can add a line there too, in
+				// the close-time editor pass, and it rides the same trailer
+				// — but the common case is the agent's, and the badge's own
+				// title says "written by a machine turn", which a followup
+				// entry is.
+				agent: true, consent: idx.OpenConsent[cur],
+			})
+			cur = source
+			continue
 		case md != nil && md.ReopenOf != "":
 			edges = append(edges, provEdge{
 				child: cur, kind: provReopen, source: curProject + "/" + md.ReopenOf,
 			})
 		case promotedFrom[cur] != "":
+			idea := promotedFrom[cur]
 			edges = append(edges, provEdge{
-				child: cur, kind: provPromote, source: promotedFrom[cur],
+				child: cur, kind: provPromote, source: idea,
+				// Keyed by the idea, not by this run: the trailer rides the
+				// idea's own status bump. Absent for `moe idea promote`.
+				agent: idx.PromoteConsent[idea] != "", consent: idx.PromoteConsent[idea],
+			})
+			cur = idea
+			continue
+		case idx.ChoreByRun[cur] != "":
+			edges = append(edges, provEdge{
+				child: cur, kind: provChore, source: idx.ChoreByRun[cur],
+				// A chore run with no consent on its open commit is `moe
+				// chore open` typed by hand: the chore is still what the run
+				// is for, so it is still named, but nothing machine-authored
+				// caused it and the badge stays off.
+				agent: idx.OpenConsent[cur] != "", consent: idx.OpenConsent[cur],
+			})
+		case idx.OpenConsent[cur] != "":
+			// Consent and nothing else: a pulse survey minted by a dynamic
+			// sweep, the one machine open that records no spawner because
+			// it is the sweep's own first act.
+			edges = append(edges, provEdge{
+				child: cur, kind: provMachineOpen,
+				agent: true, consent: idx.OpenConsent[cur],
 			})
 		case md != nil:
 			edges = append(edges, provEdge{child: cur, kind: provOperator})
 		}
 		// No arm matched: the run is gone and the journal knows nothing
 		// about its opening, so the chain simply starts below it. Reopen
-		// and promote name a source but not a *cause the machine chose*,
-		// so the walk stops there rather than re-telling the source run's
-		// own story on this page.
+		// stops here too — the prior run's own page tells its story, ship
+		// included — as does a chore or a bare machine open, which name
+		// the cause outright and have no run above them to walk to.
 		break
 	}
 
-	// The root edge can name a source the walk never visited: a reopen or
-	// promote source, which it deliberately stops below, or the run a
-	// maxHops exit stopped short of. One load answers for it.
+	// The root edge can name a source the walk never visited: a reopen
+	// source, which it deliberately stops below, or the run a maxHops
+	// exit stopped short of. One load answers for it.
+	//
+	// A chore root is the exception, and gets its own answer rather than
+	// an entry in `gone`: its source is a chore key, which never loads as
+	// a run, and the key shares its shape with a run key — a chore run's
+	// slug comes from the chore's own name, so "moe/tidy-docs" is
+	// routinely both a live run and a live chore and one map entry can't
+	// speak for both.
+	choreGone := false
 	if len(edges) > 0 {
-		if src := edges[len(edges)-1].source; src != "" {
-			if _, asked := gone[src]; !asked {
-				gone[src] = !runLoads(root, src)
+		last := edges[len(edges)-1]
+		switch {
+		case last.kind == provChore:
+			choreGone = !choreLoads(root, last.source)
+		case last.source != "":
+			if _, asked := gone[last.source]; !asked {
+				gone[last.source] = !runLoads(root, last.source)
 			}
 		}
 	}
 
-	hops := provHops(edges, self, gone)
+	hops := provHops(edges, self, gone, choreGone)
 	if consent, ok := idx.PushConsent[self]; ok {
 		// Newest event in the story, so it lands at the bottom — and it
 		// hangs off this run, not off the chain above it.
@@ -181,35 +244,65 @@ func runLoads(root, qualified string) bool {
 	return md != nil
 }
 
+// choreLoads reports whether a chore key still has a definition on disk
+// — runLoads' question, asked about the one root the walk can name that
+// isn't a run. A retired chore's page is a 404, so the rule that unlinks
+// a pruned run has to unlink a retired chore too. A chores tree that
+// won't load at all answers "no": the link is the claim, and an
+// unreadable definition doesn't support it.
+func choreLoads(root, key string) bool {
+	defs, err := chore.LoadAll(root)
+	if err != nil {
+		return false
+	}
+	return slices.ContainsFunc(defs, func(d chore.Definition) bool { return d.Key() == key })
+}
+
 // provHops renders the walk's edges as display lines, root first: one
 // line naming the actor or run the story starts from, then one "→ <verb>
 // <run>" line per edge, each line's elided subject being the line above.
-// A run in `gone` is named but not linked: the page it would point at
-// doesn't exist.
-func provHops(edges []provEdge, self string, gone map[string]bool) []serve.ProvHop {
+// A run in `gone` — or a chore root with choreGone set — is named but not
+// linked: the page it would point at doesn't exist.
+func provHops(edges []provEdge, self string, gone map[string]bool, choreGone bool) []serve.ProvHop {
 	if len(edges) == 0 {
 		return nil
 	}
 	root := edges[len(edges)-1]
-	// A plain operator-opened run is a one-line story. Rendering it as
-	// "operator / → opened this run" spends two lines and an arrow to say
-	// what one line already said.
-	if len(edges) == 1 && root.kind == provOperator {
-		return []serve.ProvHop{{Verb: "opened by operator"}}
+	// A story whose whole content is how this run opened is one line.
+	// Rendering it as "operator / → opened this run" spends two lines and
+	// an arrow to say what one line already said.
+	if len(edges) == 1 {
+		switch root.kind {
+		case provOperator:
+			return []serve.ProvHop{{Verb: "opened by operator"}}
+		case provMachineOpen:
+			// "a machine walk" is the phrase the ship hop already uses for
+			// the same reason: the heartbeat flag isn't on the commit, so
+			// the page can name the walk but not the clock behind it.
+			return []serve.ProvHop{{Verb: "opened by a machine walk", Agent: true, Consent: root.consent}}
+		}
 	}
 
 	var hops []serve.ProvHop
 	switch {
+	case root.kind == provChore:
+		start := serve.ProvHop{Subject: root.source}
+		if !choreGone {
+			start.SubjectURL = "/chore/" + root.source
+		}
+		hops = append(hops, start)
 	case root.source != "":
-		// Either the source of a reopen/promote, or — when the walk ran
-		// out of story above it — the oldest run it could still name. The
-		// latter starts the chain mid-story rather than inventing an
-		// origin for a run whose own is unknown.
+		// Either the source of a reopen, the run a capture came out of,
+		// or — when the walk ran out of story above it — the oldest run it
+		// could still name. The last starts the chain mid-story rather
+		// than inventing an origin for a run whose own is unknown.
 		start := serve.ProvHop{Subject: root.source}
 		if !gone[root.source] {
 			start.SubjectURL = "/run/" + root.source
 		}
 		hops = append(hops, start)
+	case root.kind == provMachineOpen:
+		hops = append(hops, serve.ProvHop{Subject: "a machine walk"})
 	default:
 		hops = append(hops, serve.ProvHop{Subject: "operator"})
 	}
