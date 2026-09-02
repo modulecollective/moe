@@ -74,7 +74,7 @@ func TestChainStateBlockCrossProject(t *testing.T) {
 }
 
 // TestChainStateBlockEmpty: nothing sequenced means no block at all,
-// consistent with all three siblings in pulseKickoffWithContext. An
+// consistent with every sibling in pulseKickoffWithContext. An
 // absent block reads as "nothing is sequenced"; an empty one with a
 // header reads as a bug.
 func TestChainStateBlockEmpty(t *testing.T) {

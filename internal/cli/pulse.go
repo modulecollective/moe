@@ -1051,10 +1051,11 @@ func (m *pulseMinter) mint(s pulseRunSpec, stdout, stderr io.Writer) string {
 }
 
 // nominateChore opens a judged chore's run for a gate entry that says
-// the chore's condition holds. It is a nomination, not a create, the
-// same shape maybeSpawnReflect has: with the chore's run already open
-// the nomination maps onto it, so a `chore` spec written at a thread
-// position places the existing run instead of dropping.
+// the chore's condition holds. It is a nomination, not a create: with
+// the chore's run already open, openChoreInProcess refuses with the
+// open run's id and the nomination maps onto it, so a `chore` spec
+// written at a thread position places the existing run instead of
+// dropping.
 //
 // The opened run is an ordinary chore run — the chore's own workflow,
 // its `prompt.md` seed, the MoE-Chore trailer — so completion, cooldown
@@ -1194,7 +1195,8 @@ func (m *pulseMinter) promoteIfTaggedIdea(slug string, s pulseRunSpec, atThread 
 }
 
 // ensureLive loads the dedupe set on first use, so a gate whose specs
-// are all twin nominations (or which has none at all) pays for no scan.
+// are all chore nominations or non-sdlc skips (or which has none at
+// all) pays for no scan.
 // A failed scan is remembered: without the dedupe set every sdlc mint
 // would be unguarded, so the whole gate's sdlc half is refused rather
 // than re-scanning per spec.
@@ -1297,17 +1299,19 @@ func slugBaseMatches(slugs []string, base string) bool {
 	return false
 }
 
-// pulseKickoffWithContext appends the harness-computed context blocks to
-// the static kickoff — the GitHub block, the recently-settled-runs
-// block, and the chain-state block. Wired as InitialPromptBuilder, so
-// root is the session worktree runStageSession hands the builder.
-// Best-effort throughout: a gather that fails drops its own block
-// rather than failing the sweep.
+// pulseKickoffWithContext appends the harness-computed context to the
+// static kickoff: six blocks (GitHub, recently-settled runs, chain
+// state, advanced-and-left runs, openable judged chores, the input
+// channel) and two trailing lines (what this invocation licensed, and
+// what the project's standing mode does with that licence). Wired as
+// InitialPromptBuilder, so root is the session worktree
+// runStageSession hands the builder. Best-effort throughout: a gather
+// that fails drops its own block rather than failing the sweep.
 func pulseKickoffWithContext(root, projectID, runID string, stderr io.Writer) (string, map[string]string) {
 	blocks := []string{pulseKickoff}
-	// Four of the five blocks want the same two reads. Doing them once
-	// here is not just cheaper — it means the blocks describe one
-	// consistent moment rather than four successive ones.
+	// Every block wants the same two reads. Doing them once here is not
+	// just cheaper — it means the blocks describe one consistent moment
+	// rather than six successive ones.
 	sc, ok := newPulseScan(root)
 	if !ok {
 		// Best-effort like each block was individually: a sweep with no
@@ -1530,11 +1534,11 @@ func runPulseNew(args []string, stdout, stderr io.Writer) int {
 // and the journal index, plus the by-key map and chain graph derived
 // from them.
 //
-// Four of the five context blocks want some of this, and each used to
-// take its own copy — five scans and four index builds per sweep, each
-// describing a slightly different moment. One read is cheaper and, more
-// to the point, coherent: the blocks the agent reads all describe the
-// same instant.
+// Every context block wants some of this, and each used to take its own
+// copy — a scan and an index build per block per sweep, each describing
+// a slightly different moment. One read is cheaper and, more to the
+// point, coherent: the blocks the agent reads all describe the same
+// instant.
 type pulseScan struct {
 	root  string
 	mds   []*run.Metadata
