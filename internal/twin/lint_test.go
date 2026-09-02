@@ -392,7 +392,7 @@ func equalStrings(got, want []string) bool {
 	return true
 }
 
-// Sanity check the writeFile helper from wiki_test.go produces a real
+// Sanity check the writeFile helper from helpers_test.go produces a real
 // file Scan can find — a regression here would mean the other tests
 // pass for the wrong reason.
 func TestScanFixtureSanity(t *testing.T) {
