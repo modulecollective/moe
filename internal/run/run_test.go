@@ -1468,3 +1468,58 @@ func TestJournalIndexLastOperatorActivityCountsOperatorChainCommits(t *testing.T
 		t.Errorf("LastActivity[alpha/old-child] = %v, want absent — the chain commit scopes to no run", got)
 	}
 }
+
+// TestJournalIndexOpenCommitMarks: the three marks a run's *opening* can
+// carry besides a spawner — a harvest source, the consent on the open
+// itself, and the consent on a promotion. Each is what tells a reader
+// that a run with no MoE-Spawned-By was still the machine's doing.
+func TestJournalIndexOpenCommitMarks(t *testing.T) {
+	root := newTestRoot(t)
+	commit := func(subject, body string) {
+		t.Helper()
+		gittest.Run(t, root, "commit", "--allow-empty", "-m", subject+"\n\n"+body)
+	}
+	// A followups harvest inside a bang cascade's close.
+	commit("Open run a/harvested",
+		"MoE-Run: harvested\nMoE-Project: a\nMoE-From-Run: a/source\nMoE-Consent: none\n")
+	// A survey a dynamic sweep minted: consent and nothing else.
+	commit("Open run a/pulse-1", "MoE-Run: pulse-1\nMoE-Project: a\nMoE-Consent: dynamic\n")
+	// An operator's own open, and a machine work turn landing on it
+	// afterwards. Every commit of a walk is consent-stamped, so without
+	// the subject pin this second commit would speak for an opening
+	// nobody stamped.
+	commit("Open run a/by-hand", "MoE-Run: by-hand\nMoE-Project: a\n")
+	commit("work: update design",
+		"MoE-Run: by-hand\nMoE-Project: a\nMoE-Document: design\nMoE-Consent: static\n")
+	// Two promotions, one driven by a sweep's kick and one typed.
+	commit("Promote idea a/idea-1 → a/run-1",
+		"MoE-Run: idea-1\nMoE-Project: a\nMoE-Promoted-To: a/run-1\nMoE-Consent: dynamic\n")
+	commit("Promote idea a/idea-2 → a/run-2",
+		"MoE-Run: idea-2\nMoE-Project: a\nMoE-Promoted-To: a/run-2\n")
+
+	idx, err := BuildJournalIndex(root)
+	if err != nil {
+		t.Fatalf("BuildJournalIndex: %v", err)
+	}
+	if got, want := idx.FromRun["a/harvested"], "a/source"; got != want {
+		t.Errorf("FromRun[a/harvested] = %q, want %q", got, want)
+	}
+	if got, want := idx.OpenConsent["a/harvested"], "none"; got != want {
+		t.Errorf("OpenConsent[a/harvested] = %q, want %q", got, want)
+	}
+	if got, want := idx.OpenConsent["a/pulse-1"], "dynamic"; got != want {
+		t.Errorf("OpenConsent[a/pulse-1] = %q, want %q", got, want)
+	}
+	if got, ok := idx.OpenConsent["a/by-hand"]; ok {
+		t.Errorf("OpenConsent[a/by-hand] = %q, want absent — only the open commit's own consent counts", got)
+	}
+	if got, want := idx.PromoteConsent["a/idea-1"], "dynamic"; got != want {
+		t.Errorf("PromoteConsent[a/idea-1] = %q, want %q", got, want)
+	}
+	if got, want := idx.PromotedTo["a/idea-2"], "a/run-2"; got != want {
+		t.Fatalf("PromotedTo[a/idea-2] = %q, want %q", got, want)
+	}
+	if got, ok := idx.PromoteConsent["a/idea-2"]; ok {
+		t.Errorf("PromoteConsent[a/idea-2] = %q, want absent — an operator promote stamps nothing", got)
+	}
+}

@@ -893,6 +893,32 @@ type JournalIndex struct {
 	// the trailer landed carries no consent. Readers must render absence
 	// as nothing rather than as a claim.
 	SpawnConsent map[string]string
+	// FromRun maps "<project>/<slug>" of a harvested idea → the
+	// qualified "<project>/<slug>" of the run out of whose scratch file
+	// it was captured, from the MoE-From-Run trailer on the idea's open
+	// commit. Written by the followups and twin-feedback harvests; keyed
+	// by the destination like ReopenedFrom and SpawnedBy, first (newest)
+	// commit wins, and only an open commit ever carries the trailer.
+	FromRun map[string]string
+	// OpenConsent maps "<project>/<slug>" → the MoE-Consent value on the
+	// commit that opened the run — the one whose subject is `Open run …`.
+	// Wider than SpawnConsent, which only keeps consent sitting beside a
+	// MoE-Spawned-By: a dynamic pulse survey, a harvested idea and a
+	// heartbeat chore run each open with consent and no spawner, and this
+	// is the map that remembers it. The two overlap on spawned runs and
+	// agree there.
+	//
+	// Same absence-is-unknown rule as SpawnConsent: no key means the open
+	// commit carried no trailer, which reads as an operator open on any
+	// commit written since the trailer landed, and as unknown on older
+	// ones.
+	OpenConsent map[string]string
+	// PromoteConsent maps "<project>/<slug>" of a *source idea* → the
+	// MoE-Consent value on the commit that promoted it. Keyed and paired
+	// exactly as SpawnConsent pairs with SpawnedBy, so a key here always
+	// has a PromotedTo entry too. Present only when a machine walk drove
+	// the promotion; an operator `moe idea promote` stamps nothing.
+	PromoteConsent map[string]string
 	// PushConsent maps "<project>/<slug>" → the MoE-Consent value on the
 	// run's push record — the consent level the ladder shipped under.
 	// Present only when a machine walk (a bang cascade, a chain kick)
@@ -1045,6 +1071,9 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 		ReopenedFrom:         make(map[string]string),
 		SpawnedBy:            make(map[string]string),
 		SpawnConsent:         make(map[string]string),
+		FromRun:              make(map[string]string),
+		OpenConsent:          make(map[string]string),
+		PromoteConsent:       make(map[string]string),
 		PushConsent:          make(map[string]string),
 		ChainedChild:         make(map[string]string),
 		EdgeConsent:          make(map[string]string),
@@ -1079,7 +1108,7 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 			subject = before
 		}
 		slug := ""
-		var promotedTo, prURL, projectID, docID, reopenOf, spawnedBy, chore, choreSkipped, consent string
+		var promotedTo, prURL, projectID, docID, reopenOf, spawnedBy, chore, choreSkipped, consent, fromRun string
 		var choreTouched []string
 		// Per-commit chain verdicts. addByParent wins over
 		// removeByParent for the same parent within one commit (an edit
@@ -1116,6 +1145,12 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 			if v, ok := strings.CutPrefix(line, "MoE-Promoted-To:"); ok {
 				if promotedTo == "" {
 					promotedTo = strings.TrimSpace(v)
+				}
+				continue
+			}
+			if v, ok := strings.CutPrefix(line, "MoE-From-Run:"); ok {
+				if fromRun == "" {
+					fromRun = strings.TrimSpace(v)
 				}
 				continue
 			}
@@ -1284,6 +1319,30 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 		if promotedTo != "" {
 			if _, ok := idx.PromotedTo[runKey]; !ok {
 				idx.PromotedTo[runKey] = promotedTo
+				// Paired with the promotion the way SpawnConsent pairs with
+				// the spawn: the level belongs to the commit that recorded
+				// the edge, so a later commit re-stating it can't swap the
+				// level underneath.
+				if consent != "" {
+					idx.PromoteConsent[runKey] = consent
+				}
+			}
+		}
+		if fromRun != "" {
+			if _, ok := idx.FromRun[runKey]; !ok {
+				idx.FromRun[runKey] = fromRun
+			}
+		}
+		// The open commit is the one that says who caused the run to
+		// exist, so the consent that counts here is the one it carries
+		// and no other. Pinned by subject for the same reason the push
+		// arm below pins its own: every commit a machine walk lands is
+		// consent-stamped, so without the pin the first such commit after
+		// an operator's open would stand in for an opening nobody
+		// stamped.
+		if consent != "" && strings.HasPrefix(subject, "Open run ") {
+			if _, ok := idx.OpenConsent[runKey]; !ok {
+				idx.OpenConsent[runKey] = consent
 			}
 		}
 		if prURL != "" {
