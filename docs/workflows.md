@@ -282,7 +282,7 @@ moe idea edit [--chat] <project>/<slug>
 moe idea list <project>
 moe idea log <project>/<slug>
 moe idea move <project>/<slug> <to-project>
-moe idea tag <project>/<slug> [workflow]
+moe idea tag <project>/<slug> [workflow] [--design-only]
 moe idea untag <project>/<slug>
 moe idea close <project>/<slug>
 moe idea reopen <project>/<slug>
@@ -308,6 +308,12 @@ per-idea pause, and an untagged idea stays operator-only forever. Agents can
 tag at capture time with the followups grammar (`` - [ ] `slug` (sdlc) — Title ``);
 `idea tag` is how the operator stamps one that was filed without it. Tagged
 ideas say so on the dash, and both verbs have a chip on the idea's page.
+
+`--design-only` narrows that licence to one headless design turn: the promoted
+run rides design and then holds until you read the canvas and advance it, which
+is the middle rung between "ship it" and "wait until I'm at a terminal". The
+plain tag is the ship licence, so re-tagging without the flag clears the
+narrowing, and `untag` clears both. The idea page carries a chip for each rung.
 
 ## Intents
 
@@ -517,13 +523,18 @@ Between those two there is one more rung. A `loose` spec carrying
 `"design_only": true` opens the run and rides it exactly one stage — a
 headless design turn — then parks it at design. The `design` body is the
 survey's *brief* rather than a baked design, so the bar is lower: a finding
-worth a designer's hour, not a fix worth a ride. The run is then held the way
+worth a designer's hour, not a fix worth a ride. An idea the operator tagged
+design-only (`moe idea tag --design-only`) reaches the same rung from the other
+side: the tag carries the bit, and the promoted run gets the identical
+one-stage ride with the idea canvas as its brief. The run is then held the way
 any unadvanced run is held, and your exits are the run page's advance chip (a
 full ride follows on the next sweep), a pushed note (one more design turn), or
-close. `design_only` is skipped on a slug that already names live work — a run
-in flight or a captured idea, whose triage is the operator's — at a thread
-position, on a chore or twin entry, and on a spec with no `design` body; the
-bit stays in `run.json` afterwards as provenance.
+close. A spec's `design_only` is skipped on a slug that already names live
+work — a run in flight, or an idea whose licence is the operator's to write —
+at a thread position, on a chore or twin entry, and on a spec with no `design`
+body; on an already-design-only idea the flag agrees with the tag and is
+ignored rather than skipped. The bit stays in `run.json` afterwards as
+provenance.
 
 In a hand-typed `moe pulse new`, grooming changes recorded placement and not
 execution: newly placed work parks for a later kick. Under `--dynamic`,

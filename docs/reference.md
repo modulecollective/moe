@@ -150,7 +150,8 @@ source of truth for the exact command surface; this page is a map.
 - `moe chat new|chat|close|harvest|cat|log` drives thinking-partner sessions.
 - `moe idea new|edit|close|list|move|tag|untag|reopen|cat|log|harvest` manages
   backlog notes. `tag` stamps the workflow tag that licenses a pulse to start
-  the idea (`untag` clears it); untagged ideas are operator-only.
+  the idea (`untag` clears it), and `tag --design-only` narrows that licence to
+  one design turn before the run holds; untagged ideas are operator-only.
 - `moe intent new|edit|close|list|cat|log|harvest` manages operator-authored
   standing direction.
 - `moe pulse new|pulse|close|cat|log` runs and inspects a project's read-only

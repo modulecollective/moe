@@ -267,12 +267,14 @@ hold. A pile of design canvases the operator never opens is the failure
 mode, and it is a slow one, so it is worth avoiding before it starts.
 
 **Fresh slugs only.** `design_only` on a slug that already names a live
-run is skipped, ideas included: a tag is the licence to *ship* and an
-untagged idea is the operator's, so consuming either to buy a design
-turn goes past a brake that is there on purpose. It is also skipped at
-a thread position — a design-only root is held by definition and would
-strand everything behind it — and on a `chore` or `twin` entry, where
-there is no design stage for the bound to mean anything.
+run is skipped: a tag is the licence to *ship* and an untagged idea is
+the operator's, so consuming either to buy a design turn goes past a
+brake that is there on purpose. The design-only rung on an idea is the
+operator's to stamp, not yours to reach for — and on an idea they have
+already stamped, the flag is redundant and simply ignored. It is also
+skipped at a thread position — a design-only root is held by definition
+and would strand everything behind it — and on a `chore` or `twin`
+entry, where there is no design stage for the bound to mean anything.
 
 **A design-only run the operator closed is a no.** It is in the
 recently-settled block. Do not re-propose the same finding under a
@@ -300,6 +302,14 @@ necessary, not sufficient — you still make the scheduling judgment.
 An untagged idea stays advisory-only. Promotion is not closing an idea;
 the normal promotion transition records where the work went, so the
 backlog-hygiene rule to never close ideas still stands.
+
+An idea whose tag reads **design only** on the board is proposed the
+same way — loose, under its own slug — but it clears the design-only
+bar rather than the spawn bar: a finding worth a designer's hour, not a
+fix worth a ride. Write no `design_only` on the spec; the tag carries
+it, and the harness rides the promoted run exactly one design turn. A
+design-only tag is loose-only for the same reason a `design_only` spec
+is: name one at a thread position and it strands the runs behind it.
 
 ## Judged chores — the one thing here that isn't the spawn bar
 
