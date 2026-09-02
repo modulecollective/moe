@@ -40,11 +40,22 @@ func GrepPattern(key, value string) string {
 // with '\n', so `subject + "\n\n" + block.String()` yields a commit
 // message ending in '\n'.
 type Block struct {
-	Run           string
-	Project       string
-	Workflow      string
-	Document      string
-	Session       string
+	Run      string
+	Project  string
+	Workflow string
+	Document string
+	Session  string
+	// TimedOut carries the headless cap that fired (e.g. "3h0m0s") on
+	// the turn commit of a stage killed by headlessTurnTimeout. Set
+	// only on that rare commit; absence means the turn ended some other
+	// way, not that it finished cleanly. The value is the cap rather
+	// than a bare "true" because the question it answers is "which cap
+	// was in force when this got cut?" — the input to the next resize.
+	//
+	// A timed-out turn's transcript stops mid-thought and the next
+	// drive of the stage overwrites the on-disk copy, so this trailer
+	// is the only durable marker that the ending was a kill.
+	TimedOut      string
 	PR            string
 	Merged        string
 	Closed        string
@@ -119,6 +130,7 @@ func (b Block) String() string {
 	write(&sb, "MoE-Workflow", b.Workflow)
 	write(&sb, "MoE-Document", b.Document)
 	write(&sb, "MoE-Session", b.Session)
+	write(&sb, "MoE-Timed-Out", b.TimedOut)
 	write(&sb, "MoE-PR", b.PR)
 	write(&sb, "MoE-Merged", b.Merged)
 	write(&sb, "MoE-Closed", b.Closed)

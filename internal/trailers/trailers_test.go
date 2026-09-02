@@ -15,6 +15,7 @@ func TestBlockCanonicalOrderAllFields(t *testing.T) {
 		Workflow:      "w",
 		Document:      "d",
 		Session:       "s",
+		TimedOut:      "3h0m0s",
 		PR:            "pr",
 		Merged:        "m",
 		Closed:        "c",
@@ -31,6 +32,7 @@ func TestBlockCanonicalOrderAllFields(t *testing.T) {
 		"MoE-Workflow: w\n" +
 		"MoE-Document: d\n" +
 		"MoE-Session: s\n" +
+		"MoE-Timed-Out: 3h0m0s\n" +
 		"MoE-PR: pr\n" +
 		"MoE-Merged: m\n" +
 		"MoE-Closed: c\n" +
