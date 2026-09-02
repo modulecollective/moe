@@ -1,4 +1,4 @@
-package wiki
+package twin
 
 import (
 	"path/filepath"
@@ -16,17 +16,9 @@ func TestScanManagedDocs(t *testing.T) {
 	// operations.md links to a missing sibling → BrokenLinks
 	writeFile(t, filepath.Join(twinDir, "operations.md"),
 		"# Operations\n\nSee [missing](missing.md) for details.\n")
+	writeFile(t, filepath.Join(twinDir, "glossary.md"), "# Glossary\n\nNo entries yet.\n")
 
-	cfg := Config{
-		ContentDir: twinDir,
-		ManagedDocs: []ManagedDoc{
-			{Filename: "vision.md", Title: "Vision"},
-			{Filename: "architecture.md", Title: "Architecture"},
-			{Filename: "patterns.md", Title: "Patterns"},
-			{Filename: "operations.md", Title: "Operations"},
-		},
-	}
-	f, err := Scan(cfg)
+	f, err := Scan(twinDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +35,7 @@ func TestScanManagedDocs(t *testing.T) {
 
 func TestTwinReferenceSectionEmptyWithoutDir(t *testing.T) {
 	root := t.TempDir()
-	got := TwinReferenceSectionAt(root, "p")
+	got := ReferenceSectionAt(root, "p")
 	if got != "" {
 		t.Errorf("expected empty for missing twin dir, got %q", got)
 	}
@@ -53,7 +45,7 @@ func TestTwinReferenceSectionRendersWithDocs(t *testing.T) {
 	root := t.TempDir()
 	twinDir := filepath.Join(root, "projects", "p", "digital-twin")
 	writeFile(t, filepath.Join(twinDir, "vision.md"), "# Vision\n")
-	got := TwinReferenceSectionAt(root, "p")
+	got := ReferenceSectionAt(root, "p")
 	for _, want := range []string{
 		"## Project digital twin",
 		twinDir,

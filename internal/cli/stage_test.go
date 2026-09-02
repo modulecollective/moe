@@ -19,7 +19,7 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
-	"github.com/modulecollective/moe/internal/wiki"
+	"github.com/modulecollective/moe/internal/twin"
 )
 
 // newTestBureaucracy initializes a throwaway git repo with scoped git config,
@@ -306,7 +306,7 @@ func TestBuildSystemPromptSectionsEndWithNewline(t *testing.T) {
 
 	// digital-twin/<project>/ with one managed doc on disk →
 	// TwinReferenceSectionAt returns a non-empty section.
-	twinDir := wiki.TwinDir(root, "tele")
+	twinDir := twin.Dir(root, "tele")
 	if err := os.MkdirAll(twinDir, 0o755); err != nil {
 		t.Fatal(err)
 	}

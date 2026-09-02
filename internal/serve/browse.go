@@ -11,14 +11,14 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/lore"
 	"github.com/modulecollective/moe/internal/md"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
 	// Aliased: serve.go in this package imports the stdlib sync, and one
 	// package can't spell the same identifier two ways.
-	"github.com/modulecollective/moe/internal/lore"
 	moesync "github.com/modulecollective/moe/internal/sync"
-	"github.com/modulecollective/moe/internal/wiki"
+	"github.com/modulecollective/moe/internal/twin"
 )
 
 // slugRe bounds the {name}/{topic}/{doc}/{project} path segments to a
@@ -171,7 +171,7 @@ func (s *Server) handleProjectsIndex(w http.ResponseWriter, r *http.Request) {
 			Runs:     runCounts[p.ID],
 			Chores:   choreCounts[p.ID],
 			Topics:   countMarkdown(s.knowledgeTopicsDir(p.ID)),
-			TwinDocs: countMarkdown(wiki.TwinDir(s.opts.Root, p.ID)),
+			TwinDocs: countMarkdown(twin.Dir(s.opts.Root, p.ID)),
 		})
 	}
 	s.render(w, r, "projects_index.html", vm)
@@ -274,7 +274,7 @@ func (s *Server) handleProjectHub(w http.ResponseWriter, r *http.Request) {
 		vm.HasKnowledge = true
 	}
 
-	twinDir := wiki.TwinDir(s.opts.Root, projectID)
+	twinDir := twin.Dir(s.opts.Root, projectID)
 	for _, name := range listMarkdown(twinDir) {
 		slug := strings.TrimSuffix(name, ".md")
 		vm.Twin = append(vm.Twin, twinDocVM{Name: slug})
@@ -443,7 +443,7 @@ func (s *Server) handleTwinDoc(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	rel := relTo(s.opts.Root, filepath.Join(wiki.TwinDir(s.opts.Root, projectID), doc+".md"))
+	rel := relTo(s.opts.Root, filepath.Join(twin.Dir(s.opts.Root, projectID), doc+".md"))
 	src, ok := s.readDoc(w, r, rel)
 	if !ok {
 		return

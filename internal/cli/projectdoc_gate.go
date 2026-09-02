@@ -11,7 +11,7 @@ import (
 	"github.com/modulecollective/moe/internal/knowledge"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/wiki"
+	"github.com/modulecollective/moe/internal/twin"
 )
 
 // projectdoc_gate.go holds the close-time hygiene gate over the project
@@ -65,14 +65,14 @@ var projectDocScanners = []projectDocScanner{
 		},
 	},
 	{
-		subdir:  wiki.TwinDirRel,
+		subdir:  twin.DirRel,
 		fixHint: "The doc set is fixed (vision, architecture, patterns, operations, glossary); a cross-reference must name a heading that exists in the doc it cites.",
 		scan: func(dir string) (int, string, error) {
-			f, err := wiki.Scan(wiki.Config{ContentDir: dir, ManagedDocs: twinManagedDocs})
+			f, err := twin.Scan(dir)
 			if err != nil {
 				return 0, "", err
 			}
-			return f.Count(), wiki.RenderFindings(f), nil
+			return f.Count(), twin.Render(f), nil
 		},
 	},
 }

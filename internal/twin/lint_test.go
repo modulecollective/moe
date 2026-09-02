@@ -1,4 +1,4 @@
-package wiki
+package twin
 
 import (
 	"os"
@@ -13,9 +13,9 @@ func TestRenderFindingsGroupsByCategory(t *testing.T) {
 		EmptyDocs:          []string{"stub.md"},
 		MissingManagedDocs: []string{"glossary.md"},
 	}
-	got := RenderFindings(f)
+	got := Render(f)
 	for _, want := range []string{
-		"## Structural pre-scan",
+		"## Digital twin findings",
 		"**Broken cross-links**",
 		"- a.md → b.md",
 		"**Empty or stub docs**",
@@ -24,13 +24,13 @@ func TestRenderFindingsGroupsByCategory(t *testing.T) {
 		"- glossary.md",
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("RenderFindings missing %q in:\n%s", want, got)
+			t.Errorf("Render missing %q in:\n%s", want, got)
 		}
 	}
 }
 
 func TestRenderFindingsEmptyReturnsEmpty(t *testing.T) {
-	if got := RenderFindings(Findings{}); got != "" {
+	if got := Render(Findings{}); got != "" {
 		t.Errorf("expected empty string for clean findings, got %q", got)
 	}
 }
@@ -51,15 +51,8 @@ func TestScanGlossaryOrphans(t *testing.T) {
 			"### Sandbox worktree\n\nPer-run working tree of the target submodule.\n\n"+
 			"### Wiki engine\n\nGeneric engine backing kb and twin.\n\n"+
 			"### Phantom term\n\nNobody references this in the prose.\n")
-	cfg := Config{
-		ContentDir: dir,
-		ManagedDocs: []ManagedDoc{
-			{Filename: "vision.md", Title: "Vision"},
-			{Filename: "architecture.md", Title: "Architecture"},
-			{Filename: "glossary.md", Title: "Glossary"},
-		},
-	}
-	f, err := Scan(cfg)
+	stubMissing(t, dir)
+	f, err := Scan(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,14 +68,8 @@ func TestScanGlossaryOrphansEmptyGlossary(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "vision.md"), "# Vision\n\nbody\n")
 	writeFile(t, filepath.Join(dir, "glossary.md"), "# Glossary\n\n")
-	cfg := Config{
-		ContentDir: dir,
-		ManagedDocs: []ManagedDoc{
-			{Filename: "vision.md", Title: "Vision"},
-			{Filename: "glossary.md", Title: "Glossary"},
-		},
-	}
-	f, err := Scan(cfg)
+	stubMissing(t, dir)
+	f, err := Scan(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,14 +81,14 @@ func TestScanGlossaryOrphansEmptyGlossary(t *testing.T) {
 // Render path: glossary orphans surface under their own labelled
 // bullet group so the agent knows what the rubric is for.
 func TestRenderFindingsIncludesGlossaryOrphans(t *testing.T) {
-	got := RenderFindings(Findings{GlossaryOrphans: []string{"Phantom term"}})
+	got := Render(Findings{GlossaryOrphans: []string{"Phantom term"}})
 	for _, want := range []string{
-		"## Structural pre-scan",
+		"## Digital twin findings",
 		"**Glossary orphans**",
 		"- Phantom term",
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("RenderFindings missing %q in:\n%s", want, got)
+			t.Errorf("Render missing %q in:\n%s", want, got)
 		}
 	}
 }
@@ -112,20 +99,15 @@ func TestRenderFindingsIncludesGlossaryOrphans(t *testing.T) {
 func TestScanIgnoresDocSize(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "vision.md"), "# Vision\n\n"+strings.Repeat("x", 512*1024))
-	cfg := Config{
-		ContentDir: dir,
-		ManagedDocs: []ManagedDoc{
-			{Filename: "vision.md", Title: "Vision"},
-		},
-	}
-	f, err := Scan(cfg)
+	stubMissing(t, dir)
+	f, err := Scan(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if f.HasBlocking() {
 		t.Fatalf("a large doc is not a structural finding: %+v", f)
 	}
-	if got := RenderFindings(f); got != "" {
+	if got := Render(f); got != "" {
 		t.Fatalf("clean scan should render nothing, got:\n%s", got)
 	}
 }
@@ -198,14 +180,8 @@ So does a sentence boundary. The shape lives in architecture.md. The
 Two doc tokens on one line bind the quote to the nearer: the vision.md
 entry for architecture.md "Components" is architecture's, not vision's.
 `)
-	cfg := Config{
-		ContentDir: dir,
-		ManagedDocs: []ManagedDoc{
-			{Filename: "vision.md", Title: "Vision"},
-			{Filename: "architecture.md", Title: "Architecture"},
-		},
-	}
-	f, err := Scan(cfg)
+	stubMissing(t, dir)
+	f, err := Scan(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,14 +317,8 @@ A stale continuation: architecture.md "Decisions" and "The bets".
 A possessive citation anchors continuations too:
 [architecture](architecture.md)'s "Decisions" and "Gone entirely".
 `)
-	cfg := Config{
-		ContentDir: dir,
-		ManagedDocs: []ManagedDoc{
-			{Filename: "glossary.md", Title: "Glossary"},
-			{Filename: "architecture.md", Title: "Architecture"},
-		},
-	}
-	f, err := Scan(cfg)
+	stubMissing(t, dir)
+	f, err := Scan(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,14 +347,8 @@ func TestScanDanglingXrefsSkipsAbsentTarget(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "vision.md"),
 		"# Vision\n\nSee architecture.md \"Components\" for the shape.\n")
-	cfg := Config{
-		ContentDir: dir,
-		ManagedDocs: []ManagedDoc{
-			{Filename: "vision.md", Title: "Vision"},
-			{Filename: "architecture.md", Title: "Architecture"},
-		},
-	}
-	f, err := Scan(cfg)
+	stubMissing(t, dir, "architecture.md")
+	f, err := Scan(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,7 +363,7 @@ func TestScanDanglingXrefsSkipsAbsentTarget(t *testing.T) {
 // Render path: dangling xrefs get their own labelled group, and the
 // rubric line is how a stage agent learns what fix the entry invites.
 func TestRenderFindingsIncludesDanglingXrefs(t *testing.T) {
-	got := RenderFindings(Findings{DanglingXrefs: []DanglingXref{
+	got := Render(Findings{DanglingXrefs: []DanglingXref{
 		{From: "vision.md", Target: "architecture.md", Span: "The bets"},
 	}})
 	for _, want := range []string{
@@ -408,7 +372,7 @@ func TestRenderFindingsIncludesDanglingXrefs(t *testing.T) {
 		`- vision.md: architecture.md "The bets"`,
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("RenderFindings missing %q in:\n%s", want, got)
+			t.Errorf("Render missing %q in:\n%s", want, got)
 		}
 	}
 }

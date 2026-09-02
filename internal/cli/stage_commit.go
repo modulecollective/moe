@@ -12,7 +12,7 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
 	"github.com/modulecollective/moe/internal/trailers"
-	"github.com/modulecollective/moe/internal/wiki"
+	"github.com/modulecollective/moe/internal/twin"
 )
 
 // commitSessionStart commits run.json immediately after EnsureDocument
@@ -149,7 +149,7 @@ func stageableFollowups(root string, md *run.Metadata) (string, bool) {
 // whether a turn owes the project-doc hygiene gate.
 func projectCommitDirs(workflow string) []string {
 	if workflow == sdlcWorkflow {
-		return []string{"hooks", "chores", "knowledge", wiki.TwinDirRel}
+		return []string{"hooks", "chores", "knowledge", twin.DirRel}
 	}
 	return nil
 }

@@ -1,4 +1,16 @@
-package wiki
+// Package twin holds the path helpers, the doc-set declaration, and the
+// structural scan for a project's digital twin — the closed-schema doc
+// set under projects/<p>/digital-twin/.
+//
+// It was once an engine called internal/wiki: an ingest loop, a
+// checkpoint, an events window, a session-end finalize that appended to
+// log.md, and a schema mode generic over two wikis. Both wikis are gone
+// as workflows. A project's knowledge/ tree is a plain doc tree checked
+// by internal/knowledge; the twin is a plain doc tree any sdlc stage may
+// write, checked by Scan here and gated at stage exit. What's left is
+// the scan, the doc set it scans against, and the prompt section that
+// points an agent at the tree.
+package twin
 
 import (
 	"fmt"
@@ -7,20 +19,37 @@ import (
 	"strings"
 )
 
-// TwinDirRel is the wiki-relative path under
-// `projects/<project>/` where a project's closed-schema digital twin
-// lives. Hard-coded — every project's twin sits in the same place so
-// stage prompts and tools can compute the path without consulting
-// per-project config.
-const TwinDirRel = "digital-twin"
+// DirRel is the path under `projects/<project>/` where a project's
+// closed-schema digital twin lives. Hard-coded — every project's twin
+// sits in the same place so stage prompts and tools can compute the
+// path without consulting per-project config.
+const DirRel = "digital-twin"
 
-// TwinDir returns the absolute path to the project's digital-twin
-// directory under the bureaucracy root.
-func TwinDir(root, projectID string) string {
-	return filepath.Join(root, "projects", projectID, TwinDirRel)
+// managedDocs is the hard-fixed set of docs every project's twin
+// carries, in the order findings render. Project-agnostic:
+// closed-schema means "opinions are the product", so a new doc joins
+// the set by a code change here, not per-project config. What each doc
+// is *for* is taught to the agent by the moe-twin skill, which is the
+// one place that prose has to stay in step with a real twin.
+//
+// One reader now that the reflect ladder is gone: Scan, called from the
+// project-doc hygiene gate after any stage commit that touched the
+// tree.
+var managedDocs = []string{
+	"vision.md",
+	"architecture.md",
+	"patterns.md",
+	"operations.md",
+	"glossary.md",
 }
 
-// TwinReferenceSectionAt emits a system-prompt block that names the
+// Dir returns the absolute path to the project's digital-twin
+// directory under the bureaucracy root.
+func Dir(root, projectID string) string {
+	return filepath.Join(root, "projects", projectID, DirRel)
+}
+
+// ReferenceSectionAt emits a system-prompt block that names the
 // project's digital twin and tells the agent to read it before doing
 // substantive work. Reference, not splice — the agent decides what to
 // read each turn rather than every prompt carrying the full twin.
@@ -28,11 +57,11 @@ func TwinDir(root, projectID string) string {
 // Returns "" when the project has no digital-twin/ dir on disk.
 // Stages don't need to branch on this: empty input concatenates
 // cleanly into buildSystemPrompt's section join.
-func TwinReferenceSectionAt(root, projectID string) string {
+func ReferenceSectionAt(root, projectID string) string {
 	if root == "" || projectID == "" {
 		return ""
 	}
-	dir := TwinDir(root, projectID)
+	dir := Dir(root, projectID)
 	info, err := os.Stat(dir)
 	if err != nil || !info.IsDir() {
 		return ""

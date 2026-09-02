@@ -8,7 +8,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/lore"
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/wiki"
+	"github.com/modulecollective/moe/internal/twin"
 )
 
 // TestStageLocationSectionSDLC pins the rendered header for each sdlc
@@ -107,7 +107,7 @@ func TestStageLocationSectionUnknownStage(t *testing.T) {
 func TestBuildSystemPromptInjectsLoreAfterTwin(t *testing.T) {
 	root := newTestBureaucracy(t)
 
-	twinDir := wiki.TwinDir(root, "tele")
+	twinDir := twin.Dir(root, "tele")
 	if err := os.MkdirAll(twinDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +224,7 @@ func TestIntentTitleFallsBackToSlug(t *testing.T) {
 func TestBuildSystemPromptInjectsIntentsBetweenTwinAndLore(t *testing.T) {
 	root := newTestBureaucracy(t)
 
-	twinDir := wiki.TwinDir(root, "tele")
+	twinDir := twin.Dir(root, "tele")
 	if err := os.MkdirAll(twinDir, 0o755); err != nil {
 		t.Fatal(err)
 	}

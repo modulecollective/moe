@@ -14,7 +14,7 @@ import (
 	"github.com/modulecollective/moe/internal/lore"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/wiki"
+	"github.com/modulecollective/moe/internal/twin"
 )
 
 // buildSystemPrompt assembles the `--append-system-prompt` payload in the
@@ -63,7 +63,7 @@ func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string, s
 	// Twin-as-context: every stage gets a reference block pointing at
 	// the project's digital-twin/ dir (when one exists). Lands early:
 	// what the project *is* frames everything that follows.
-	if ref := wiki.TwinReferenceSectionAt(root, md.Project); ref != "" {
+	if ref := twin.ReferenceSectionAt(root, md.Project); ref != "" {
 		sections = append(sections, ref)
 	}
 
@@ -510,10 +510,10 @@ The harness commits run artifacts after the turn; never run ` + "`git add` or `g
 	// domain fact it just learned has a home.
 	if dirs := projectCommitDirs(md.Workflow); len(dirs) > 0 {
 		routing := map[string]string{
-			"hooks":         "drop-in scripts under `<event>.d/`; `moe hook fire` is the loop",
-			"chores":        "chore definitions (`chore.json` + `prompt.md`); `moe chore check` is the dry run",
-			"knowledge":     "the project's durable domain reference — research findings, external surveys, facts worth citing across runs",
-			wiki.TwinDirRel: "the project's recorded intent; the `moe-twin` skill has the writing contract",
+			"hooks":     "drop-in scripts under `<event>.d/`; `moe hook fire` is the loop",
+			"chores":    "chore definitions (`chore.json` + `prompt.md`); `moe chore check` is the dry run",
+			"knowledge": "the project's durable domain reference — research findings, external surveys, facts worth citing across runs",
+			twin.DirRel: "the project's recorded intent; the `moe-twin` skill has the writing contract",
 		}
 		paths := make([]string, len(dirs))
 		for i, name := range dirs {

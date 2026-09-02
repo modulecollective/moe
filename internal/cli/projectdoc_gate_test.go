@@ -284,11 +284,15 @@ func TestEnforceProjectDocHygieneScansOnlyWhatWasTouched(t *testing.T) {
 }
 
 // seedTwin stubs the five managed docs so a scan finds no missing docs
-// and no empty stubs — the baseline a targeted breakage builds on.
+// and no empty stubs — the baseline a targeted breakage builds on. The
+// set is spelled out rather than read from internal/twin: a doc joining
+// the schema should make this test fail until someone looks at it.
 func seedTwin(t *testing.T, root, projectID string) {
 	t.Helper()
-	for _, d := range twinManagedDocs {
-		writeTwinDoc(t, root, projectID, d.Filename,
-			"# "+d.Title+"\n\nPlaceholder prose so the doc isn't an empty stub.\n")
+	for _, name := range []string{
+		"vision.md", "architecture.md", "patterns.md", "operations.md", "glossary.md",
+	} {
+		writeTwinDoc(t, root, projectID, name,
+			"# "+name+"\n\nPlaceholder prose so the doc isn't an empty stub.\n")
 	}
 }

@@ -9,7 +9,7 @@ import (
 // This file is the corpus-analysis half of the package: the helpers that
 // read a doc's link topology and emptiness rather than rendering it.
 // Both structural scans in the bureaucracy — the twin's closed-schema
-// hygiene pass (internal/wiki) and the knowledge tree's
+// hygiene pass (internal/twin) and the knowledge tree's
 // (internal/knowledge) — resolve links and detect stubs the same way, so
 // the rules live here once instead of once per corpus.
 

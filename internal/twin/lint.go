@@ -1,4 +1,4 @@
-package wiki
+package twin
 
 import (
 	"fmt"
@@ -25,7 +25,7 @@ type Findings struct {
 	// whitespace-only, or just a title heading and nothing else) —
 	// typically unfilled, just-bootstrapped stubs.
 	EmptyDocs []string
-	// MissingManagedDocs are filenames declared in cfg.ManagedDocs
+	// MissingManagedDocs are filenames declared in managedDocs
 	// that don't exist on disk.
 	MissingManagedDocs []string
 	// GlossaryOrphans are glossary entries (H3 terms in glossary.md)
@@ -48,8 +48,8 @@ type DanglingXref struct {
 
 // BrokenLink is one cross-link a managed doc makes that doesn't resolve.
 type BrokenLink struct {
-	From   string // doc that contains the link, relative to ContentDir
-	Target string // path the link resolves to, relative to ContentDir
+	From   string // doc that contains the link, relative to the twin dir
+	Target string // path the link resolves to, relative to the twin dir
 }
 
 // Count is the total number of findings across every category. Every
@@ -67,40 +67,39 @@ func (f Findings) Count() int {
 // HasBlocking reports whether f carries any finding at all.
 func (f Findings) HasBlocking() bool { return f.Count() > 0 }
 
-// Scan walks the wiki content directory and returns the structural
-// findings. The catalogue is cfg.ManagedDocs (flat, no topics/);
-// MissingManagedDocs flags unstubbed docs. A missing ContentDir is not
-// an error — it produces empty findings (a fresh-wiki scan has nothing
-// to find).
+// Scan walks a project's digital-twin directory and returns the
+// structural findings. The catalogue is managedDocs (flat, no topics/);
+// MissingManagedDocs flags unstubbed docs. A missing dir is not an
+// error — it produces empty findings (a project without a twin has
+// nothing to find).
 //
 // The scan is best-effort and does not fail on per-file read errors:
-// a doc the engine couldn't read becomes an absence in the link checks
-// rather than a hard error. Errors that would prevent any scan from
-// completing propagate.
-func Scan(cfg Config) (Findings, error) {
+// a doc it couldn't read becomes an absence in the link checks rather
+// than a hard error. Errors that would prevent any scan from completing
+// propagate.
+func Scan(dir string) (Findings, error) {
 	var f Findings
 
-	// Catalogue managed docs from cfg, not from disk — the schema
-	// invariants forbid extras. Disk presence drives MissingManagedDocs.
+	// Catalogue managed docs from the schema, not from disk — the twin
+	// is closed and extras aren't docs. Disk presence drives
+	// MissingManagedDocs.
 	docs := map[string]bool{}
-	var docList []string
-	for _, d := range cfg.ManagedDocs {
-		docs[d.Filename] = true
-		docList = append(docList, d.Filename)
-		_, err := os.Stat(filepath.Join(cfg.ContentDir, d.Filename))
+	for _, name := range managedDocs {
+		docs[name] = true
+		_, err := os.Stat(filepath.Join(dir, name))
 		if err != nil {
 			if os.IsNotExist(err) {
-				f.MissingManagedDocs = append(f.MissingManagedDocs, d.Filename)
+				f.MissingManagedDocs = append(f.MissingManagedDocs, name)
 				continue
 			}
-			return f, fmt.Errorf("wiki: stat %s: %w", d.Filename, err)
+			return f, fmt.Errorf("twin: stat %s: %w", name, err)
 		}
 	}
 
 	// Walk every present managed doc for empty bodies and broken
 	// cross-links.
-	for _, name := range docList {
-		body, ok, err := readMaybe(filepath.Join(cfg.ContentDir, name))
+	for _, name := range managedDocs {
+		body, ok, err := readMaybe(filepath.Join(dir, name))
 		if err != nil {
 			return f, err
 		}
@@ -119,8 +118,8 @@ func Scan(cfg Config) (Findings, error) {
 		}
 	}
 
-	f.GlossaryOrphans = scanGlossaryOrphans(cfg)
-	f.DanglingXrefs = scanDanglingXrefs(cfg)
+	f.GlossaryOrphans = scanGlossaryOrphans(dir)
+	f.DanglingXrefs = scanDanglingXrefs(dir)
 
 	sort.Strings(f.MissingManagedDocs)
 	sort.Strings(f.EmptyDocs)
@@ -134,23 +133,20 @@ func Scan(cfg Config) (Findings, error) {
 	return f, nil
 }
 
-// RenderFindings formats f as a markdown known-issues block suitable
-// for splicing into the lint kickoff prompt. Returns "" when f is
-// empty so callers can drop the heading entirely on a clean wiki.
+// Render formats f as a markdown findings block for the project-doc
+// hygiene gate, mirroring knowledge.Render. Returns "" when f is empty
+// so a clean twin renders no block at all.
 //
 // The block is grouped by category, with each group prefixed by a
 // short rubric so the agent knows what kind of fix the entries
 // invite. Operator judgement decides what to act on — the renderer
 // doesn't editorialise.
-func RenderFindings(f Findings) string {
+func Render(f Findings) string {
 	if !f.HasBlocking() {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("## Structural pre-scan\n\n")
-	b.WriteString("The engine has flagged the following deterministic issues " +
-		"under the wiki dir. Walk through them with the operator and decide " +
-		"which to fix this pass.\n\n")
+	b.WriteString("## Digital twin findings\n\n")
 	if len(f.BrokenLinks) > 0 {
 		b.WriteString("**Broken cross-links** (link in left doc, missing target on the right):\n")
 		for _, bl := range f.BrokenLinks {
@@ -209,18 +205,8 @@ var glossaryTermPattern = regexp.MustCompile(`(?m)^###\s+(.+?)\s*$`)
 // `### Sandbox worktree` is satisfied by prose that says "the sandbox
 // worktree …". Headings in the glossary itself don't count — the
 // check only walks the other managed docs.
-func scanGlossaryOrphans(cfg Config) []string {
-	managedHasGlossary := false
-	for _, d := range cfg.ManagedDocs {
-		if d.Filename == glossaryDocName {
-			managedHasGlossary = true
-			break
-		}
-	}
-	if !managedHasGlossary {
-		return nil
-	}
-	body, ok, err := readMaybe(filepath.Join(cfg.ContentDir, glossaryDocName))
+func scanGlossaryOrphans(dir string) []string {
+	body, ok, err := readMaybe(filepath.Join(dir, glossaryDocName))
 	if err != nil || !ok {
 		return nil
 	}
@@ -229,11 +215,11 @@ func scanGlossaryOrphans(cfg Config) []string {
 		return nil
 	}
 	var others strings.Builder
-	for _, d := range cfg.ManagedDocs {
-		if d.Filename == glossaryDocName {
+	for _, name := range managedDocs {
+		if name == glossaryDocName {
 			continue
 		}
-		otherBody, ok, err := readMaybe(filepath.Join(cfg.ContentDir, d.Filename))
+		otherBody, ok, err := readMaybe(filepath.Join(dir, name))
 		if err != nil || !ok {
 			continue
 		}
@@ -287,18 +273,12 @@ const xrefPathSeparator = "→"
 // Citations into a managed doc that isn't on disk are skipped:
 // MissingManagedDocs already reports that, and every citation into the
 // absent doc would otherwise pile on as noise.
-func scanDanglingXrefs(cfg Config) []DanglingXref {
-	names := make([]string, 0, len(cfg.ManagedDocs))
-	for _, d := range cfg.ManagedDocs {
-		names = append(names, d.Filename)
-	}
-	if len(names) == 0 {
-		return nil
-	}
+func scanDanglingXrefs(dir string) []DanglingXref {
+	names := managedDocs
 
 	bodies := map[string]string{}
 	for _, name := range names {
-		body, ok, err := readMaybe(filepath.Join(cfg.ContentDir, name))
+		body, ok, err := readMaybe(filepath.Join(dir, name))
 		if err != nil || !ok {
 			continue
 		}
@@ -370,7 +350,7 @@ func scanDanglingXrefs(cfg Config) []DanglingXref {
 // The {0,48} bound is a backstop, sized off the longest separator the
 // corpus writes (41 bytes) with headroom; the exclusions are the guard.
 //
-// The alternation is built from cfg.ManagedDocs rather than hardcoded,
+// The alternation is built from managedDocs rather than hardcoded,
 // longest name first so a doc whose name is a suffix of another still
 // matches the longer one.
 func xrefCitationPattern(names []string) *regexp.Regexp {
