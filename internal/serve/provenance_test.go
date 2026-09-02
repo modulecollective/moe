@@ -199,3 +199,81 @@ func TestDashBadgesAgentRows(t *testing.T) {
 		}
 	}
 }
+
+// TestRunPageRendersACaptureChain: the reported shape, end to end. A
+// harvested idea's page draws the run its followup came from, and the
+// capture hop wears both marks the walk hands over — the agent badge and
+// a `none` consent chip. `none` is the one ride level that reads like an
+// absence, and the template's `{{if .Consent}}` is all that stands
+// between it and a hop that silently drops the level it was given: a
+// bang cascade did the close, which is a different fact from an operator
+// closing the run by hand, and only the chip tells them apart.
+func TestRunPageRendersACaptureChain(t *testing.T) {
+	s := provenanceServer(t, []ProvHop{
+		{Subject: "operator"},
+		{
+			Verb: "opened", Object: "alpha/design-only-spawn",
+			ObjectURL: "/run/alpha/design-only-spawn",
+		},
+		{
+			Verb: "promoted to", Object: "alpha/design-only-spawn-2026-09-01",
+			ObjectURL: "/run/alpha/design-only-spawn-2026-09-01",
+		},
+		{Verb: "captured", Object: "this run", Agent: true, Consent: "none"},
+	}, nil)
+	body := getRunPage(t, s, "/run/alpha/fix-ci")
+
+	for _, want := range []string{
+		`<h2>provenance</h2>`,
+		`href="/run/alpha/design-only-spawn"`,
+		`promoted to`,
+		`captured`,
+		`class="badge agent"`,
+		`>none<`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("capture chain missing %q\nbody:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "opened by operator") {
+		t.Errorf("a harvested idea must not still credit the operator\nbody:\n%s", body)
+	}
+}
+
+// TestRunPageNamesAPrunedCaptureSourceWithoutLinkingIt: the honesty rule
+// on the arm the fix added. A harvesting run that has since been pruned
+// is still named — the journal remembers it — but a link would claim a
+// page that 404s.
+func TestRunPageNamesAPrunedCaptureSourceWithoutLinkingIt(t *testing.T) {
+	s := provenanceServer(t, []ProvHop{
+		{Subject: "alpha/pruned-harvester"},
+		{Verb: "captured", Object: "this run", Agent: true, Consent: "none"},
+	}, nil)
+	body := getRunPage(t, s, "/run/alpha/fix-ci")
+
+	if !strings.Contains(body, `<span class="slug">alpha/pruned-harvester</span>`) {
+		t.Errorf("the pruned harvester must be named, unlinked\nbody:\n%s", body)
+	}
+	if strings.Contains(body, `href="/run/alpha/pruned-harvester"`) {
+		t.Errorf("a pruned harvester must carry no link\nbody:\n%s", body)
+	}
+}
+
+// TestRunPageRendersAMachineWalkOpen: the one-line story the fix minted.
+// It has no chain and no source, so nothing but the badge and the chip
+// distinguishes it from the `opened by operator` line it replaced.
+func TestRunPageRendersAMachineWalkOpen(t *testing.T) {
+	s := provenanceServer(t, []ProvHop{
+		{Verb: "opened by a machine walk", Agent: true, Consent: "dynamic"},
+	}, nil)
+	body := getRunPage(t, s, "/run/alpha/fix-ci")
+
+	for _, want := range []string{"opened by a machine walk", `class="badge agent"`, `>dynamic<`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("machine-walk open missing %q\nbody:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, `class="arrow"`) {
+		t.Errorf("no arrow on a one-line story\nbody:\n%s", body)
+	}
+}
