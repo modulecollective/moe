@@ -409,8 +409,8 @@ func launchEditorOrFail(path string) error {
 // dirtyOutsidePaths returns true if the working tree has uncommitted
 // changes anywhere except the named paths (relative to root). The
 // close handler uses this to tolerate local edits to the harvest
-// scratch files — followups.md and feedback/lore.md — while still
-// refusing on anything else dirty.
+// scratch files — followups.md, feedback/lore.md, feedback/twin.md —
+// while still refusing on anything else dirty.
 //
 // Untracked files never count, matching run.WorkingTreeDirty: they
 // can't ride the path-scoped close commit.

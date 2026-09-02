@@ -315,10 +315,7 @@ func resolveAgentName(explicit, runDefault, stylesheet string) string {
 //
 // opts.InitialPrompt, if non-empty, is auto-sent as the first user
 // message of the turn — it's how stages spare the operator from
-// typing "go" every time they resume a session. opts.WikiBuilder, if
-// non-nil, opts the stage into the wiki engine: an extra system-prompt
-// section, per-turn staging of the wiki dir, and FinalizeIngest at
-// session close.
+// typing "go" every time they resume a session.
 //
 // Declared as a var so the chain-back closures (hooks.go,
 // push.go) can be exercised end-to-end in tests without spinning a
@@ -863,13 +860,11 @@ func serveAgentSuppress() bool {
 	return os.Getenv("MOE_SERVE_AGENT") == "1"
 }
 
-// wikiSessionInputs is everything runWikiSession needs to drive a
-// wiki-aware session through its full lifecycle: open the session
-// worktree, rewrite the wiki cfg to worktree paths,
-// run the executor, finalize the wiki, commit, and close. The two
-// callbacks — WikiBuilder and BuildSpec — defer the work that depends
-// on the worktree path (or, for ingest, on the run metadata loaded
-// from inside the worktree).
+// wikiSessionInputs is everything runWikiSession needs to drive a stage
+// session through its full lifecycle: open the session worktree, run
+// the executor, commit, and close. The BuildSpec callback defers the
+// work that depends on the worktree path. (The wiki- names are the
+// engine's, and outlived it; nothing here knows about a wiki.)
 type wikiSessionInputs struct {
 	// Project / RunSlug / DocID identify the session worktree branch
 	// (`session/<project>/<runslug>/<doc>`); RunSlug is the run's real

@@ -508,10 +508,10 @@ going through a run.
 Most of what a survey finds becomes a followup. When it finds work that is
 mechanical, bounded, and verifiable — a red check with a named failing test,
 documentation the code plainly contradicts — it may open or nominate an
-ordinary `sdlc` or chore run. It can place new and existing queued
-runs into ordinary chain threads, leave them loose when it has no ordering
-opinion, or add a chain head when a stable name helps tell the thread's story.
-A head is a naming convenience, not a container every batch receives.
+ordinary `sdlc` or chore run. It can place new and existing queued runs into
+ordinary chain threads, leave them loose when it has no ordering opinion, or
+add a chain head when a stable name helps tell the thread's story. A head is a
+naming convenience, not a container every batch receives.
 
 Between those two there is one more rung. A `loose` spec carrying
 `"design_only": true` opens the run and rides it exactly one stage — a

@@ -240,8 +240,8 @@ transition does not repair the transition. Guidance belongs where the agent
 acts. Deterministic checks belong where state changes. Review and test can
 send work back; push hooks and fast-forward rules can block a bad merge; a
 stage that changed the shape can record the new intent while it still has the
-context. A detached score must prove that it
-changes decisions, and eval did not.
+context. A detached score must prove that it changes decisions, and eval did
+not.
 
 Deletion is therefore part of the architecture, not an admission that the
 architecture failed. Git makes a removed implementation cheap to recover, so
