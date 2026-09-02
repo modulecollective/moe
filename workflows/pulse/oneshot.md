@@ -10,7 +10,7 @@ refuse by leaving the canvas blank: a *quiet* pulse — "nothing new
 since the last pulse" plus one line of why — is a complete, successful
 report, not a refusal. An empty sweep still writes its canvas. So does
 a sweep that spawns nothing and grooms nothing: a gate with neither a
-`spawn` nor a `chain` list is the normal outcome.
+`loose` nor a `threads` list is the normal outcome.
 
 File followups for real work you found; skip filing when you found
 none. Never manufacture findings to justify the turn — the whole point

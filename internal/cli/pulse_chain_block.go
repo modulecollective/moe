@@ -117,7 +117,7 @@ func chainStateBlock(sc *pulseScan, projectID string) string {
 		"proposal matching a queued fix by *content* is a duplicate even under a fresh slug: the " +
 		"harness dedupes slugs, you dedupe substance. Nothing here is identified by its slug — " +
 		"match on what the run is about.\n\n" +
-		"This is also your grooming map: a `chain` group's `onto` names any run above, and " +
+		"This is also your grooming map: a `threads` group's `onto` names any run above, and " +
 		"extending an existing thread beats forking a new one.")
 	return sb.String()
 }
