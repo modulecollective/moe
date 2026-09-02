@@ -103,7 +103,8 @@ func chainStateBlock(sc *pulseScan, projectID string) string {
 		"executing: that item shipped and the active run after it is what runs next. Read it as " +
 		"ordered and in flight, not as a loose run or a deliberate un-threading.\n")
 	sb.WriteString("\nA run marked `held:` is one the floor will not start — its design is unwritten, " +
-		"or its last machine turn died and was reaped, and either way only the operator opens " +
+		"its last machine turn died and was reaped, or it is a design-only spawn parked after its " +
+		"one design turn; whichever it is, only the operator opens " +
 		"that door. The hold covers the whole thread wherever on the line it sits, so anything " +
 		"queued alongside it waits on the operator too, however ready it is on its own. Decide, per " +
 		"line: do those members continue the held run's work? If they don't, move them out into " +
