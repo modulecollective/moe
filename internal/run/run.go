@@ -96,7 +96,8 @@ type Metadata struct {
 	// to become. Stamped by a filer's followup tag at harvest or by
 	// `moe idea tag` (cleared by `moe idea untag`); the pulse still
 	// decides whether and when to promote it. Untagged ideas remain
-	// operator-triaged and cannot be machine-promoted.
+	// operator-triaged and cannot be machine-promoted. On an idea,
+	// DesignOnly below may ride alongside it to narrow the licence.
 	PromoteTo string `json:"promote_to,omitempty"`
 	// SpawnedBy, when non-empty, names the run that machine-opened this
 	// run as a consequence of a terminal transition (the pulse a
@@ -113,12 +114,19 @@ type Metadata struct {
 	// headless design turn and nothing more. It is a bound on a ride's
 	// length — the machine's `!<stage>` — written as a run field rather
 	// than a trailer because every reader of it already has run.json in
-	// hand. Set only by a pulse gate's `design_only` spec. The kick
-	// floor reads it to decline calling such a run settled until the
-	// operator advances it, and the design stage's prompt reads it to
-	// tell the agent who it is writing for. Nothing reads it once the
-	// design stage is satisfied; from then on it is provenance, like
-	// SpawnedBy.
+	// hand. The kick floor reads it to decline calling such a run
+	// settled until the operator advances it, and the design stage's
+	// prompt reads it to tell the agent who it is writing for. Nothing
+	// reads it once the design stage is satisfied; from then on it is
+	// provenance, like SpawnedBy.
+	//
+	// Two writers, same claim. On a run: a pulse gate's `design_only`
+	// spec. On an *idea*: `moe idea tag --design-only` (and the idea
+	// page's chip), where it says "when this becomes a run, that" — the
+	// idea canvas travels verbatim into the run's first stage, so the
+	// claim about the seed travels with it. The pulse's tagged-idea
+	// promote copies the bit onto the run it mints; `--from-idea`
+	// deliberately does not.
 	DesignOnly bool `json:"design_only,omitempty"`
 	// Reaped, when non-nil, records that the run's last machine turn
 	// died before landing anything and the heartbeat's reap destroyed

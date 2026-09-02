@@ -887,6 +887,13 @@ func classify(md *run.Metadata, byRunKey map[string]*run.Metadata, idx *run.Jour
 				// there the arrow points at the run that happened, here at
 				// the workflow that may.
 				note += " → " + md.PromoteTo
+				// A design-only tag is a narrower licence — one design
+				// turn, then a hold — and the board is where a survey
+				// reads which bar to apply. Comma form matches the kick
+				// line's "dynamic, design only".
+				if md.DesignOnly {
+					note += ", design only"
+				}
 			}
 			return BucketBacklog, note, "", ""
 		case run.StatusPromoted:

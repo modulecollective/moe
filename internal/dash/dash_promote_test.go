@@ -192,3 +192,19 @@ func TestTaggedIdeaNoteNamesItsWorkflow(t *testing.T) {
 		t.Fatalf("untagged idea note = %q, want %q", got, "idea:capture")
 	}
 }
+
+// TestDesignOnlyTaggedIdeaNoteSaysSo: a design-only tag is a narrower
+// licence — one design turn, then a hold — and the board is where a
+// survey reads which bar to apply to a slug. Without it the note can't
+// tell "ship this" from "think about this", and neither can the eye.
+func TestDesignOnlyTaggedIdeaNoteSaysSo(t *testing.T) {
+	runs := []*run.Metadata{
+		{ID: "briefed", Project: "p", Workflow: IdeaWorkflow, Status: run.StatusInProgress, PromoteTo: "sdlc", DesignOnly: true},
+	}
+	when := map[string]time.Time{"p/briefed": time.Now().UTC().Add(-2 * time.Hour)}
+	byKey, _ := buildPromote(t, runs, when, nil, nil)
+
+	if got, want := byKey["p/briefed"].Note, "idea:capture → sdlc, design only"; got != want {
+		t.Fatalf("design-only idea note = %q, want %q", got, want)
+	}
+}

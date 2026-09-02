@@ -2307,6 +2307,51 @@ func TestIdeaPageRendersTagChips(t *testing.T) {
 	}
 }
 
+// TestIdeaPageRendersDesignOnlyTagChip: the second chip is the
+// phone-shaped middle rung — a licence to design and then hold, rather
+// than to ship. Same route, one form value, so the pair is one write
+// and the row always shows the states the idea is not in.
+func TestIdeaPageRendersDesignOnlyTagChip(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "my-idea", "idea")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	page := func() string {
+		rr := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/my-idea", nil))
+		return rr.Body.String()
+	}
+	const plain = `action="/run/alpha/my-idea/tag?workflow=sdlc"`
+	const designOnly = `action="/run/alpha/my-idea/tag?workflow=sdlc&amp;design_only=1"`
+
+	body := page()
+	if !strings.Contains(body, plain) || !strings.Contains(body, designOnly) {
+		t.Errorf("untagged idea should offer both rungs\n%s", body)
+	}
+	if !strings.Contains(body, "tag sdlc, design only") {
+		t.Errorf("design-only chip should say what it buys\n%s", body)
+	}
+
+	md, err := run.Load(root, "alpha", "my-idea")
+	if err != nil {
+		t.Fatal(err)
+	}
+	md.PromoteTo, md.DesignOnly = "sdlc", true
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+	body = page()
+	if strings.Contains(body, designOnly) {
+		t.Errorf("a design-only idea should not re-offer the rung it is on\n%s", body)
+	}
+	if !strings.Contains(body, plain) {
+		t.Errorf("a design-only idea should offer the plain ship licence\n%s", body)
+	}
+	if !strings.Contains(body, `action="/run/alpha/my-idea/untag"`) {
+		t.Errorf("a design-only idea should offer untag\n%s", body)
+	}
+}
+
 // TestIdeaTagChipsRenderUnarmed: tagging performs no motion — it
 // parks a license the pulse acts on under its own consent — so the
 // chips follow promote/edit/close rather than the dynamic-gated spawn
@@ -2366,6 +2411,48 @@ func TestIdeaTagRoutesWriteAndRedirect(t *testing.T) {
 	}
 	if got := promoteTo(); got != "" {
 		t.Fatalf("promote_to=%q after untag, want empty", got)
+	}
+}
+
+// TestIdeaTagRouteCarriesDesignOnly walks the second chip's round trip:
+// the same route with design_only=1 writes both fields, a plain re-tag
+// clears the narrowing again (the tag is one claim, not two), and untag
+// clears the pair.
+func TestIdeaTagRouteCarriesDesignOnly(t *testing.T) {
+	root := newGitServeRoot(t)
+	seedRun(t, root, "alpha", "my-idea", "idea")
+	gittest.Commit(t, root, "seed idea")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	post := func(path string) {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rr, httptest.NewRequest("POST", path, strings.NewReader("")))
+		if rr.Code != http.StatusSeeOther {
+			t.Fatalf("%s: want 303, got %d body=%s", path, rr.Code, rr.Body.String())
+		}
+	}
+	state := func() (string, bool) {
+		t.Helper()
+		md, err := run.Load(root, "alpha", "my-idea")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return md.PromoteTo, md.DesignOnly
+	}
+
+	post("/run/alpha/my-idea/tag?workflow=sdlc&design_only=1")
+	if wf, only := state(); wf != "sdlc" || !only {
+		t.Fatalf("after design-only tag: promote_to=%q design_only=%v, want sdlc/true", wf, only)
+	}
+	post("/run/alpha/my-idea/tag?workflow=sdlc")
+	if wf, only := state(); wf != "sdlc" || only {
+		t.Fatalf("after plain re-tag: promote_to=%q design_only=%v, want the narrowing cleared", wf, only)
+	}
+	post("/run/alpha/my-idea/tag?workflow=sdlc&design_only=1")
+	post("/run/alpha/my-idea/untag")
+	if wf, only := state(); wf != "" || only {
+		t.Fatalf("after untag: promote_to=%q design_only=%v, want both cleared", wf, only)
 	}
 }
 

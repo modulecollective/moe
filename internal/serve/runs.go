@@ -480,8 +480,10 @@ func (s *Server) handleIdeaReopen(w http.ResponseWriter, r *http.Request) {
 // handleIdeaTag stamps a workflow tag onto an in-progress idea. The
 // workflow rides the chip's query string (`?workflow=sdlc`) and is
 // resolved against Options.TagWorkflows; an absent value takes that
-// list's default. Journal-only — the tag is a licence a later sweep
-// spends, it starts nothing here.
+// list's default. `design_only=1` alongside it narrows the licence to
+// one design turn — the second chip, same route, because it is the same
+// write. Journal-only — the tag is a licence a later sweep spends, it
+// starts nothing here.
 func (s *Server) handleIdeaTag(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad form: "+err.Error(), http.StatusBadRequest)
@@ -493,7 +495,7 @@ func (s *Server) handleIdeaTag(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "tag idea: unknown workflow "+strconv.Quote(name), http.StatusBadRequest)
 		return
 	}
-	s.setIdeaTag(w, r, wf)
+	s.setIdeaTag(w, r, wf, r.FormValue("design_only") == "1")
 }
 
 // tagWorkflow resolves a submitted (or query-string) workflow name
@@ -511,19 +513,21 @@ func (s *Server) tagWorkflow(name string) (string, bool) {
 }
 
 // handleIdeaUntag clears an idea's workflow tag — the per-idea pause.
+// It clears the design-only narrowing with it: untag is the removal of
+// the whole licence, not of one of its halves.
 func (s *Server) handleIdeaUntag(w http.ResponseWriter, r *http.Request) {
-	s.setIdeaTag(w, r, "")
+	s.setIdeaTag(w, r, "", false)
 }
 
 // setIdeaTag is the body both tag routes share. An idea already in the
 // requested state comes back as run.ErrNothingToCommit, which is a
 // success: a double-tap on the chip is a no-op, not a 500.
-func (s *Server) setIdeaTag(w http.ResponseWriter, r *http.Request, workflow string) {
+func (s *Server) setIdeaTag(w http.ResponseWriter, r *http.Request, workflow string, designOnly bool) {
 	projectID := r.PathValue("project")
 	slug := r.PathValue("slug")
 	id := projectID + "/" + slug
 
-	err := runopen.TagIdea(s.opts.Root, projectID, slug, workflow, s.syncWriter(), s.syncWriter())
+	err := runopen.TagIdea(s.opts.Root, projectID, slug, workflow, designOnly, s.syncWriter(), s.syncWriter())
 	switch {
 	case err == nil, errors.Is(err, run.ErrNothingToCommit):
 	case errors.Is(err, run.ErrRunNotFound):
@@ -839,24 +843,34 @@ func (s *Server) fillRunRow(vm *runVM, projectID, slug string, now time.Time) {
 // dash face of `moe idea tag`, and the operator's one-tap way to hand
 // the machine a license to start a parked idea.
 //
-// One "tag <workflow>" chip per entry in Options.TagWorkflows — the
-// same list the tag route resolves against, so the two surfaces can't
-// disagree on what a valid destination is — rendered as chips rather
-// than a select because the chip row carries no form fields. The
-// workflow already stamped gets no chip (re-tagging it would be a
-// no-op), and an "untag" chip appears once any tag is on, which is the
-// per-idea pause.
+// Two chips per entry in Options.TagWorkflows — the same list the tag
+// route resolves against, so the two surfaces can't disagree on what a
+// valid destination is — rendered as chips rather than a select because
+// the chip row carries no form fields. "tag <workflow>" is the ship
+// licence; "tag <workflow>, design only" narrows it to one design turn
+// and a hold, which is the phone-shaped rung between shipping and
+// waiting for a terminal. The pair the idea already carries gets no
+// chip (re-tapping it would be a no-op), so the row always shows the
+// states the idea isn't in. An "untag" chip appears once any tag is on,
+// which is the per-idea pause.
 func ideaTagActions(base string, md *run.Metadata, workflows []string) []runAction {
 	var out []runAction
 	for _, wf := range workflows {
-		if wf == md.PromoteTo {
-			continue
+		current := wf == md.PromoteTo
+		if !current || md.DesignOnly {
+			out = append(out, runAction{
+				Label:  "tag " + wf,
+				Href:   base + "/tag?workflow=" + url.QueryEscape(wf),
+				Method: "POST",
+			})
 		}
-		out = append(out, runAction{
-			Label:  "tag " + wf,
-			Href:   base + "/tag?workflow=" + url.QueryEscape(wf),
-			Method: "POST",
-		})
+		if !current || !md.DesignOnly {
+			out = append(out, runAction{
+				Label:  "tag " + wf + ", design only",
+				Href:   base + "/tag?workflow=" + url.QueryEscape(wf) + "&design_only=1",
+				Method: "POST",
+			})
+		}
 	}
 	if md.PromoteTo != "" {
 		out = append(out, runAction{Label: "untag", Href: base + "/untag", Method: "POST"})

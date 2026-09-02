@@ -85,6 +85,14 @@ type PromoteOptions struct {
 	// together — a promote the machine made); empty for the operator's
 	// `moe idea promote`, which stamps no consent trailer at all.
 	Consent string
+	// DesignOnly persists run.Options.DesignOnly onto the destination:
+	// the seed is a brief, not a design, so the run gets one headless
+	// design turn and then holds until the operator advances it. Set by
+	// the pulse's tagged-idea promote when the idea itself carries the
+	// bit, and left false by `moe <wf> new --from-idea` — there the
+	// operator's own --park/--ship/--chain rung is typed consent and
+	// outranks a licence written for the machine.
+	DesignOnly bool
 }
 
 // Promoted is Promote's result. Run is the destination run's
@@ -160,6 +168,7 @@ func Promote(root, projectID, ideaSlug string, opts PromoteOptions, stdout, stde
 		SeedDocs:    map[string]string{opts.FirstStage: seed},
 		SubjectFrom: "idea " + ideaSlug,
 		SpawnedBy:   opts.SpawnedBy,
+		DesignOnly:  opts.DesignOnly,
 		Trailers:    trailers.Block{Idea: ideaSlug, SpawnedBy: opts.SpawnedBy, Consent: opts.Consent},
 	}
 
@@ -262,6 +271,14 @@ func bumpIdeaPromoted(root string, md *run.Metadata, destProjectID, destSlug, co
 // which is the per-idea pause: an untagged idea is operator-fenced,
 // always, whoever filed it.
 //
+// designOnly narrows that licence: the promoted run gets one headless
+// design turn and then holds for the operator, which is what
+// Metadata.DesignOnly already means on a run. The two fields are one
+// claim and are written together — "ship it" or "design it, then I
+// look", never both — so an untag clears both and a plain re-tag of an
+// already design-only idea clears the bit. designOnly with an empty
+// workflow is a caller bug: there is no licence for it to narrow.
+//
 // The tag is a license, not a schedule: the survey still decides whether
 // and where a tagged idea rides. Nothing here starts anything.
 //
@@ -271,7 +288,10 @@ func bumpIdeaPromoted(root string, md *run.Metadata, destProjectID, destSlug, co
 // isn't an in-progress idea with ErrNotTaggableIdea, and returns
 // run.ErrNothingToCommit when the idea already carries this exact tag —
 // callers treat that as success.
-func TagIdea(root, projectID, slug, workflow string, stdout, stderr io.Writer) error {
+func TagIdea(root, projectID, slug, workflow string, designOnly bool, stdout, stderr io.Writer) error {
+	if designOnly && workflow == "" {
+		return fmt.Errorf("%w: cannot untag %s/%s design-only — design-only narrows a tag, it is not one", ErrNotTaggableIdea, projectID, slug)
+	}
 	md, err := run.Load(root, projectID, slug)
 	if err != nil {
 		return err
@@ -284,6 +304,9 @@ func TagIdea(root, projectID, slug, workflow string, stdout, stderr io.Writer) e
 	}
 
 	subject := fmt.Sprintf("Tag idea %s/%s (%s)", projectID, slug, workflow)
+	if designOnly {
+		subject = fmt.Sprintf("Tag idea %s/%s (%s, design only)", projectID, slug, workflow)
+	}
 	purpose := "idea-tag"
 	if workflow == "" {
 		subject = fmt.Sprintf("Untag idea %s/%s", projectID, slug)
@@ -301,12 +324,13 @@ func TagIdea(root, projectID, slug, workflow string, stdout, stderr io.Writer) e
 		Run:     projectID + "/" + slug,
 	}, stdout, stderr, func() error {
 		md.PromoteTo = workflow
+		md.DesignOnly = designOnly
 		if err := run.Save(root, md); err != nil {
 			return err
 		}
-		// A re-tag to the same workflow leaves run.json byte-identical,
-		// so StageAndCommit reports ErrNothingToCommit rather than
-		// minting an empty journal entry.
+		// A re-tag to the same state leaves run.json byte-identical, so
+		// StageAndCommit reports ErrNothingToCommit rather than minting
+		// an empty journal entry.
 		return run.StageAndCommit(root, msg, runJSONRel)
 	})
 }

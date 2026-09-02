@@ -763,7 +763,7 @@ func TestPendingInputBlockNamesTaggedIdeasAsPromoteSignal(t *testing.T) {
 		t.Fatalf("block reads an untagged idea as promote signal:\n%s", got)
 	}
 
-	if err := runopen.TagIdea(root, "moe", "an-idea", "sdlc", io.Discard, io.Discard); err != nil {
+	if err := runopen.TagIdea(root, "moe", "an-idea", "sdlc", false, io.Discard, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	sc, ok = newPulseScan(root)

@@ -478,6 +478,17 @@ func runIdeaList(args []string, stdout, stderr io.Writer) int {
 // "an agent could just execute this" and sdlc is how work executes.
 const defaultPromoteTag = "sdlc"
 
+// promoteTagLabel spells a tag's state for the operator: the workflow,
+// plus the design-only narrowing when it's on. Both `moe idea tag`
+// success lines and its already-in-that-state line go through it, so a
+// double-tap reads back exactly what the first tap printed.
+func promoteTagLabel(workflow string, designOnly bool) string {
+	if designOnly {
+		return workflow + " (design only)"
+	}
+	return workflow
+}
+
 // runIdeaTag stamps a workflow tag onto a parked idea. The tag is the
 // machine's license: the pulse survey proposes only tagged ideas, so
 // tagging is how the operator says "you may start this" without the
@@ -487,12 +498,18 @@ const defaultPromoteTag = "sdlc"
 // The workflow argument is optional and defaults to sdlc; it is
 // validated against the same bar the followups grammar applies to a
 // filer's `(sdlc)` tag, so the two mint identical state.
+//
+// --design-only narrows the licence to one headless design turn, after
+// which the promoted run holds for the operator. It is the phone-shaped
+// middle rung between "ship it" and "wait for a terminal": tagging
+// plain is the ship licence, and re-tagging plain clears the bit.
 func runIdeaTag(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("idea tag", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe idea tag <project>/<slug> [workflow]\n")
+		moePrintf(stderr, "usage: moe idea tag <project>/<slug> [workflow] [--design-only]\n")
 	}
+	designOnly := fs.Bool("design-only", false, "promote to one design turn, then hold for the operator")
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
@@ -508,7 +525,7 @@ func runIdeaTag(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "idea tag: %v\n", err)
 		return 2
 	}
-	return setIdeaTag(fs.Arg(0), workflow, "idea tag", stdout, stderr)
+	return setIdeaTag(fs.Arg(0), workflow, *designOnly, "idea tag", stdout, stderr)
 }
 
 // runIdeaUntag clears an idea's workflow tag — the per-idea pause. An
@@ -527,14 +544,14 @@ func runIdeaUntag(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
-	return setIdeaTag(fs.Arg(0), "", "idea untag", stdout, stderr)
+	return setIdeaTag(fs.Arg(0), "", false, "idea untag", stdout, stderr)
 }
 
 // setIdeaTag is the body both verbs share: resolve the ref, apply the
 // idea gates, and write the tag through the same seam the dash chips
 // use. An empty workflow untags; verb names the caller for error
 // prefixes.
-func setIdeaTag(ref, workflow, verb string, stdout, stderr io.Writer) int {
+func setIdeaTag(ref, workflow string, designOnly bool, verb string, stdout, stderr io.Writer) int {
 	projectID, slug, err := splitProjectRun(ref)
 	if err != nil {
 		moePrintf(stderr, "%s: %v\n", verb, err)
@@ -564,7 +581,7 @@ func setIdeaTag(ref, workflow, verb string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	err = runopen.TagIdea(root, projectID, slug, workflow, stdout, stderr)
+	err = runopen.TagIdea(root, projectID, slug, workflow, designOnly, stdout, stderr)
 	switch {
 	case errors.Is(err, run.ErrNothingToCommit):
 		// Already in the requested state — say so and exit clean, so a
@@ -573,7 +590,7 @@ func setIdeaTag(ref, workflow, verb string, stdout, stderr io.Writer) int {
 		if workflow == "" {
 			moePrintf(stdout, "idea %s/%s is already untagged\n", projectID, slug)
 		} else {
-			moePrintf(stdout, "idea %s/%s is already tagged → %s\n", projectID, slug, workflow)
+			moePrintf(stdout, "idea %s/%s is already tagged → %s\n", projectID, slug, promoteTagLabel(workflow, designOnly))
 		}
 	case err != nil:
 		moePrintf(stderr, "%s: %v\n", verb, err)
@@ -581,7 +598,7 @@ func setIdeaTag(ref, workflow, verb string, stdout, stderr io.Writer) int {
 	case workflow == "":
 		moePrintf(stdout, "untagged idea %s/%s\n", projectID, slug)
 	default:
-		moePrintf(stdout, "tagged idea %s/%s → %s\n", projectID, slug, workflow)
+		moePrintf(stdout, "tagged idea %s/%s → %s\n", projectID, slug, promoteTagLabel(workflow, designOnly))
 	}
 	return 0
 }
