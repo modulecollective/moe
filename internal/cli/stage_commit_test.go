@@ -92,15 +92,14 @@ func TestCommitWikiTurn(t *testing.T) {
 }
 
 // TestProjectCommitDirsPerWorkflow pins the whitelist: sdlc stages
-// carry hooks/, chores/, and knowledge/ edits, and every other workflow
-// (twin, chat, pulse, …) carries nothing — a twin edit must reach the
-// twin through feedback/twin.md, not through a stage commit.
+// carry hooks/, chores/, knowledge/, and digital-twin/ edits, and every
+// other workflow (chat, pulse, …) carries nothing.
 func TestProjectCommitDirsPerWorkflow(t *testing.T) {
 	cases := []struct {
 		workflow string
 		want     []string
 	}{
-		{sdlcWorkflow, []string{"hooks", "chores", "knowledge"}},
+		{sdlcWorkflow, []string{"hooks", "chores", "knowledge", "digital-twin"}},
 		{"twin", nil},
 		{chatWorkflow, nil},
 	}

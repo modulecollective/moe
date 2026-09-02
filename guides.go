@@ -27,6 +27,9 @@ var moeContextSkill string
 //go:embed skills/moe-howto/SKILL.md
 var moeHowtoSkill string
 
+//go:embed skills/moe-twin/SKILL.md
+var moeTwinSkill string
+
 // Soul returns the embedded soul.md content. Never empty in a correctly
 // built binary; an empty return means the embed directive is broken.
 func Soul() string {
@@ -77,6 +80,15 @@ func MoeContextSkill() string {
 // verbatim. Never empty in a correctly built binary.
 func MoeHowtoSkill() string {
 	return moeHowtoSkill
+}
+
+// MoeTwinSkill returns the embedded SKILL.md for the moe-twin skill —
+// the digital-twin writing contract sdlc stages get now that they write
+// the twin directly. Like moe-howto it carries no template
+// placeholders, so the materialiser writes it verbatim. Never empty in
+// a correctly built binary.
+func MoeTwinSkill() string {
+	return moeTwinSkill
 }
 
 // OneShot returns the embedded workflows/<workflow>/oneshot.md fragment

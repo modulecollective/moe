@@ -235,7 +235,7 @@ func TestTwinReferenceSectionRendersWithDocs(t *testing.T) {
 		"patterns.md",
 		"operations.md",
 		"glossary.md",
-		"twin wins until a reflect pass updates it",
+		"twin wins until a run updates it",
 		"`moe-bureaucracy`",
 		"`moe-context`",
 	} {

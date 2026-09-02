@@ -309,3 +309,53 @@ func TestMaterializeMoeContextSkillIsIdempotent(t *testing.T) {
 		t.Errorf("materialize is not idempotent across two calls:\nfirst:\n%s\nsecond:\n%s", first, second)
 	}
 }
+
+// TestMoeTwinSkillEmbedded pins the //go:embed wiring for the sdlc
+// workflow's moe-twin skill — the digital-twin writing contract. A
+// broken embed degrades to an empty body, and an sdlc agent that now
+// writes the twin directly would do it with no contract at all. Like
+// moe-howto it carries no `{{...}}` placeholders, so the assertions are
+// on the contract's load-bearing rules.
+func TestMoeTwinSkillEmbedded(t *testing.T) {
+	body := moe.MoeTwinSkill()
+	if body == "" {
+		t.Fatal("MoeTwinSkill() is empty; //go:embed skills/... likely broken")
+	}
+	for _, want := range []string{
+		"name: moe-twin",
+		"digital-twin",
+		"Single home per rule",
+		"Compression is a valid edit",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("embedded moe-twin skill missing %q in body", want)
+		}
+	}
+	if strings.Contains(body, "{{") {
+		t.Errorf("moe-twin carries no template placeholders; found one:\n%s", body)
+	}
+}
+
+// TestMaterializeMoeTwinSkillWritesBothTrees pins the two discovery
+// roots the materialiser plants into — codex walks up from workRoot,
+// claude discovers under sessionCwd — for the one skill that has no
+// template step to fail first.
+func TestMaterializeMoeTwinSkillWritesBothTrees(t *testing.T) {
+	root := t.TempDir()
+	sessionCwd := t.TempDir()
+	if err := materializeMoeTwinSkill(root, sessionCwd); err != nil {
+		t.Fatalf("materialize: %v", err)
+	}
+	for _, path := range []string{
+		filepath.Join(root, ".codex", "skills", "moe-twin", "SKILL.md"),
+		filepath.Join(sessionCwd, ".claude", "skills", "moe-twin", "SKILL.md"),
+	} {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if !strings.Contains(string(body), "name: moe-twin") {
+			t.Errorf("%s missing frontmatter:\n%s", path, body)
+		}
+	}
+}

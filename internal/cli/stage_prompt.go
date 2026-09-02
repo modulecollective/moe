@@ -511,9 +511,10 @@ The harness commits run artifacts after the turn; never run ` + "`git add` or `g
 	// domain fact it just learned has a home.
 	if dirs := projectCommitDirs(md.Workflow); len(dirs) > 0 {
 		routing := map[string]string{
-			"hooks":     "drop-in scripts under `<event>.d/`; `moe hook fire` is the loop",
-			"chores":    "chore definitions (`chore.json` + `prompt.md`); `moe chore check` is the dry run",
-			"knowledge": "the project's durable domain reference — research findings, external surveys, facts worth citing across runs",
+			"hooks":         "drop-in scripts under `<event>.d/`; `moe hook fire` is the loop",
+			"chores":        "chore definitions (`chore.json` + `prompt.md`); `moe chore check` is the dry run",
+			"knowledge":     "the project's durable domain reference — research findings, external surveys, facts worth citing across runs",
+			wiki.TwinDirRel: "the project's recorded intent; the `moe-twin` skill has the writing contract",
 		}
 		paths := make([]string, len(dirs))
 		for i, name := range dirs {
@@ -534,13 +535,17 @@ Write to `+"`knowledge/`"+` on your own initiative, not only when asked: a
 fact about the project's domain that a future run would want to cite
 belongs in a topic file there. Read `+"`index.md`"+` first, fold into an
 existing topic before minting a new one, and add the topic to
-`+"`index.md`"+` — the stage refuses to close on a knowledge tree with
-orphaned topics, broken links, or empty docs.
+`+"`index.md`"+`. The stage refuses to close on a structurally broken
+`+"`knowledge/`"+` or `+"`digital-twin/`"+` — orphaned topics, broken links,
+empty docs, dangling cross-references.
 
 Route by what the note *is*: domain reference → `+"`knowledge/`"+`; what
-this project *is* or how it works → `+"`feedback/twin.md`"+`; a portable
-fact true of other projects too → `+"`feedback/lore.md`"+`; work worth
-doing later → `+"`followups.md`"+`. Run-specific notes stay on the canvas.
+this project *is* or how it works, when this run has the evidence →
+edit `+"`digital-twin/`"+` in place (the `+"`moe-twin`"+` skill has the
+writing contract); a twin edit you can see but this run shouldn't make
+→ `+"`feedback/twin.md`"+`; a portable fact true of other projects too →
+`+"`feedback/lore.md`"+`; other work worth doing later →
+`+"`followups.md`"+`. Run-specific notes stay on the canvas.
 The `+"`moe-bureaucracy`"+` skill has the conventions for each.
 `, strings.Join(paths, "\n  "))
 	}

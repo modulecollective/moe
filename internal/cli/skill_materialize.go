@@ -105,6 +105,17 @@ func materializeMoeHowtoSkill(workRoot, sessionCwd string) error {
 	return writeSkill(workRoot, sessionCwd, "moe-howto", []byte(moe.MoeHowtoSkill()))
 }
 
+// materializeMoeTwinSkill writes the sdlc workflow's moe-twin skill —
+// the digital-twin writing contract — into the same trees as its
+// siblings. Like moe-howto it carries no per-run template: the body is
+// the contract, and the concrete twin path already reaches the agent
+// through the twin reference section and the writable-dirs block.
+// Gated on sdlc in BuildSpec, because sdlc is the only workflow whose
+// turn commit picks the twin dir up.
+func materializeMoeTwinSkill(workRoot, sessionCwd string) error {
+	return writeSkill(workRoot, sessionCwd, "moe-twin", []byte(moe.MoeTwinSkill()))
+}
+
 // writeSkill plants the rendered SKILL.md body under each backend's
 // discovery root. workRoot/.codex/skills/ covers codex (its anchor-walk
 // from cwd=workRoot); sessionCwd/.claude/skills/, when sessionCwd is

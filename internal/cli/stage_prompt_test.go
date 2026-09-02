@@ -807,11 +807,16 @@ func TestOperationalCoreNamesProjectCommitDirs(t *testing.T) {
 		{workflow: sdlcWorkflow, docID: "code",
 			want: []string{
 				"projects/tele/hooks", "projects/tele/chores", "projects/tele/knowledge",
+				"projects/tele/digital-twin",
 				// The knowledge line has to invite, not just permit —
 				// nothing else tells an agent a durable domain fact has a
 				// home, or that the close gate polices the tree's shape.
 				"on your own initiative",
-				"orphaned topics, broken links, or empty docs",
+				"orphaned topics, broken links,\nempty docs, dangling cross-references",
+				// The twin cue points at the skill that carries the
+				// writing contract; the routing sentence still has to
+				// name the out-of-scope channel so the two don't blur.
+				"`moe-twin` skill has the writing contract",
 				"feedback/twin.md",
 				"feedback/lore.md",
 			}},

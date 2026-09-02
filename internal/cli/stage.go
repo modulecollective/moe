@@ -605,14 +605,24 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				return wikiTurnSpec{}, err
 			}
 
-			// moe-howto is the chat workflow's idea-capture / backlog-
-			// grooming skill — chat-only by intent (sdlc and twin
-			// agents aren't here to groom the backlog, so per "tool
-			// scoping by document" they don't get it). One workflow needs
-			// it today, so a single gate beats a registry; revisit if a
-			// second workflow-specific skill shows up.
+			// Two workflow-scoped skills, one gate each, per "tool
+			// scoping by document":
+			//
+			//   - moe-howto is chat's idea-capture / backlog-grooming
+			//     guidance; an sdlc agent isn't here to groom the backlog.
+			//   - moe-twin is the digital-twin writing contract, and sdlc
+			//     is the only workflow whose turn commit picks the twin
+			//     dir up (see projectCommitDirs).
+			//
+			// Two gates is not a registry. A third workflow-specific skill
+			// is the point to reconsider.
 			if md.Workflow == chatWorkflow {
 				if err := materializeMoeHowtoSkill(workRoot, sessionCwd); err != nil {
+					return wikiTurnSpec{}, err
+				}
+			}
+			if md.Workflow == sdlcWorkflow {
+				if err := materializeMoeTwinSkill(workRoot, sessionCwd); err != nil {
 					return wikiTurnSpec{}, err
 				}
 			}

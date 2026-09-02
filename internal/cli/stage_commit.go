@@ -12,6 +12,7 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
 	"github.com/modulecollective/moe/internal/trailers"
+	"github.com/modulecollective/moe/internal/wiki"
 )
 
 // commitSessionStart commits run.json immediately after EnsureDocument
@@ -172,24 +173,23 @@ func stageableFollowups(root string, md *run.Metadata) (string, bool) {
 // projectCommitDirs names the directories under projects/<p>/ whose
 // edits ride a workflow's per-turn stage commit alongside the canvas.
 //
-// sdlc gets all three. A stage that authors a hook, a chore, or a
-// knowledge topic as a side deliverable of its main change would
-// otherwise leave the file untracked, and it dies with the pruned
-// session worktree while the canvas claims it landed. Each of the three
-// once had its own workflow; the whitelist dissolved the reason for
-// them, and now sdlc is the only route.
+// sdlc gets all four. A stage that authors a hook, a chore, a
+// knowledge topic, or a twin edit as a side deliverable of its main
+// change would otherwise leave the file untracked, and it dies with the
+// pruned session worktree while the canvas claims it landed. Each of
+// the four once had its own workflow; the whitelist dissolved the
+// reason for them, and now sdlc is the only route.
 //
-// Deliberately not a sweep of projects/<p>/: digital-twin/ is
-// reflect-mediated (sdlc writes feedback/twin.md, never the twin
-// itself) and src/ is the submodule pointer. Extending this whitelist
-// is a one-line change if a future artifact class needs it.
+// Deliberately not a sweep of projects/<p>/: src/ is the submodule
+// pointer. Extending this whitelist is a one-line change if a future
+// artifact class needs it.
 //
 // Also the single source of truth for the prompt sentence that tells
 // the agent these dirs are writable — see operationalCore — and for
-// whether a turn owes the knowledge-hygiene gate.
+// whether a turn owes the project-doc hygiene gate.
 func projectCommitDirs(workflow string) []string {
 	if workflow == sdlcWorkflow {
-		return []string{"hooks", "chores", "knowledge"}
+		return []string{"hooks", "chores", "knowledge", wiki.TwinDirRel}
 	}
 	return nil
 }
