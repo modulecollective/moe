@@ -8,7 +8,7 @@
 // upstreamChangeBanner) lives in stage_prompt.go. Per-turn commits
 // (commitSessionStart / commitTurn / stageableFollowups) live in
 // stage_commit.go. This file owns the session worktree dance —
-// open under lock, hand to executor, finalize wiki, commit turn,
+// open under lock, hand to executor, commit turn,
 // close under lock — that ties the others together.
 package cli
 
@@ -977,7 +977,7 @@ type wikiTurnSpec struct {
 }
 
 // closeBootstrapFailedSession runs closeSess on an early-exit path
-// (BuildSpec / wiki bootstrap / BuildPrompt failed before the executor
+// (BuildSpec / InitialPromptBuilder / BuildPrompt failed before the executor
 // ran) and surfaces any non-nil close error to stderr. The bootstrap
 // failure has already been printed; this layer makes sure a subsequent
 // canvas-unchanged refusal — the new "no-op session" gate's loud-fail
@@ -994,11 +994,10 @@ func closeBootstrapFailedSession(closeSess func(okToPush bool) error, stderr io.
 	}
 }
 
-// runWikiSession owns the full wiki-aware session lifecycle: open the
-// session worktree under the repo lock, rewrite the wiki cfg to the
-// worktree, ask the caller for the per-turn spec, run
-// the executor, finalize the wiki, commit the turn (via the caller's
-// CommitStager), and close the session worktree. Run-scoped extras
+// runWikiSession owns the full session lifecycle: open the session
+// worktree under the repo lock, ask the caller for the per-turn spec,
+// run the executor, commit the turn (via the caller's CommitStager),
+// and close the session worktree. Run-scoped extras
 // (run.json, EnsureDocument, sandbox, promptNextStage) layer on top
 // in runStageSession, its only caller. Returns the exit code to
 // bubble up.
@@ -1020,7 +1019,6 @@ func runWikiSession(root string, in wikiSessionInputs, stdout, stderr io.Writer)
 		return 1
 	}
 
-	// Wiki integration — built after BuildSpec so callers that need
 	// Assemble the kickoff now that the worktree exists. Callers that
 	// bake absolute bureaucracy paths into the first user message defer
 	// to this builder so those paths land inside the worktree instead of

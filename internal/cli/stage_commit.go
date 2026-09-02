@@ -64,10 +64,9 @@ func commitAdvance(root string, md *run.Metadata, docID string) error {
 // §"Runs, Stages, And Canvases" for the trailer convention.
 //
 // extraPaths lists additional path specs (relative to root) to stage
-// alongside the document dir. Used by ingest stages to ride the wiki
-// dir into the same per-turn commit as the canvas, so the operator
-// always sees the agent's wiki edits and the canvas snapshot moving
-// together in git history.
+// alongside the document dir — the projectCommitDirs trees an sdlc
+// stage may write — so the operator always sees the agent's edits
+// there and the canvas snapshot moving together in git history.
 func commitTurn(root string, md *run.Metadata, docID string, extraPaths ...string) error {
 	docDir := run.DocDir(md.Project, md.ID, docID)
 	runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")

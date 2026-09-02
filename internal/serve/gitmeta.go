@@ -53,7 +53,6 @@ func (s *Server) gatherFileMeta(now time.Time, rel string) fileMeta {
 }
 
 // parseRunTrailers pulls MoE-Project / MoE-Run out of a commit body.
-// Same trailer-scan idiom as wiki/detect.go's lastCommitIsTwin.
 func parseRunTrailers(body string) (project, run string) {
 	for line := range strings.SplitSeq(body, "\n") {
 		line = strings.TrimSpace(line)
