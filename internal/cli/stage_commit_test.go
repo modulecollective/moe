@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
@@ -87,7 +88,7 @@ func TestCommitTurnCarriesSdlcChoreEdit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := commitTurn(root, md, "code", extras...); err != nil {
+	if err := commitTurn(root, md, "code", 0, extras...); err != nil {
 		t.Fatalf("commitTurn: %v", err)
 	}
 
@@ -97,5 +98,80 @@ func TestCommitTurnCarriesSdlcChoreEdit(t *testing.T) {
 	}
 	if !strings.Contains(names, contentRel) {
 		t.Errorf("turn commit missing canvas %q in:\n%s", contentRel, names)
+	}
+}
+
+// TestCommitTurnStampsTimedOut: a turn killed by the headless cap
+// carries exactly one MoE-Timed-Out line naming the cap that fired,
+// rendered right after MoE-Session. This trailer is the whole durable
+// record of the kill — the transcript it interrupted is overwritten by
+// the next drive of the stage — so `git log --grep='^MoE-Timed-Out:'`
+// has to find it.
+func TestCommitTurnStampsTimedOut(t *testing.T) {
+	root := newTestBureaucracy(t)
+
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: sdlcWorkflow,
+		Documents: map[string]*run.Document{}}
+	if _, _, err := run.EnsureDocument(root, md, "code"); err != nil {
+		t.Fatal(err)
+	}
+	contentRel := run.ContentPath("tele", "fix-it", "code")
+	if err := os.WriteFile(filepath.Join(root, contentRel), []byte("# code\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := commitTurn(root, md, "code", 3*time.Hour); err != nil {
+		t.Fatalf("commitTurn: %v", err)
+	}
+
+	body := gitLogFormat(t, root, 1, "HEAD", "%B")
+	if n := strings.Count(body, "MoE-Timed-Out:"); n != 1 {
+		t.Fatalf("want exactly one MoE-Timed-Out line, got %d:\n%s", n, body)
+	}
+	if !strings.Contains(body, "MoE-Timed-Out: 3h0m0s") {
+		t.Errorf("trailer should name the cap that fired:\n%s", body)
+	}
+	sessionLine := "MoE-Session: " + md.Documents["code"].Session + "\n"
+	if !strings.Contains(body, sessionLine+"MoE-Timed-Out: 3h0m0s") {
+		t.Errorf("MoE-Timed-Out should render directly after MoE-Session:\n%s", body)
+	}
+
+	// The grep the idea asked for.
+	found := gittest.Output(t, root, "log", "--format=%H", "--grep=^MoE-Timed-Out:")
+	if strings.TrimSpace(found) == "" {
+		t.Error("git log --grep='^MoE-Timed-Out:' found nothing")
+	}
+}
+
+// TestCommitTurnWithoutTimeoutIsUnchanged: the ordinary turn — every
+// turn but the rare kill — writes a message byte-identical to what it
+// wrote before the trailer existed. No MoE-Timed-Out, and nothing else
+// shifted around it.
+func TestCommitTurnWithoutTimeoutIsUnchanged(t *testing.T) {
+	root := newTestBureaucracy(t)
+
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: sdlcWorkflow,
+		Documents: map[string]*run.Document{}}
+	if _, _, err := run.EnsureDocument(root, md, "code"); err != nil {
+		t.Fatal(err)
+	}
+	contentRel := run.ContentPath("tele", "fix-it", "code")
+	if err := os.WriteFile(filepath.Join(root, contentRel), []byte("# code\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := commitTurn(root, md, "code", 0); err != nil {
+		t.Fatalf("commitTurn: %v", err)
+	}
+
+	body := gitLogFormat(t, root, 1, "HEAD", "%B")
+	want := "work: update code\n\n" +
+		"MoE-Run: fix-it\n" +
+		"MoE-Project: tele\n" +
+		"MoE-Workflow: " + sdlcWorkflow + "\n" +
+		"MoE-Document: code\n" +
+		"MoE-Session: " + md.Documents["code"].Session + "\n"
+	if strings.TrimRight(body, "\n") != strings.TrimRight(want, "\n") {
+		t.Fatalf("ordinary turn message drifted:\n got: %q\nwant: %q", body, want)
 	}
 }

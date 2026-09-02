@@ -614,7 +614,7 @@ func TestCommitSessionStartFollowedByCommitTurnYieldsTwoDistinctCommits(t *testi
 	if err := os.WriteFile(filepath.Join(root, contentRel), []byte("# hello\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := commitTurn(root, md, "design"); err != nil {
+	if err := commitTurn(root, md, "design", 0); err != nil {
 		t.Fatalf("commitTurn: %v", err)
 	}
 
@@ -652,7 +652,7 @@ func TestSecondTurnOnExistingDocumentSkipsEagerCommit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, contentRel), []byte("# v1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := commitTurn(root, md, "design"); err != nil {
+	if err := commitTurn(root, md, "design", 0); err != nil {
 		t.Fatalf("commitTurn: %v", err)
 	}
 
@@ -671,7 +671,7 @@ func TestSecondTurnOnExistingDocumentSkipsEagerCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	headBefore := gitLogFormat(t, root, 1, "HEAD", "%H")
-	if err := commitTurn(root, md, "design"); err != nil {
+	if err := commitTurn(root, md, "design", 0); err != nil {
 		t.Fatalf("commitTurn: %v", err)
 	}
 	headAfter := gitLogFormat(t, root, 1, "HEAD", "%H")
@@ -717,7 +717,7 @@ func TestCommitTurnRequiresCanvas(t *testing.T) {
 	}
 
 	headBefore := gitLogFormat(t, root, 1, "HEAD", "%H")
-	err := commitTurn(root, md, "design")
+	err := commitTurn(root, md, "design", 0)
 	if err == nil {
 		t.Fatal("commitTurn returned nil, want error about missing canvas")
 	}
@@ -754,7 +754,7 @@ func TestCommitTurnRejectsEmptyCanvas(t *testing.T) {
 	}
 
 	headBefore := gitLogFormat(t, root, 1, "HEAD", "%H")
-	err := commitTurn(root, md, "design")
+	err := commitTurn(root, md, "design", 0)
 	if err == nil {
 		t.Fatal("commitTurn returned nil, want error about empty canvas")
 	}
@@ -791,12 +791,12 @@ func TestCommitTurnNoOpTurnReturnsErrNothingToCommit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, contentRel), []byte("# v1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := commitTurn(root, md, "design"); err != nil {
+	if err := commitTurn(root, md, "design", 0); err != nil {
 		t.Fatalf("first commitTurn: %v", err)
 	}
 
 	headBefore := gitLogFormat(t, root, 1, "HEAD", "%H")
-	err := commitTurn(root, md, "design")
+	err := commitTurn(root, md, "design", 0)
 	if !errors.Is(err, run.ErrNothingToCommit) {
 		t.Fatalf("commitTurn err = %v, want ErrNothingToCommit", err)
 	}
@@ -1147,7 +1147,7 @@ func TestCommitTurnStagesFeedbackFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := commitTurn(root, md, "design"); err != nil {
+	if err := commitTurn(root, md, "design", 0); err != nil {
 		t.Fatalf("commitTurn: %v", err)
 	}
 

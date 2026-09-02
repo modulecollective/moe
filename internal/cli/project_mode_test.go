@@ -55,7 +55,7 @@ func advanceRun(t *testing.T, root, runID, docID string) {
 	if md.Documents[docID] == nil {
 		md.Documents[docID] = &run.Document{}
 	}
-	if err := commitTurn(root, md, docID); err != nil {
+	if err := commitTurn(root, md, docID, 0); err != nil {
 		t.Fatalf("commitTurn: %v", err)
 	}
 	if err := commitAdvance(root, md, docID); err != nil {

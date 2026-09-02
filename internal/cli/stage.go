@@ -733,7 +733,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 					}
 					return p, nil
 				},
-				CommitStager: func(workRoot string) error {
+				CommitStager: func(workRoot string, runErr error) error {
 					// cwd-inversion shape: the agent writes the canvas,
 					// followups, and feedback files at their natural
 					// absolute bureaucracy paths under the session
@@ -748,7 +748,18 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 						}
 						extras = append(extras, more...)
 					}
-					if err := commitTurn(workRoot, md, docID, extras...); err != nil {
+					// A headless deadline kill is the one turn ending
+					// with no other durable trace: stderr scrolls away
+					// and the interrupted transcript is overwritten by
+					// the next drive of the stage. Stamp the cap on
+					// this turn's own commit so sizing it later is a
+					// `git log --grep='^MoE-Timed-Out:'`.
+					var timedOut time.Duration
+					var toErr *agent.TimeoutError
+					if errors.As(runErr, &toErr) {
+						timedOut = toErr.Timeout
+					}
+					if err := commitTurn(workRoot, md, docID, timedOut, extras...); err != nil {
 						return err
 					}
 					// HEAD is this turn's commit and the worktree is still
@@ -968,7 +979,13 @@ type stageTurnSpec struct {
 	// caller-specific paths and committing with an appropriate message.
 	// Returning run.ErrNothingToCommit is treated as a soft empty turn —
 	// reported but not fatal.
-	CommitStager func(workRoot string) error
+	//
+	// runErr is how the executor's turn ended (nil on success). It is
+	// passed because the commit is the turn's durable record and some
+	// endings only exist there: a headless deadline kill leaves nothing
+	// behind but an abrupt transcript the next drive overwrites, so the
+	// stager classifies runErr and stamps the commit.
+	CommitStager func(workRoot string, runErr error) error
 	// ExtraEnv is the merged dev-env exports (parsed from the
 	// project's `hooks/dev-env.d/*` setup scripts) that should ride
 	// the claude subprocess as additional KEY=VALUE entries. Empty
@@ -1171,7 +1188,7 @@ func runStageTurn(root string, in stageTurnInputs, stdout, stderr io.Writer) int
 	// operator may have chosen to bail mid-edit but kept the edits.
 	var commitErr error
 	if spec.CommitStager != nil {
-		commitErr = spec.CommitStager(workRoot)
+		commitErr = spec.CommitStager(workRoot, runErr)
 	}
 
 	// Close the session: land it on local main and tear the

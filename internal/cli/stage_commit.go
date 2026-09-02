@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
@@ -67,7 +68,13 @@ func commitAdvance(root string, md *run.Metadata, docID string) error {
 // alongside the document dir — the projectCommitDirs trees an sdlc
 // stage may write — so the operator always sees the agent's edits
 // there and the canvas snapshot moving together in git history.
-func commitTurn(root string, md *run.Metadata, docID string, extraPaths ...string) error {
+//
+// timedOut is the headless cap that killed this turn, or zero when the
+// turn ended any other way. Non-zero adds MoE-Timed-Out to the block —
+// the turn's own commit is where a kill becomes durable, since the
+// transcript it interrupted gets overwritten by the next drive. Zero
+// leaves the message byte-identical to what every ordinary turn writes.
+func commitTurn(root string, md *run.Metadata, docID string, timedOut time.Duration, extraPaths ...string) error {
 	docDir := run.DocDir(md.Project, md.ID, docID)
 	runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
 
@@ -91,15 +98,18 @@ func commitTurn(root string, md *run.Metadata, docID string, extraPaths ...strin
 		return err
 	}
 
-	msg := fmt.Sprintf("work: update %s\n\n", docID) +
-		trailers.Block{
-			Run:      md.ID,
-			Project:  md.Project,
-			Workflow: md.Workflow,
-			Document: docID,
-			Session:  md.Documents[docID].Session,
-			Consent:  walkConsent(),
-		}.String()
+	block := trailers.Block{
+		Run:      md.ID,
+		Project:  md.Project,
+		Workflow: md.Workflow,
+		Document: docID,
+		Session:  md.Documents[docID].Session,
+		Consent:  walkConsent(),
+	}
+	if timedOut > 0 {
+		block.TimedOut = timedOut.String()
+	}
+	msg := fmt.Sprintf("work: update %s\n\n", docID) + block.String()
 	allPaths := append([]string{docDir, runJSON}, extraPaths...)
 	// followups.md is sibling of run.json — stages append to it as
 	// they spot adjacent work to capture. Stage it conditionally so

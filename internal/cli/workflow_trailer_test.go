@@ -53,7 +53,7 @@ func TestCommitTurnCarriesWorkflowTrailer(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, contentRel), []byte("# hello\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := commitTurn(root, md, "code"); err != nil {
+	if err := commitTurn(root, md, "code", 0); err != nil {
 		t.Fatal(err)
 	}
 	body := gitLogFormat(t, root, 1, "HEAD", "%B")

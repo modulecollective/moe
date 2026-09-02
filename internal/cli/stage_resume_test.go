@@ -47,6 +47,11 @@ type fakeAgent struct {
 	// transcriptFound is what TranscriptExists reports. The two-turn
 	// resume tests want the hit branch (resume), so they set it true.
 	transcriptFound bool
+	// oneShotErr is what ExecuteOneShot returns after writing the
+	// canvas — nil for the resume tests, a *agent.TimeoutError for the
+	// timeout-stamp test. The canvas is written either way, mirroring a
+	// real kill: the agent had already edited before the deadline hit.
+	oneShotErr error
 
 	writes int // bumps the canvas body each turn so it differs from main
 
@@ -93,7 +98,7 @@ func (f *fakeAgent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 	// resumes against. The id-rediscovery path has its own coverage in
 	// the claude executor package; this harness pins the cwd-and-resume
 	// wiring, not id minting.
-	return "", nil
+	return "", f.oneShotErr
 }
 
 func (f *fakeAgent) CopyTranscript(sessionID, dest string) (bool, error) {
@@ -137,15 +142,24 @@ func setupResumeFixture(t *testing.T, name string) (string, *fakeAgent) {
 // on stdin; headless turns skip it structurally regardless.
 func driveDesignTurn(t *testing.T, fakeName string, headless bool) {
 	t.Helper()
+	if code := driveDesignTurnCode(t, fakeName, headless); code != 0 {
+		t.Fatalf("design turn exited %d", code)
+	}
+}
+
+// driveDesignTurnCode is driveDesignTurn for callers that expect a
+// failing turn — a fake whose executor returns an error exits non-zero
+// by design, and the turn's commit is what they're inspecting.
+func driveDesignTurnCode(t *testing.T, fakeName string, headless bool) int {
+	t.Helper()
 	var stdout, stderr bytes.Buffer
 	code := runStageSession("tele", "fix-it", "design", stageSessionOpts{
 		Agent:         fakeName,
 		Headless:      headless,
 		SkipNextStage: true,
 	}, &stdout, &stderr)
-	if code != 0 {
-		t.Fatalf("design turn exited %d\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
-	}
+	t.Logf("design turn exited %d\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
+	return code
 }
 
 // TestTwoTurnInteractiveResumePreflightsSameCwd is the headline
