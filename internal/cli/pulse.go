@@ -875,7 +875,7 @@ func applyPulseGate(root, projectID, pulseSlug string, gate pulseGate, stdout, s
 				// Anything that isn't a promotable idea falls through to the
 				// slug it always was — an ordinary parked run is the common
 				// case and stays the groom's to resolve.
-				if id, _ := m.promoteIfTaggedIdea(entry.Existing, pulseRunSpec{Why: "named at a thread position"}, stdout, stderr); id != "" {
+				if id, _ := m.promoteIfTaggedIdea(entry.Existing, pulseRunSpec{Why: "named at a thread position"}, true /*atThread*/, stdout, stderr); id != "" {
 					grp.Runs = append(grp.Runs, groomMember{mintedID: id})
 					// A ping lands only on a run that already existed when the
 					// survey wrote the gate. A promotion mints a different
@@ -1015,16 +1015,11 @@ func (m *pulseMinter) mint(s pulseRunSpec, stdout, stderr io.Writer) string {
 		return ""
 	}
 	if slugBaseMatches(m.live, slug) {
-		// Design-only is for fresh slugs. The live match is either an
-		// ordinary run already in flight — nothing to design twice — or a
-		// live idea, and there the refusal is the point: a tag is the
-		// licence to *ship*, an untagged idea is human-fenced, and either
-		// way a design-only promotion would consume the capture past the
-		// operator's per-idea brake to buy a turn they never asked for.
-		if s.DesignOnly {
-			moePrintf(stderr, "pulse: spawn: entry %q asks for design_only but the slug already names live work — design-only opens fresh slugs only; skipping\n", slug)
-			return ""
-		}
+		// A live match is either an ordinary run already in flight, which
+		// promoteOrSkip calls a duplicate, or a tagged idea, which it
+		// promotes. What `design_only` means there depends on the idea's
+		// own licence, so the refusal lives in promoteIfTaggedIdea, where
+		// the idea has been identified.
 		return m.promoteOrSkip(slug, s, stdout, stderr)
 	}
 	title := strings.TrimSpace(s.Title)
@@ -1104,7 +1099,7 @@ func (m *pulseMinter) nominateChore(name string, s pulseRunSpec, stdout, stderr 
 // `--from-idea` uses. Everything else already has this work in flight
 // and skips.
 func (m *pulseMinter) promoteOrSkip(slug string, s pulseRunSpec, stdout, stderr io.Writer) string {
-	id, dup := m.promoteIfTaggedIdea(slug, s, stdout, stderr)
+	id, dup := m.promoteIfTaggedIdea(slug, s, false /*atThread*/, stdout, stderr)
 	if dup {
 		moePrintf(stderr, "pulse: spawn: %s already has a live run for %q — skipping\n", m.projectID, slug)
 	}
@@ -1123,9 +1118,12 @@ func (m *pulseMinter) promoteOrSkip(slug string, s pulseRunSpec, stdout, stderr 
 // grammar — a duplicate proposal to the spec path, an ordinary parked
 // run to the thread path — so it's returned rather than warned about
 // here. Every other refusal (an unreadable scan, an untagged idea, an
-// unusable tag, a failed promotion) has already warned by the time this
-// returns "".
-func (m *pulseMinter) promoteIfTaggedIdea(slug string, s pulseRunSpec, stdout, stderr io.Writer) (id string, dup bool) {
+// unusable tag, a design-only idea at a thread position, a failed
+// promotion) has already warned by the time this returns "".
+//
+// atThread says the caller is applyPulseGate's string-entry branch,
+// which is a position a design-only root can't hold.
+func (m *pulseMinter) promoteIfTaggedIdea(slug string, s pulseRunSpec, atThread bool, stdout, stderr io.Writer) (id string, dup bool) {
 	projectID, pulseSlug := m.projectID, m.pulseSlug
 	spawnedBy := projectID + "/" + pulseSlug
 
@@ -1147,6 +1145,28 @@ func (m *pulseMinter) promoteIfTaggedIdea(slug string, s pulseRunSpec, stdout, s
 		moePrintf(stderr, "pulse: spawn: idea %s/%s has unusable workflow tag %q — skipping\n", projectID, idea.ID, idea.PromoteTo)
 		return "", false
 	}
+	// The same rule a `design_only` spec gets at a thread position, on
+	// the tag that carries the bit instead: the promoted root is
+	// unsettled by definition until the operator advances it, so every
+	// member behind it would strand. The next sweep may propose the idea
+	// loose, which is where design-only work belongs.
+	if idea.DesignOnly && atThread {
+		moePrintf(stderr, "pulse: spawn: idea %s/%s is tagged design-only and was named at a thread position — a design-only root strands the runs behind it; put it in loose. Skipping\n", projectID, idea.ID)
+		return "", false
+	}
+	// A spec that asks for design_only on a plain-tagged idea is trying
+	// to narrow the operator's ship licence to a design turn; refuse it,
+	// same as design_only on any other live slug. On an idea that
+	// already carries the bit the two agree, and refusing would make the
+	// operator's own licence unusable the moment a survey quotes the
+	// board it reads "design only" from.
+	if s.DesignOnly {
+		if !idea.DesignOnly {
+			moePrintf(stderr, "pulse: spawn: entry %q asks for design_only but the slug names tagged idea %s/%s — the tag is the operator's licence to spend; skipping\n", slug, projectID, idea.ID)
+			return "", false
+		}
+		moePrintf(stderr, "pulse: spawn: ignoring design_only for tagged idea %s/%s; the tag carries it\n", projectID, idea.ID)
+	}
 	if strings.TrimSpace(s.Design) != "" {
 		moePrintf(stderr, "pulse: spawn: ignoring design body for tagged idea %s/%s; the idea canvas is the seed\n", projectID, idea.ID)
 	}
@@ -1155,6 +1175,7 @@ func (m *pulseMinter) promoteIfTaggedIdea(slug string, s pulseRunSpec, stdout, s
 		FirstStage: wf.Stages()[0],
 		SpawnedBy:  spawnedBy,
 		Consent:    spawnConsent(spawnedBy),
+		DesignOnly: idea.DesignOnly,
 	}, stdout, stderr)
 	if promoteErr != nil {
 		moePrintf(stderr, "pulse: promote tagged idea %s/%s: %v\n", projectID, idea.ID, promoteErr)
@@ -1164,7 +1185,11 @@ func (m *pulseMinter) promoteIfTaggedIdea(slug string, s pulseRunSpec, stdout, s
 		moePrintf(stderr, "pulse: warning: promoted %s/%s but could not mark the idea: %v\n", projectID, promoted.Run.ID, promoted.MarkErr)
 	}
 	m.live = append(m.live, promoted.Run.ID)
-	moePrintf(stderr, "pulse: promoted tagged idea %s/%s to %s run %s/%s\n", projectID, idea.ID, idea.PromoteTo, projectID, promoted.Run.ID)
+	kind := idea.PromoteTo
+	if idea.DesignOnly {
+		kind += ", design only"
+	}
+	moePrintf(stderr, "pulse: promoted tagged idea %s/%s to %s run %s/%s\n", projectID, idea.ID, kind, projectID, promoted.Run.ID)
 	return promoted.Run.ID, false
 }
 

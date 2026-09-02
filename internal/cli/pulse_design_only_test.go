@@ -76,14 +76,19 @@ func TestDesignOnlySpecMintsTheBitOntoTheRun(t *testing.T) {
 	}
 }
 
-// TestDesignOnlyIsSkippedOrIgnored walks the four shapes that may not
-// carry the bit. Two skip the entry outright, because honouring the
-// field there would consume something the operator is holding — a live
-// idea's brake, or the runs queued behind a thread position — or would
-// mint the one-line idea the rung exists to replace. Two only warn: on
-// a chore or twin entry the run's shape comes from elsewhere entirely,
+// TestDesignOnlyIsSkippedOrIgnored walks the shapes that may not carry
+// the bit. Most skip the entry outright, because honouring the field
+// there would consume something the operator is holding — a live idea's
+// brake, or the runs queued behind a thread position — or would mint
+// the one-line idea the rung exists to replace. Two only warn: on a
+// chore or twin entry the run's shape comes from elsewhere entirely,
 // and dropping the operator's chore over a meaningless bool would cost
 // more than the warn.
+//
+// The live-slug cases split on what the slug names, because only the
+// idea itself knows what licence the operator wrote. A design-only
+// tagged idea is the one live shape the spec may agree with, and that
+// case lives in TestDesignOnlySpecOnADesignOnlyTaggedIdeaIsIgnored.
 func TestDesignOnlyIsSkippedOrIgnored(t *testing.T) {
 	t.Run("no design body", func(t *testing.T) {
 		root := spawnFixture(t)
@@ -99,7 +104,7 @@ func TestDesignOnlyIsSkippedOrIgnored(t *testing.T) {
 		}
 	})
 
-	t.Run("slug already live", func(t *testing.T) {
+	t.Run("slug names an untagged idea", func(t *testing.T) {
 		root := spawnFixture(t)
 		seedRun(t, root, "moe", "baseline-drift", "idea", run.StatusInProgress, time.Now().Local(),
 			map[string]string{"idea": "# Baseline drift\n\ncaptured\n"})
@@ -107,9 +112,9 @@ func TestDesignOnlyIsSkippedOrIgnored(t *testing.T) {
 
 		if minted := mintSpecs(root, "moe", "pulse-one",
 			[]pulseRunSpec{designOnlySpec("baseline-drift")}, io.Discard, &errb); len(minted) != 0 {
-			t.Errorf("minted %v, want nothing — design-only opens fresh slugs only", minted)
+			t.Errorf("minted %v, want nothing — the idea is operator-fenced", minted)
 		}
-		if !strings.Contains(errb.String(), "already names live work") {
+		if !strings.Contains(errb.String(), "is untagged and requires operator triage") {
 			t.Errorf("stderr = %q, want the skip named", errb.String())
 		}
 		// The capture is untouched: the refusal exists so a design-only
@@ -120,6 +125,42 @@ func TestDesignOnlyIsSkippedOrIgnored(t *testing.T) {
 		}
 		if md.Status != run.StatusInProgress {
 			t.Errorf("idea status = %q, want it left alone", md.Status)
+		}
+	})
+
+	t.Run("slug names a plain-tagged idea", func(t *testing.T) {
+		root := spawnFixture(t)
+		seedTaggedIdea(t, root, "moe", "baseline-drift")
+		var errb bytes.Buffer
+
+		if minted := mintSpecs(root, "moe", "pulse-one",
+			[]pulseRunSpec{designOnlySpec("baseline-drift")}, io.Discard, &errb); len(minted) != 0 {
+			t.Errorf("minted %v, want nothing — the spec would narrow the operator's ship licence", minted)
+		}
+		if !strings.Contains(errb.String(), "the tag is the operator's licence to spend") {
+			t.Errorf("stderr = %q, want the skip named", errb.String())
+		}
+		md, err := run.Load(root, "moe", "baseline-drift")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if md.Status != run.StatusInProgress {
+			t.Errorf("idea status = %q, want it left alone", md.Status)
+		}
+	})
+
+	t.Run("slug names an ordinary live run", func(t *testing.T) {
+		root := spawnFixture(t)
+		seedRun(t, root, "moe", "baseline-drift", "sdlc", run.StatusInProgress, time.Now().Local(),
+			map[string]string{"design": "# Already in flight\n"})
+		var errb bytes.Buffer
+
+		if minted := mintSpecs(root, "moe", "pulse-one",
+			[]pulseRunSpec{designOnlySpec("baseline-drift")}, io.Discard, &errb); len(minted) != 0 {
+			t.Errorf("minted %v, want nothing — there is nothing to design twice", minted)
+		}
+		if !strings.Contains(errb.String(), "already has a live run") {
+			t.Errorf("stderr = %q, want the duplicate skip named", errb.String())
 		}
 	})
 
@@ -448,6 +489,16 @@ func TestStageLocationSectionOnADesignOnlyRun(t *testing.T) {
 	}
 	if got := stageLocationSection(ordinary, "design"); strings.Contains(got, marker) {
 		t.Errorf("ordinary design block =\n%s\nwant no paragraph", got)
+	}
+
+	// The idea is now a second carrier of the bit, and the idea
+	// workflow's single stage is also its first — so without the
+	// successor gate an operator sitting in `moe idea edit --chat` on
+	// their own design-only tagged idea would be told nobody is going
+	// to walk their open questions with them.
+	taggedIdea := &run.Metadata{Project: "moe", ID: "worth-a-think", Workflow: "idea", DesignOnly: true}
+	if got := stageLocationSection(taggedIdea, "idea"); strings.Contains(got, marker) {
+		t.Errorf("design-only idea block =\n%s\nwant no paragraph — a capture stage has no ride to bound", got)
 	}
 }
 

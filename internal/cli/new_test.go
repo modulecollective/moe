@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
@@ -823,5 +824,38 @@ func TestRunNewAgentHelpNamesPersistenceBoundary(t *testing.T) {
 	}
 	if !strings.Contains(got, "model stylesheet, then claude") {
 		t.Fatalf("help missing fallback step:\n%s", got)
+	}
+}
+
+// TestRunNewFromIdeaDoesNotCarryDesignOnly: the design-only tag is a
+// licence written for the machine. `--from-idea` is the hand-shaping
+// door — the operator picked the destination and is seeding the run
+// now — and its --park/--ship/--chain rung is typed consent that
+// outranks it. Copying the bit here would hold a run the operator
+// opened themselves, and would render the design-only paragraph into an
+// interactive design session.
+func TestRunNewFromIdeaDoesNotCarryDesignOnly(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+
+	captureIdea(t, "tele", "briefed-by-hand")
+	if code := Run([]string{"idea", "tag", "tele/briefed-by-hand", "--design-only"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatal("setup design-only tag failed")
+	}
+
+	var out, errb bytes.Buffer
+	if code := runNew("sdlc", []string{"--from-idea=tele/briefed-by-hand", "--park"}, &out, &errb); code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	md, err := run.Load(root, "tele", "briefed-by-hand-"+todayDateSuffix())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if md.DesignOnly {
+		t.Errorf("design_only = true, want the operator's own promote to leave the machine's licence behind")
 	}
 }
