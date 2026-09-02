@@ -131,14 +131,24 @@
   </section>
   {{end}}
 
-  {{with .Traces.TwinNote}}
-  <section class="twin-note">
+  {{if .Traces.Twin}}
+  <section class="traces">
     <h2>twin notes</h2>
-    <p class="meta">
-      <span class="status">{{.Status}}</span>
-      {{if .ReflectURL}}<a class="slug" href="{{.ReflectURL}}">{{.ReflectRun}}</a>{{end}}
-    </p>
-    <details class="trace-body"><summary>note</summary><div class="doc">{{.BodyHTML}}</div></details>
+    <ul>
+      {{range .Traces.Twin}}
+      <li>
+        <span class="box">{{if .Done}}[x]{{else}}[ ]{{end}}</span>
+        {{if .Raw}}
+        <span class="raw">{{.Raw}}</span>
+        {{else}}
+        {{if .TargetURL}}<a class="slug" href="{{.TargetURL}}">{{.Slug}}</a>{{else}}<span class="slug">{{.Slug}}</span>{{end}}
+        <span class="note">{{.Title}}</span>
+        {{if .TargetStatus}}<span class="badge">{{.TargetStatus}}</span>{{end}}
+        {{end}}
+        {{if .BodyHTML}}<details class="trace-body"><summary>why</summary><div class="doc">{{.BodyHTML}}</div></details>{{end}}
+      </li>
+      {{end}}
+    </ul>
   </section>
   {{end}}
 

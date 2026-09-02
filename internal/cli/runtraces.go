@@ -1,15 +1,11 @@
 package cli
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
-	"time"
 
-	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/serve"
 	"github.com/modulecollective/moe/internal/wiki"
@@ -17,17 +13,14 @@ import (
 
 // A run leaves traces beyond its stage canvases: followups.md entries
 // that harvest into idea runs, feedback/lore.md entries that promote to
-// lore/<slug>.md, and a feedback/twin.md note a later reflect pass folds
-// into the digital twin. This file gathers all three for the run page,
+// lore/<slug>.md, and feedback/twin.md entries that harvest into idea
+// runs of their own. This file gathers all three for the run page,
 // resolving each landed trace to the thing it became.
 //
-// Both link edges are derived on read rather than written forward. A
+// Every link edge is derived on read rather than written forward: a
 // harvested checklist line already carries the resolved slug — which
 // *is* the promoted idea's run ID / the promoted lore file's name — so
-// the followup and lore joins are O(1) lookups. Twin notes carry no
-// such marker (ingestion is per-file, and nothing marks a file
-// consumed), so the reflect attribution replays checkpoint history; see
-// twinNoteStatus.
+// each join is an O(1) lookup.
 
 // displayEntry is one checklist line as the run page shows it. A line
 // that matched the grammar fills slug/title/body; one that didn't fills
@@ -108,85 +101,8 @@ func readDisplayChecklist(root, rel string) ([]displayEntry, error) {
 	return scanChecklistDisplay(body), nil
 }
 
-// checkpointSeal is one historical reflect pass: the LastIngestAt it
-// sealed and the run that sealed it.
-type checkpointSeal struct {
-	sealedAt  time.Time
-	ingestRun string
-}
-
-// checkpointHistory replays every committed revision of a project's
-// digital-twin checkpoint.json, oldest first. Each revision is one
-// reflect pass's seal, which is the only record of which pass ingested
-// a given twin note — nothing writes that edge forward.
-//
-// Revisions that don't parse, or that predate the field, are skipped
-// rather than fatal: a page that can't attribute one note should say
-// "pending", not 500.
-func checkpointHistory(root, projectID string) ([]checkpointSeal, error) {
-	rel := filepath.Join("projects", projectID, wiki.TwinDirRel, "checkpoint.json")
-	out, err := git.Output(root, "log", "--format=%H", "--", rel)
-	if err != nil {
-		return nil, fmt.Errorf("git log %s: %w", rel, err)
-	}
-	var seals []checkpointSeal
-	for sha := range strings.FieldsSeq(out) {
-		blob, err := git.Output(root, "show", sha+":"+rel)
-		if err != nil {
-			continue
-		}
-		var cp wiki.Checkpoint
-		if err := json.Unmarshal([]byte(blob), &cp); err != nil || cp.LastIngestAt == "" {
-			continue
-		}
-		t, err := time.Parse(time.RFC3339, cp.LastIngestAt)
-		if err != nil {
-			continue
-		}
-		seals = append(seals, checkpointSeal{sealedAt: t, ingestRun: cp.LastIngestRun})
-	}
-	slices.Reverse(seals) // git log is newest-first; the walk wants oldest-first
-	return seals, nil
-}
-
-// twinNoteStatus reports which reflect pass folded a run's twin note
-// in, mirroring loadTwinFeedback's inclusion rule exactly: a pass
-// ingests every note whose git time doesn't post-date the LastIngestAt
-// it seals, so the *earliest* seal at-or-after the note is the pass
-// that consumed it.
-//
-// One carve-out, same as the consumer's: a pass writes its own
-// feedback/twin.md in the stage-exit commit that seals the checkpoint,
-// so that note can't post-date the threshold it created — yet plainly
-// wasn't ingested by the pass that filed it. When the covering seal
-// names this run, attribution shifts to the next seal.
-//
-// reflected=false means pending — no seal covers the note yet, or it
-// isn't committed (zero git time), matching loadTwinFeedback's skip.
-// reflected=true with an empty run means a pass covered it but didn't
-// record which; the page says "folded in" without a link.
-func twinNoteStatus(root, projectID, runID string, noteAt time.Time) (reflectRun string, reflected bool, err error) {
-	if noteAt.IsZero() {
-		return "", false, nil
-	}
-	seals, err := checkpointHistory(root, projectID)
-	if err != nil {
-		return "", false, err
-	}
-	for _, s := range seals {
-		if s.sealedAt.Before(noteAt) {
-			continue
-		}
-		if s.ingestRun == runID {
-			continue // carried to the next pass
-		}
-		return s.ingestRun, true, nil
-	}
-	return "", false, nil
-}
-
 // GatherRunTraces backs serve.Options.GatherRunTraces: the run page's
-// followups / lore / twin-note sections for one run. Lives here because
+// followups / lore / twin sections for one run. Lives here because
 // the checklist grammar is unexported cli state and serve can't import
 // cli.
 //
@@ -237,11 +153,23 @@ func GatherRunTraces(root, projectID, runID string) (serve.RunTraces, error) {
 		out.Lore = append(out.Lore, t)
 	}
 
-	note, err := gatherTwinNote(root, projectID, runID)
+	twin, err := readDisplayChecklist(root, run.FeedbackPath(projectID, runID, "twin"))
 	if err != nil {
 		return serve.RunTraces{}, err
 	}
-	out.TwinNote = note
+	for _, e := range twin {
+		t := traceOf(e)
+		// A harvested twin note's resolved slug is an idea run in this
+		// project — parseTwinFeedback rejects a cross-project prefix, so
+		// there is no other project to look in.
+		if e.done && e.slug != "" {
+			if md, err := run.Load(root, projectID, e.slug); err == nil {
+				t.TargetURL = "/run/" + projectID + "/" + e.slug
+				t.TargetStatus = md.Status
+			}
+		}
+		out.Twin = append(out.Twin, t)
+	}
 	return out, nil
 }
 
@@ -253,34 +181,4 @@ func traceOf(e displayEntry) serve.RunTrace {
 		Title: e.title,
 		Body:  e.body,
 	}
-}
-
-// gatherTwinNote reads a run's feedback/twin.md and dates its
-// ingestion. The whole file is one trace: reflect's granularity is the
-// file, not the note inside it, so a per-note status would be fiction.
-func gatherTwinNote(root, projectID, runID string) (*serve.TwinNoteTrace, error) {
-	rel := run.FeedbackPath(projectID, runID, "twin")
-	body, err := os.ReadFile(filepath.Join(root, rel))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("read %s: %w", rel, err)
-	}
-	if strings.TrimSpace(string(body)) == "" {
-		return nil, nil
-	}
-	when, err := run.LastFileActivity(root, rel)
-	if err != nil {
-		return nil, fmt.Errorf("git time %s: %w", rel, err)
-	}
-	reflectRun, reflected, err := twinNoteStatus(root, projectID, runID, when)
-	if err != nil {
-		return nil, err
-	}
-	return &serve.TwinNoteTrace{
-		Body:       string(body),
-		Reflected:  reflected,
-		ReflectRun: reflectRun,
-	}, nil
 }

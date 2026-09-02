@@ -21,10 +21,10 @@ import (
 // Harvest is welded to enterTerminal today: once a run is closed, a
 // re-run of a stage rewrites followups.md with fresh entries that can
 // never be picked up (close refuses an already-terminal run). This verb
-// is the trigger that isn't the status flip — it re-runs the existing
-// followups and lore harvest pipelines against the run's current
-// scratch files and commits what they rewrote, leaving run.json
-// untouched.
+// is the trigger that isn't the status flip — it re-runs the three
+// harvest pipelines (followups, lore, twin observations) against the
+// run's current scratch files and commits what they rewrote, leaving
+// run.json untouched.
 //
 // Idempotent: the pipelines skip `- [x]` lines, so a clean run finds
 // nothing new and a regenerated file harvests only the fresh entries.
@@ -36,7 +36,7 @@ import (
 func harvestCommand(workflow string) *Command {
 	return &Command{
 		Name:    "harvest",
-		Summary: "re-harvest a run's followups.md and feedback/lore.md without closing it",
+		Summary: "re-harvest a run's followups.md and feedback/*.md without closing it",
 		Run: func(args []string, stdout, stderr io.Writer) int {
 			return runHarvest(workflow, args, stdout, stderr)
 		},
@@ -66,7 +66,7 @@ func runHarvest(workflow string, args []string, stdout, stderr io.Writer) int {
 	// --no-edit mirrors close: skip the editor pre-flight and harvest the
 	// files as-is. The pop is on by default here — the operator is
 	// explicitly invoking harvest, so they get to review what fans out.
-	noEdit := fs.Bool("no-edit", false, "skip the followups.md / feedback/lore.md editor steps (harvest as-is)")
+	noEdit := fs.Bool("no-edit", false, "skip the followups.md / feedback/*.md editor steps (harvest as-is)")
 	fs.Usage = func() {
 		moePrintf(stderr, "usage: moe %s harvest [--no-edit] <project>/<run>\n", workflow)
 		fs.PrintDefaults()
@@ -107,23 +107,23 @@ func runHarvest(workflow string, args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// harvestRunInProcess re-runs the followups and lore harvests for an
+// harvestRunInProcess re-runs all three scratch harvests for an
 // already-resolved run and commits what they rewrote — without flipping
 // run status. Unlike closeRunInProcess it is status-agnostic: harvest is
 // journal-local (it creates idea runs, promotes lore files, and rewrites
-// two scratch files), touching neither the PR nor run.json, so it is
+// the scratch files), touching neither the PR nor run.json, so it is
 // safe on in_progress, closed, merged, or pushed runs. That
 // status-blindness is the whole point — the reported gap is a closed run
 // whose regenerated follow-ups can never reach ideas through the close
 // path.
 //
-// Both scratch files, in enterTerminal's order and with its staging: the
-// verb shipped followups-only with a note that a symmetric lore
-// re-harvest could be a separate verb if the gap ever bit. It bit — a
-// conversational session on an intent stranded a lore entry alongside
-// its followups — and a "harvest" that silently skips half the captures
-// is the trap that produced that run, so the pairing lives in the one
-// verb.
+// All three scratch files, in enterTerminal's order and with its
+// staging: the verb shipped followups-only with a note that a symmetric
+// lore re-harvest could be a separate verb if the gap ever bit. It bit
+// — a conversational session on an intent stranded a lore entry
+// alongside its followups — and a "harvest" that silently skips part of
+// the captures is the trap that produced that run, so the grouping
+// lives in the one verb.
 //
 // No workflow is refused. The idea refusal this function shipped with
 // ("the run *is* the capture") predates `idea edit --chat`: an agent
@@ -141,7 +141,8 @@ func harvestRunInProcess(root, workflow, projectID, runID string, skipEdit bool,
 	// the gate ignores those while still refusing on anything else dirty.
 	followupsRel := run.FollowupsPath(projectID, runID)
 	loreRel := run.FeedbackPath(projectID, runID, "lore")
-	dirty, derr := dirtyOutsidePaths(root, followupsRel, loreRel, wiki.LoreDirRel+"/")
+	twinRel := run.FeedbackPath(projectID, runID, "twin")
+	dirty, derr := dirtyOutsidePaths(root, followupsRel, loreRel, twinRel, wiki.LoreDirRel+"/")
 	if derr != nil {
 		return derr
 	}
@@ -160,7 +161,7 @@ func harvestRunInProcess(root, workflow, projectID, runID string, skipEdit bool,
 		return fmt.Errorf("run %s/%s is a %s run, not %s", projectID, runID, md.Workflow, workflow)
 	}
 
-	msg := fmt.Sprintf("harvest: capture follow-ups and lore for %s/%s\n\n", projectID, runID) +
+	msg := fmt.Sprintf("harvest: capture follow-ups, lore, and twin observations for %s/%s\n\n", projectID, runID) +
 		trailers.Block{
 			Run:      runID,
 			Project:  projectID,
@@ -176,12 +177,15 @@ func harvestRunInProcess(root, workflow, projectID, runID string, skipEdit bool,
 		if err := harvestLore(root, projectID, runID, workflow, skipEdit); err != nil {
 			return err
 		}
+		if err := harvestTwinFeedback(root, projectID, runID, workflow, skipEdit); err != nil {
+			return err
+		}
 		// Stage exactly what enterTerminal stages, and only what's on
-		// disk: a run with neither scratch file has nothing to commit.
+		// disk: a run with no scratch file has nothing to commit.
 		// lore/ goes in as a dir so every newly-promoted slug rides along
 		// without enumerating them.
 		var paths []string
-		for _, rel := range []string{followupsRel, loreRel, wiki.LoreDirRel} {
+		for _, rel := range []string{followupsRel, loreRel, twinRel, wiki.LoreDirRel} {
 			if _, statErr := os.Stat(filepath.Join(root, rel)); statErr == nil {
 				paths = append(paths, rel)
 			}
@@ -189,7 +193,7 @@ func harvestRunInProcess(root, workflow, projectID, runID string, skipEdit bool,
 		if len(paths) == 0 {
 			return nil
 		}
-		// A clean re-run (all `- [x]`) leaves both files byte-identical,
+		// A clean re-run (all `- [x]`) leaves every file byte-identical,
 		// so there's nothing staged: swallow ErrNothingToCommit and report
 		// the no-op as success. The harvested ideas' own open commits
 		// (written by createIdea inside the pipeline) are already landed.

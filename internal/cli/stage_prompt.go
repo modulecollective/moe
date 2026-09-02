@@ -390,15 +390,18 @@ func followupsReferenceSection(root string, md *run.Metadata) string {
 	b.WriteString("symptom and why it matters, not just a path. The skill has the\n")
 	b.WriteString("full format; a wrong shape is rejected at close, not silently\n")
 	b.WriteString("dropped.\n")
-	// Routing, not format: an entry filed here is harvested into an idea
-	// and promoted to a run, so a twin-doc edit filed as a followup ends
-	// up in a workflow forbidden to make it. The rule has to travel with
-	// the inlined grammar for the same reason the grammar is inlined —
-	// an agent that never opens the skill still has to route correctly.
+	// Routing, not format. All three channels harvest into ideas now, so
+	// the rule is no longer "this workflow can't make that edit" — it's
+	// that a twin note's harvested idea opens with a provenance line
+	// naming the tree it edits, and a lore entry doesn't become an idea
+	// at all. Filing in the wrong channel loses that. The rule travels
+	// with the inlined grammar for the same reason the grammar is
+	// inlined: an agent that never opens the skill still has to route.
 	b.WriteString("Check the channel before you file: if acting on the entry would\n")
-	b.WriteString("edit a digital-twin doc, it belongs in `feedback/twin.md` instead;\n")
-	b.WriteString("if it's a portable fact that applies to other projects,\n")
-	b.WriteString("`feedback/lore.md`. Only what's left is a followup.\n")
+	b.WriteString("edit a digital-twin doc, it belongs in `feedback/twin.md` instead\n")
+	b.WriteString("(same grammar, different destination); if it's a portable fact\n")
+	b.WriteString("that applies to other projects, `feedback/lore.md`. Only what's\n")
+	b.WriteString("left is a followup.\n")
 	b.WriteString("To check what prior runs have already filed for this project (so\n")
 	b.WriteString("you don't duplicate a followup or re-decide a settled question),\n")
 	b.WriteString("use `moe-context`.\n")

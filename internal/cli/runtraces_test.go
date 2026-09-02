@@ -1,9 +1,9 @@
 package cli
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -171,7 +171,7 @@ func TestGatherRunTracesAbsentFilesYieldNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GatherRunTraces: %v", err)
 	}
-	if len(got.Followups) != 0 || len(got.Lore) != 0 || got.TwinNote != nil {
+	if len(got.Followups) != 0 || len(got.Lore) != 0 || len(got.Twin) != 0 {
 		t.Errorf("want empty traces, got %+v", got)
 	}
 }
@@ -201,123 +201,41 @@ func commitAt(t *testing.T, root, msg string, when time.Time) {
 	}, "commit", "-m", msg)
 }
 
-// writeCheckpoint commits one revision of a project's digital-twin
-// checkpoint.json — one reflect pass's seal.
-func writeCheckpoint(t *testing.T, root, projectID, lastIngestAt, lastIngestRun string) {
-	t.Helper()
-	cp := wiki.Checkpoint{
-		Version:       wiki.CheckpointVersion,
-		LastIngestAt:  lastIngestAt,
-		LastIngestRun: lastIngestRun,
-		Project:       projectID,
-	}
-	b, err := json.Marshal(cp)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rel := filepath.Join("projects", projectID, wiki.TwinDirRel, "checkpoint.json")
-	writeTraceFile(t, root, rel, string(b))
-	commitAt(t, root, "seal "+lastIngestRun, mustTime(t, lastIngestAt))
-}
-
-func mustTime(t *testing.T, s string) time.Time {
-	t.Helper()
-	parsed, err := time.Parse(time.RFC3339, s)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return parsed
-}
-
-// TestGatherRunTracesTwinNoteStatus walks the reflect attribution the
-// run page derives from checkpoint history — the only record of which
-// pass ingested a note, since nothing marks a twin note consumed.
-//
-// The carve-out case is the subtle one, and mirrors loadTwinFeedback: a
-// reflect pass seals the checkpoint and writes its own feedback/twin.md
-// in the same commit, so that note can't post-date the threshold it
-// created. It belongs to the *next* pass.
-func TestGatherRunTracesTwinNoteStatus(t *testing.T) {
-	noteAt := "2026-01-15T00:00:00Z"
-	for _, tc := range []struct {
-		name        string
-		runID       string
-		seals       [][2]string // {lastIngestAt, lastIngestRun}, oldest first
-		wantRefl    bool
-		wantRunLink string
-	}{
-		{
-			name:  "pending when no seal covers the note",
-			runID: "src",
-			seals: [][2]string{{"2025-12-01T00:00:00Z", "reflect-old"}},
-		},
-		{
-			name:  "pending when the project has no checkpoint history",
-			runID: "src",
-		},
-		{
-			name:        "attributed to the earliest seal at or after the note",
-			runID:       "src",
-			seals:       [][2]string{{"2025-12-01T00:00:00Z", "reflect-old"}, {"2026-02-01T00:00:00Z", "reflect-new"}, {"2026-03-01T00:00:00Z", "reflect-later"}},
-			wantRefl:    true,
-			wantRunLink: "reflect-new",
-		},
-		{
-			name:        "a pass does not ingest the note it filed itself",
-			runID:       "reflect-new",
-			seals:       [][2]string{{"2026-02-01T00:00:00Z", "reflect-new"}, {"2026-03-01T00:00:00Z", "reflect-later"}},
-			wantRefl:    true,
-			wantRunLink: "reflect-later",
-		},
-		{
-			name:     "seal without a recorded run reflects with no link",
-			runID:    "src",
-			seals:    [][2]string{{"2026-02-01T00:00:00Z", ""}},
-			wantRefl: true,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			root := newTestBureaucracy(t)
-			seedTraceRun(t, root, "alpha", tc.runID, run.StatusClosed)
-			writeTraceFile(t, root, run.FeedbackPath("alpha", tc.runID, "twin"),
-				"architecture.md understates the serve seam.\n")
-			commitAt(t, root, "note", mustTime(t, noteAt))
-			for _, s := range tc.seals {
-				writeCheckpoint(t, root, "alpha", s[0], s[1])
-			}
-
-			got, err := GatherRunTraces(root, "alpha", tc.runID)
-			if err != nil {
-				t.Fatalf("GatherRunTraces: %v", err)
-			}
-			if got.TwinNote == nil {
-				t.Fatal("want a twin note trace, got nil")
-			}
-			if got.TwinNote.Reflected != tc.wantRefl {
-				t.Errorf("Reflected = %v, want %v", got.TwinNote.Reflected, tc.wantRefl)
-			}
-			if got.TwinNote.ReflectRun != tc.wantRunLink {
-				t.Errorf("ReflectRun = %q, want %q", got.TwinNote.ReflectRun, tc.wantRunLink)
-			}
-		})
-	}
-}
-
-// TestGatherRunTracesUncommittedTwinNoteIsPending: an uncommitted note
-// is invisible to the journal, so reflect can't have ingested it — the
-// same when.IsZero() skip loadTwinFeedback makes.
-func TestGatherRunTracesUncommittedTwinNoteIsPending(t *testing.T) {
+// TestGatherRunTracesResolvesTwinNotes: a harvested twin note links to
+// the idea it minted, exactly like a followup. The one difference the
+// gather has to honour is that a twin slug is never `<project>/`-
+// prefixed — parseTwinFeedback rejects that — so the lookup stays in
+// the run's own project.
+func TestGatherRunTracesResolvesTwinNotes(t *testing.T) {
 	root := newTestBureaucracy(t)
-	seedTraceRun(t, root, "alpha", "src", run.StatusInProgress)
-	writeCheckpoint(t, root, "alpha", "2026-06-01T00:00:00Z", "reflect-new")
-	// Written after the seal and never committed.
-	writeTraceFile(t, root, run.FeedbackPath("alpha", "src", "twin"), "A fresh observation.\n")
+	seedTraceRun(t, root, "alpha", "src", run.StatusClosed)
+	seedTraceRun(t, root, "alpha", "landed-note", run.StatusInProgress)
+	writeTraceFile(t, root, run.FeedbackPath("alpha", "src", "twin"), strings.Join([]string{
+		"- [x] `landed-note` — architecture understates the serve seam",
+		"",
+		"  The component list predates the split.",
+		"- [x] `vanished-note` — a note whose idea was deleted",
+		"- [ ] `open-note` — not harvested yet",
+		"",
+	}, "\n"))
 
 	got, err := GatherRunTraces(root, "alpha", "src")
 	if err != nil {
 		t.Fatalf("GatherRunTraces: %v", err)
 	}
-	if got.TwinNote == nil || got.TwinNote.Reflected {
-		t.Errorf("uncommitted note should read pending, got %+v", got.TwinNote)
+	if len(got.Twin) != 3 {
+		t.Fatalf("want 3 twin traces, got %d: %+v", len(got.Twin), got.Twin)
+	}
+	if n := got.Twin[0]; n.TargetURL != "/run/alpha/landed-note" || n.TargetStatus != run.StatusInProgress {
+		t.Errorf("harvested note: %+v", n)
+	}
+	if n := got.Twin[0]; !strings.Contains(n.Body, "predates the split") {
+		t.Errorf("body not carried: %+v", n)
+	}
+	if n := got.Twin[1]; n.TargetURL != "" {
+		t.Errorf("missing idea must not link: %+v", n)
+	}
+	if n := got.Twin[2]; n.Done || n.TargetURL != "" {
+		t.Errorf("open note must not link: %+v", n)
 	}
 }

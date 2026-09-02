@@ -159,7 +159,7 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 
 	// Capture closes (idea, intent) have no follow-ups dance — the run
 	// *is* the capture. For everything else, the operator's local edits
-	// to the harvest scratch files (followups.md, feedback/lore.md) are
+	// to the harvest scratch files (followups.md, feedback/lore.md, feedback/twin.md) are
 	// expected — that's where stage-time captures land — so the
 	// clean-tree gate ignores changes on those paths. Anything else dirty
 	// stays a refusal.
@@ -174,7 +174,8 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 	if !isCaptureWorkflow(workflow) {
 		followupsRel := run.FollowupsPath(projectID, runID)
 		loreRel := run.FeedbackPath(projectID, runID, "lore")
-		dirty, derr := dirtyOutsidePaths(root, followupsRel, loreRel, wiki.LoreDirRel+"/")
+		twinRel := run.FeedbackPath(projectID, runID, "twin")
+		dirty, derr := dirtyOutsidePaths(root, followupsRel, loreRel, twinRel, wiki.LoreDirRel+"/")
 		if derr != nil {
 			return derr
 		}

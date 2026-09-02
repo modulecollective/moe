@@ -111,20 +111,17 @@ type reapedVM struct {
 }
 
 // RunTraces is the non-canvas residue of one run, as the run page shows
-// it: the checklist entries it left in followups.md and
-// feedback/lore.md, and its feedback/twin.md note. Bodies cross the
-// seam as markdown; serve renders them, same as every other doc.
+// it: the checklist entries it left in followups.md, feedback/lore.md,
+// and feedback/twin.md. Bodies cross the seam as markdown; serve
+// renders them, same as every other doc.
 type RunTraces struct {
 	Followups []RunTrace
 	Lore      []RunTrace
-	// TwinNote is nil when the run left no note. Reflect ingests twin
-	// feedback a file at a time, so there's one trace per run, not one
-	// per note inside the file.
-	TwinNote *TwinNoteTrace
+	Twin      []RunTrace
 }
 
-// RunTrace is one checklist entry from followups.md or
-// feedback/lore.md. A harvested entry (Done) that still resolves to
+// RunTrace is one checklist entry from followups.md, feedback/lore.md,
+// or feedback/twin.md. A harvested entry (Done) that still resolves to
 // what it became carries TargetURL; one the operator checked by hand to
 // drop it doesn't. Raw is set instead of Slug/Title when the line
 // didn't match the grammar — display is lenient where harvest is
@@ -143,20 +140,11 @@ type RunTrace struct {
 	TargetStatus string
 }
 
-// TwinNoteTrace is a run's feedback/twin.md and its ingestion state.
-// Reflected with an empty ReflectRun means a pass covered the note but
-// didn't record which — the page says so without a link.
-type TwinNoteTrace struct {
-	Body       string // markdown
-	Reflected  bool
-	ReflectRun string
-}
-
 // runTracesVM is the rendered form of RunTraces.
 type runTracesVM struct {
 	Followups []runTraceVM
 	Lore      []runTraceVM
-	TwinNote  *twinNoteVM
+	Twin      []runTraceVM
 }
 
 type runTraceVM struct {
@@ -167,15 +155,6 @@ type runTraceVM struct {
 	BodyHTML     template.HTML
 	TargetURL    string
 	TargetStatus string
-}
-
-type twinNoteVM struct {
-	BodyHTML template.HTML
-	// Status is the chip text: "awaiting next reflect pass", "folded
-	// into the twin", or "folded in by" when ReflectRun names the pass.
-	Status     string
-	ReflectRun string
-	ReflectURL string
 }
 
 // reapedNotice renders md.Reaped for the run page, or nil when the run
@@ -207,26 +186,11 @@ func (s *Server) gatherRunTraces(projectID, slug string) runTracesVM {
 		s.logf("run traces %s/%s: %v", projectID, slug, err)
 		return runTracesVM{}
 	}
-	out := runTracesVM{
+	return runTracesVM{
 		Followups: traceVMs(traces.Followups),
 		Lore:      traceVMs(traces.Lore),
+		Twin:      traceVMs(traces.Twin),
 	}
-	if n := traces.TwinNote; n != nil {
-		vm := &twinNoteVM{
-			BodyHTML:   template.HTML(md.Render(n.Body, nil)),
-			Status:     "awaiting next reflect pass",
-			ReflectRun: n.ReflectRun,
-		}
-		switch {
-		case n.Reflected && n.ReflectRun != "":
-			vm.Status = "folded in by"
-			vm.ReflectURL = "/run/" + projectID + "/" + n.ReflectRun
-		case n.Reflected:
-			vm.Status = "folded into the twin"
-		}
-		out.TwinNote = vm
-	}
-	return out
 }
 
 func traceVMs(traces []RunTrace) []runTraceVM {

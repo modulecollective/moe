@@ -21,11 +21,10 @@ func tracesServer(t *testing.T, traces RunTraces, gatherErr error) *Server {
 }
 
 // TestRunPageRendersTraces: the three sections a run's residue gets on
-// its page. A landed follow-up links to the idea run it became and
-// badges that run's current status ("did it land, and where is it
-// now"); a lore entry links to the promoted file; the twin note keeps
-// its chip naming the pass that folded it in, with the note itself
-// behind the same disclosure the other two use.
+// its page. All three read the same way now: a landed follow-up or twin
+// note links to the idea run it became and badges that run's current
+// status ("did it land, and where is it now"); a lore entry links to the
+// promoted file. Bodies sit behind a disclosure in every section.
 func TestRunPageRendersTraces(t *testing.T) {
 	s := tracesServer(t, RunTraces{
 		Followups: []RunTrace{
@@ -39,10 +38,9 @@ func TestRunPageRendersTraces(t *testing.T) {
 			{Done: true, Slug: "portable-fact", Title: "A portable fact",
 				Body: "Why: it bites every project the same way.", TargetURL: "/lore/portable-fact"},
 		},
-		TwinNote: &TwinNoteTrace{
-			Body:       "architecture.md understates the serve seam.",
-			Reflected:  true,
-			ReflectRun: "reflect-2026-07",
+		Twin: []RunTrace{
+			{Done: true, Slug: "arch-serve-seam", Title: "architecture.md understates the serve seam",
+				Body: "The component list predates the split.", TargetURL: "/run/alpha/arch-serve-seam", TargetStatus: "in_progress"},
 		},
 	}, nil)
 	body := getRunPage(t, s, "/run/alpha/src")
@@ -59,9 +57,9 @@ func TestRunPageRendersTraces(t *testing.T) {
 		`<h2>lore</h2>`,
 		`href="/lore/portable-fact">portable-fact</a>`,
 		`<h2>twin notes</h2>`,
-		`folded in by`,
-		`href="/run/alpha/reflect-2026-07">reflect-2026-07</a>`,
-		`architecture.md understates the serve seam.`,
+		`href="/run/alpha/arch-serve-seam">arch-serve-seam</a>`,
+		`<span class="badge">in_progress</span>`,
+		`The component list predates the split.`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("run page missing %q\n%s", want, body)
@@ -76,27 +74,24 @@ func TestRunPageRendersTraces(t *testing.T) {
 	if strings.Contains(body, "<details class=\"trace-body\" open") {
 		t.Errorf("trace bodies must default collapsed:\n%s", body)
 	}
-	if !strings.Contains(body, `<summary>note</summary>`) {
-		t.Errorf("the twin note's body must sit behind its own disclosure:\n%s", body)
-	}
 	if strings.Count(body, `<details class="trace-body">`) != 3 {
 		t.Errorf("want a disclosure on each of the follow-up, lore, and twin bodies:\n%s", body)
 	}
 }
 
-// TestRunPagePendingTwinNote: a note no reflect pass has sealed past
-// says so, and offers no link — there's no pass to point at yet.
-func TestRunPagePendingTwinNote(t *testing.T) {
+// TestRunPageUnharvestedTwinNote: a note still waiting on a harvest
+// renders unchecked and unlinked — there is no idea to point at yet.
+func TestRunPageUnharvestedTwinNote(t *testing.T) {
 	s := tracesServer(t, RunTraces{
-		TwinNote: &TwinNoteTrace{Body: "A fresh observation."},
+		Twin: []RunTrace{{Slug: "fresh-observation", Title: "A fresh observation"}},
 	}, nil)
 	body := getRunPage(t, s, "/run/alpha/src")
 
-	if !strings.Contains(body, "awaiting next reflect pass") {
-		t.Errorf("pending note missing its chip\n%s", body)
+	if !strings.Contains(body, `>fresh-observation</span>`) {
+		t.Errorf("unharvested note missing its entry\n%s", body)
 	}
-	if strings.Contains(body, "folded in") {
-		t.Errorf("pending note must not claim it was folded in\n%s", body)
+	if strings.Contains(body, `href="/run/alpha/fresh-observation"`) {
+		t.Errorf("unharvested note must not link\n%s", body)
 	}
 }
 

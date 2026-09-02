@@ -59,6 +59,17 @@ func enterTerminal(root string, md *run.Metadata, newStatus string, skipEdit boo
 		if _, err := os.Stat(filepath.Join(root, wiki.LoreDirRel)); err == nil {
 			paths = append(paths, wiki.LoreDirRel)
 		}
+		// Twin feedback is the third pop, and the third destination:
+		// notes about the project's own twin fan out into ideas so a
+		// spotted twin edit gets scheduled rather than waiting for a
+		// pass that no longer exists.
+		if err := harvestTwinFeedback(root, md.Project, md.ID, md.Workflow, skipEdit); err != nil {
+			return nil, err
+		}
+		twinRel := run.FeedbackPath(md.Project, md.ID, "twin")
+		if _, err := os.Stat(filepath.Join(root, twinRel)); err == nil {
+			paths = append(paths, twinRel)
+		}
 	}
 	md.Status = newStatus
 	if err := run.Save(root, md); err != nil {

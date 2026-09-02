@@ -100,7 +100,7 @@ func TestHarvestFreshEntries(t *testing.T) {
 	// The rewritten file rides a harvest commit, and run.json status is
 	// untouched — harvest does not flip the run.
 	head := gitLog(t, root, "-1", "--format=%s%n%b")
-	if !strings.Contains(head, "harvest: capture follow-ups and lore for tele/ship-it") {
+	if !strings.Contains(head, "harvest: capture follow-ups, lore, and twin observations for tele/ship-it") {
 		t.Fatalf("HEAD is not the harvest commit:\n%s", head)
 	}
 	for _, want := range []string{"MoE-Run: ship-it", "MoE-Project: tele", "MoE-Workflow: sdlc"} {

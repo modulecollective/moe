@@ -9,11 +9,12 @@ You are inside a Ministry of Everything (MoE) bureaucracy session. While doing
 your stage's work, you may notice things *out of scope* for this turn but
 worth recording for future runs. MoE keeps three places for this:
 
-- **The digital twin** (`projects/<project>/digital-twin/`) records what a project *is*
-  and *how it works* — vision, architecture, named patterns, operations,
-  glossary. Code is the implementation; the twin is the intent. When
-  the two disagree, the twin wins until someone updates it. Notes that would
-  edit a twin doc go to twin feedback, below.
+- **Twin feedback** (`feedback/twin.md`) records edits the digital twin
+  (`projects/<project>/digital-twin/` — `vision.md`, `architecture.md`,
+  `patterns.md`, `operations.md`, `glossary.md`) needs but this run shouldn't
+  make. The twin records what a project *is* and *how it works*. Your stage may
+  edit those files directly; this channel is for what you'd edit if it were
+  yours.
 - **Lore** (`lore/`) records portable operational facts that apply across
   multiple projects, not just this one — things like "this kind of sandbox
   needs that kind of proxy." One fact per file with an `applies-when:`
@@ -22,11 +23,11 @@ worth recording for future runs. MoE keeps three places for this:
   scope for the current canvas. The operator triages at close; survivors
   become idea runs.
 
-Both fan out when the run reaches a terminal status — close, merge, or push.
-A conversational session (`moe idea edit --chat`, `moe intent edit --chat`,
-`moe chat`) is the exception: its run may never reach one, so both harvest at
-*session end* instead, with no editor review — what you write fans out the
-moment the operator exits. Write accordingly.
+All three fan out when the run reaches a terminal status — close, merge, or
+push. A conversational session (`moe idea edit --chat`, `moe intent edit
+--chat`, `moe chat`) is the exception: its run may never reach one, so they
+harvest at *session end* instead, with no editor review — what you write fans
+out the moment the operator exits. Write accordingly.
 
 Two more sections at the end cover artifacts you write *as* the work rather
 than as a note about it: **Knowledge** (the project's durable domain
@@ -51,27 +52,42 @@ yourself.
 
 ## Twin observations
 
-If you notice something about the project that belongs in the digital
-twin — would acting on this note edit `projects/<project>/digital-twin/`
-(architecture.md, vision.md, patterns.md, operations.md, glossary.md)? —
-append a note to:
+The digital twin is an ordinary write target for an sdlc stage. If your
+run has the evidence and the edit is yours to make, **edit
+`projects/<project>/digital-twin/` in place** — your turn's commit picks
+it up, and the `moe-twin` skill has the writing contract.
+
+This channel is for the other case: a twin edit you can see but this run
+shouldn't make. Thin evidence, a call that's the operator's, or simply
+out of scope for the change you're landing. Append an entry to:
 
   {{.TwinFeedback}}
 
-Free-form prose; separate notes with `---`. Name the twin doc and
-any file:line refs so the next `moe twin reflect` knows where to
-look. Example:
+Format: the same `- [ ] `slug` — Title` grammar as followups below,
+parsed by the same parser, with the same three load-bearing tokens: the
+`- [ ]` checkbox, the backtick-quoted `slug`, and the em-dash `—`
+before a terse title. Follow it with an indented body (two-space
+indent). Name the twin doc and any file:line refs — that's what makes
+the note actionable later:
 
-  <doc>.md says X is invariant, but <pkg>/<file>.go:<N> does Y.
-  Decide which is canon.
+  - [ ] `architecture-clone-gc-stale` — architecture.md still says reflect owns clone gc
 
-  ---
+    operations.md §"Sandbox clones" moved gc to `moe clone gc` in
+    2026-07; architecture's component list never caught up. Decide
+    which is canon and cut the loser.
 
-  patterns.md "fail loud" claims handlers panic on bad input, but
-  <some-handler>.go silently returns nil. Decide which is canon.
+Unchecked entries are harvested at termination into idea runs, one per
+entry, each opening with a line naming this run and the twin dir acting
+on it edits. Tag `(sdlc)` under the same rule as a followup — mechanical,
+bounded, verifiable — and leave it untagged when a human should decide.
+No other tag is valid: twin-ness rides in the idea's body, not the tag.
 
-The next `moe twin reflect` picks these up as kickoff context — the
-note arrives where the work actually happens.
+A twin slug is a bare slug. The cross-project `<project>/` prefix
+followups allow is rejected here — a twin note is about *this* project's
+twin.
+
+Content written in any other shape is **rejected at termination**, not
+silently dropped.
 
 ---
 
