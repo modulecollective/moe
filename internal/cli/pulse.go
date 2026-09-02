@@ -634,8 +634,9 @@ type pulseGate struct {
 // Workflow picks the mint path and defaults to "sdlc" when empty. The
 // allowlist is sdlc alone: the only workflow a pulse has a reason to
 // propose fresh (chat is perpetual, pulse would be recursion). The
-// field survives the twin reflect it once also named, because a survey
-// that writes one is told so rather than having the key ignored.
+// field outlives the twin reflect it once also named so a survey that
+// still writes `"workflow": "twin"` is told it isn't spawnable rather
+// than having the key silently ignored.
 //
 // Chore names a judged chore instead, and is exclusive with every other
 // field: the survey's claim is only "the condition the operator wrote
