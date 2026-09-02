@@ -161,6 +161,11 @@ first guard fires: a pulse-side ask for a reflect is a nomination, so an
 already-open pass is mapped onto rather than refused, and the gate never has to
 know which case it is.
 
+That channel is gone too. The twin folded into sdlc — any stage may edit the
+five documents, checked on the way out — so there is no reflect to nominate
+and the `workflow` field has one legal value again. See
+[un-changelist.md](un-changelist.md).
+
 ## Step 4: the fourth bang
 
 Which left the last gap. The pulse could find work and open it, but the runs it

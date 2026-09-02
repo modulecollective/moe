@@ -84,8 +84,12 @@ MoE's memory improves through a few explicit channels:
 - The idea backlog holds work that is worth remembering but not ready for a
   full run.
 - The digital twin records project intent in `vision`, `architecture`,
-  `patterns`, `operations`, and `glossary` documents. When code and
-  twin disagree, the twin wins until a deliberate edit updates it.
+  `patterns`, `operations`, and `glossary` documents. When code and twin
+  disagree, the twin wins until a deliberate edit updates it. An sdlc stage
+  makes that edit in place, riding its own turn commit; the stage won't close
+  on a twin left structurally broken. A twin edit a run sees but shouldn't
+  make goes to `feedback/twin.md`, which harvests into an idea at termination
+  the same way followups do.
 - Lore stores portable facts that apply across projects. Agents see a compact
   catalog and open entries only when the "applies when" hint matches. Entries
   carry provenance frontmatter: the run that discovered the fact
@@ -116,7 +120,7 @@ editing the markdown it reads over adding Go code.
 ## Skills
 
 Claude Code and Codex both support skills: named markdown files the backend can
-load when their description matches the situation. MoE ships three:
+load when their description matches the situation. MoE ships four:
 
 - `moe-bureaucracy` teaches agents how to leave traces for downstream runs:
   followups, twin observations, and lore, without exceeding the current stage's
@@ -126,6 +130,10 @@ load when their description matches the situation. MoE ships three:
   transcripts, the twin, and lore.
 - `moe-howto` teaches agents how to capture and groom the idea backlog from a
   chat session, the verb set chat uses on your behalf.
+- `moe-twin` carries the digital twin's writing contract — what each of the
+  five documents owns, how much license an edit has, and the compression
+  discipline. sdlc stages get it, because sdlc is the workflow that writes the
+  twin.
 
 MoE materializes the relevant skills into the session's backend-specific skill
 directory with paths already filled in for the current run.

@@ -91,7 +91,7 @@ happening has already run the experiment. What survived these workflows was a
 smaller vocabulary tied to real habits, plus markdown guidance cheap enough to
 reshape when the habit changes.
 
-The last three went for a different reason: their deliverables were fine and
+The last four went for a different reason: their deliverables were fine and
 the machinery around them was the problem. `kb` wrapped an engine — an
 evolving doc schema, a changelog, a checkpoint, a separate lint session — around
 a directory of markdown articles. Eight runs ever, dormant for two months, one
@@ -99,11 +99,36 @@ schema operation recorded in its whole history. `hooks` and `chores` existed
 because their edits landed in the bureaucracy repo rather than in project
 source, and no other workflow was allowed to write there. Once ordinary sdlc
 stages could commit those directories, the dedicated workflows were a longer
-route to the same file. All three retired in July 2026; the articles, the hook
-scripts, the chore definitions, and the fast loops around them (`moe hook
+route to the same file. Those three retired in July 2026; the articles, the
+hook scripts, the chore definitions, and the fast loops around them (`moe hook
 fire`, `moe chore check`) all stayed. What replaced them is a whitelist entry
-and one structural check that runs when a stage writes the tree. The thing
-worth keeping was the artifact, and it never needed a workflow to have one.
+and one structural check that runs when a stage writes the tree.
+
+`twin` was the same shape and took two months longer to see, because its
+machinery was the most convincing. A six-stage reflect ladder walked the five
+managed documents against an events window; a checkpoint recorded where the
+last pass stopped; a detector refused a pass over edits made outside one; a
+finalize stage sealed it all and rolled the narrative into a history summary.
+Every piece was there to protect an incremental window — and the window only
+existed because a pass was expensive enough to want to resume. Meanwhile the
+ledger said what the ladder cost: one stage could only edit one document, so
+moving a rule from architecture to patterns took two sessions and could not be
+reviewed as one change, and a deliberate pare-down of a 444 KB twin meant six
+interactive sittings nobody was going to sit.
+
+The twin retired as a workflow in September 2026. The five documents are
+ordinary sdlc write targets now: a run that establishes something the twin
+should record edits it in place, and the edit rides that stage's commit. The
+structural check survived — it is the same close-time gate `knowledge` uses,
+with a second scanner. `feedback/twin.md` survived too, but stopped being a
+mailbox: it takes the followups grammar and harvests into ideas, so a twin
+edit worth doing gets scheduled rather than waiting for a pass. The
+checkpoint, the events window, the detector, the history summary, and the
+engine under them all went.
+
+Writing a rule down was never the expensive part. Deciding it was, and the
+ladder had been billing for the writing. The thing worth keeping was the
+artifact, and none of these four needed a workflow to have one.
 
 ## A queue was the wrong answer twice
 
@@ -189,10 +214,11 @@ Some removals began as safety features. `moe twin claim` let an operator
 legitimize edits made directly to the managed twin documents. It seemed like a
 practical escape hatch. In use it was confusing: a decided change was supposed
 to travel through reflection, while claim blessed a parallel path after the
-fact. We removed the verb but kept the detection that made it possible. The
-guard now refuses unrecorded edits and directs the change back through the
-workflow. The bypass died; the boundary survived
-(`drop-twin-claim-2026-06-12`).
+fact. We removed the verb but kept the detection that made it possible: a guard
+that refused unrecorded edits and directed the change back through the
+workflow (`drop-twin-claim-2026-06-12`). The guard outlived the verb by three
+months and then went with the workflow itself — with no incremental window to
+protect, an out-of-band edit is just an edit.
 
 `moe eval` was the purest attempt at detached oversight. A pinned LLM judge
 compared a merged run's design with its code diff and wrote specific findings
@@ -212,8 +238,9 @@ That is narrower than “judgment cannot be automated.” MoE asks agents to
 review work constantly. The lesson is that a report about a completed
 transition does not repair the transition. Guidance belongs where the agent
 acts. Deterministic checks belong where state changes. Review and test can
-send work back; push hooks and fast-forward rules can block a bad merge;
-reflection can repair recorded intent. A detached score must prove that it
+send work back; push hooks and fast-forward rules can block a bad merge; a
+stage that changed the shape can record the new intent while it still has the
+context. A detached score must prove that it
 changes decisions, and eval did not.
 
 Deletion is therefore part of the architecture, not an admission that the

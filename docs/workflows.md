@@ -77,13 +77,13 @@ excludes both. Every tail composes with either seed: `--seed --park` mints from
 a typed seed and walks away, `--from-idea --chain` promotes an idea and rides
 it. All ride the shared `new` facade, so
 every workflow's `new` that takes `--from-idea` takes these too (a cascade tail
-needs the workflow to have a cascade dispatcher, which it refuses to mint a run
-without). These tails reach past `new`: `moe chore open`, `moe twin reflect`,
-and `moe sdlc reopen` — the other creators that end at the chain prompt — take
-`--park` and the whole `--ship`/`--chain` ladder with the same
-meaning. (`--chain`'s ride is usually a no-op on a freshly minted run, which
-heads no chain yet; it's offered because the ladder is one vocabulary and the
-rung's consent is what matters — same as `new --chain` on a fresh run.)
+needs the workflow to have a cascade dispatcher, which it refuses to mint a
+run without). These tails reach past `new`: `moe chore open` and `moe sdlc
+reopen` — the other creators that end at the chain prompt — take `--park` and
+the whole `--ship`/`--chain` ladder with the same meaning. (`--chain`'s ride
+is usually a no-op on a freshly minted run, which heads no chain yet; it's
+offered because the ladder is one vocabulary and the rung's consent is what
+matters — same as `new --chain` on a fresh run.)
 
 ### Cascades: the bang vocabulary
 
@@ -129,7 +129,7 @@ at the interactive chain prompt alike. The reasoning is durable (it is the
 committed canvas) and the run stops being re-offered on every sweep;
 `moe sdlc reopen` mints a successor seeded from that canvas if the operator
 disagrees. A close that fails — lock contention, a dirty tree — warns and
-leaves the run open. sdlc only: twin's ladder seals at `finalize`.
+leaves the run open. sdlc only.
 
 ### Chains
 
@@ -150,7 +150,7 @@ runs at night"; standing, it is "the clock you armed keeps asking", under every
 guard a typed ride runs under.
 
 `moe chain edit` opens every active chainable run across projects in `$EDITOR`
-— every operator-cascade workflow (SDLC, twin) plus chain heads — grouped into
+— every operator-cascade workflow (SDLC today) plus chain heads — grouped into
 blocks that mirror the dash's chains. A blank line is a chain boundary: each
 contiguous block of run lines becomes one linear chain (each line chains-to
 the one below it in its block; the block's last line chains-to nothing). The
@@ -469,19 +469,18 @@ Every pulse does three things:
   followups; and writes a short report ending in a machine-readable `## Gate`.
   It also judges the project's **judged chores**: for each, does what landed
   meet the condition the operator wrote? When it does, the gate nominates the
-  chore and the harness opens its ordinary chore run.
-  The gate may also open parked runs — fix runs and twin reflects alike —
-  and order queued work into chained lanes, in one grammar: a run with no
-  ordering opinion goes in `loose`, a run whose position the sweep is sure
-  of is written inline at that position in `threads`. A `loose` entry may
-  set `"design_only": true`, which opens the run, rides it one headless
-  design turn and parks it — the sweep's rung between filing a followup
-  and proposing a fix. See "Grooming lanes" in the stage guidance. A clean
-  sweep auto-closes its own run: the filed followups harvest straight into
-  ideas (review them by scrapping on the dash). Every fire runs a fresh sweep
-  unconditionally — a lingering open pulse run means a failed or abandoned
-  sweep, sitting visible on the dash's ACTIVE list until you inspect and
-  close it, but it never blocks the next survey.
+  chore and the harness opens its ordinary chore run. The gate may also open
+  parked runs and order queued work into chained lanes, in one grammar: a run
+  with no ordering opinion goes in `loose`, a run whose position the sweep is
+  sure of is written inline at that position in `threads`. A `loose` entry may
+  set `"design_only": true`, which opens the run, rides it one headless design
+  turn and parks it — the sweep's rung between filing a followup and proposing
+  a fix. See "Grooming lanes" in the stage guidance. A clean sweep auto-closes
+  its own run: the filed followups harvest straight into ideas (review them by
+  scrapping on the dash). Every fire runs a fresh sweep unconditionally — a
+  lingering open pulse run means a failed or abandoned sweep, sitting visible
+  on the dash's ACTIVE list until you inspect and close it, but it never
+  blocks the next survey.
 
 ```sh
 moe pulse new <project>                  # run the whole pulse by hand (chore auto-open + survey)
@@ -509,7 +508,7 @@ going through a run.
 Most of what a survey finds becomes a followup. When it finds work that is
 mechanical, bounded, and verifiable — a red check with a named failing test,
 documentation the code plainly contradicts — it may open or nominate an
-ordinary `sdlc`, `twin`, or chore run. It can place new and existing queued
+ordinary `sdlc` or chore run. It can place new and existing queued
 runs into ordinary chain threads, leave them loose when it has no ordering
 opinion, or add a chain head when a stable name helps tell the thread's story.
 A head is a naming convenience, not a container every batch receives.
@@ -710,14 +709,16 @@ the code and the twin disagree, the twin wins until a deliberate edit updates
 it. A run that would contradict a recorded decision has to name the conflict
 first, not quietly diverge. Intent leads; implementation follows.
 
-`moe twin reflect <project>` is the maintenance verb. It walks each document
-against the journal events since the last pass and folds observed drift in
-under a rising edit bar: fill a genuine gap freely, tighten wording only on
-repeated sightings, and reverse a stated bet only loudly and on strong
-evidence. A closing `finalize` stage then seals the pass — clearing hygiene
-findings and rolling events into a history summary, older horizons compressed.
-Runs don't edit the twin directly; they leave observations as feedback notes,
-and reflect is where those get adjudicated. See
+The twin has no maintenance verb. An `sdlc` run that establishes something
+the twin should record edits the five documents in place, and the edit rides
+that stage's own commit — the same route hooks, chores, and knowledge topics
+take. The `moe-twin` skill carries the writing contract: fill a genuine gap
+freely, tighten wording on evidence, reverse a stated bet only loudly, and
+treat compression as a valid edit. A stage that leaves the tree structurally
+broken — a dangling cross-reference, an empty doc — doesn't get to close on it.
+
+A twin edit a run can see but shouldn't make goes to `feedback/twin.md`, which
+harvests into an idea at termination. See
 [concepts.md §Feedback Channels](concepts.md#feedback-channels) for how the
 twin steers future runs.
 

@@ -129,9 +129,9 @@ source of truth for the exact command surface; this page is a map.
 - `moe chain new [--seed] <project>/<slug>` mints a chain run: a stageless
   placeholder head to collect a batch under. `--seed` pops `$EDITOR` on its
   purpose note first.
-- `moe chain edit` opens an editor over active operator-cascade runs (SDLC,
-  twin) plus chain heads; reorder
-  lines to record a run chain in the bureaucracy journal.
+- `moe chain edit` opens an editor over active operator-cascade runs (SDLC)
+  plus chain heads; reorder lines to record a run chain in the bureaucracy
+  journal.
 - `moe chain note <project>/<run>` edits a head's purpose note: why the batch
   exists. Membership isn't written there — it renders live from the edges.
 - `moe chain kick <project>/<run>` rides a chain headlessly from
@@ -153,8 +153,6 @@ source of truth for the exact command surface; this page is a map.
   the idea (`untag` clears it); untagged ideas are operator-only.
 - `moe intent new|edit|close|list|cat|log|harvest` manages operator-authored
   standing direction.
-- `moe twin reflect|vision|architecture|patterns|operations|glossary|finalize|close|harvest|cat|log`
-  maintains recorded intent.
 - `moe pulse new|pulse|close|cat|log` runs and inspects a project's read-only
   backlog sweep. `moe pulse new --dynamic <project>` runs it at the dynamic
   consent rung — the sweep starts every kickable parked thread on the board
@@ -237,9 +235,9 @@ comments. Two properties in v1:
 - `agent` — the backend name (`claude` | `codex`), resolved through the same
   registry `--agent` uses.
 
-**Selectors** have two axes — workflow and stage. Because a bare stage name is
-ambiguous across workflows (`vision` is a stage of `twin` alone, `code` of `sdlc`),
-stage-only selectors take a leading dot:
+**Selectors** have two axes — workflow and stage. Because a bare stage name
+could be ambiguous across workflows (`code` is a stage of `sdlc`, `chat` of
+`chat`), stage-only selectors take a leading dot:
 
 | Selector      | Matches                     | Specificity |
 | ------------- | --------------------------- | ----------- |

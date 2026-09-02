@@ -201,54 +201,6 @@ separate bar.
        "design": "<markdown seeding the design canvas>"}
     ]
 
-### Asking for a twin reflect
-
-A spec may set `"workflow": "twin"` to ask for a twin reflect instead
-of a fix run. Only `sdlc` (the default) and `twin` are spawnable;
-anything else is skipped.
-
-    "loose": [
-      {"workflow": "twin",
-       "why": "the X/Y boundary moved and no twin doc describes it"}
-    ]
-
-**When.** Either the cycle landed a significant twin-relevant change (a
-decision, a new component, a boundary move the twin docs don't yet
-describe), or twin staleness has accumulated (many small changes and/or
-pending twin observations teed up since the last reflect). Never
-manufacture one to justify the turn.
-
-You don't have to know whether a reflect is already open. The ask is a
-*nomination*, not a create: with none open the harness mints one, and
-with one already open it lands on that run instead — so a twin spec
-written at a thread's tail places the open reflect exactly as it would
-a fresh one. Ask when the drift is real; the harness sorts out which
-run it lands on.
-
-**A twin spec carries almost nothing.** `workflow` and `why`, and that
-is the whole shape. The harness names the reflect itself
-(`reflect-YYYY-MM-DD`), so a `slug` names nothing and is better left
-off. `title`/`design` are meaningless on a reflect too — it reads the
-twin, not a seed — and are warned and ignored.
-
-**Placement is yours, and the tail is the default.** A reflect sweeps
-the settled record of everything that ran before it, so all things
-equal it goes *last*: when this gate builds a thread, write the twin
-spec as the final entry of the thread carrying the cycle's work.
-Leaving a pending reflect in `loose` while you order other work is the
-choice that needs justifying, not placing it. A reflect written in
-`loose` parks standalone and unchained, same as any other spec — and
-under a dynamic sweep it starts on its own, in no particular relation to
-the work it was meant to sweep. That is one more reason the tail is the
-default.
-
-Two cases carry that justification. If the thread's membership or
-order is a guess — it fails the lane bar — don't append the reflect to
-it: a reflect reading a half-finished record is one to leave in
-`loose`. And with several threads there is still one reflect and one
-tail, so put it behind the one carrying the cycle's twin-relevant bulk;
-never mint a `head` just to have somewhere to put it.
-
 **The bar: mechanical, bounded, and verifiable.** All three, not two:
 
 - **Mechanical** — the fix is obvious from the evidence. You are not
@@ -378,8 +330,8 @@ its seed come from the chore's own definition; `why` is the one line the
 operator reads, and it should name the landed change that met the
 condition, not restate the criterion.
 
-Like a twin spec, this is a nomination rather than a create: with the
-chore's run already open, the entry lands on that run. So a `chore`
+This is a nomination rather than a create: with the chore's run already
+open, the entry lands on that run. So a `chore`
 entry works at a thread position too, and places the chore's run there.
 A thread rooted at a chore run starts like any other — the operator
 wrote the prompt, so the design is settled by construction and the only
@@ -596,26 +548,6 @@ Your kickoff carries the board's open questions and the notes the
 operator has pushed at runs. Don't re-ask what's already open, and
 don't park a run "awaiting input" when the operator has already pushed
 it something — that run's own turn receives the prose in full.
-
-### A parked reflect is a thread, not a finished job
-
-An earlier sweep's twin reflect can still be sitting parked with the
-pending observations stacked behind it — your kickoff names it when so.
-Parked is where a reflect stays until someone chains or kicks it; it is
-not a verdict that the reflect is done, and it does not make the drift
-it was opened for any less real. Treat it like any other parked
-machine-rooted thread, and give it the same slot a fresh one would
-get: when this sweep grooms lanes, write a twin spec at the tail of the
-thread carrying the work it should read the settled record of, or in a
-thread of its own. A reflect that would read a half-finished record
-is exactly the case `"park"` is for — name that in
-the park line rather than leaving the reflect out of the order.
-
-You do not need to know which case you are in. Writing a
-`"workflow": "twin"` spec at a thread's tail places the reflect either
-way: with one already open the harness lands on it rather than minting
-a second. What is never right is treating "a reflect is already open"
-as a reason to leave the first one sitting.
 
 ## Hard don'ts
 

@@ -95,12 +95,14 @@ canvas.
 ## Read, don't write
 
 Anything under `projects/<p>/runs/<other-slug>/` is somebody else's
-run — read for context, never edit. Same for
-`projects/<p>/digital-twin/` and `lore/<slug>.md`: those are decided
-state the operator updates through `moe twin reflect` and lore
-promotion, not through inline edits. If you find something in another
-run that ought to change, leave a trace via the `moe-bureaucracy`
-skill instead of editing the source.
+run — read for context, never edit. `lore/<slug>.md` is decided state
+the operator updates through lore promotion, not through inline edits.
+If you find something in another run that ought to change, leave a
+trace via the `moe-bureaucracy` skill instead of editing the source.
+
+`projects/<p>/digital-twin/` is the exception, and only for an sdlc
+stage: it is a write target for a run whose own evidence moved the
+project's recorded intent. The `moe-twin` skill has the contract.
 
 Your own canvas lives at the path the always-on stage prompt named;
 that is the only file under the bureaucracy root you write to.
