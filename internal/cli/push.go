@@ -717,6 +717,9 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 	err = repolock.With(root, repolock.Options{
 		Purpose: "push-harvest",
 		Run:     md.Project + "/" + md.ID,
+		// An interactive push keeps the harvest editor pop, so this
+		// window can sit on the operator. See runClose.
+		Heartbeat: true,
 	}, func() error {
 		var ferr error
 		paths, ferr = enterTerminal(root, md, run.StatusMerged, skipTerminalEdit)
@@ -785,6 +788,10 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 	err = repolock.With(root, repolock.Options{
 		Purpose: "push-merge",
 		Run:     md.Project + "/" + md.ID,
+		// sync.BumpOne fetches the project submodule from its remote
+		// inside this window — the one journal lock window that still
+		// spans the network after the push moved to serve.
+		Heartbeat: true,
 	}, func() error {
 		if err := releaseRunWorkspace(root, md); err != nil {
 			moePrintf(stderr, "warning: release workspace: %v\n", err)

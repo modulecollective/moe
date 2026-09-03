@@ -169,6 +169,9 @@ func harvestRunInProcess(root, workflow, projectID, runID string, skipEdit bool,
 	return repolock.With(root, repolock.Options{
 		Purpose: workflow + "-harvest",
 		Run:     projectID + "/" + runID,
+		// Three $EDITOR pops for operator review live inside this
+		// window. See the same note on runClose's lock options.
+		Heartbeat: true,
 	}, func() error {
 		if err := harvestFollowups(root, projectID, runID, workflow, skipEdit); err != nil {
 			return err

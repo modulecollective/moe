@@ -254,6 +254,14 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 	if err := repolock.With(root, repolock.Options{
 		Purpose: workflow + "-close",
 		Run:     projectID + "/" + runID,
+		// enterTerminal harvests, and an interactive harvest pops
+		// $EDITOR inside this window — an unbounded wait on the
+		// operator. Without the heartbeat the holder reads as stale
+		// after StaleThreshold and the next acquirer takes the lock out
+		// from under the review. Most journal windows dropped the
+		// heartbeat when the push left; this is one of the few that
+		// can still sit.
+		Heartbeat: true,
 	}, func() error {
 		if cleanup != nil {
 			if err := cleanup(root, md, stdout, stderr); err != nil {
