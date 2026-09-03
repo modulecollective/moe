@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/modulecollective/moe/internal/agent"
+	"github.com/modulecollective/moe/internal/procgroup"
 	"github.com/modulecollective/moe/internal/run"
 )
 
@@ -309,7 +310,7 @@ func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 	// takes tool children (go test, npm install) too, not just the
 	// claude leader — a zombie tool process can't outlive the turn
 	// holding this pipe open or writing into the sandbox clone.
-	agent.SetProcessGroup(cmd)
+	procgroup.Isolate(cmd)
 	// agent.StartCommand wraps cmd.Start so an operator Ctrl-C during
 	// the headless turn surfaces as a non-nil waitErr (ErrInterrupted)
 	// instead of a clean exit. The context's timeout-kill still wins on

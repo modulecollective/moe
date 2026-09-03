@@ -8,7 +8,7 @@ import (
 
 // drainGrace bounds how long DrainThenWait waits for the stdout drain to
 // finish after the context deadline fires before it force-closes the
-// pipe read end. The group SIGKILL (SetProcessGroup) normally EOFs the
+// pipe read end. The group SIGKILL (procgroup.Isolate) normally EOFs the
 // pipe near-instantly, so this only matters for the pathological case of
 // a process that escaped its group (a setsid'ing daemon) while holding
 // the agent's stdout: without the force-close the headless cascade would

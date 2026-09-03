@@ -73,7 +73,7 @@ func TestExecuteOneShotDrainsAllProgress(t *testing.T) {
 // codex: the fake CLI backgrounds a grandchild that inherits stdout and
 // never exits, so a leader-only SIGKILL would leave it holding the pipe
 // (drain hangs) and running (writing into the sandbox after the turn).
-// SetProcessGroup's group-wide kill must take the grandchild too.
+// procgroup.Isolate's group-wide kill must take the grandchild too.
 func TestExecuteOneShotDeadlineKillsProcessGroup(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "grandchild.pid")
 	script := "#!/bin/sh\n" +

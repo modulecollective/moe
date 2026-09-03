@@ -67,7 +67,7 @@ func (c *Command) watch(sigCh <-chan os.Signal) {
 	for range sigCh {
 		c.interrupted.Store(true)
 		// signalProcess forwards to the whole process group when the
-		// child was isolated with SetProcessGroup (one-shot path), so
+		// child was isolated with procgroup.Isolate (one-shot path), so
 		// tool children still get the Ctrl-C the tty no longer delivers
 		// to them; leader-only otherwise.
 		_ = signalProcess(c.cmd, os.Interrupt)

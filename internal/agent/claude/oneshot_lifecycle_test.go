@@ -74,7 +74,7 @@ func TestExecuteOneShotDrainsAllProgress(t *testing.T) {
 // fake CLI backgrounds a grandchild that inherits stdout and never
 // exits, so a leader-only SIGKILL would leave the grandchild holding the
 // pipe (drain hangs) and running (writing into the sandbox after the
-// turn). SetProcessGroup's group-wide kill must take the grandchild too:
+// turn). procgroup.Isolate's group-wide kill must take the grandchild too:
 // the call returns promptly with a timeout error and the grandchild is
 // gone.
 func TestExecuteOneShotDeadlineKillsProcessGroup(t *testing.T) {
