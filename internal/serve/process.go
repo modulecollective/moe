@@ -68,10 +68,17 @@ type child struct {
 type children struct {
 	mu  sync.RWMutex
 	all map[string]*child
-	// notify fires once per child on natural exit (not on server
-	// shutdown). Empty by default; Server.New wires it when
-	// Options.NotifyURL is set.
+	// notify fires once per child on natural exit. Empty by default;
+	// Server.New wires it when Options.NotifyURL is set. Read through
+	// exitNotifier rather than captured at spawn, so shutdown can
+	// suppress it for children it is killing itself.
 	notify func(id string, exitErr error)
+	// stopping is raised once by shutdown and never cleared — a
+	// registry only shuts down once. It is what makes notify's "on
+	// natural exit" true: a child serve interrupted exits with a
+	// status the operator caused, so posting it as a sweep failure
+	// would be a false alarm.
+	stopping bool
 	// onSpawn and onExit are the activity record's hooks: one call per
 	// child started, one per child reaped, with the output tail attached
 	// to the second. Wired once in Server.New, at the registry level
@@ -139,15 +146,28 @@ func (cs *children) spawn(id, moeBin string, args []string, root string, logger 
 		started: time.Now(),
 		done:    make(chan struct{}),
 	}
-	notify, onSpawn, onExit := cs.notify, cs.onSpawn, cs.onExit
+	onSpawn, onExit := cs.onSpawn, cs.onExit
 	cs.all[id] = c
 	cs.mu.Unlock()
 
 	if onSpawn != nil {
 		onSpawn(id, c.started)
 	}
-	go c.read(logger, notify, onExit)
+	go c.read(cs, logger, onExit)
 	return c, nil
+}
+
+// exitNotifier returns the hook to fire for a child that has just
+// exited, or nil once shutdown has started. Looked up at exit time
+// rather than captured at spawn: a child spawned long before the
+// Ctrl-C still has to be silenced by it.
+func (cs *children) exitNotifier() func(id string, exitErr error) {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	if cs.stopping {
+		return nil
+	}
+	return cs.notify
 }
 
 func (cs *children) get(id string) (*child, bool) {
@@ -196,6 +216,11 @@ func (cs *children) remove(id string) {
 // the Go runtime's default handler).
 func (cs *children) shutdown(ctx context.Context, logger io.Writer) {
 	cs.mu.Lock()
+	// Raised before the early return below, not alongside the live
+	// children: the narrow case this closes is a child that exited a
+	// moment ago whose reader hasn't reached its notify call yet, and
+	// that child is not in live.
+	cs.stopping = true
 	live := make([]*child, 0, len(cs.all))
 	for _, c := range cs.all {
 		select {
@@ -277,14 +302,15 @@ func shutLogf(logger io.Writer, format string, a ...any) {
 }
 
 // read drains the master PTY until EIO, then reaps the child and
-// closes done. Calls notify (if non-nil) once the exit status is
-// known, then onExit with the output tail.
+// closes done. It then asks the registry for a notify hook — nil once
+// shutdown has raised stopping, so a child serve killed itself sends
+// nothing — and finally calls onExit with the output tail.
 //
 // Only the last childTailBytes are kept, and only so a child that died
 // can say what of. This is still not a remote terminal — nothing streams,
 // nothing is stored past the process's own lifetime, and the agent inside
 // moe handles its own per-document transcript mirror at session close.
-func (c *child) read(logger io.Writer, notify func(string, error), onExit func(string, time.Time, error, string)) {
+func (c *child) read(cs *children, logger io.Writer, onExit func(string, time.Time, error, string)) {
 	buf := make([]byte, 4096)
 	for {
 		n, err := c.pty.File().Read(buf)
@@ -300,7 +326,7 @@ func (c *child) read(logger io.Writer, notify func(string, error), onExit func(s
 	if logger != nil {
 		fmt.Fprintf(logger, "serve: child %s exited: %v\n", c.id, c.exitErr)
 	}
-	if notify != nil {
+	if notify := cs.exitNotifier(); notify != nil {
 		notify(c.id, c.exitErr)
 	}
 	if onExit != nil {

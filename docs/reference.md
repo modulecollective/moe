@@ -38,8 +38,10 @@ source of truth for the exact command surface; this page is a map.
   the output tail of any sweep that failed — reachable from the menu and from
   the one-line status cluster every board header carries. `MOE_SERVE_NOTIFY_URL`
   is the other env var: set it and serve POSTs a small JSON body to that URL
-  each time a heartbeat sweep exits, naming which project's sweep it was and
-  whether it succeeded. A failed POST is logged and blocks nothing.
+  each time a heartbeat sweep exits on its own, naming which project's sweep it
+  was and whether it succeeded. A sweep serve interrupted on its way down sends
+  nothing: an `ok:false` there would report a failure the operator caused. A
+  failed POST is logged and blocks nothing.
 - `moe project mode <id> [paused|safe|auto]` caps what the heartbeat may start
   in one project, without stopping the process. See below.
 - `moe chore list|check|open|skip` lists due project chores, dry-runs a chore

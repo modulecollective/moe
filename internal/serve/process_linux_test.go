@@ -381,3 +381,80 @@ func TestShutdownWithALiveChildLeavesNoStateFile(t *testing.T) {
 			"every later `moe dash` would report a crash that never happened")
 	}
 }
+
+// TestShutdownSuppressesNotify: the notify hook is the operator's
+// phone. A sweep serve itself interrupted exits 130, which would POST
+// `ok:false` — a "vendor is down" tell for a shutdown the operator
+// asked for. The negative is deterministic because read fires onExit
+// after notify on the same goroutine, so the channel below is a
+// happens-after edge for the counter.
+func TestShutdownSuppressesNotify(t *testing.T) {
+	withShortShutdownGrace(t, 2*time.Second, 500*time.Millisecond)
+	cs := newChildren()
+	notified := 0
+	cs.notify = func(string, error) { notified++ }
+	exited := make(chan struct{})
+	cs.onExit = func(string, time.Time, error, string) { close(exited) }
+
+	if _, err := cs.spawn("p/r", "/bin/cat", nil, t.TempDir(), io.Discard); err != nil {
+		t.Fatalf("spawn: %v", err)
+	}
+	cs.shutdown(context.Background(), io.Discard)
+
+	select {
+	case <-exited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the child's exit hook")
+	}
+	if notified != 0 {
+		t.Errorf("notify fired %d time(s) for a child serve killed itself; want 0", notified)
+	}
+}
+
+// TestNaturalExitStillNotifies is the other half of
+// TestShutdownSuppressesNotify: suppressing on shutdown must not
+// suppress the case the webhook exists for. Nothing else pins the
+// spawn → notify path — TestMakeNotifierPostsJSON tests the POST body
+// in isolation.
+func TestNaturalExitStillNotifies(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		bin     string
+		wantErr bool
+	}{
+		{"failure", "/bin/false", true},
+		{"success", "/bin/echo", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cs := newChildren()
+			var gotID string
+			var gotErr error
+			notified := 0
+			cs.notify = func(id string, exitErr error) {
+				notified++
+				gotID, gotErr = id, exitErr
+			}
+			exited := make(chan struct{})
+			cs.onExit = func(string, time.Time, error, string) { close(exited) }
+
+			if _, err := cs.spawn("p/r", tc.bin, nil, t.TempDir(), io.Discard); err != nil {
+				t.Fatalf("spawn: %v", err)
+			}
+			select {
+			case <-exited:
+			case <-time.After(5 * time.Second):
+				t.Fatal("timed out waiting for the child's exit hook")
+			}
+
+			if notified != 1 {
+				t.Fatalf("notify fired %d time(s) for a natural exit; want 1", notified)
+			}
+			if gotID != "p/r" {
+				t.Errorf("notify id = %q, want %q", gotID, "p/r")
+			}
+			if (gotErr != nil) != tc.wantErr {
+				t.Errorf("notify exitErr = %v, want non-nil: %v", gotErr, tc.wantErr)
+			}
+		})
+	}
+}
