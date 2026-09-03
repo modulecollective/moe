@@ -177,7 +177,7 @@ func runPulse(root, projectID, emitRun string, stdout, stderr io.Writer) (int, b
 	pi := installPulseInterrupt()
 	defer pi.Close()
 	moePrintf(stderr, "pulse: scanning %s — Ctrl-C to skip\n", projectID)
-	autoOpenDueChores(root, projectID, pi, stdout, stderr)
+	autoOpenDueChores(root, projectID, pi, stderr)
 	reconcileAtPulse(root, projectID, pi, stdout, stderr)
 	code := runPulseSurvey(root, projectID, emitRun, pi, stdout, stderr)
 	return code, pi.interrupted()
@@ -222,7 +222,7 @@ func reconcileAtPulse(root, projectID string, pi *pulseInterrupt, stdout, stderr
 // refusal is the anti-pile-up guard, so a chore that already has an open
 // run is skipped silently; any other failure warns and moves on (a chore
 // pile-up must not derail the sweep or the verb that triggered it).
-func autoOpenDueChores(root, projectID string, pi *pulseInterrupt, stdout, stderr io.Writer) {
+func autoOpenDueChores(root, projectID string, pi *pulseInterrupt, stderr io.Writer) {
 	states, err := gatherChoreStates(root, projectID)
 	if err != nil {
 		moePrintf(stderr, "pulse: read chore states for %s: %v\n", projectID, err)
@@ -238,7 +238,7 @@ func autoOpenDueChores(root, projectID string, pi *pulseInterrupt, stdout, stder
 		if !s.Due {
 			continue
 		}
-		if _, err := openChoreInProcess(root, projectID, s.Definition.Name, choreOpenNormal, stdout, stderr); err != nil {
+		if _, err := openChoreInProcess(root, projectID, s.Definition.Name, choreOpenNormal); err != nil {
 			if _, ok := errors.AsType[*choreNotOpenableError](err); ok {
 				// Expected: an open run already holds this chore, or it
 				// cooled/undued between the scan and the open.
@@ -306,7 +306,7 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 		// walks. Unstamped, the sweep's opening act read as the
 		// operator's.
 		Trailers: trailers.Block{Consent: walkConsent()},
-	}, stdout, stderr)
+	})
 	if err != nil {
 		moePrintf(stderr, "pulse: open run for %s: %v\n", projectID, err)
 		return 1
@@ -329,7 +329,7 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 	// the just-minted skeleton run so it doesn't linger on the dash with
 	// nothing to review.
 	if pi.interrupted() {
-		disposePulseRun(root, projectID, md.ID, stdout, stderr)
+		disposePulseRun(root, projectID, md.ID, stderr)
 		return 0
 	}
 
@@ -357,7 +357,7 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 		// millisecond gap between setup children tripped the pre-executor
 		// belt (openPulse's prompt builder returned errPulseSkipped).
 		// Nothing was surveyed, so dispose the just-minted run.
-		disposePulseRun(root, projectID, md.ID, stdout, stderr)
+		disposePulseRun(root, projectID, md.ID, stderr)
 		return 0
 	case pi.interrupted():
 		// The agent ran and the operator asked for the sweep to get out of
@@ -412,7 +412,7 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 	// can only be stamped once every run in it exists, and a kick must
 	// not start until the thread it names has stopped moving.
 	groups := applyPulseGate(root, projectID, md.ID, gate, stdout, stderr)
-	groomed := groomChains(root, projectID, md.ID, groups, survey.chainEdges, stdout, stderr)
+	groomed := groomChains(root, projectID, md.ID, groups, survey.chainEdges, stderr)
 
 	// Clean sweep: auto-close the run so the next sweep starts from a
 	// clean board. Route through the registered close (subject +
@@ -436,7 +436,7 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 	var stamp closeCleanup
 	if currentRideMode == rideDynamic {
 		section := renderKickSection(planKick(root, groomed))
-		stamp = func(root string, _ *run.Metadata, _, _ io.Writer) error {
+		stamp = func(root string, _ *run.Metadata) error {
 			body, err := os.ReadFile(canvas)
 			if err != nil {
 				return fmt.Errorf("read pulse canvas: %w", err)
@@ -449,7 +449,7 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 			return run.Stage(root, canvasRel)
 		}
 	}
-	if err := closePulseRun(root, projectID, md.ID, stamp, stdout, stderr); err != nil {
+	if err := closePulseRun(root, projectID, md.ID, stamp, stderr); err != nil {
 		if before != nil {
 			// The stamp got as far as rewriting the canvas. Put it back:
 			// the dirty-tree gate is repo-wide, so a half-applied stamp
@@ -487,13 +487,13 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 // nil and gets exactly the registered behavior, while the disposal
 // passes the skip-note stamp so it rides the close's single lock and
 // single commit instead of taking its own.
-func closePulseRun(root, projectID, runID string, cleanup closeCleanup, stdout, stderr io.Writer) error {
+func closePulseRun(root, projectID, runID string, cleanup closeCleanup, stderr io.Writer) error {
 	reg, ok := lookupCloseRegistration(pulseWorkflow)
 	if !ok {
 		return fmt.Errorf("no close registration for %q", pulseWorkflow)
 	}
 	return closeRunInProcess(root, pulseWorkflow, reg.subject, cleanup,
-		projectID, runID, true /*skipEdit*/, stdout, stderr)
+		projectID, runID, true /*skipEdit*/, stderr)
 }
 
 // disposePulseRun closes a just-minted pulse run the operator Ctrl-C'd
@@ -518,11 +518,11 @@ func closePulseRun(root, projectID, runID string, cleanup closeCleanup, stdout, 
 // of closing it with a decoy canvas. Escalation by visibility is the
 // pulse's standard failure mode, disposal only fires on the operator's
 // own Ctrl-C, and a decoy report has cost three diagnosis cycles.
-func disposePulseRun(root, projectID, runID string, stdout, stderr io.Writer) {
+func disposePulseRun(root, projectID, runID string, stderr io.Writer) {
 	canvasRel := run.ContentPath(projectID, runID, pulseDoc)
 	canvas := filepath.Join(root, canvasRel)
 	var before []byte
-	stamp := func(root string, md *run.Metadata, stdout, stderr io.Writer) error {
+	stamp := func(root string, md *run.Metadata) error {
 		body, err := os.ReadFile(canvas)
 		if err != nil {
 			return fmt.Errorf("read pulse canvas: %w", err)
@@ -536,7 +536,7 @@ func disposePulseRun(root, projectID, runID string, stdout, stderr io.Writer) {
 		// note and the status flip are one commit.
 		return run.Stage(root, canvasRel)
 	}
-	if err := closePulseRun(root, projectID, runID, stamp, stdout, stderr); err != nil {
+	if err := closePulseRun(root, projectID, runID, stamp, stderr); err != nil {
 		restorePulseRun(root, projectID, runID, canvas, before)
 		moePrintf(stderr, "pulse: skip-close %s/%s: %v — leaving run open\n", projectID, runID, err)
 		return
@@ -934,8 +934,7 @@ func askThreadEntry(root, projectID, pulseSlug, slug, question string, stderr io
 		moePrintf(stderr, "pulse: input: %s/%s is a chain head — no stage to deliver an answer to; question dropped\n", projectID, slug)
 		return
 	}
-	e, err := input.Ask(root, projectID, slug, projectID+"/"+pulseSlug,
-		question, walkConsent(), io.Discard, stderr)
+	e, err := input.Ask(root, projectID, slug, projectID+"/"+pulseSlug, question, walkConsent())
 	if err != nil {
 		moePrintf(stderr, "pulse: input: %s/%s: %v\n", projectID, slug, err)
 		return
@@ -984,7 +983,7 @@ func (m *pulseMinter) mint(s pulseRunSpec, stdout, stderr io.Writer) string {
 	// A chore nomination names a registration, not a slug to mint, so it
 	// dispatches ahead of the slug validation the sdlc path applies.
 	if choreName := strings.TrimSpace(s.Chore); choreName != "" {
-		return m.nominateChore(choreName, s, stdout, stderr)
+		return m.nominateChore(choreName, s, stderr)
 	}
 	slug := strings.TrimSpace(s.Slug)
 	// Dispatch on workflow before the slug check, the same way a chore
@@ -1035,7 +1034,7 @@ func (m *pulseMinter) mint(s pulseRunSpec, stdout, stderr io.Writer) string {
 			SpawnedBy: spawnedBy,
 			Consent:   spawnConsent(spawnedBy),
 		},
-	}, stdout, stderr)
+	})
 	if err != nil {
 		moePrintf(stderr, "pulse: spawn %q for %s: %v\n", slug, projectID, err)
 		return ""
@@ -1065,7 +1064,7 @@ func (m *pulseMinter) mint(s pulseRunSpec, stdout, stderr io.Writer) string {
 //
 // Warn-only throughout, like the rest of the gate: a refusal or a
 // failure drops this entry and the sweep carries on.
-func (m *pulseMinter) nominateChore(name string, s pulseRunSpec, stdout, stderr io.Writer) string {
+func (m *pulseMinter) nominateChore(name string, s pulseRunSpec, stderr io.Writer) string {
 	for _, extra := range []struct{ field, value string }{
 		{"slug", s.Slug}, {"workflow", s.Workflow}, {"title", s.Title}, {"design", s.Design},
 	} {
@@ -1076,7 +1075,7 @@ func (m *pulseMinter) nominateChore(name string, s pulseRunSpec, stdout, stderr 
 	if s.DesignOnly {
 		moePrintf(stderr, "pulse: chore: ignoring design_only on chore entry %q; a chore run's shape comes from its own definition\n", name)
 	}
-	res, err := openChoreInProcess(m.root, m.projectID, name, choreOpenNominated, stdout, stderr)
+	res, err := openChoreInProcess(m.root, m.projectID, name, choreOpenNominated)
 	if err != nil {
 		var notOpenable *choreNotOpenableError
 		if errors.As(err, &notOpenable) && notOpenable.OpenRun != "" {

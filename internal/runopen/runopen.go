@@ -109,7 +109,7 @@ type Promoted struct {
 // origin. opts.Workflow must be set; opts.ID names the slug (collisions
 // fail loud) or opts.IDBase supplies a base for date-suffixed collision
 // handling. See run.New for the full opts contract.
-func Open(root, projectID string, opts run.Options, stdout, stderr io.Writer) (*run.Metadata, error) {
+func Open(root, projectID string, opts run.Options) (*run.Metadata, error) {
 	runRef := projectID
 	if opts.ID != "" {
 		runRef = projectID + "/" + opts.ID
@@ -171,7 +171,7 @@ func Promote(root, projectID, ideaSlug string, opts PromoteOptions, stdout, stde
 		Trailers:    trailers.Block{Idea: ideaSlug, SpawnedBy: opts.SpawnedBy, Consent: opts.Consent},
 	}
 
-	md, err := Open(root, projectID, runOpts, stdout, stderr)
+	md, err := Open(root, projectID, runOpts)
 	if err != nil {
 		return Promoted{}, err
 	}
@@ -225,10 +225,10 @@ func loadIdeaForPromote(root, projectID, slug string) (*run.Metadata, string, er
 // marked open beside an unmarked status bump sitting in the same sweep
 // window.
 func markIdeaPromoted(root string, md *run.Metadata, destProjectID, destSlug, consent string, stdout, stderr io.Writer) error {
-	if err := bumpIdeaPromoted(root, md, destProjectID, destSlug, consent, stdout, stderr); err != nil {
+	if err := bumpIdeaPromoted(root, md, destProjectID, destSlug, consent); err != nil {
 		return err
 	}
-	n, err := input.Carry(root, md.Project, md.ID, destProjectID, destSlug, consent, stdout, stderr)
+	n, err := input.Carry(root, md.Project, md.ID, destProjectID, destSlug, consent, stderr)
 	switch {
 	case err != nil:
 		fmt.Fprintf(stderr, "warning: promoted %s/%s but could not carry its operator input to %s/%s: %v\n",
@@ -242,7 +242,7 @@ func markIdeaPromoted(root string, md *run.Metadata, destProjectID, destSlug, co
 }
 
 // bumpIdeaPromoted is the status flip and its commit.
-func bumpIdeaPromoted(root string, md *run.Metadata, destProjectID, destSlug, consent string, stdout, stderr io.Writer) error {
+func bumpIdeaPromoted(root string, md *run.Metadata, destProjectID, destSlug, consent string) error {
 	md.Status = run.StatusPromoted
 	runJSONRel := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
 	msg := fmt.Sprintf("Promote idea %s/%s → %s/%s\n\n", md.Project, md.ID, destProjectID, destSlug) +
@@ -287,7 +287,7 @@ func bumpIdeaPromoted(root string, md *run.Metadata, destProjectID, destSlug, co
 // isn't an in-progress idea with ErrNotTaggableIdea, and returns
 // run.ErrNothingToCommit when the idea already carries this exact tag —
 // callers treat that as success.
-func TagIdea(root, projectID, slug, workflow string, designOnly bool, stdout, stderr io.Writer) error {
+func TagIdea(root, projectID, slug, workflow string, designOnly bool) error {
 	if designOnly && workflow == "" {
 		return fmt.Errorf("%w: cannot untag %s/%s design-only — design-only narrows a tag, it is not one", ErrNotTaggableIdea, projectID, slug)
 	}
@@ -384,7 +384,7 @@ func AdvanceMarker(root string, md *run.Metadata, docID, consent string) error {
 //
 // No consent trailer: a click is the operator's own act, and the ride
 // levels are what MoE-Consent names.
-func MarkAdvanced(root, projectID, slug, docID string, stdout, stderr io.Writer) error {
+func MarkAdvanced(root, projectID, slug, docID string) error {
 	if docID == "" {
 		return fmt.Errorf("%w: no stage named", ErrNotAdvanceable)
 	}
@@ -415,7 +415,7 @@ func MarkAdvanced(root, projectID, slug, docID string, stdout, stderr io.Writer)
 // trailer block. Subject and lock purpose derive from the run's own
 // workflow, so the resulting commit is byte-identical to the one the
 // matching CLI verb (`moe idea close` / `moe intent close`) writes.
-func CloseCapture(root, projectID, slug string, stdout, stderr io.Writer) error {
+func CloseCapture(root, projectID, slug string) error {
 	md, err := run.Load(root, projectID, slug)
 	if err != nil {
 		return err
@@ -453,7 +453,7 @@ func CloseCapture(root, projectID, slug string, stdout, stderr io.Writer) error 
 // Workflow-derived subject ("Reopen idea …", "Reopen chat …"), trailer
 // block, and lock purpose keep each workflow's history greppable while
 // the flip itself lives in exactly one place.
-func Reopen(root string, md *run.Metadata, stdout, stderr io.Writer) error {
+func Reopen(root string, md *run.Metadata) error {
 	runJSONRel := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
 	msg := fmt.Sprintf("Reopen %s %s/%s\n\n", md.Workflow, md.Project, md.ID) +
 		trailers.Block{
@@ -478,7 +478,7 @@ func Reopen(root string, md *run.Metadata, stdout, stderr io.Writer) error {
 // resolve through MoE-Promoted-To and be closed, otherwise reopening
 // would create two live owners of the same intent or resurrect shipped
 // work. The flip itself routes through Reopen.
-func ReopenIdea(root, projectID, slug string, stdout, stderr io.Writer) error {
+func ReopenIdea(root, projectID, slug string) error {
 	md, err := run.Load(root, projectID, slug)
 	if err != nil {
 		return err
@@ -496,7 +496,7 @@ func ReopenIdea(root, projectID, slug string, stdout, stderr io.Writer) error {
 	default:
 		return fmt.Errorf("%w: idea %s/%s is %s, not closed or promoted", ErrNotReopenableIdea, projectID, slug, md.Status)
 	}
-	return Reopen(root, md, stdout, stderr)
+	return Reopen(root, md)
 }
 
 func verifyPromotedDestinationClosed(root, projectID, slug string) error {
@@ -559,7 +559,7 @@ func splitPromotedTo(v string) (projectID, slug string, ok bool) {
 // their editor flow writes the file in place via $EDITOR and a body-in
 // API doesn't fit cleanly. The trailer block is the same shape
 // (work: update <doc>, MoE-Run / MoE-Project / MoE-Workflow / MoE-Document).
-func EditCapture(root, projectID, slug, body string, stdout, stderr io.Writer) error {
+func EditCapture(root, projectID, slug, body string) error {
 	md, err := run.Load(root, projectID, slug)
 	if err != nil {
 		return err

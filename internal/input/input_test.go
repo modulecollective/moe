@@ -49,7 +49,7 @@ func seedRun(t *testing.T, root, slug string) *run.Metadata {
 func ask(t *testing.T, root, slug string) Entry {
 	t.Helper()
 	e, err := Ask(root, "moe", slug, "moe/pulse-one",
-		"Which compatibility policy?", "dynamic", io.Discard, io.Discard)
+		"Which compatibility policy?", "dynamic")
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
@@ -58,7 +58,7 @@ func ask(t *testing.T, root, slug string) Entry {
 
 func add(t *testing.T, root, slug, text string) Entry {
 	t.Helper()
-	e, err := Add(root, "moe", slug, text, io.Discard, io.Discard)
+	e, err := Add(root, "moe", slug, text)
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestAnswerMakesThePingPending(t *testing.T) {
 	seedRun(t, root, "change-auth")
 	ask(t, root, "change-auth")
 
-	e, err := Answer(root, "moe", "change-auth", 1, "Adopt the new default.", io.Discard, io.Discard)
+	e, err := Answer(root, "moe", "change-auth", 1, "Adopt the new default.")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestAskRefusesSecondOpenPingButNotesStack(t *testing.T) {
 	ask(t, root, "change-auth")
 
 	_, err := Ask(root, "moe", "change-auth", "moe/pulse-two",
-		"Something else?", "dynamic", io.Discard, io.Discard)
+		"Something else?", "dynamic")
 	if !errors.Is(err, ErrOpenPing) {
 		t.Fatalf("second Ask err = %v, want ErrOpenPing", err)
 	}
@@ -199,11 +199,11 @@ func TestAskAllowedAfterAnswer(t *testing.T) {
 	root := seedRoot(t)
 	seedRun(t, root, "change-auth")
 	ask(t, root, "change-auth")
-	if _, err := Answer(root, "moe", "change-auth", 0, "Adopt.", io.Discard, io.Discard); err != nil {
+	if _, err := Answer(root, "moe", "change-auth", 0, "Adopt."); err != nil {
 		t.Fatal(err)
 	}
 	e, err := Ask(root, "moe", "change-auth", "moe/pulse-two",
-		"And the migration?", "dynamic", io.Discard, io.Discard)
+		"And the migration?", "dynamic")
 	if err != nil {
 		t.Fatalf("follow-up Ask: %v", err)
 	}
@@ -224,14 +224,14 @@ func TestTerminalRunRefusesEveryWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := Answer(root, "moe", "change-auth", 0, "too late", io.Discard, io.Discard); !errors.Is(err, ErrNotLive) {
+	if _, err := Answer(root, "moe", "change-auth", 0, "too late"); !errors.Is(err, ErrNotLive) {
 		t.Fatalf("Answer on merged run = %v, want ErrNotLive", err)
 	}
-	if _, err := Add(root, "moe", "change-auth", "too late", io.Discard, io.Discard); !errors.Is(err, ErrNotLive) {
+	if _, err := Add(root, "moe", "change-auth", "too late"); !errors.Is(err, ErrNotLive) {
 		t.Fatalf("Add on merged run = %v, want ErrNotLive", err)
 	}
 	if _, err := Ask(root, "moe", "change-auth", "moe/pulse-two",
-		"Anything?", "dynamic", io.Discard, io.Discard); !errors.Is(err, ErrNotLive) {
+		"Anything?", "dynamic"); !errors.Is(err, ErrNotLive) {
 		t.Fatalf("Ask on merged run = %v, want ErrNotLive", err)
 	}
 }
@@ -242,15 +242,15 @@ func TestAnswerRefusesStalePingID(t *testing.T) {
 	root := seedRoot(t)
 	seedRun(t, root, "change-auth")
 	ask(t, root, "change-auth")
-	if _, err := Answer(root, "moe", "change-auth", 1, "Adopt.", io.Discard, io.Discard); err != nil {
+	if _, err := Answer(root, "moe", "change-auth", 1, "Adopt."); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := Ask(root, "moe", "change-auth", "moe/pulse-two",
-		"And the migration?", "dynamic", io.Discard, io.Discard); err != nil {
+		"And the migration?", "dynamic"); err != nil {
 		t.Fatal(err)
 	}
 	// The stale tab still thinks #1 is open.
-	if _, err := Answer(root, "moe", "change-auth", 1, "In place.", io.Discard, io.Discard); !errors.Is(err, ErrStalePing) {
+	if _, err := Answer(root, "moe", "change-auth", 1, "In place."); !errors.Is(err, ErrStalePing) {
 		t.Fatalf("stale Answer = %v, want ErrStalePing", err)
 	}
 	f, _ := Load(root, "moe", "change-auth")
@@ -262,14 +262,14 @@ func TestAnswerRefusesStalePingID(t *testing.T) {
 func TestEmptyProseIsRefused(t *testing.T) {
 	root := seedRoot(t)
 	seedRun(t, root, "change-auth")
-	if _, err := Add(root, "moe", "change-auth", "  \n ", io.Discard, io.Discard); !errors.Is(err, ErrEmpty) {
+	if _, err := Add(root, "moe", "change-auth", "  \n "); !errors.Is(err, ErrEmpty) {
 		t.Fatalf("blank Add = %v, want ErrEmpty", err)
 	}
-	if _, err := Ask(root, "moe", "change-auth", "moe/p", " ", "dynamic", io.Discard, io.Discard); !errors.Is(err, ErrEmpty) {
+	if _, err := Ask(root, "moe", "change-auth", "moe/p", " ", "dynamic"); !errors.Is(err, ErrEmpty) {
 		t.Fatalf("blank Ask = %v, want ErrEmpty", err)
 	}
 	ask(t, root, "change-auth")
-	if _, err := Answer(root, "moe", "change-auth", 0, "\t", io.Discard, io.Discard); !errors.Is(err, ErrEmpty) {
+	if _, err := Answer(root, "moe", "change-auth", 0, "\t"); !errors.Is(err, ErrEmpty) {
 		t.Fatalf("blank Answer = %v, want ErrEmpty", err)
 	}
 }
@@ -277,11 +277,11 @@ func TestEmptyProseIsRefused(t *testing.T) {
 func TestAnswerWithNothingOpen(t *testing.T) {
 	root := seedRoot(t)
 	seedRun(t, root, "change-auth")
-	if _, err := Answer(root, "moe", "change-auth", 0, "hello", io.Discard, io.Discard); !errors.Is(err, ErrNoOpenPing) {
+	if _, err := Answer(root, "moe", "change-auth", 0, "hello"); !errors.Is(err, ErrNoOpenPing) {
 		t.Fatalf("Answer with no record = %v, want ErrNoOpenPing", err)
 	}
 	add(t, root, "change-auth", "a plain note")
-	if _, err := Answer(root, "moe", "change-auth", 0, "hello", io.Discard, io.Discard); !errors.Is(err, ErrNoOpenPing) {
+	if _, err := Answer(root, "moe", "change-auth", 0, "hello"); !errors.Is(err, ErrNoOpenPing) {
 		t.Fatalf("Answer against a note = %v, want ErrNoOpenPing", err)
 	}
 }
@@ -295,7 +295,7 @@ func TestMarkDeliveredStampsOnlyRenderedPendingIDs(t *testing.T) {
 	// The turn rendered #1 and started. #2 lands mid-turn.
 	add(t, root, "change-auth", "second")
 
-	if err := MarkDelivered(root, "moe", "change-auth", "code", []int{1}, "", io.Discard, io.Discard); err != nil {
+	if err := MarkDelivered(root, "moe", "change-auth", "code", []int{1}, ""); err != nil {
 		t.Fatal(err)
 	}
 	f, _ := Load(root, "moe", "change-auth")
@@ -322,7 +322,7 @@ func TestMarkDeliveredStampsOnlyRenderedPendingIDs(t *testing.T) {
 
 	// Re-marking is a no-op: no second commit, nothing overwritten.
 	before := gittest.Output(t, root, "rev-parse", "HEAD")
-	if err := MarkDelivered(root, "moe", "change-auth", "review", []int{1}, "", io.Discard, io.Discard); err != nil {
+	if err := MarkDelivered(root, "moe", "change-auth", "review", []int{1}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if after := gittest.Output(t, root, "rev-parse", "HEAD"); after != before {
@@ -339,7 +339,7 @@ func TestMarkDeliveredStampsAWalksConsent(t *testing.T) {
 	seedRun(t, root, "change-auth")
 	add(t, root, "change-auth", "first")
 
-	if err := MarkDelivered(root, "moe", "change-auth", "code", []int{1}, "dynamic", io.Discard, io.Discard); err != nil {
+	if err := MarkDelivered(root, "moe", "change-auth", "code", []int{1}, "dynamic"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -357,7 +357,7 @@ func TestMarkDeliveredIgnoresOpenPingAndEmptyList(t *testing.T) {
 	ask(t, root, "change-auth")
 	before := gittest.Output(t, root, "rev-parse", "HEAD")
 	for _, ids := range [][]int{nil, {1}} {
-		if err := MarkDelivered(root, "moe", "change-auth", "code", ids, "", io.Discard, io.Discard); err != nil {
+		if err := MarkDelivered(root, "moe", "change-auth", "code", ids, ""); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -412,18 +412,18 @@ func TestCarryCopiesUndeliveredEntriesWithDenseDestinationIDs(t *testing.T) {
 	seedRun(t, root, "destination")
 
 	add(t, root, "idea", "already consumed")
-	if err := MarkDelivered(root, "moe", "idea", "idea", []int{1}, "", io.Discard, io.Discard); err != nil {
+	if err := MarkDelivered(root, "moe", "idea", "idea", []int{1}, ""); err != nil {
 		t.Fatal(err)
 	}
 	add(t, root, "idea", "operator note")
 	answered := ask(t, root, "idea")
-	if _, err := Answer(root, "moe", "idea", answered.ID, "Keep the old policy.", io.Discard, io.Discard); err != nil {
+	if _, err := Answer(root, "moe", "idea", answered.ID, "Keep the old policy."); err != nil {
 		t.Fatal(err)
 	}
 	open := ask(t, root, "idea")
 	add(t, root, "destination", "destination-local note")
 
-	n, err := Carry(root, "moe", "idea", "moe", "destination", "dynamic", io.Discard, io.Discard)
+	n, err := Carry(root, "moe", "idea", "moe", "destination", "dynamic", io.Discard)
 	if err != nil {
 		t.Fatalf("Carry: %v", err)
 	}
@@ -485,7 +485,7 @@ func TestCarryNoOpsWithoutUndeliveredInput(t *testing.T) {
 	seedRun(t, root, "destination")
 
 	head := gittest.Output(t, root, "rev-parse", "HEAD")
-	if n, err := Carry(root, "moe", "no-record", "moe", "destination", "", io.Discard, io.Discard); err != nil || n != 0 {
+	if n, err := Carry(root, "moe", "no-record", "moe", "destination", "", io.Discard); err != nil || n != 0 {
 		t.Fatalf("Carry(no record) = %d, %v", n, err)
 	}
 	if got := gittest.Output(t, root, "rev-parse", "HEAD"); got != head {
@@ -493,11 +493,11 @@ func TestCarryNoOpsWithoutUndeliveredInput(t *testing.T) {
 	}
 
 	add(t, root, "idea", "done")
-	if err := MarkDelivered(root, "moe", "idea", "idea", []int{1}, "", io.Discard, io.Discard); err != nil {
+	if err := MarkDelivered(root, "moe", "idea", "idea", []int{1}, ""); err != nil {
 		t.Fatal(err)
 	}
 	head = gittest.Output(t, root, "rev-parse", "HEAD")
-	if n, err := Carry(root, "moe", "idea", "moe", "destination", "", io.Discard, io.Discard); err != nil || n != 0 {
+	if n, err := Carry(root, "moe", "idea", "moe", "destination", "", io.Discard); err != nil || n != 0 {
 		t.Fatalf("Carry(all delivered) = %d, %v", n, err)
 	}
 	if got := gittest.Output(t, root, "rev-parse", "HEAD"); got != head {
@@ -519,7 +519,7 @@ func TestCarryDropsAnOpenPingCollisionAndCarriesTheRest(t *testing.T) {
 	add(t, root, "destination", "already here")
 
 	var stderr strings.Builder
-	n, err := Carry(root, "moe", "idea", "moe", "destination", "", io.Discard, &stderr)
+	n, err := Carry(root, "moe", "idea", "moe", "destination", "", &stderr)
 	if err != nil {
 		t.Fatalf("Carry: %v", err)
 	}
@@ -607,7 +607,7 @@ func TestScanDropsDeliveredEntries(t *testing.T) {
 	root := seedRoot(t)
 	seedRun(t, root, "change-auth")
 	add(t, root, "change-auth", "ship it")
-	if err := MarkDelivered(root, "moe", "change-auth", "code", []int{1}, "", io.Discard, io.Discard); err != nil {
+	if err := MarkDelivered(root, "moe", "change-auth", "code", []int{1}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if waiting, _ := Scan(root, ""); len(waiting) != 0 {
@@ -626,7 +626,7 @@ func TestScanFiltersByProject(t *testing.T) {
 	}
 	ask(t, root, "mine")
 	if _, err := Ask(root, "other", "theirs", "other/pulse",
-		"Which?", "dynamic", io.Discard, io.Discard); err != nil {
+		"Which?", "dynamic"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -716,7 +716,7 @@ func TestMarkDeliveredKeepsANoteAddedMidWindow(t *testing.T) {
 		}}, "input: note moe/change-auth#2")
 	})
 
-	if err := MarkDelivered(root, "moe", "change-auth", "code", []int{1}, "", io.Discard, io.Discard); err != nil {
+	if err := MarkDelivered(root, "moe", "change-auth", "code", []int{1}, ""); err != nil {
 		t.Fatalf("MarkDelivered: %v", err)
 	}
 
@@ -750,7 +750,7 @@ func TestAskRefusesAPingOpenedMidWindow(t *testing.T) {
 	})
 
 	_, err := Ask(root, "moe", "change-auth", "moe/pulse-one",
-		"Ship behind a flag?", "dynamic", io.Discard, io.Discard)
+		"Ship behind a flag?", "dynamic")
 	if !errors.Is(err, ErrOpenPing) {
 		t.Fatalf("Ask err = %v, want ErrOpenPing", err)
 	}
@@ -781,7 +781,7 @@ func TestAddLandsAfterANoteAddedMidWindow(t *testing.T) {
 		}}, "input: note moe/change-auth#2")
 	})
 
-	e, err := Add(root, "moe", "change-auth", "skip the integration leg", io.Discard, io.Discard)
+	e, err := Add(root, "moe", "change-auth", "skip the integration leg")
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
@@ -816,7 +816,7 @@ func TestAnswerRefusesAPingAnsweredMidWindow(t *testing.T) {
 		}}, "input: answer moe/change-auth#1")
 	})
 
-	_, err := Answer(root, "moe", "change-auth", open.ID, "Break it.", io.Discard, io.Discard)
+	_, err := Answer(root, "moe", "change-auth", open.ID, "Break it.")
 	if !errors.Is(err, ErrNoOpenPing) {
 		t.Fatalf("Answer err = %v, want ErrNoOpenPing", err)
 	}
@@ -852,7 +852,7 @@ func TestCarryHonoursAnOpenPingLandedOnTheDestinationMidWindow(t *testing.T) {
 	})
 
 	var stderr strings.Builder
-	n, err := Carry(root, "moe", "idea", "moe", "destination", "", io.Discard, &stderr)
+	n, err := Carry(root, "moe", "idea", "moe", "destination", "", &stderr)
 	if err != nil {
 		t.Fatalf("Carry: %v", err)
 	}

@@ -33,15 +33,14 @@ func seedParkedRun(t *testing.T, root, slug string) *run.Metadata {
 
 func askOn(t *testing.T, root, projectID, slug, question string) {
 	t.Helper()
-	if _, err := input.Ask(root, projectID, slug, "moe/pulse-one", question,
-		"dynamic", io.Discard, io.Discard); err != nil {
+	if _, err := input.Ask(root, projectID, slug, "moe/pulse-one", question, "dynamic"); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func addOn(t *testing.T, root, projectID, slug, text string) {
 	t.Helper()
-	if _, err := input.Add(root, projectID, slug, text, io.Discard, io.Discard); err != nil {
+	if _, err := input.Add(root, projectID, slug, text); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -251,7 +250,7 @@ func TestOperatorInputSectionRendersAnsweredPingAsAPair(t *testing.T) {
 	root := spawnFixture(t)
 	md := seedParkedRun(t, root, "change-auth")
 	askOn(t, root, "moe", "change-auth", "Which compatibility policy?")
-	if _, err := input.Answer(root, "moe", "change-auth", 0, "Adopt the new default.", io.Discard, io.Discard); err != nil {
+	if _, err := input.Answer(root, "moe", "change-auth", 0, "Adopt the new default."); err != nil {
 		t.Fatal(err)
 	}
 
@@ -295,7 +294,7 @@ func TestOperatorInputSectionDropsDeliveredEntries(t *testing.T) {
 	root := spawnFixture(t)
 	md := seedParkedRun(t, root, "change-auth")
 	addOn(t, root, "moe", "change-auth", "skip the flake")
-	if err := input.MarkDelivered(root, "moe", "change-auth", "code", []int{1}, "", io.Discard, io.Discard); err != nil {
+	if err := input.MarkDelivered(root, "moe", "change-auth", "code", []int{1}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got, ids := operatorInputSection(root, md); got != "" || ids != nil {
@@ -400,7 +399,7 @@ func TestSafeModeAdmitsAThreadWithAPendingNote(t *testing.T) {
 	})
 
 	// Delivery consumes the licence; another note re-arms it.
-	if err := input.MarkDelivered(root, "moe", id, "code", []int{1}, "", io.Discard, io.Discard); err != nil {
+	if err := input.MarkDelivered(root, "moe", id, "code", []int{1}, ""); err != nil {
 		t.Fatal(err)
 	}
 	asClock(func() {
@@ -639,7 +638,7 @@ exit 0
 	if code := runNew("sdlc", []string{"tele/note-me"}, &out, &errb); code != 0 {
 		t.Fatalf("runNew exit=%d stderr=%q", code, errb.String())
 	}
-	if _, err := input.Add(root, "tele", "note-me", "Skip the flake and ship.", io.Discard, io.Discard); err != nil {
+	if _, err := input.Add(root, "tele", "note-me", "Skip the flake and ship."); err != nil {
 		t.Fatal(err)
 	}
 
@@ -701,7 +700,7 @@ func TestFailedStageTurnLeavesTheNotePending(t *testing.T) {
 	if code := runNew("sdlc", []string{"tele/note-me"}, &out, &errb); code != 0 {
 		t.Fatalf("runNew exit=%d stderr=%q", code, errb.String())
 	}
-	if _, err := input.Add(root, "tele", "note-me", "Skip the flake and ship.", io.Discard, io.Discard); err != nil {
+	if _, err := input.Add(root, "tele", "note-me", "Skip the flake and ship."); err != nil {
 		t.Fatal(err)
 	}
 
@@ -763,7 +762,7 @@ func TestPendingInputBlockNamesTaggedIdeasAsPromoteSignal(t *testing.T) {
 		t.Fatalf("block reads an untagged idea as promote signal:\n%s", got)
 	}
 
-	if err := runopen.TagIdea(root, "moe", "an-idea", "sdlc", false, io.Discard, io.Discard); err != nil {
+	if err := runopen.TagIdea(root, "moe", "an-idea", "sdlc", false); err != nil {
 		t.Fatal(err)
 	}
 	sc, ok = newPulseScan(root)

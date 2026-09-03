@@ -176,7 +176,7 @@ func serveOptions(root string, stderr io.Writer) serve.Options {
 					"workflow %s has no close pipeline", md.Workflow)}
 			}
 			return closeRunInProcess(root, md.Workflow, reg.subject,
-				reg.cleanup, project, runID, true, io.Discard, io.Discard)
+				reg.cleanup, project, runID, true, io.Discard)
 		},
 		// The workflow registries are init-time static, so the serve UI
 		// declarations cross the seam as a lookup plus a precomputed

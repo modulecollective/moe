@@ -152,9 +152,9 @@ func (s *Server) handleInput(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "input: ping id is not a number", http.StatusBadRequest)
 			return
 		}
-		_, err = input.Answer(s.opts.Root, projectID, slug, pingID, text, s.syncWriter(), s.syncWriter())
+		_, err = input.Answer(s.opts.Root, projectID, slug, pingID, text)
 	} else {
-		_, err = input.Add(s.opts.Root, projectID, slug, text, s.syncWriter(), s.syncWriter())
+		_, err = input.Add(s.opts.Root, projectID, slug, text)
 	}
 	switch {
 	case err == nil:

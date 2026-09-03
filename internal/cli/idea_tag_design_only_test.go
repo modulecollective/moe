@@ -3,7 +3,6 @@ package cli
 import (
 	"bytes"
 	"errors"
-	"io"
 	"strings"
 	"testing"
 
@@ -127,7 +126,7 @@ func TestIdeaTagDesignOnlyRepeatIsANoOp(t *testing.T) {
 func TestTagIdeaRefusesDesignOnlyWithoutAWorkflow(t *testing.T) {
 	root := tagFixture(t, "moe", "no-such-licence")
 
-	err := runopen.TagIdea(root, "moe", "no-such-licence", "", true, io.Discard, io.Discard)
+	err := runopen.TagIdea(root, "moe", "no-such-licence", "", true)
 	if !errors.Is(err, runopen.ErrNotTaggableIdea) {
 		t.Fatalf("err = %v, want ErrNotTaggableIdea", err)
 	}

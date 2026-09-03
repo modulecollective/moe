@@ -249,7 +249,7 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 				}
 			}()
 		}
-		m, err := runopen.Open(root, project, openOpts, stdout, stderr)
+		m, err := runopen.Open(root, project, openOpts)
 		if err != nil {
 			if seedTmpPath != "" {
 				keepSeedTmp = true

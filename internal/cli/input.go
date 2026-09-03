@@ -65,7 +65,7 @@ func runInputAdd(args []string, stdout, stderr io.Writer) int {
 	}
 	return inputWrite(fs, args, stdout, stderr, "input add",
 		func(root, projectID, runID, text string) (input.Entry, error) {
-			return input.Add(root, projectID, runID, text, stdout, stderr)
+			return input.Add(root, projectID, runID, text)
 		},
 		func(projectID, runID string, e input.Entry) string {
 			return fmt.Sprintf("noted on %s/%s#%d\n", projectID, runID, e.ID)
@@ -88,7 +88,7 @@ func runInputAnswer(args []string, stdout, stderr io.Writer) int {
 	}
 	return inputWrite(fs, args, stdout, stderr, "input answer",
 		func(root, projectID, runID, text string) (input.Entry, error) {
-			return input.Answer(root, projectID, runID, 0 /*whatever is open*/, text, stdout, stderr)
+			return input.Answer(root, projectID, runID, 0 /*whatever is open*/, text)
 		},
 		func(projectID, runID string, e input.Entry) string {
 			return fmt.Sprintf("answered %s/%s#%d — %s\n", projectID, runID, e.ID, e.Question)

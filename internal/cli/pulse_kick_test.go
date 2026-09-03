@@ -22,7 +22,7 @@ func selfKickFixture(t *testing.T) (root, threadRoot string, groomed groomResult
 	root, stages, _ = kickFixture(t)
 	minted := groomFixture(t, root, "fix-a", "fix-b")
 	groomed = groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, nil /*kickoff edges*/, os.Stderr)
 	return root, "moe/" + minted["fix-a"], groomed, stages
 }
 
@@ -61,7 +61,7 @@ func TestSelfKickReturnsTheFirstFailureAndKeepsKicking(t *testing.T) {
 	groomed := groomChains(root, "moe", "pulse-groom", []groomGroup{
 		{Runs: runsFrom("fails-first")},
 		{Runs: runsFrom("fails-later")},
-	}, nil /*kickoff edges*/, io.Discard, os.Stderr)
+	}, nil /*kickoff edges*/, os.Stderr)
 
 	var dispatched []string
 	prev := openSdlcStage
@@ -102,7 +102,7 @@ func TestSelfKickInterruptStopsLaterThreads(t *testing.T) {
 	groomed := groomChains(root, "moe", "pulse-groom", []groomGroup{
 		{Runs: runsFrom("interrupted")},
 		{Runs: runsFrom("must-not-start")},
-	}, nil /*kickoff edges*/, io.Discard, os.Stderr)
+	}, nil /*kickoff edges*/, os.Stderr)
 
 	var dispatched []string
 	prev := openSdlcStage
@@ -160,14 +160,14 @@ func handMintedHeadFixture(t *testing.T) (root, headKey string, groomed groomRes
 	t.Helper()
 	root, stages, _ = kickFixture(t)
 	minted := groomFixture(t, root, "fix-a")
-	head, err := mintChainRun(root, "moe", "operator-topic", "" /*spawnedBy*/, "", io.Discard, os.Stderr)
+	head, err := mintChainRun(root, "moe", "operator-topic", "" /*spawnedBy*/, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	headKey = "moe/" + head.ID
 	chainEdgeCommit(t, root, headKey, "moe/"+minted["fix-a"])
 	return root, headKey, groomChains(root, "moe", "pulse-groom",
-		nil /*no groups*/, nil /*kickoff edges*/, io.Discard, os.Stderr), stages
+		nil /*no groups*/, nil /*kickoff edges*/, os.Stderr), stages
 }
 
 // TestSelfKickSkipsAHandMintedChainHead: the operator composes a chain
@@ -224,7 +224,7 @@ func TestSelfKickSkipsASeedOnlyOperatorRoot(t *testing.T) {
 	seedRun(t, root, "moe", "promoted-sketch", "sdlc", run.StatusInProgress, time.Now().Local(),
 		map[string]string{"design": "# A thought I had\n\nseed\n"})
 	groomed := groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Runs: runsFrom("promoted-sketch")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("promoted-sketch")}}, nil /*kickoff edges*/, os.Stderr)
 
 	defer withRideMode(rideDynamic)()
 	var errb bytes.Buffer
@@ -251,7 +251,7 @@ func TestSelfKickSkipsADesignClosedButNotAdvancedRoot(t *testing.T) {
 		map[string]string{"design": "# Worked, then parked\n\nbody\n"})
 	trailerstest.CommitWorkTurnAt(t, root, "moe", "design-done", "sdlc", "design", time.Now().Local())
 	groomed := groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Runs: runsFrom("design-done")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("design-done")}}, nil /*kickoff edges*/, os.Stderr)
 
 	defer withRideMode(rideDynamic)()
 	var errb bytes.Buffer
@@ -277,7 +277,7 @@ func TestSelfKickRidesARootParkedByDownstreamWork(t *testing.T) {
 	trailerstest.CommitWorkTurnAt(t, root, "moe", "mid-ladder", "sdlc", "design", now.Add(-2*time.Hour))
 	trailerstest.CommitWorkTurnAt(t, root, "moe", "mid-ladder", "sdlc", "code", now.Add(-time.Hour))
 	groomed := groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Runs: runsFrom("mid-ladder")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("mid-ladder")}}, nil /*kickoff edges*/, os.Stderr)
 
 	defer withRideMode(rideDynamic)()
 	var errb bytes.Buffer
@@ -307,7 +307,7 @@ func choreKickFixture(t *testing.T) (root, threadRoot string, groomed groomResul
 		time.Time{})
 
 	groomed = groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Runs: runsFrom("readme-update-2026-07-22")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("readme-update-2026-07-22")}}, nil /*kickoff edges*/, os.Stderr)
 	if groomed.idx.ChoreByRun["moe/readme-update-2026-07-22"] == "" {
 		t.Fatal("precondition: the groom's index should carry the chore edge the open commit recorded")
 	}
@@ -376,7 +376,7 @@ func advancedKickFixture(t *testing.T) (root, threadRoot string, groomed groomRe
 	advanceAt(t, root, "moe", "advanced-run", "design", now.Add(-2*time.Hour))
 
 	groomed = groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Runs: runsFrom("advanced-run")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("advanced-run")}}, nil /*kickoff edges*/, os.Stderr)
 	if len(groomed.threads) != 1 || groomed.threads[0].Root != "moe/advanced-run" {
 		t.Fatalf("threads = %+v, want one self-rooted at moe/advanced-run", groomed.threads)
 	}
@@ -560,7 +560,7 @@ func TestSelfKickAnnouncesOneStartPerParkedThread(t *testing.T) {
 	// board enumeration is what finds them — the retry shape the
 	// heartbeat re-offers.
 	groomed := groomChains(root, "moe", "pulse-groom",
-		nil /*no groups*/, nil /*kickoff edges*/, io.Discard, os.Stderr)
+		nil /*no groups*/, nil /*kickoff edges*/, os.Stderr)
 
 	var errb bytes.Buffer
 	pulseSelfKick(root, groomed, io.Discard, &errb)
@@ -595,7 +595,7 @@ func TestSelfKickReportsAnEmptyBoard(t *testing.T) {
 
 	defer withRideMode(rideDynamic)()
 	groomed := groomChains(root, "moe", "pulse-groom",
-		nil /*no groups*/, nil /*kickoff edges*/, io.Discard, os.Stderr)
+		nil /*no groups*/, nil /*kickoff edges*/, os.Stderr)
 	var errb bytes.Buffer
 	pulseSelfKick(root, groomed, io.Discard, &errb)
 
@@ -619,7 +619,7 @@ func TestSelfKickSkipsASettledThreadRoot(t *testing.T) {
 	setRunStatus(t, root, "moe", minted["shipped"], run.StatusMerged)
 
 	groomed := groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Onto: "shipped", Runs: runsFrom("fix-a")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
+		[]groomGroup{{Onto: "shipped", Runs: runsFrom("fix-a")}}, nil /*kickoff edges*/, os.Stderr)
 	if len(groomed.threads) != 1 || groomed.threads[0].Root != shippedKey {
 		t.Fatalf("threads = %+v, want one rooted at the merged anchor %s", groomed.threads, shippedKey)
 	}
@@ -655,7 +655,7 @@ func strandedThreadFixture(t *testing.T) (root, runKey string, groomed groomResu
 	advanceAt(t, root, "moe", "stalled-at-review", "test", now.Add(-2*time.Hour))
 
 	groomed = groomChains(root, "moe", "pulse-groom",
-		nil /*empty gate*/, nil /*kickoff edges*/, io.Discard, os.Stderr)
+		nil /*empty gate*/, nil /*kickoff edges*/, os.Stderr)
 	if len(groomed.threads) != 0 {
 		t.Fatalf("threads = %+v, want none — the gate named nothing", groomed.threads)
 	}
@@ -698,7 +698,7 @@ func TestSelfKickHoldsAnEnumeratedThreadTheSurveyParked(t *testing.T) {
 
 	groomed := groomChains(root, "moe", "pulse-groom-2",
 		[]groomGroup{{Runs: runsFrom("stalled-at-review"), Park: "the review canvas contradicts the design"}},
-		nil /*kickoff edges*/, io.Discard, os.Stderr)
+		nil /*kickoff edges*/, os.Stderr)
 
 	var errb bytes.Buffer
 	pulseSelfKick(root, groomed, io.Discard, &errb)
@@ -760,7 +760,7 @@ func TestSelfKickHoldsEnumeratedFloorMisses(t *testing.T) {
 			tc.setUp(t, root)
 
 			groomed := groomChains(root, "moe", "pulse-groom",
-				nil /*empty gate*/, nil /*kickoff edges*/, io.Discard, os.Stderr)
+				nil /*empty gate*/, nil /*kickoff edges*/, os.Stderr)
 			var errb bytes.Buffer
 			pulseSelfKick(root, groomed, io.Discard, &errb)
 
@@ -787,7 +787,7 @@ func TestSelfKickDoesNotEnumerateASettledThread(t *testing.T) {
 	setRunStatus(t, root, "moe", minted["shipped"], run.StatusMerged)
 
 	groomed := groomChains(root, "moe", "pulse-groom",
-		nil /*empty gate*/, nil /*kickoff edges*/, io.Discard, os.Stderr)
+		nil /*empty gate*/, nil /*kickoff edges*/, os.Stderr)
 	var errb bytes.Buffer
 	pulseSelfKick(root, groomed, io.Discard, &errb)
 
@@ -808,7 +808,7 @@ func TestSelfKickDoesNotEnumerateASettledThread(t *testing.T) {
 func TestKickableRootsAndTheParkedLegSeeOneBoard(t *testing.T) {
 	root, _, _ := kickFixture(t)
 	minted := groomFixture(t, root, "loose-fix", "staged-fix", "shipped-fix")
-	head, err := mintChainRun(root, "moe", "operator-topic", "" /*spawnedBy*/, "", io.Discard, os.Stderr)
+	head, err := mintChainRun(root, "moe", "operator-topic", "" /*spawnedBy*/, "")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -117,7 +117,7 @@ func (g *heartbeatGate) Due(tick time.Duration, log io.Writer) []serve.Heartbeat
 	// line per quiet project per tick would bury the ones that matter.
 	decisions := make([]serve.HeartbeatDecision, 0, len(projects))
 	for _, p := range projects {
-		sweep, held, reason := g.projectDue(sc, p, occupied, tick, now, log)
+		sweep, held, reason := g.projectDue(sc, p, occupied, tick, now)
 		if sweep {
 			fmt.Fprintf(log, "heartbeat: sweeping %s — %s\n", p.ID, reason)
 		}
@@ -211,7 +211,7 @@ func (g *heartbeatGate) Swept(projectID string, clean bool) {
 // something outside the machine (an operator commit in the quiet window,
 // somebody inside the project) are held; the rest are "nothing to do"
 // spelled three ways, and /serve collapses them to a count.
-func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied map[string]bool, tick time.Duration, now time.Time, log io.Writer) (sweep, held bool, reason string) {
+func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied map[string]bool, tick time.Duration, now time.Time) (sweep, held bool, reason string) {
 	projectID := p.ID
 
 	// The operator's standing cap, ahead of every read: a paused project

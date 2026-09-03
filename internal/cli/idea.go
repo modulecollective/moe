@@ -580,7 +580,7 @@ func setIdeaTag(ref, workflow string, designOnly bool, verb string, stdout, stde
 		return 1
 	}
 
-	err = runopen.TagIdea(root, projectID, slug, workflow, designOnly, stdout, stderr)
+	err = runopen.TagIdea(root, projectID, slug, workflow, designOnly)
 	switch {
 	case errors.Is(err, run.ErrNothingToCommit):
 		// Already in the requested state — say so and exit clean, so a
@@ -742,7 +742,7 @@ func runIdeaReopen(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	if err := runopen.ReopenIdea(root, projectID, slug, stdout, stderr); err != nil {
+	if err := runopen.ReopenIdea(root, projectID, slug); err != nil {
 		if errors.Is(err, run.ErrRunNotFound) {
 			moePrintf(stderr, "idea %s/%s does not exist; run `moe idea list %s` to see open ideas\n", projectID, slug, projectID)
 		} else {

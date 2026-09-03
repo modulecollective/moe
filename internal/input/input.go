@@ -213,13 +213,13 @@ func (f File) validate() error {
 //
 // No consent trailer: a note is the operator's own act, which is the
 // whole point of the record.
-func Add(root, projectID, runID, text string, stdout, stderr io.Writer) (Entry, error) {
+func Add(root, projectID, runID, text string) (Entry, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return Entry{}, fmt.Errorf("%w: note has no text", ErrEmpty)
 	}
 	var e Entry
-	err := commit(root, projectID, runID, "input-add", stdout, stderr, func() (File, string, error) {
+	err := commit(root, projectID, runID, "input-add", func() (File, string, error) {
 		md, f, err := loadLive(root, projectID, runID)
 		if err != nil {
 			return File{}, "", err
@@ -251,13 +251,13 @@ func Add(root, projectID, runID, text string, stdout, stderr io.Writer) (Entry, 
 // (ErrEmpty), and a run that already has one open (ErrOpenPing). All
 // three are the caller's cue to warn and carry on rather than fail the
 // sweep.
-func Ask(root, projectID, runID, askedBy, question, consent string, stdout, stderr io.Writer) (Entry, error) {
+func Ask(root, projectID, runID, askedBy, question, consent string) (Entry, error) {
 	question = strings.TrimSpace(question)
 	if question == "" {
 		return Entry{}, fmt.Errorf("%w: question has no text", ErrEmpty)
 	}
 	var e Entry
-	err := commit(root, projectID, runID, "input-ask", stdout, stderr, func() (File, string, error) {
+	err := commit(root, projectID, runID, "input-ask", func() (File, string, error) {
 		md, f, err := loadLive(root, projectID, runID)
 		if err != nil {
 			return File{}, "", err
@@ -292,13 +292,13 @@ func Ask(root, projectID, runID, askedBy, question, consent string, stdout, stde
 //
 // The answered ping becomes an ordinary pending entry: the next turn's
 // prompt carries the question and the answer as a pair.
-func Answer(root, projectID, runID string, id int, text string, stdout, stderr io.Writer) (Entry, error) {
+func Answer(root, projectID, runID string, id int, text string) (Entry, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return Entry{}, fmt.Errorf("%w: answer has no text", ErrEmpty)
 	}
 	var answered Entry
-	err := commit(root, projectID, runID, "input-answer", stdout, stderr, func() (File, string, error) {
+	err := commit(root, projectID, runID, "input-answer", func() (File, string, error) {
 		md, f, err := loadLive(root, projectID, runID)
 		if err != nil {
 			return File{}, "", err
@@ -349,7 +349,7 @@ func Answer(root, projectID, runID string, id int, text string, stdout, stderr i
 // turn. The stage that calls this is shared between a typed `moe sdlc
 // <stage>` and a heartbeat walk, so it is one of the sites walkConsent's
 // rule covers: the ride level under a walk, nothing otherwise.
-func MarkDelivered(root, projectID, runID, docID string, ids []int, consent string, stdout, stderr io.Writer) error {
+func MarkDelivered(root, projectID, runID, docID string, ids []int, consent string) error {
 	if len(ids) == 0 {
 		return nil
 	}
@@ -357,7 +357,7 @@ func MarkDelivered(root, projectID, runID, docID string, ids []int, consent stri
 	for _, id := range ids {
 		want[id] = true
 	}
-	return commit(root, projectID, runID, "input-delivered", stdout, stderr, func() (File, string, error) {
+	return commit(root, projectID, runID, "input-delivered", func() (File, string, error) {
 		f, err := Load(root, projectID, runID)
 		if err != nil {
 			return File{}, "", err
@@ -416,11 +416,11 @@ func MarkDelivered(root, projectID, runID, docID string, ids []int, consent stri
 // no commit is the overwhelmingly common case (no record, or nothing
 // left undelivered) — it costs one brief lock hold to find that out,
 // since the source read has to sit under the same lock as the write.
-func Carry(root, srcProject, srcRun, dstProject, dstRun, consent string, stdout, stderr io.Writer) (int, error) {
+func Carry(root, srcProject, srcRun, dstProject, dstRun, consent string, stderr io.Writer) (int, error) {
 	var carried int
 	// One prepare closure reads both records: the lock is repo-wide, so
 	// a single hold covers the source read and the destination rewrite.
-	err := commit(root, dstProject, dstRun, "input-carry", stdout, stderr, func() (File, string, error) {
+	err := commit(root, dstProject, dstRun, "input-carry", func() (File, string, error) {
 		src, err := Load(root, srcProject, srcRun)
 		if err != nil {
 			return File{}, "", err
@@ -512,7 +512,7 @@ var testLocked func()
 // A prepare with nothing to write returns run.ErrNothingToCommit, which
 // skips the commit (repolock.With passes it through untouched) and
 // maps back to nil here — the no-op verbs' contract.
-func commit(root, projectID, runID, purpose string, stdout, stderr io.Writer, prepare func() (File, string, error)) error {
+func commit(root, projectID, runID, purpose string, prepare func() (File, string, error)) error {
 	rel := Path(projectID, runID)
 	err := repolock.With(root, repolock.Options{
 		Purpose: purpose,

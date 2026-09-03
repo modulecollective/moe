@@ -2,7 +2,6 @@ package runopen
 
 import (
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -45,7 +44,7 @@ func stagedRunFixture(t *testing.T, workTurn bool) string {
 func TestMarkAdvancedWritesTheMarker(t *testing.T) {
 	root := stagedRunFixture(t, true)
 
-	if err := MarkAdvanced(root, "alpha", "fix-it", "design", io.Discard, io.Discard); err != nil {
+	if err := MarkAdvanced(root, "alpha", "fix-it", "design"); err != nil {
 		t.Fatalf("MarkAdvanced: %v", err)
 	}
 
@@ -92,7 +91,7 @@ func TestMarkAdvancedWritesTheMarker(t *testing.T) {
 func TestMarkAdvancedRefusesAStageWithNoWorkTurn(t *testing.T) {
 	root := stagedRunFixture(t, false)
 
-	err := MarkAdvanced(root, "alpha", "fix-it", "design", io.Discard, io.Discard)
+	err := MarkAdvanced(root, "alpha", "fix-it", "design")
 	if !errors.Is(err, ErrNotAdvanceable) {
 		t.Fatalf("want ErrNotAdvanceable, got %v", err)
 	}
@@ -107,7 +106,7 @@ func TestMarkAdvancedRefusesATerminalRun(t *testing.T) {
 	root := stagedRunFixture(t, true)
 	seedRunMetadata(t, root, "alpha", "fix-it", "sdlc", run.StatusMerged)
 
-	err := MarkAdvanced(root, "alpha", "fix-it", "design", io.Discard, io.Discard)
+	err := MarkAdvanced(root, "alpha", "fix-it", "design")
 	if !errors.Is(err, ErrNotAdvanceable) {
 		t.Fatalf("want ErrNotAdvanceable, got %v", err)
 	}
@@ -119,7 +118,7 @@ func TestMarkAdvancedRefusesATerminalRun(t *testing.T) {
 func TestMarkAdvancedReportsAMissingRun(t *testing.T) {
 	root := stagedRunFixture(t, true)
 
-	err := MarkAdvanced(root, "alpha", "ghost", "design", io.Discard, io.Discard)
+	err := MarkAdvanced(root, "alpha", "ghost", "design")
 	if !errors.Is(err, run.ErrRunNotFound) {
 		t.Fatalf("want ErrRunNotFound, got %v", err)
 	}
@@ -132,7 +131,7 @@ func TestMarkAdvancedReportsAMissingRun(t *testing.T) {
 func TestMarkAdvancedRefusesAnEmptyStage(t *testing.T) {
 	root := stagedRunFixture(t, true)
 
-	err := MarkAdvanced(root, "alpha", "fix-it", "", io.Discard, io.Discard)
+	err := MarkAdvanced(root, "alpha", "fix-it", "")
 	if !errors.Is(err, ErrNotAdvanceable) {
 		t.Fatalf("want ErrNotAdvanceable, got %v", err)
 	}

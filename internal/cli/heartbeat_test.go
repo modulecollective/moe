@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -898,7 +897,7 @@ func TestHeartbeatSweepsPastALingeringOpenSurvey(t *testing.T) {
 // machine.
 func TestHeartbeatIgnoresAnOperatorStagedHead(t *testing.T) {
 	root := quietFixture(t)
-	head, err := mintChainRun(root, "moe", "operator-topic", "" /*spawnedBy*/, "", io.Discard, os.Stderr)
+	head, err := mintChainRun(root, "moe", "operator-topic", "" /*spawnedBy*/, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -952,7 +951,7 @@ func TestParkedLegLooksPastAHeldHead(t *testing.T) {
 // sweep onto work somebody is still arranging.
 func TestParkedLegHoldsAnOperatorStagedBatch(t *testing.T) {
 	root := quietFixture(t)
-	head, err := mintChainRun(root, "moe", "operator-topic", "" /*spawnedBy*/, "", io.Discard, os.Stderr)
+	head, err := mintChainRun(root, "moe", "operator-topic", "" /*spawnedBy*/, "")
 	if err != nil {
 		t.Fatal(err)
 	}

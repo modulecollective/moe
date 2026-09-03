@@ -20,7 +20,7 @@ import (
 func TestEditCaptureWritesCanvasAndCommits(t *testing.T) {
 	root := newIdeaBureaucracy(t, "alpha", "my-idea", "# my idea\n")
 
-	if err := EditCapture(root, "alpha", "my-idea", "# my idea\n\nrefined.\n", io.Discard, io.Discard); err != nil {
+	if err := EditCapture(root, "alpha", "my-idea", "# my idea\n\nrefined.\n"); err != nil {
 		t.Fatalf("EditCapture: %v", err)
 	}
 
@@ -54,7 +54,7 @@ func TestEditCaptureWritesCanvasAndCommits(t *testing.T) {
 func TestEditCaptureNothingToCommit(t *testing.T) {
 	root := newIdeaBureaucracy(t, "alpha", "my-idea", "# stays the same\n")
 
-	err := EditCapture(root, "alpha", "my-idea", "# stays the same\n", io.Discard, io.Discard)
+	err := EditCapture(root, "alpha", "my-idea", "# stays the same\n")
 	if !errors.Is(err, run.ErrNothingToCommit) {
 		t.Fatalf("want ErrNothingToCommit, got %v", err)
 	}
@@ -77,7 +77,7 @@ func TestEditCaptureRefusesPromotedIdea(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = EditCapture(root, "alpha", "my-idea", "# rewrite\n", io.Discard, io.Discard)
+	err = EditCapture(root, "alpha", "my-idea", "# rewrite\n")
 	if !errors.Is(err, ErrNotCapture) {
 		t.Fatalf("want ErrNotCapture, got %v", err)
 	}
@@ -98,7 +98,7 @@ func TestEditCaptureRefusesNonIdeaWorkflow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = EditCapture(root, "alpha", "my-run", "# rewrite\n", io.Discard, io.Discard)
+	err = EditCapture(root, "alpha", "my-run", "# rewrite\n")
 	if !errors.Is(err, ErrNotCapture) {
 		t.Fatalf("want ErrNotCapture, got %v", err)
 	}
@@ -111,7 +111,7 @@ func TestEditCaptureMissingRun(t *testing.T) {
 	gittest.InitAt(t, root)
 	gittest.Commit(t, root, "seed")
 
-	err := EditCapture(root, "ghost", "ghost", "# nope\n", io.Discard, io.Discard)
+	err := EditCapture(root, "ghost", "ghost", "# nope\n")
 	if !errors.Is(err, run.ErrRunNotFound) {
 		t.Fatalf("want ErrRunNotFound, got %v", err)
 	}
@@ -182,7 +182,7 @@ func newCaptureBureaucracy(t *testing.T, workflow, projectID, slug, body string)
 func TestEditCaptureWritesIntentCanvas(t *testing.T) {
 	root := newCaptureBureaucracy(t, dash.IntentWorkflow, "alpha", "ship-faster", "# ship faster\n")
 
-	if err := EditCapture(root, "alpha", "ship-faster", "# ship faster\n\nsharpened\n", io.Discard, io.Discard); err != nil {
+	if err := EditCapture(root, "alpha", "ship-faster", "# ship faster\n\nsharpened\n"); err != nil {
 		t.Fatalf("EditCapture: %v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(root, run.ContentPath("alpha", "ship-faster", dash.IntentDocID)))
@@ -212,7 +212,7 @@ func TestEditCaptureWritesIntentCanvas(t *testing.T) {
 func TestCloseCaptureClosesIntent(t *testing.T) {
 	root := newCaptureBureaucracy(t, dash.IntentWorkflow, "alpha", "ship-faster", "# ship faster\n")
 
-	if err := CloseCapture(root, "alpha", "ship-faster", io.Discard, io.Discard); err != nil {
+	if err := CloseCapture(root, "alpha", "ship-faster"); err != nil {
 		t.Fatalf("CloseCapture: %v", err)
 	}
 	md, err := run.Load(root, "alpha", "ship-faster")
@@ -240,10 +240,10 @@ func TestCaptureHelpersRefuseTerminalIntent(t *testing.T) {
 	root := newCaptureBureaucracy(t, dash.IntentWorkflow, "alpha", "ship-faster", "# ship faster\n")
 	setRunFields(t, root, "alpha", "ship-faster", dash.IntentWorkflow, run.StatusClosed)
 
-	if err := EditCapture(root, "alpha", "ship-faster", "x\n", io.Discard, io.Discard); !errors.Is(err, ErrNotCapture) {
+	if err := EditCapture(root, "alpha", "ship-faster", "x\n"); !errors.Is(err, ErrNotCapture) {
 		t.Errorf("EditCapture: want ErrNotCapture, got %v", err)
 	}
-	if err := CloseCapture(root, "alpha", "ship-faster", io.Discard, io.Discard); !errors.Is(err, ErrNotCapture) {
+	if err := CloseCapture(root, "alpha", "ship-faster"); !errors.Is(err, ErrNotCapture) {
 		t.Errorf("CloseCapture: want ErrNotCapture, got %v", err)
 	}
 }
@@ -260,7 +260,7 @@ func contains(s, sub string) bool {
 func TestCloseCaptureBumpsStatusAndCommits(t *testing.T) {
 	root := newIdeaBureaucracy(t, "alpha", "my-idea", "# my idea\n")
 
-	if err := CloseCapture(root, "alpha", "my-idea", io.Discard, io.Discard); err != nil {
+	if err := CloseCapture(root, "alpha", "my-idea"); err != nil {
 		t.Fatalf("CloseCapture: %v", err)
 	}
 	md, err := run.Load(root, "alpha", "my-idea")
@@ -296,7 +296,7 @@ func TestCloseCaptureRefusesNonIdeaAndTerminalIdea(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			root := newIdeaBureaucracy(t, "alpha", "my-idea", "# my idea\n")
 			setRunFields(t, root, "alpha", "my-idea", tc.workflow, tc.status)
-			if err := CloseCapture(root, "alpha", "my-idea", io.Discard, io.Discard); !errors.Is(err, ErrNotCapture) {
+			if err := CloseCapture(root, "alpha", "my-idea"); !errors.Is(err, ErrNotCapture) {
 				t.Fatalf("want ErrNotCapture, got %v", err)
 			}
 		})
@@ -308,7 +308,7 @@ func TestReopenIdeaReopensClosedIdea(t *testing.T) {
 	setRunFields(t, root, "alpha", "my-idea", dash.IdeaWorkflow, run.StatusClosed)
 	gittest.Commit(t, root, "close fixture")
 
-	if err := ReopenIdea(root, "alpha", "my-idea", io.Discard, io.Discard); err != nil {
+	if err := ReopenIdea(root, "alpha", "my-idea"); err != nil {
 		t.Fatalf("ReopenIdea: %v", err)
 	}
 	md, err := run.Load(root, "alpha", "my-idea")
@@ -334,7 +334,7 @@ func TestReopenIdeaReopensClosedIdea(t *testing.T) {
 func TestReopenIdeaPreservesPromotedDestinationClosedPath(t *testing.T) {
 	root := promotedIdeaFixture(t, run.StatusClosed, "alpha/my-idea-dest")
 
-	if err := ReopenIdea(root, "alpha", "my-idea", io.Discard, io.Discard); err != nil {
+	if err := ReopenIdea(root, "alpha", "my-idea"); err != nil {
 		t.Fatalf("ReopenIdea: %v", err)
 	}
 	md, err := run.Load(root, "alpha", "my-idea")
@@ -370,7 +370,7 @@ func TestReopenIdeaRefusesInvalidStates(t *testing.T) {
 				}
 				gittest.Commit(t, root, "promote fixture\n\nMoE-Run: my-idea\nMoE-Project: alpha\nMoE-Workflow: idea\nMoE-Promoted-To: "+tc.dest)
 			}
-			if err := ReopenIdea(root, "alpha", "my-idea", io.Discard, io.Discard); !errors.Is(err, ErrNotReopenableIdea) {
+			if err := ReopenIdea(root, "alpha", "my-idea"); !errors.Is(err, ErrNotReopenableIdea) {
 				t.Fatalf("want ErrNotReopenableIdea, got %v", err)
 			}
 		})
@@ -418,10 +418,10 @@ func TestIdeaTransitionsReturnRunNotFoundForMissingRuns(t *testing.T) {
 	root := t.TempDir()
 	gittest.InitAt(t, root)
 	gittest.Commit(t, root, "seed")
-	if err := CloseCapture(root, "ghost", "ghost", io.Discard, io.Discard); !errors.Is(err, run.ErrRunNotFound) {
+	if err := CloseCapture(root, "ghost", "ghost"); !errors.Is(err, run.ErrRunNotFound) {
 		t.Fatalf("CloseCapture: want ErrRunNotFound, got %v", err)
 	}
-	if err := ReopenIdea(root, "ghost", "ghost", io.Discard, io.Discard); !errors.Is(err, run.ErrRunNotFound) {
+	if err := ReopenIdea(root, "ghost", "ghost"); !errors.Is(err, run.ErrRunNotFound) {
 		t.Fatalf("ReopenIdea: want ErrRunNotFound, got %v", err)
 	}
 }
@@ -432,7 +432,7 @@ func TestIdeaTransitionsReturnRunNotFoundForMissingRuns(t *testing.T) {
 // and no turn ever renders them.
 func TestPromoteCarriesTheIdeasUndeliveredInput(t *testing.T) {
 	root := newIdeaBureaucracy(t, "alpha", "my-idea", "# my idea\n")
-	if _, err := input.Add(root, "alpha", "my-idea", "Do the design pass and park.", io.Discard, io.Discard); err != nil {
+	if _, err := input.Add(root, "alpha", "my-idea", "Do the design pass and park."); err != nil {
 		t.Fatal(err)
 	}
 

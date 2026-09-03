@@ -82,7 +82,7 @@ func TestGateStringEntryPromotesTaggedIdea(t *testing.T) {
 
 	// And it grooms: travelling as a minted id is what makes the rest of
 	// the sweep byte-identical to the object-spec path that always worked.
-	groomed := groomChains(root, "moe", "pulse-one", groups, nil /*kickoff edges*/, io.Discard, &errb)
+	groomed := groomChains(root, "moe", "pulse-one", groups, nil /*kickoff edges*/, &errb)
 	if len(groomed.threads) != 1 {
 		t.Fatalf("groomed threads = %+v, want the promoted run placed; stderr=%q", groomed.threads, errb.String())
 	}
@@ -154,7 +154,7 @@ func TestGateStringEntryStillResolvesAnOrdinaryParkedRun(t *testing.T) {
 		t.Error("the gate opened a second run for a slug that already names one")
 	}
 
-	groomed := groomChains(root, "moe", "pulse-one", groups, nil /*kickoff edges*/, io.Discard, &errb)
+	groomed := groomChains(root, "moe", "pulse-one", groups, nil /*kickoff edges*/, &errb)
 	if len(groomed.threads) != 1 || groomed.threads[0].Root != "moe/"+minted["fix-a"] {
 		t.Errorf("groomed threads = %+v, want the existing run placed; stderr=%q", groomed.threads, errb.String())
 	}
@@ -193,7 +193,7 @@ func TestGateStringEntriesPromoteEveryTaggedIdea(t *testing.T) {
 		t.Errorf("ideas still parked = %v, want all three promoted", got)
 	}
 
-	groomed := groomChains(root, "moe", "pulse-one", groups, nil /*kickoff edges*/, io.Discard, &errb)
+	groomed := groomChains(root, "moe", "pulse-one", groups, nil /*kickoff edges*/, &errb)
 	if len(groomed.threads) != len(slugs) {
 		t.Errorf("groomed threads = %+v, want three; stderr=%q", groomed.threads, errb.String())
 	}
@@ -217,7 +217,7 @@ func TestGateStringEntryTwicePromotesOnce(t *testing.T) {
 	if got := runsWithWorkflow(t, root, "moe", "sdlc"); len(got) != 1 {
 		t.Fatalf("sdlc runs = %v, want exactly one — the second position is the same work", got)
 	}
-	groomed := groomChains(root, "moe", "pulse-one", groups, nil /*kickoff edges*/, io.Discard, &errb)
+	groomed := groomChains(root, "moe", "pulse-one", groups, nil /*kickoff edges*/, &errb)
 	if len(groomed.threads) != 1 {
 		t.Fatalf("groomed threads = %+v, want one; stderr=%q", groomed.threads, errb.String())
 	}
@@ -238,7 +238,7 @@ func seedDesignOnlyIdea(t *testing.T, root, projectID, slug string) *run.Metadat
 	// Through the real writer, so the fixture can't drift from what the
 	// operator's `moe idea tag --design-only` actually lands — and so it
 	// leaves the tree clean, which the promote below requires.
-	if err := runopen.TagIdea(root, projectID, slug, "sdlc", true, io.Discard, io.Discard); err != nil {
+	if err := runopen.TagIdea(root, projectID, slug, "sdlc", true); err != nil {
 		t.Fatal(err)
 	}
 	md, err := run.Load(root, projectID, slug)

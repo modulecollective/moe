@@ -793,7 +793,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	//
 	// Best-effort: a failure here costs a re-delivery next turn, which is
 	// noise, not damage, and is not worth failing a good turn over.
-	if err := input.MarkDelivered(root, projectID, runID, docID, deliveredInputIDs, walkConsent(), stdout, stderr); err != nil {
+	if err := input.MarkDelivered(root, projectID, runID, docID, deliveredInputIDs, walkConsent()); err != nil {
 		moePrintf(stderr, "input: mark delivered: %v\n", err)
 	}
 	// Boundary check runs AFTER the bureaucracy commit (canvas + run
@@ -830,7 +830,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	// next session end — or a manual `moe <workflow> harvest` — retries,
 	// which the `- [x]` skip makes free.
 	if opts.HarvestOnExit {
-		if err := harvestRunInProcess(root, md.Workflow, md.Project, md.ID, true, stdout, stderr); err != nil {
+		if err := harvestRunInProcess(root, md.Workflow, md.Project, md.ID, true); err != nil {
 			moePrintf(stderr, "harvest: %v\n", err)
 			return 1
 		}

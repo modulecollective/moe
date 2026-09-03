@@ -406,7 +406,7 @@ func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) closeCaptureRun(w http.ResponseWriter, r *http.Request, projectID, slug, id, workflow string) {
-	if err := runopen.CloseCapture(s.opts.Root, projectID, slug, s.syncWriter(), s.syncWriter()); err != nil {
+	if err := runopen.CloseCapture(s.opts.Root, projectID, slug); err != nil {
 		switch {
 		case errors.Is(err, run.ErrRunNotFound):
 			http.Error(w, "no such run: "+id, http.StatusNotFound)
@@ -462,7 +462,7 @@ func (s *Server) handleIdeaReopen(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 	id := projectID + "/" + slug
 
-	if err := runopen.ReopenIdea(s.opts.Root, projectID, slug, s.syncWriter(), s.syncWriter()); err != nil {
+	if err := runopen.ReopenIdea(s.opts.Root, projectID, slug); err != nil {
 		switch {
 		case errors.Is(err, run.ErrRunNotFound):
 			http.Error(w, "no such run: "+id, http.StatusNotFound)
@@ -527,7 +527,7 @@ func (s *Server) setIdeaTag(w http.ResponseWriter, r *http.Request, workflow str
 	slug := r.PathValue("slug")
 	id := projectID + "/" + slug
 
-	err := runopen.TagIdea(s.opts.Root, projectID, slug, workflow, designOnly, s.syncWriter(), s.syncWriter())
+	err := runopen.TagIdea(s.opts.Root, projectID, slug, workflow, designOnly)
 	switch {
 	case err == nil, errors.Is(err, run.ErrNothingToCommit):
 	case errors.Is(err, run.ErrRunNotFound):
@@ -581,7 +581,7 @@ func (s *Server) handleAdvance(w http.ResponseWriter, r *http.Request) {
 	// A replayed POST is harmless and deliberately not special-cased: a
 	// second marker is the same claim as the first, and stageSatisfied
 	// reads the freshest one.
-	switch err := runopen.MarkAdvanced(s.opts.Root, projectID, slug, stage, s.syncWriter(), s.syncWriter()); {
+	switch err := runopen.MarkAdvanced(s.opts.Root, projectID, slug, stage); {
 	case err == nil:
 	case errors.Is(err, run.ErrRunNotFound):
 		http.Error(w, "no such run: "+id, http.StatusNotFound)
@@ -1092,7 +1092,7 @@ func (s *Server) handleNewIdeaSubmit(w http.ResponseWriter, r *http.Request) {
 		ID:       slug,
 		Workflow: dash.IdeaWorkflow,
 		SeedDocs: map[string]string{dash.IdeaDocID: seed},
-	}, s.syncWriter(), s.syncWriter())
+	})
 	if err != nil {
 		fail("open: " + err.Error())
 		return
@@ -1185,7 +1185,7 @@ func (s *Server) handleCaptureEditSubmit(w http.ResponseWriter, r *http.Request)
 	}
 	body := strings.ReplaceAll(r.FormValue("body"), "\r\n", "\n")
 
-	err := runopen.EditCapture(s.opts.Root, projectID, slug, body, s.syncWriter(), s.syncWriter())
+	err := runopen.EditCapture(s.opts.Root, projectID, slug, body)
 	switch {
 	case errors.Is(err, run.ErrRunNotFound):
 		http.Error(w, "no such run: "+id, http.StatusNotFound)

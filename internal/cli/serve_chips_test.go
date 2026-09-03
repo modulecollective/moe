@@ -122,7 +122,7 @@ func TestParkedRunRowResolvesToFirstStage(t *testing.T) {
 	// Park a run exactly the way a sweep's promote does.
 	if _, err := runopen.Open(root, "alpha", run.Options{
 		ID: "parked-one", Workflow: "sdlc", Agent: "claude",
-	}, io.Discard, io.Discard); err != nil {
+	}); err != nil {
 		t.Fatalf("runopen.Open: %v", err)
 	}
 

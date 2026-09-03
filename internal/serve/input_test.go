@@ -1,7 +1,6 @@
 package serve
 
 import (
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -28,8 +27,7 @@ func seedInputRoot(t *testing.T) string {
 
 func askOn(t *testing.T, root, slug, question string) input.Entry {
 	t.Helper()
-	e, err := input.Ask(root, "alpha", slug, "alpha/pulse-one", question,
-		"dynamic", io.Discard, io.Discard)
+	e, err := input.Ask(root, "alpha", slug, "alpha/pulse-one", question, "dynamic")
 	if err != nil {
 		t.Fatalf("Ask: %v", err)
 	}
@@ -70,7 +68,7 @@ func TestInputQueueListsOpenQuestionsWithReplyBoxes(t *testing.T) {
 // turn — so one page answers "what needs me, and what's already moving."
 func TestInputQueueListsPendingNotesReadOnly(t *testing.T) {
 	root := seedInputRoot(t)
-	if _, err := input.Add(root, "alpha", "fix-it", "Ship behind the flag.\nDetails follow.", io.Discard, io.Discard); err != nil {
+	if _, err := input.Add(root, "alpha", "fix-it", "Ship behind the flag.\nDetails follow."); err != nil {
 		t.Fatal(err)
 	}
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
@@ -104,7 +102,7 @@ func TestDashLinksInputOnlyWhenSomethingIsAsking(t *testing.T) {
 	if body := get(t, s, "/").Body.String(); strings.Contains(body, `href="/input"`) {
 		t.Fatalf("quiet dash advertises the queue:\n%s", body)
 	}
-	if _, err := input.Add(root, "alpha", "fix-it", "a note", io.Discard, io.Discard); err != nil {
+	if _, err := input.Add(root, "alpha", "fix-it", "a note"); err != nil {
 		t.Fatal(err)
 	}
 	if body := get(t, s, "/").Body.String(); strings.Contains(body, `href="/input"`) {
@@ -184,7 +182,7 @@ func TestPostRefusesEmptyText(t *testing.T) {
 func TestReplyRefusesStalePingID(t *testing.T) {
 	root := seedInputRoot(t)
 	askOn(t, root, "fix-it", "Which compatibility policy?")
-	if _, err := input.Answer(root, "alpha", "fix-it", 1, "Adopt.", io.Discard, io.Discard); err != nil {
+	if _, err := input.Answer(root, "alpha", "fix-it", 1, "Adopt."); err != nil {
 		t.Fatal(err)
 	}
 	askOn(t, root, "fix-it", "And the migration?")
@@ -206,10 +204,10 @@ func TestReplyRefusesStalePingID(t *testing.T) {
 func TestRunPageShowsInputHistoryAndForms(t *testing.T) {
 	root := seedInputRoot(t)
 	askOn(t, root, "fix-it", "Which compatibility policy?")
-	if _, err := input.Answer(root, "alpha", "fix-it", 1, "Adopt.", io.Discard, io.Discard); err != nil {
+	if _, err := input.Answer(root, "alpha", "fix-it", 1, "Adopt."); err != nil {
 		t.Fatal(err)
 	}
-	if err := input.MarkDelivered(root, "alpha", "fix-it", "code", []int{1}, "", io.Discard, io.Discard); err != nil {
+	if err := input.MarkDelivered(root, "alpha", "fix-it", "code", []int{1}, ""); err != nil {
 		t.Fatal(err)
 	}
 	askOn(t, root, "fix-it", "And the migration?")

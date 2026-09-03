@@ -441,7 +441,7 @@ func closeNoShipRun(root string, md *run.Metadata, pj *project.Metadata, clonePa
 	// not one the operator abandoned.
 	subject := reg.subject + " — no ship: no project change"
 	if err := closeRunInProcess(root, md.Workflow, subject, reg.cleanup, md.Project, md.ID,
-		opts.SkipTerminalEdit, stdout, stderr); err != nil {
+		opts.SkipTerminalEdit, stderr); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1, true
 	}

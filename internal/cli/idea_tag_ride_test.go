@@ -109,17 +109,17 @@ exit 0
 	// The next sweep finds it held. This is the operator's brake: the
 	// run sits at design until they read it.
 	t.Chdir(root)
-	groomed := groomChains(root, "moe", "pulse-groom", nil /*empty gate*/, nil /*kickoff edges*/, io.Discard, io.Discard)
+	groomed := groomChains(root, "moe", "pulse-groom", nil /*empty gate*/, nil /*kickoff edges*/, io.Discard)
 	if got := kickFloorHold(root, "moe/"+promoted.ID, groomed); got != designOnlyHeldReason {
 		t.Fatalf("kickFloorHold = %q, want %q", got, designOnlyHeldReason)
 	}
 
 	// "Park it at code" is the advance chip — the same marker
 	// runopen.MarkAdvanced writes — and it is what licenses the rest.
-	if err := runopen.MarkAdvanced(root, "moe", promoted.ID, "design", io.Discard, io.Discard); err != nil {
+	if err := runopen.MarkAdvanced(root, "moe", promoted.ID, "design"); err != nil {
 		t.Fatalf("MarkAdvanced: %v", err)
 	}
-	groomed = groomChains(root, "moe", "pulse-groom", nil /*empty gate*/, nil /*kickoff edges*/, io.Discard, io.Discard)
+	groomed = groomChains(root, "moe", "pulse-groom", nil /*empty gate*/, nil /*kickoff edges*/, io.Discard)
 	if got := kickFloorHold(root, "moe/"+promoted.ID, groomed); got != "" {
 		t.Fatalf("kickFloorHold after advance = %q, want the hold released", got)
 	}

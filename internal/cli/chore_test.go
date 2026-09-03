@@ -351,8 +351,8 @@ func TestAutoOpenDueChoresOpensOnlyDueOnes(t *testing.T) {
 		t.Fatal("precondition: the cooling chore should not be due")
 	}
 
-	var stdout, stderr bytes.Buffer
-	autoOpenDueChores(root, "moe", nil /*pi*/, &stdout, &stderr)
+	var stderr bytes.Buffer
+	autoOpenDueChores(root, "moe", nil /*pi*/, &stderr)
 
 	if open := choreOpenRun(t, root, "readme-refresh"); open == "" {
 		t.Error("the due chore should have an open run after the sweep's chore step")
@@ -370,7 +370,7 @@ func TestAutoOpenDueChoresOpensOnlyDueOnes(t *testing.T) {
 // belt behind it), and the assertion is the outcome across both.
 func TestAutoOpenDueChoresSkipsAlreadyOpenSilently(t *testing.T) {
 	root := seedChoreRoot(t)
-	if _, err := openChoreInProcess(root, "moe", "readme-refresh", choreOpenNormal, io.Discard, io.Discard); err != nil {
+	if _, err := openChoreInProcess(root, "moe", "readme-refresh", choreOpenNormal); err != nil {
 		t.Fatalf("pre-open: %v", err)
 	}
 	first := choreOpenRun(t, root, "readme-refresh")
@@ -378,8 +378,8 @@ func TestAutoOpenDueChoresSkipsAlreadyOpenSilently(t *testing.T) {
 		t.Fatal("pre-open produced no run")
 	}
 
-	var stdout, stderr bytes.Buffer
-	autoOpenDueChores(root, "moe", nil /*pi*/, &stdout, &stderr)
+	var stderr bytes.Buffer
+	autoOpenDueChores(root, "moe", nil /*pi*/, &stderr)
 
 	if got := choreOpenRun(t, root, "readme-refresh"); got != first {
 		t.Errorf("open run = %q, want the pre-existing %q — the sweep must not pile a second run on", got, first)
@@ -395,8 +395,8 @@ func TestAutoOpenDueChoresSkipsAlreadyOpenSilently(t *testing.T) {
 func TestAutoOpenDueChoresSkipsWhenInterrupted(t *testing.T) {
 	root := seedChoreRoot(t)
 
-	var stdout, stderr bytes.Buffer
-	autoOpenDueChores(root, "moe", latchedPulseInterrupt(t), &stdout, &stderr)
+	var stderr bytes.Buffer
+	autoOpenDueChores(root, "moe", latchedPulseInterrupt(t), &stderr)
 
 	if open := choreOpenRun(t, root, "readme-refresh"); open != "" {
 		t.Errorf("chore opened run %q despite the latch", open)
@@ -410,8 +410,8 @@ func TestAutoOpenDueChoresWarnsOnUnreadableStates(t *testing.T) {
 	root := seedChoreRoot(t)
 	writeFile(t, filepath.Join(root, "projects", "moe", "chores", "readme-refresh", "chore.json"), "{not json\n")
 
-	var stdout, stderr bytes.Buffer
-	autoOpenDueChores(root, "moe", nil /*pi*/, &stdout, &stderr)
+	var stderr bytes.Buffer
+	autoOpenDueChores(root, "moe", nil /*pi*/, &stderr)
 
 	if !strings.Contains(stderr.String(), "pulse: read chore states for moe:") {
 		t.Fatalf("stderr = %q, want the chore-state read failure warned and named", stderr.String())
@@ -513,8 +513,7 @@ func TestChoreCooldownRefusalStampIsLocal(t *testing.T) {
 	fz := withFixedLocalZone(t)
 	next := choreNextEligible(t, root, "readme-refresh")
 
-	var stdout, stderr bytes.Buffer
-	_, err := openChoreInProcess(root, "moe", "readme-refresh", choreOpenNormal, &stdout, &stderr)
+	_, err := openChoreInProcess(root, "moe", "readme-refresh", choreOpenNormal)
 	if err == nil {
 		t.Fatal("cooling chore should refuse a normal open")
 	}

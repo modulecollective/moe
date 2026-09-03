@@ -144,7 +144,7 @@ func runChainNew(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
-	md, err := mintChainRun(root, projectID, slug, "" /*spawnedBy*/, note, stdout, stderr)
+	md, err := mintChainRun(root, projectID, slug, "" /*spawnedBy*/, note)
 	if err != nil {
 		moePrintf(stderr, "chain new: %v\n", err)
 		return 1
@@ -315,7 +315,7 @@ func chainKickRun(root, projectID, runID string, mode rideMode, oneStage bool, s
 			return 1
 		}
 		if err := closeRunInProcess(root, chainWorkflow, reg.subject, reg.cleanup,
-			projectID, md.ID, true /*skipEdit*/, stdout, stderr); err != nil {
+			projectID, md.ID, true /*skipEdit*/, stderr); err != nil {
 			moePrintf(stderr, "chain kick: close %s/%s: %v\n", projectID, md.ID, err)
 			return 1
 		}
@@ -454,7 +454,7 @@ func runChainNote(args []string, stdout, stderr io.Writer) int {
 //
 // note is the purpose-note body; empty takes the default skeleton (plus
 // a provenance line when spawnedBy is set). Only `--seed` passes one.
-func mintChainRun(root, projectID, base, spawnedBy, note string, stdout, stderr io.Writer) (*run.Metadata, error) {
+func mintChainRun(root, projectID, base, spawnedBy, note string) (*run.Metadata, error) {
 	if note == "" {
 		note = chainSeed(spawnedBy)
 	}
@@ -467,5 +467,5 @@ func mintChainRun(root, projectID, base, spawnedBy, note string, stdout, stderr 
 		opts.SpawnedBy = spawnedBy
 		opts.Trailers = trailers.Block{SpawnedBy: spawnedBy, Consent: spawnConsent(spawnedBy)}
 	}
-	return runopen.Open(root, projectID, opts, stdout, stderr)
+	return runopen.Open(root, projectID, opts)
 }

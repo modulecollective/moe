@@ -29,7 +29,7 @@ func isCaptureWorkflow(workflow string) bool { return dash.IsCapture(workflow) }
 // closeCleanup runs workflow-specific tear-down after state guards pass
 // and before the shared status-flip commit. Returning an error aborts
 // the close before run.json is modified.
-type closeCleanup func(root string, md *run.Metadata, stdout, stderr io.Writer) error
+type closeCleanup func(root string, md *run.Metadata) error
 
 // closeRegistration is the (subject, cleanup) pair a workflow handed
 // to closeCommand, recorded so other close entry points — today
@@ -126,7 +126,7 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 		return 1
 	}
 
-	if err := closeRunInProcess(root, workflow, subject, cleanup, projectID, runID, *noEdit, stdout, stderr); err != nil {
+	if err := closeRunInProcess(root, workflow, subject, cleanup, projectID, runID, *noEdit, stderr); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
@@ -147,11 +147,7 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 // canvas-empty gate and any IO/commit failure come back as plain errors
 // (serve answers 500). skipEdit threads to enterTerminal's harvest
 // pre-flight: serve always passes true since it can't host $EDITOR.
-//
-// stdout/stderr are handed to the workflow cleanup hook; the only hook
-// today (sdlc's releaseWorkspaceCleanup) logs to the process streams
-// directly, so serve passes io.Discard without losing anything.
-func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, projectID, runID string, skipEdit bool, stdout, stderr io.Writer) error {
+func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, projectID, runID string, skipEdit bool, stderr io.Writer) error {
 	if err := requireProject(root, projectID); err != nil {
 		return err
 	}
@@ -264,7 +260,7 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 		Heartbeat: true,
 	}, func() error {
 		if cleanup != nil {
-			if err := cleanup(root, md, stdout, stderr); err != nil {
+			if err := cleanup(root, md); err != nil {
 				return err
 			}
 		}
@@ -301,7 +297,7 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 //
 // Used by sdlc close to release the run workspace after abandoning code
 // work. It is idempotent so closing before first code attach is still safe.
-func releaseWorkspaceCleanup(root string, md *run.Metadata, stdout, stderr io.Writer) error {
+func releaseWorkspaceCleanup(root string, md *run.Metadata) error {
 	if err := releaseRunWorkspace(root, md); err != nil {
 		return fmt.Errorf("release workspace: %w", err)
 	}

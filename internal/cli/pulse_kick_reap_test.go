@@ -70,7 +70,7 @@ func reapThread(t *testing.T, root string, mutate func(minted map[string]string)
 	minted := groomFixture(t, root, "fix-a", "fix-b")
 	mutate(minted)
 	groomed = groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, nil /*kickoff edges*/, os.Stderr)
 	return "moe/" + minted["fix-a"], groomed
 }
 
@@ -189,7 +189,7 @@ func TestReapHoldReArmsAfterAFailedRetry(t *testing.T) {
 		"MoE-Input-Added: 1\n", reapAfter)
 
 	groomed := groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, nil /*kickoff edges*/, os.Stderr)
 	threadRoot := "moe/" + minted["fix-a"]
 	if got := holdOf(t, root, threadRoot, groomed); got != "" {
 		t.Fatalf("hold = %q, want the note to buy the first retry", got)
@@ -200,7 +200,7 @@ func TestReapHoldReArmsAfterAFailedRetry(t *testing.T) {
 	reArmed := reapAfter.Add(time.Hour)
 	tombstone(t, root, "moe", minted["fix-a"], "design", reArmed)
 	groomed = groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, nil /*kickoff edges*/, os.Stderr)
 
 	got := holdOf(t, root, threadRoot, groomed)
 	if !strings.Contains(got, reArmed.Format(time.RFC3339)) {
@@ -245,7 +245,7 @@ func TestReapHoldKeepsTheDesignHoldsReason(t *testing.T) {
 		map[string]string{"design": "# A thought I had\n\nseed\n"})
 	tombstone(t, root, "moe", "promoted-sketch", "design", reapAt)
 	groomed := groomChains(root, "moe", "pulse-groom",
-		nil /*empty gate*/, nil /*kickoff edges*/, io.Discard, os.Stderr)
+		nil /*empty gate*/, nil /*kickoff edges*/, os.Stderr)
 
 	want := "is waiting at its first stage with only a seed — the operator holds the trigger"
 	if got := holdOf(t, root, "moe/promoted-sketch", groomed); got != want {
@@ -294,7 +294,7 @@ func TestParkedKickableThreadSkipsAReapHeldThreadWhole(t *testing.T) {
 	root, _, _ := kickFixture(t)
 	minted := groomFixture(t, root, "fix-a", "fix-b")
 	groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, nil /*kickoff edges*/, os.Stderr)
 
 	want := "moe/" + minted["fix-a"]
 	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe", false); got != want {
@@ -383,7 +383,7 @@ func TestReapHoldReArmsAfterAChainEdit(t *testing.T) {
 		"MoE-Chained-To-Removed: "+a+" "+b+"\nMoE-Chained-To: "+b+" "+a+"\n", reapAfter)
 
 	groomed := groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, nil /*kickoff edges*/, os.Stderr)
 	if got := holdOf(t, root, a, groomed); got != "" {
 		t.Fatalf("hold = %q, want the edit to buy the first retry", got)
 	}
@@ -393,7 +393,7 @@ func TestReapHoldReArmsAfterAChainEdit(t *testing.T) {
 	reArmed := reapAfter.Add(time.Hour)
 	tombstone(t, root, "moe", minted["fix-a"], "design", reArmed)
 	groomed = groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, nil /*kickoff edges*/, os.Stderr)
 
 	got := holdOf(t, root, a, groomed)
 	if !strings.Contains(got, reArmed.Format(time.RFC3339)) {

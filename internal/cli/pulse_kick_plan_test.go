@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"io"
 	"os"
 	"slices"
 	"strings"
@@ -36,7 +35,7 @@ func TestKickPlanOrdersGateThreadsAheadOfTheBoard(t *testing.T) {
 	minted := groomFixture(t, root, "aa-board", "zz-gate-head", "zz-gate-tail")
 	groomed := groomChains(root, "moe", "pulse-groom",
 		[]groomGroup{{Runs: runsFrom("zz-gate-head", "zz-gate-tail")}},
-		nil /*kickoff edges*/, io.Discard, os.Stderr)
+		nil /*kickoff edges*/, os.Stderr)
 
 	got := planSteps(planKick(root, groomed))
 	want := []string{
@@ -127,7 +126,7 @@ func TestKickPlanNamesEachFloorHold(t *testing.T) {
 			root, _, _ := kickFixture(t)
 			threadRoot := tc.setUp(t, root)
 			groomed := groomChains(root, "moe", "pulse-groom",
-				nil /*empty gate*/, nil /*kickoff edges*/, io.Discard, os.Stderr)
+				nil /*empty gate*/, nil /*kickoff edges*/, os.Stderr)
 
 			plan := planKick(root, wantKick(groomed, groomedThread{Root: threadRoot}))
 			if len(plan.Steps) != 1 || plan.Steps[0].Hold != tc.want {
@@ -144,7 +143,7 @@ func TestKickPlanIsEmptyOnAnEmptyBoard(t *testing.T) {
 	defer withRideMode(rideDynamic)()
 	root, _, _ := kickFixture(t)
 	groomed := groomChains(root, "moe", "pulse-groom",
-		nil /*empty gate*/, nil /*kickoff edges*/, io.Discard, os.Stderr)
+		nil /*empty gate*/, nil /*kickoff edges*/, os.Stderr)
 
 	if plan := planKick(root, groomed); len(plan.Steps) != 0 {
 		t.Fatalf("plan = %+v, want no steps on an empty board", plan.Steps)

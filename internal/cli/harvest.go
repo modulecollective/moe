@@ -98,7 +98,7 @@ func runHarvest(workflow string, args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	if err := harvestRunInProcess(root, workflow, projectID, runID, *noEdit, stdout, stderr); err != nil {
+	if err := harvestRunInProcess(root, workflow, projectID, runID, *noEdit); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
@@ -129,7 +129,7 @@ func runHarvest(workflow string, args []string, stdout, stderr io.Writer) int {
 // session on a capture run files followups and lore like any other
 // stage, and capture close deliberately skips harvest, so refusing here
 // would leave those captures with no path at all.
-func harvestRunInProcess(root, workflow, projectID, runID string, skipEdit bool, stdout, stderr io.Writer) error {
+func harvestRunInProcess(root, workflow, projectID, runID string, skipEdit bool) error {
 	if err := requireProject(root, projectID); err != nil {
 		return err
 	}

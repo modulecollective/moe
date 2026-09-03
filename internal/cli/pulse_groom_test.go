@@ -91,7 +91,7 @@ func TestGroomSelfRootsAHeadlessThread(t *testing.T) {
 
 	groomed := groomChains(root, "moe", "pulse-groom",
 		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b", "fix-c")}},
-		nil /*kickoff edges*/, io.Discard, os.Stderr)
+		nil /*kickoff edges*/, os.Stderr)
 
 	if got := runsWithWorkflow(t, root, "moe", chainWorkflow); len(got) != 0 {
 		t.Fatalf("chain heads %v, want none — a self-rooted thread is headless", got)
@@ -117,9 +117,9 @@ func TestGroomOntoAppendsAtATail(t *testing.T) {
 	a, b, c := "moe/"+minted["fix-a"], "moe/"+minted["fix-b"], "moe/"+minted["fix-c"]
 
 	groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, nil /*kickoff edges*/, os.Stderr)
 	groomChains(root, "moe", "pulse-groom-2",
-		[]groomGroup{{Onto: "fix-b", Runs: runsFrom("fix-c")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
+		[]groomGroup{{Onto: "fix-b", Runs: runsFrom("fix-c")}}, nil /*kickoff edges*/, os.Stderr)
 
 	edges := liveEdges(t, root)
 	if edges[a] != b || edges[b] != c || edges[c] != "" {
@@ -137,9 +137,9 @@ func TestGroomOntoSplicesMidChain(t *testing.T) {
 	a, b, c := "moe/"+minted["fix-a"], "moe/"+minted["fix-b"], "moe/"+minted["fix-c"]
 
 	groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, nil /*kickoff edges*/, os.Stderr)
 	groomChains(root, "moe", "pulse-groom-2",
-		[]groomGroup{{Onto: "fix-a", Runs: runsFrom("fix-c")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
+		[]groomGroup{{Onto: "fix-a", Runs: runsFrom("fix-c")}}, nil /*kickoff edges*/, os.Stderr)
 
 	edges := liveEdges(t, root)
 	if edges[a] != c || edges[c] != b {
@@ -164,11 +164,11 @@ func TestGroomMoveRestitchesTheOldUnit(t *testing.T) {
 
 	// Two threads: a → b → c, and d alone.
 	groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b", "fix-c")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b", "fix-c")}}, nil /*kickoff edges*/, os.Stderr)
 
 	// Steal the middle member onto d.
 	groomChains(root, "moe", "pulse-groom-2",
-		[]groomGroup{{Onto: "fix-d", Runs: runsFrom("fix-b")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
+		[]groomGroup{{Onto: "fix-d", Runs: runsFrom("fix-b")}}, nil /*kickoff edges*/, os.Stderr)
 
 	edges := liveEdges(t, root)
 	if edges[d] != b {
@@ -192,7 +192,7 @@ func TestGroomExplicitHeadMintsAndCarriesProvenance(t *testing.T) {
 
 	groomed := groomChains(root, "moe", "pulse-groom",
 		[]groomGroup{{Head: "perf-cleanups", Runs: runsFrom("fix-a", "fix-b")}},
-		nil /*kickoff edges*/, io.Discard, os.Stderr)
+		nil /*kickoff edges*/, os.Stderr)
 
 	heads := runsWithWorkflow(t, root, "moe", chainWorkflow)
 	if len(heads) != 1 {
@@ -228,7 +228,7 @@ func TestGroomOntoUnknownWarnsAndSkips(t *testing.T) {
 	var errb bytes.Buffer
 	groomed := groomChains(root, "moe", "pulse-groom",
 		[]groomGroup{{Onto: "no-such-run", Runs: runsFrom("fix-a")}},
-		nil /*kickoff edges*/, io.Discard, &errb)
+		nil /*kickoff edges*/, &errb)
 
 	if len(groomed.threads) != 0 {
 		t.Fatalf("threads = %+v, want the group skipped", groomed.threads)
@@ -250,7 +250,7 @@ func TestGroomRejectsOntoAndHeadTogether(t *testing.T) {
 	var errb bytes.Buffer
 	groomChains(root, "moe", "pulse-groom",
 		[]groomGroup{{Onto: "fix-a", Head: "topic", Runs: runsFrom("fix-b")}},
-		nil /*kickoff edges*/, io.Discard, &errb)
+		nil /*kickoff edges*/, &errb)
 
 	if got := runsWithWorkflow(t, root, "moe", chainWorkflow); len(got) != 0 {
 		t.Errorf("chain heads %v, want none — the group was skipped", got)
@@ -283,7 +283,7 @@ func TestGroomResolvesADatedSlug(t *testing.T) {
 	// Groom with an empty `minted` map, so resolution has to go through
 	// the on-disk lookup rather than this batch's own mints.
 	groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, nil /*kickoff edges*/, io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, nil /*kickoff edges*/, os.Stderr)
 
 	edges := liveEdges(t, root)
 	if edges["moe/"+minted["fix-a"]] != "moe/"+minted["fix-b"] {
@@ -305,7 +305,7 @@ func TestGroomKickRootFollowsALaterGroupsMove(t *testing.T) {
 	groomed := groomChains(root, "moe", "pulse-groom", []groomGroup{
 		{Runs: runsFrom("fix-a", "fix-b")},
 		{Onto: "fix-c", Runs: runsFrom("fix-a")},
-	}, nil /*kickoff edges*/, io.Discard, os.Stderr)
+	}, nil /*kickoff edges*/, os.Stderr)
 
 	if len(groomed.threads) != 2 {
 		t.Fatalf("threads = %+v, want two", groomed.threads)
@@ -335,12 +335,12 @@ func TestGroomSkipsWhenChainEdgesMovedUnderTheSweep(t *testing.T) {
 	// a → b while the survey is running.
 	kickoff := map[string]string{}
 	groomChains(root, "moe", "operator-edit",
-		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, nil, io.Discard, os.Stderr)
+		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}}, nil, os.Stderr)
 
 	var errb bytes.Buffer
 	groomed := groomChains(root, "moe", "pulse-groom",
 		[]groomGroup{{Onto: "fix-c", Runs: runsFrom("fix-a")}},
-		kickoff, io.Discard, &errb)
+		kickoff, &errb)
 
 	if len(groomed.threads) != 0 {
 		t.Fatalf("threads = %+v, want none — a stale ordering opinion kicks nothing", groomed.threads)
@@ -366,7 +366,7 @@ func TestGroomProceedsWhenTheEdgeSetIsUnchanged(t *testing.T) {
 
 	groomChains(root, "moe", "pulse-groom",
 		[]groomGroup{{Runs: runsFrom("fix-a", "fix-b")}},
-		map[string]string{} /*nothing chained at kickoff*/, io.Discard, os.Stderr)
+		map[string]string{} /*nothing chained at kickoff*/, os.Stderr)
 
 	if edges := liveEdges(t, root); edges[a] != b {
 		t.Fatalf("edges = %v, want %s → %s stamped", edges, a, b)
@@ -378,7 +378,7 @@ func TestGroomProceedsWhenTheEdgeSetIsUnchanged(t *testing.T) {
 // hand leaves the board. Returns the head's qualified key.
 func stagedUnderHead(t *testing.T, root, headSlug string, members ...string) string {
 	t.Helper()
-	head, err := mintChainRun(root, "moe", headSlug, "" /*spawnedBy*/, "", io.Discard, os.Stderr)
+	head, err := mintChainRun(root, "moe", headSlug, "" /*spawnedBy*/, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -403,7 +403,7 @@ func TestGroomWontMoveAMemberOutOfAnOperatorHead(t *testing.T) {
 	var errb bytes.Buffer
 	// A later sweep tries to consolidate fix-a onto fix-b's thread.
 	groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Runs: runsFrom("fix-b", "fix-a")}}, nil /*kickoff edges*/, io.Discard, &errb)
+		[]groomGroup{{Runs: runsFrom("fix-b", "fix-a")}}, nil /*kickoff edges*/, &errb)
 
 	after := liveEdges(t, root)
 	if after[headKey] != before[headKey] {
@@ -425,7 +425,7 @@ func TestGroomWontSpliceIntoAnOperatorHead(t *testing.T) {
 
 	var errb bytes.Buffer
 	groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Onto: "fix-a", Runs: runsFrom("fix-b")}}, nil /*kickoff edges*/, io.Discard, &errb)
+		[]groomGroup{{Onto: "fix-a", Runs: runsFrom("fix-b")}}, nil /*kickoff edges*/, &errb)
 
 	edges := liveEdges(t, root)
 	if edges["moe/"+minted["fix-a"]] != "" {
@@ -447,7 +447,7 @@ func TestGroomWontSpliceIntoAnOperatorHead(t *testing.T) {
 func TestGroomStillConsolidatesUnderAMachineHead(t *testing.T) {
 	root := spawnFixture(t)
 	minted := groomFixture(t, root, "fix-a", "fix-b")
-	head, err := mintChainRun(root, "moe", "machine-topic", "moe/pulse-1", "", io.Discard, os.Stderr)
+	head, err := mintChainRun(root, "moe", "machine-topic", "moe/pulse-1", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -455,7 +455,7 @@ func TestGroomStillConsolidatesUnderAMachineHead(t *testing.T) {
 
 	var errb bytes.Buffer
 	groomChains(root, "moe", "pulse-groom",
-		[]groomGroup{{Runs: runsFrom("fix-b", "fix-a")}}, nil /*kickoff edges*/, io.Discard, &errb)
+		[]groomGroup{{Runs: runsFrom("fix-b", "fix-a")}}, nil /*kickoff edges*/, &errb)
 
 	edges := liveEdges(t, root)
 	if edges["moe/"+minted["fix-b"]] != "moe/"+minted["fix-a"] {

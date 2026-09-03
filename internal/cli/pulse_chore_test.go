@@ -244,8 +244,8 @@ func TestJudgedChoresBlockMarksLastCompletedUTC(t *testing.T) {
 func TestAutoOpenSkipsJudgedChores(t *testing.T) {
 	root := judgedChoreFixture(t)
 
-	var stdout, stderr bytes.Buffer
-	autoOpenDueChores(root, "moe", nil /*pi*/, &stdout, &stderr)
+	var stderr bytes.Buffer
+	autoOpenDueChores(root, "moe", nil /*pi*/, &stderr)
 
 	states, err := gatherChoreStates(root, "moe")
 	if err != nil {

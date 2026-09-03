@@ -196,7 +196,7 @@ func openDueChore(root, projectID, choreName string, force bool, stdout, stderr 
 	if force {
 		mode = choreOpenForced
 	}
-	res, err := openChoreInProcess(root, projectID, choreName, mode, stdout, stderr)
+	res, err := openChoreInProcess(root, projectID, choreName, mode)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return nil, 1
@@ -269,7 +269,7 @@ const (
 // come back as typed errors (*choreNotFoundError /
 // *choreNotOpenableError) so callers can branch on HTTP status or print
 // to stderr; everything else is a plain error.
-func openChoreInProcess(root, projectID, choreName string, mode choreOpenMode, stdout, stderr io.Writer) (*choreOpenResult, error) {
+func openChoreInProcess(root, projectID, choreName string, mode choreOpenMode) (*choreOpenResult, error) {
 	states, err := gatherChoreStates(root, projectID)
 	if err != nil {
 		return nil, err
@@ -336,7 +336,7 @@ func openChoreInProcess(root, projectID, choreName string, mode choreOpenMode, s
 		Workflow: state.Definition.Workflow,
 		SeedDocs: map[string]string{stages[0]: prompt},
 		Trailers: trailers.Block{Chore: state.Definition.Key(), Consent: walkConsent()},
-	}, stdout, stderr)
+	})
 	if err != nil {
 		return nil, err
 	}

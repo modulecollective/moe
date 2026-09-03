@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -136,7 +135,7 @@ func TestSweepLandsOnlyMachineMarkedCommits(t *testing.T) {
 	// exactly where an unstamped commit belongs. Promotion then carries
 	// it onto the destination run and the design turn delivers it — two
 	// more emit sites the guard gets to see, both inside the range.
-	if _, err := input.Add(root, "moe", "tagged-fix", pendingNoteText, io.Discard, io.Discard); err != nil {
+	if _, err := input.Add(root, "moe", "tagged-fix", pendingNoteText); err != nil {
 		t.Fatalf("input.Add: %v", err)
 	}
 
@@ -340,9 +339,9 @@ func TestCloseStampsConsentOnlyInsideAWalk(t *testing.T) {
 			if tc.ride {
 				t.Cleanup(withRideMode(rideDynamic))
 			}
-			var out, errb bytes.Buffer
+			var errb bytes.Buffer
 			if err := closeRunInProcess(root, "sdlc", reg.subject, reg.cleanup,
-				"tele", "close-me", true /*skipEdit*/, &out, &errb); err != nil {
+				"tele", "close-me", true /*skipEdit*/, &errb); err != nil {
 				t.Fatalf("close: %v stderr=%q", err, errb.String())
 			}
 			tip, err := git.HEAD(root)

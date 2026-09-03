@@ -157,7 +157,7 @@ type groomSweep struct {
 // can't be resolved drops with a stderr line and the rest of the sweep
 // carries on. Grooming is an ordering opinion — losing one is a
 // re-groom next pulse, not a lost sweep.
-func groomChains(root, projectID, pulseSlug string, groups []groomGroup, kickoffEdges map[string]string, stdout, stderr io.Writer) groomResult {
+func groomChains(root, projectID, pulseSlug string, groups []groomGroup, kickoffEdges map[string]string, stderr io.Writer) groomResult {
 	// Every early return below is a groom that produced no threads and no
 	// graph, so the kick's board enumeration finds nothing to start.
 	var bail groomResult
@@ -214,7 +214,7 @@ func groomChains(root, projectID, pulseSlug string, groups []groomGroup, kickoff
 
 	var threads []groomedThread
 	for i, grp := range groups {
-		th, ok := sw.placeGroup(i, grp, stdout, stderr)
+		th, ok := sw.placeGroup(i, grp, stderr)
 		if ok {
 			threads = append(threads, th)
 		}
@@ -279,7 +279,7 @@ func groomChains(root, projectID, pulseSlug string, groups []groomGroup, kickoff
 // placeGroup resolves one group's members and anchor and rewrites the
 // graph. Returns the thread it landed on, and false when the group was
 // skipped.
-func (sw *groomSweep) placeGroup(i int, grp groomGroup, stdout, stderr io.Writer) (groomedThread, bool) {
+func (sw *groomSweep) placeGroup(i int, grp groomGroup, stderr io.Writer) (groomedThread, bool) {
 	label := fmt.Sprintf("chain group %d", i+1)
 	if grp.Onto != "" && grp.Head != "" {
 		moePrintf(stderr, "pulse: groom: %s sets both `onto` and `head` — skipping\n", label)
@@ -309,7 +309,7 @@ func (sw *groomSweep) placeGroup(i int, grp groomGroup, stdout, stderr io.Writer
 		return groomedThread{}, false
 	}
 
-	anchor, headKey, ok := sw.groomAnchor(label, grp, members, stdout, stderr)
+	anchor, headKey, ok := sw.groomAnchor(label, grp, members, stderr)
 	if !ok {
 		return groomedThread{}, false
 	}
@@ -355,7 +355,7 @@ func (sw *groomSweep) placeGroup(i int, grp groomGroup, stdout, stderr io.Writer
 // placements in first-match order. Returns the anchor ("" self-roots
 // the group), the minted head key if one was minted, and false when the
 // group should be skipped entirely.
-func (sw *groomSweep) groomAnchor(label string, grp groomGroup, members []string, stdout, stderr io.Writer) (anchor, headKey string, ok bool) {
+func (sw *groomSweep) groomAnchor(label string, grp groomGroup, members []string, stderr io.Writer) (anchor, headKey string, ok bool) {
 	switch {
 	case grp.Onto != "":
 		key, found := sw.resolveAnchor(grp.Onto)
@@ -388,7 +388,7 @@ func (sw *groomSweep) groomAnchor(label string, grp groomGroup, members []string
 		// Provenance rides on the head canvas here and nowhere else: an
 		// operator head's purpose note is theirs, and a groomed run's
 		// `why` already travels on its own seeded design canvas.
-		md, err := mintChainRun(sw.root, sw.projectID, slug, sw.projectID+"/"+sw.pulseSlug, "" /*note*/, stdout, stderr)
+		md, err := mintChainRun(sw.root, sw.projectID, slug, sw.projectID+"/"+sw.pulseSlug, "" /*note*/)
 		if err != nil {
 			moePrintf(stderr, "pulse: groom: %s mint head %q: %v — skipping\n", label, slug, err)
 			return "", "", false

@@ -295,7 +295,7 @@ func TestKickFloorHoldOnADesignOnlySpawn(t *testing.T) {
 	}
 	note := func(t *testing.T, root string) {
 		t.Helper()
-		if _, err := input.Add(root, "moe", "brief", "narrow it to the read path", io.Discard, io.Discard); err != nil {
+		if _, err := input.Add(root, "moe", "brief", "narrow it to the read path"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -334,7 +334,7 @@ func TestKickFloorHoldOnADesignOnlySpawn(t *testing.T) {
 				for _, e := range f.Pending() {
 					ids = append(ids, e.ID)
 				}
-				if err := input.MarkDelivered(root, "moe", "brief", "design", ids, "", io.Discard, io.Discard); err != nil {
+				if err := input.MarkDelivered(root, "moe", "brief", "design", ids, ""); err != nil {
 					t.Fatal(err)
 				}
 			},
@@ -353,7 +353,7 @@ func TestKickFloorHoldOnADesignOnlySpawn(t *testing.T) {
 			seedDesignOnlyRun(t, root, "moe", "brief")
 			tc.setUp(t, root)
 			groomed := groomChains(root, "moe", "pulse-groom",
-				nil /*empty gate*/, nil /*kickoff edges*/, io.Discard, os.Stderr)
+				nil /*empty gate*/, nil /*kickoff edges*/, os.Stderr)
 
 			if got := kickFloorHold(root, "moe/brief", groomed); got != tc.want {
 				t.Errorf("kickFloorHold = %q, want %q", got, tc.want)
@@ -384,12 +384,12 @@ func TestDesignOnlyTakesNoSafeModeExemption(t *testing.T) {
 				t.Fatal(err)
 			}
 			if tc.note {
-				if _, err := input.Add(root, "moe", "brief", "go ahead", io.Discard, io.Discard); err != nil {
+				if _, err := input.Add(root, "moe", "brief", "go ahead"); err != nil {
 					t.Fatal(err)
 				}
 			}
 			groomed := groomChains(root, "moe", "pulse-groom",
-				nil /*empty gate*/, nil /*kickoff edges*/, io.Discard, os.Stderr)
+				nil /*empty gate*/, nil /*kickoff edges*/, os.Stderr)
 
 			if got := kickFloorHold(root, "moe/brief", groomed); got != tc.want {
 				t.Errorf("kickFloorHold = %q, want %q", got, tc.want)
@@ -406,7 +406,7 @@ func TestKickPlanMarksTheBoundedRide(t *testing.T) {
 	root, _, _ := kickFixture(t)
 	seedDesignOnlyRun(t, root, "moe", "brief")
 	groomed := groomChains(root, "moe", "pulse-groom",
-		nil /*empty gate*/, nil /*kickoff edges*/, io.Discard, os.Stderr)
+		nil /*empty gate*/, nil /*kickoff edges*/, os.Stderr)
 
 	plan := planKick(root, wantKick(groomed, groomedThread{Root: "moe/brief"}))
 	if len(plan.Steps) != 1 || !plan.Steps[0].OneStage {
@@ -429,7 +429,7 @@ func TestSelfKickRidesADesignOnlySpawnExactlyOneStage(t *testing.T) {
 	root, stages, pushes := kickFixture(t)
 	seedDesignOnlyRun(t, root, "moe", "brief")
 	groomed := groomChains(root, "moe", "pulse-groom",
-		nil /*empty gate*/, nil /*kickoff edges*/, io.Discard, os.Stderr)
+		nil /*empty gate*/, nil /*kickoff edges*/, os.Stderr)
 
 	var errb bytes.Buffer
 	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: "moe/brief"}), io.Discard, &errb)
