@@ -7,7 +7,8 @@
 // kept reaching past internal/git to get: Probe for silent exit-code
 // answers and Stream for live stdio passthrough on interactive ops
 // (push, pull) where progress and credential prompts need to reach the
-// operator.
+// operator. CombinedContext is Combined under a deadline, for the one
+// caller that runs with nobody watching (serve's pusher).
 //
 // Every primitive except Stream funnels through one private execGit,
 // so the worktree-shared index.lock retry, the error shape, and the
@@ -33,6 +34,7 @@ package git
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -41,6 +43,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/modulecollective/moe/internal/procgroup"
 )
 
 // writeRetryCap, readRetryCap, and indexLockRetryStep bound the retry
@@ -64,6 +68,13 @@ var (
 	readRetryCap       = 500 * time.Millisecond
 	indexLockRetryStep = 50 * time.Millisecond
 )
+
+// waitDelay bounds Wait after a cancel killed the process group. The
+// group SIGKILL is what normally ends the wait; this is the second net,
+// for a grandchild that escaped the group (a credential helper that
+// daemonised, say) and still holds the captured output pipe. Two
+// seconds of slack beats a deadline that hangs anyway.
+const waitDelay = 2 * time.Second
 
 // indexLockSubstr is the stderr fragment git emits when another
 // process holds the worktree index lock. Both the bare-repo and
@@ -95,7 +106,7 @@ var Hook func(dir string, args []string, dur time.Duration, err error)
 // the retry only fires when stderr contains the lock-file substring
 // git itself prints, so unrelated failures pass through untouched.
 func Run(dir string, args ...string) error {
-	combined, _, err := execGit(dir, args, true, writeRetryCap)
+	combined, _, err := execGit(context.Background(), dir, args, true, writeRetryCap)
 	if err != nil {
 		return fmt.Errorf("git %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(string(combined)))
 	}
@@ -106,7 +117,7 @@ func Run(dir string, args ...string) error {
 // folded into the returned error message. Index-lock retry uses the
 // shorter read cap.
 func Output(dir string, args ...string) (string, error) {
-	stdout, stderr, err := execGit(dir, args, false, readRetryCap)
+	stdout, stderr, err := execGit(context.Background(), dir, args, false, readRetryCap)
 	if err != nil {
 		return "", fmt.Errorf("git %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(string(stderr)))
 	}
@@ -118,7 +129,23 @@ func Output(dir string, args ...string) (string, error) {
 // callers can include it verbatim in diagnostics. Index-lock retry
 // uses the shorter read cap.
 func Combined(dir string, args ...string) (string, error) {
-	out, _, err := execGit(dir, args, true, readRetryCap)
+	out, _, err := execGit(context.Background(), dir, args, true, readRetryCap)
+	return strings.TrimSpace(string(out)), err
+}
+
+// CombinedContext is Combined bounded by a caller-supplied context —
+// the shape for a git call nobody is watching, where the transport can
+// black-hole and there is no operator to hit Ctrl-C. On expiry the
+// error names the budget ("timed out after 1m0s") and unwraps to
+// ctx.Err(), so errors.Is(err, context.DeadlineExceeded) holds.
+//
+// Cancellation reaps git's whole process group, not just the leader:
+// git-remote-https inherits the captured output pipe, so a leader-only
+// kill leaves Wait blocked on a helper still sitting on a dead socket.
+// Callers passing a non-cancellable context (every other primitive
+// here) keep stock exec behaviour.
+func CombinedContext(ctx context.Context, dir string, args ...string) (string, error) {
+	out, _, err := execGit(ctx, dir, args, true, readRetryCap)
 	return strings.TrimSpace(string(out)), err
 }
 
@@ -128,7 +155,7 @@ func Combined(dir string, args ...string) (string, error) {
 // Index-lock retry uses the shorter read cap; the typed wrapper HasRef
 // is the most-common shape.
 func Probe(dir string, args ...string) bool {
-	_, _, err := execGit(dir, args, true, readRetryCap)
+	_, _, err := execGit(context.Background(), dir, args, true, readRetryCap)
 	return err == nil
 }
 
@@ -164,13 +191,23 @@ func Stream(dir string, stdout, stderr io.Writer, args ...string) error {
 //
 // Hook (if set) fires once per attempt — retries are visible to a
 // tracer, not hidden inside this loop.
-func execGit(dir string, args []string, combined bool, retryCap time.Duration) (stdoutBuf, stderrBuf []byte, err error) {
-	deadline := time.Now().Add(retryCap)
+func execGit(ctx context.Context, dir string, args []string, combined bool, retryCap time.Duration) (stdoutBuf, stderrBuf []byte, err error) {
+	callStart := time.Now()
+	deadline := callStart.Add(retryCap)
 	for {
 		start := time.Now()
-		cmd := exec.Command("git", args...)
+		cmd := exec.CommandContext(ctx, "git", args...)
 		if dir != "" {
 			cmd.Dir = dir
+		}
+		if ctx.Done() != nil {
+			// See CombinedContext: a cancellable caller needs git's
+			// transport child reaped alongside the leader. Background
+			// callers must not take this path — an interactive git
+			// moved out of the terminal's foreground group would stop
+			// on SIGTTIN at a credential prompt.
+			procgroup.Isolate(cmd)
+			cmd.WaitDelay = waitDelay
 		}
 		var outBuf, errBuf bytes.Buffer
 		cmd.Stdout = &outBuf
@@ -186,6 +223,12 @@ func execGit(dir string, args []string, combined bool, retryCap time.Duration) (
 		if err == nil {
 			return outBuf.Bytes(), errBuf.Bytes(), nil
 		}
+		// A finished context outranks whatever git said on the way out
+		// ("signal: killed" carries no diagnosis) and ends the retry
+		// loop — there is no budget left to sleep against.
+		if ctx.Err() != nil {
+			return outBuf.Bytes(), errBuf.Bytes(), contextError(ctx, callStart)
+		}
 		// Pick the buffer that actually carries git's stderr — when
 		// combined, it's the shared outBuf; otherwise errBuf.
 		check := errBuf.Bytes()
@@ -198,6 +241,45 @@ func execGit(dir string, args []string, combined bool, retryCap time.Duration) (
 		}
 		return outBuf.Bytes(), errBuf.Bytes(), err
 	}
+}
+
+// contextError renders a finished context as the error the caller
+// should see in place of git's own "signal: killed". Wrapping ctx.Err()
+// keeps errors.Is(err, context.DeadlineExceeded) true for callers that
+// branch on it; the message names the budget, because in a serve log
+// "timed out after 1m0s" is the whole diagnostic and "context deadline
+// exceeded" says nothing about how long anything waited.
+func contextError(ctx context.Context, start time.Time) error {
+	err := ctx.Err()
+	dl, ok := ctx.Deadline()
+	if !ok || !errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	return &timeoutError{budget: max(dl.Sub(start), 0), err: err}
+}
+
+// timeoutError is a git call that blew its deadline. Error() is the
+// bare clause — callers prefix it with the operation they were running,
+// so PushMain's wrap reads "git push: timed out after 1m0s".
+type timeoutError struct {
+	budget time.Duration
+	err    error
+}
+
+func (e *timeoutError) Error() string { return "timed out after " + roundBudget(e.budget).String() }
+
+func (e *timeoutError) Unwrap() error { return e.err }
+
+// roundBudget trims sub-tick noise off the printed budget. It is
+// measured against a clock read taken after the caller built the
+// context, so a 60s deadline arrives as 59.9999s; rounding at the
+// budget's own scale prints "1m0s" without flattening a millisecond
+// test budget to "0s".
+func roundBudget(d time.Duration) time.Duration {
+	if d >= time.Second {
+		return d.Round(time.Second)
+	}
+	return d.Round(time.Millisecond)
 }
 
 // RevParse returns the resolved SHA for ref in dir.
@@ -229,7 +311,7 @@ func HasRef(dir, ref string) bool {
 // the answer is "no". A real repo problem (missing git, corrupt index)
 // will surface at the next Run/Output call.
 func Upstream(dir string) (string, error) {
-	stdout, _, err := execGit(dir,
+	stdout, _, err := execGit(context.Background(), dir,
 		[]string{"rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"},
 		false, readRetryCap)
 	if err != nil {
@@ -244,7 +326,7 @@ func Upstream(dir string) (string, error) {
 // caller decides what an uncomputable count means. Wraps
 // `rev-list --count <base>..<head>`.
 func AheadOf(dir, base, head string) (int, error) {
-	stdout, stderr, err := execGit(dir,
+	stdout, stderr, err := execGit(context.Background(), dir,
 		[]string{"rev-list", "--count", base + ".." + head},
 		false, readRetryCap)
 	if err != nil {
@@ -264,7 +346,7 @@ func AheadOf(dir, base, head string) (int, error) {
 // `ls-remote --symref <url> HEAD` output. Pure URL operation: runs
 // outside any repo (dir == "").
 func LsRemoteDefault(url string) (string, error) {
-	stdout, stderr, err := execGit("",
+	stdout, stderr, err := execGit(context.Background(), "",
 		[]string{"ls-remote", "--symref", url, "HEAD"},
 		false, readRetryCap)
 	if err != nil {
@@ -328,7 +410,7 @@ func Status(dir string, paths ...string) ([]StatusEntry, error) {
 		args = append(args, "--")
 		args = append(args, paths...)
 	}
-	stdout, stderr, err := execGit(dir, args, false, readRetryCap)
+	stdout, stderr, err := execGit(context.Background(), dir, args, false, readRetryCap)
 	if err != nil {
 		if _, ok := errors.AsType[*exec.ExitError](err); ok {
 			return nil, fmt.Errorf("git %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(string(stderr)))

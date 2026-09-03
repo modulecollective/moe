@@ -190,6 +190,23 @@ func HeadSHA(t *testing.T, dir string) string {
 // requireGit skips the test if git is not on PATH. CI and developer
 // boxes have git; stripped containers do not, and a missing-binary
 // failure there should not turn the whole suite red.
+// RequireHTTPSTransport skips the test when git can't speak https. The
+// transport helper lives in git's exec-path rather than on PATH, and a
+// git built without curl simply doesn't ship it — so a test that needs
+// to stall an https push has nothing to stall.
+func RequireHTTPSTransport(t *testing.T) {
+	t.Helper()
+	requireGit(t)
+	out, err := exec.Command("git", "--exec-path").Output()
+	if err != nil {
+		t.Skipf("git --exec-path: %v", err)
+	}
+	execPath := strings.TrimSpace(string(out))
+	if _, err := os.Stat(filepath.Join(execPath, "git-remote-https")); err != nil {
+		t.Skipf("no git-remote-https in %s; git can't speak https here", execPath)
+	}
+}
+
 func requireGit(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
