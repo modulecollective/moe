@@ -305,12 +305,11 @@ func rebaseOntoMain(s *Session, op string) error {
 // Close lands the session branch on local main and cleans up the
 // worktree. Caller must hold the repo lock.
 //
-// Close itself stays network-free — the rebase and fast-forward
-// touch only local refs, and the repo lock is scoped to same-machine
-// concurrency. Pushing to origin is the caller's edge: callers follow
-// a successful Close with a push in the same lock window (closeSess
-// in internal/cli/stage.go conditions it on okToPush; `moe session
-// resolve` wraps sync.WithJournalPush).
+// Close stays network-free — the rebase and fast-forward touch only
+// local refs, and the repo lock is scoped to same-machine concurrency.
+// No caller pushes either: the landed commit sits on local main until
+// serve's pusher (internal/serve/pusher.go) drains it, which is what
+// keeps the close window off the network entirely.
 //
 // On rebase failure, the rebase is aborted, the worktree and branch
 // are left intact, and the error names both so the operator can

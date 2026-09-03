@@ -92,8 +92,9 @@ func ReadMode(root, id string) (Mode, error) {
 // tick and newly licensed work starts without anyone remembering to
 // pulse.
 //
-// The caller owns the repolock and the journal push (see
-// sync.WithJournalPush); this is the disk write and the commit.
+// The caller owns the repolock (see repolock.With at the callsites);
+// this is the disk write and the commit. Reaching origin is serve's
+// pusher, not this path.
 func SetMode(root, id string, mode Mode) error {
 	if !idPattern.MatchString(id) {
 		return fmt.Errorf("project: id %q must match %s", id, idPattern)

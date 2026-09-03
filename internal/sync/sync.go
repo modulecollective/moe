@@ -29,7 +29,6 @@ import (
 	"github.com/modulecollective/moe/internal/cliout"
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/project"
-	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
@@ -548,42 +547,21 @@ func AutoPull(root string, stdout, stderr io.Writer) error {
 	return nil
 }
 
-// AutoPush is the session-close write-edge: push the turn commit that
-// just landed on local main so the other machine sees it before the
-// operator switches over. Plain `git push` — no submodule recursion
-// (auto-push never moves a gitlink, that's `moe sync`'s job) and no
-// PR reconcile. Best-effort: a brand-new branch with no upstream is a
-// silent no-op, and a network failure warns one line and returns nil
-// so a turn can't fail just because origin is unreachable. The local
-// commit is intact; the next session close retries.
-func AutoPush(root string, stdout, stderr io.Writer) error {
-	if !HasUpstream(root) {
-		return nil
-	}
-	if err := git.Stream(root, stdout, stderr, "push"); err != nil {
-		cliout.Printf(stderr, "[auto-sync skipped] git push failed: %v — working offline\n", err)
-		return nil
+// PushMain drains local main to its upstream. It is the whole of the
+// bureaucracy's write-edge to origin: journal verbs commit and return,
+// and serve's pusher goroutine (internal/serve/pusher.go) calls this
+// within a couple of seconds to land whatever accumulated.
+//
+// Plain `git push` — no submodule recursion (this never moves a
+// gitlink, that's `moe sync`'s job) and no PR reconcile. Unlike the
+// auto-push it replaced, failure comes back rather than being warned
+// away: the pusher needs the error to back off, and git's stderr is
+// folded in so the serve log says what origin actually refused.
+func PushMain(root string) error {
+	if out, err := git.Combined(root, "push"); err != nil {
+		return fmt.Errorf("git push: %w (%s)", err, strings.TrimSpace(out))
 	}
 	return nil
-}
-
-// WithJournalPush is the write-edge for verbs that land commits on
-// root main — direct journal commits and session-branch landings
-// (`moe session resolve`) alike: take the repo lock, run fn, and on
-// success race the commit to origin. Push failure never fails the verb
-// (AutoPush warns and returns nil). Heartbeat is forced on because the
-// lock now spans a network leg — without it, a slow push window would
-// look stale to a contending acquirer. fn returning an error (including
-// run.ErrNothingToCommit) skips the push and surfaces unchanged to
-// callers that special-case it.
-func WithJournalPush(root string, opts repolock.Options, stdout, stderr io.Writer, fn func() error) error {
-	opts.Heartbeat = true
-	return repolock.With(root, opts, func() error {
-		if err := fn(); err != nil {
-			return err
-		}
-		return AutoPush(root, stdout, stderr)
-	})
 }
 
 // DeleteRemoteBranch asks GitHub to drop refs/heads/<branch> from

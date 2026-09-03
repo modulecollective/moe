@@ -12,7 +12,6 @@ import (
 	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/trailers"
 	"github.com/modulecollective/moe/internal/workspace"
 )
@@ -229,10 +228,10 @@ func mintSDLCReopen(verb, root string, prior *run.Metadata, wsName, agentName st
 	}
 
 	var md *run.Metadata
-	err = sync.WithJournalPush(root, repolock.Options{
+	err = repolock.With(root, repolock.Options{
 		Purpose: "run-new",
 		Run:     projectID,
-	}, stdout, stderr, func() error {
+	}, func() error {
 		m, err := run.New(root, projectID, opts)
 		if err != nil {
 			return err

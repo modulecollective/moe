@@ -25,8 +25,10 @@ const shutdownIntrGap = 100 * time.Millisecond
 // shutdownSoftGrace is how long the four-phase shutdown waits after
 // the two Ctrl-Cs for a child to exit naturally. Moe at the chain
 // prompt is the common end-state once the agent exits — this is the
-// budget for the agent to flush, moe to run session.Close +
-// sync.AutoPush, and moe to print the chain prompt.
+// budget for the agent to flush, moe to run session.Close, and moe to
+// print the chain prompt. Session close is local-only now (serve's own
+// pusher takes the commit to origin), but the budget stays: the flush
+// and the rebase are what it was really sized for.
 //
 // Variable rather than const so tests can shorten the wait; not
 // part of the package's surface and not safe to mutate concurrently
@@ -200,7 +202,7 @@ func (cs *children) remove(id string) {
 //     buffer until something reads it.
 //  2. Wait up to shutdownSoftGrace for natural exit. The common
 //     end-state: agent flushes and exits → moe runs session.Close
-//     + AutoPush → moe prints the chain prompt → the second \x03
+//     → moe prints the chain prompt → the second \x03
 //     (now in cooked mode) interrupts the prompt → moe exits.
 //  3. For stragglers, pty.Close() → kernel SIGHUP via the
 //     controlling terminal. Same blunt instrument as the old

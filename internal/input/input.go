@@ -46,7 +46,6 @@ import (
 
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
@@ -511,14 +510,14 @@ var testLocked func()
 // drops whatever another writer landed in between.
 //
 // A prepare with nothing to write returns run.ErrNothingToCommit, which
-// skips the push (WithJournalPush passes it through untouched) and maps
-// back to nil here — the no-op verbs' contract.
+// skips the commit (repolock.With passes it through untouched) and
+// maps back to nil here — the no-op verbs' contract.
 func commit(root, projectID, runID, purpose string, stdout, stderr io.Writer, prepare func() (File, string, error)) error {
 	rel := Path(projectID, runID)
-	err := sync.WithJournalPush(root, repolock.Options{
+	err := repolock.With(root, repolock.Options{
 		Purpose: purpose,
 		Run:     projectID + "/" + runID,
-	}, stdout, stderr, func() error {
+	}, func() error {
 		if testLocked != nil {
 			testLocked()
 		}

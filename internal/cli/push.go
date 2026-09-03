@@ -574,10 +574,10 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch stri
 				PR:       url,
 				Consent:  consent,
 			}.String()
-		err := sync.WithJournalPush(root, repolock.Options{
+		err := repolock.With(root, repolock.Options{
 			Purpose: "push-pr",
 			Run:     md.Project + "/" + md.ID,
-		}, stdout, stderr, func() error {
+		}, func() error {
 			return run.StageAndCommit(root, msg, runJSON)
 		})
 		if err != nil {
@@ -662,10 +662,10 @@ var removePRRecordPending = func(root string, md *run.Metadata) error {
 // landed the staged record by hand, which is successful recovery.
 func resumePRRecord(root string, md *run.Metadata, pending *pendingPRRecord, stdout, stderr io.Writer) int {
 	runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
-	err := sync.WithJournalPush(root, repolock.Options{
+	err := repolock.With(root, repolock.Options{
 		Purpose: "push-pr",
 		Run:     md.Project + "/" + md.ID,
-	}, stdout, stderr, func() error {
+	}, func() error {
 		if err := run.StageAndCommit(root, pending.Msg, runJSON); err != nil && !errors.Is(err, run.ErrNothingToCommit) {
 			return err
 		}
@@ -714,10 +714,10 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 	// as-is so a headless ship has no hidden interactive surface.
 	priorStatus := md.Status
 	var paths []string
-	err = sync.WithJournalPush(root, repolock.Options{
+	err = repolock.With(root, repolock.Options{
 		Purpose: "push-harvest",
 		Run:     md.Project + "/" + md.ID,
-	}, stdout, stderr, func() error {
+	}, func() error {
 		var ferr error
 		paths, ferr = enterTerminal(root, md, run.StatusMerged, skipTerminalEdit)
 		return ferr
@@ -782,10 +782,10 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 			ChoreTouched: touched,
 			Consent:      consent,
 		}.String()
-	err = sync.WithJournalPush(root, repolock.Options{
+	err = repolock.With(root, repolock.Options{
 		Purpose: "push-merge",
 		Run:     md.Project + "/" + md.ID,
-	}, stdout, stderr, func() error {
+	}, func() error {
 		if err := releaseRunWorkspace(root, md); err != nil {
 			moePrintf(stderr, "warning: release workspace: %v\n", err)
 		}
@@ -895,10 +895,10 @@ func loadMergeRecordPending(root string, md *run.Metadata, stderr io.Writer) (*p
 // another run may hold it. And ErrNothingToCommit is success, not
 // failure: it means the operator committed the staged record by hand.
 func resumeMergeRecord(root string, md *run.Metadata, pending *pendingMergeRecord, stdout, stderr io.Writer) int {
-	err := sync.WithJournalPush(root, repolock.Options{
+	err := repolock.With(root, repolock.Options{
 		Purpose: "push-merge",
 		Run:     md.Project + "/" + md.ID,
-	}, stdout, stderr, func() error {
+	}, func() error {
 		if err := run.StageAndCommit(root, pending.Msg, pending.Paths...); err != nil && !errors.Is(err, run.ErrNothingToCommit) {
 			return err
 		}

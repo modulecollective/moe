@@ -20,7 +20,6 @@ import (
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
-	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
@@ -193,9 +192,9 @@ func runPulse(root, projectID, emitRun string, stdout, stderr io.Writer) (int, b
 // Warn-only like everything else in the pulse: a reconcile failure
 // (offline, no gh, a wedged lock) must not derail the sweep. The
 // repolock is taken here and held only for the walk — the survey's own
-// run-open takes its own. The journal push is conditional on something
-// actually having moved: the common case is a project with nothing
-// pushed, which should stay a disk-only scan.
+// run-open takes its own. Whatever the walk commits reaches origin on
+// serve's pusher, so the common case (a project with nothing pushed)
+// stays a disk-only scan with no network leg of its own.
 func reconcileAtPulse(root, projectID string, pi *pulseInterrupt, stdout, stderr io.Writer) {
 	// Checkpoint: a Ctrl-C during chore auto-open skips the network walk
 	// too — the operator asked for the sweep to get out of the way.
@@ -207,14 +206,8 @@ func reconcileAtPulse(root, projectID string, pi *pulseInterrupt, stdout, stderr
 		Budget:    repolock.CronBudget,
 		Heartbeat: true,
 	}, func() error {
-		moved, err := reconcilePushedRuns(root, projectID, stdout, stderr)
-		if err != nil {
-			return err
-		}
-		if moved == 0 {
-			return nil
-		}
-		return sync.AutoPush(root, stdout, stderr)
+		_, err := reconcilePushedRuns(root, projectID, stdout, stderr)
+		return err
 	})
 	if err != nil {
 		moePrintf(stderr, "pulse: reconcile pushed runs for %s: %v\n", projectID, err)
@@ -510,9 +503,9 @@ func closePulseRun(root, projectID, runID string, cleanup closeCleanup, stdout, 
 // passes.
 //
 // The skip note rides in as the close's cleanup, which runs inside the
-// close's WithJournalPush closure — after the dirty-tree gate, before
-// the status flip — so the staged canvas lands in the *same* commit that
-// marks the run closed. That fold is the point: a stamp that lived in
+// close's locked closure — after the dirty-tree gate, before the status
+// flip — so the staged canvas lands in the *same* commit that marks the
+// run closed. That fold is the point: a stamp that lived in
 // its own lock and its own commit could fail while the close went on to
 // succeed, and the run would close with the raw skeleton and only an
 // ephemeral warn to say why. Skeleton-closed is now unreachable from any

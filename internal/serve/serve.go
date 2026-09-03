@@ -393,6 +393,11 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	if s.opts.Dynamic && s.opts.Heartbeat != nil {
 		heartbeatDone.Go(func() { s.runHeartbeat(hbCtx) })
 	}
+	// The pusher shares the heartbeat's context but not its arming gate:
+	// draining commits the operator already made is not starting work.
+	// See pusher.go. Not joined on the way out — a push in flight is
+	// stateless, and the next start re-reads the ahead count.
+	go s.runPusher(hbCtx)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -659,9 +664,9 @@ func (s *Server) logf(format string, a ...any) {
 	fmt.Fprintf(s.opts.Logger, format+"\n", a...)
 }
 
-// syncWriter is the io.Writer handed to runopen's journal write-edge
-// (auto-push progress and warnings). Same sink as logf; never nil
-// because the push helpers write unconditionally.
+// syncWriter is the io.Writer handed to the journal write-edge helpers
+// in runopen and input. Same sink as logf; never nil because those
+// helpers write unconditionally.
 func (s *Server) syncWriter() io.Writer {
 	if s.opts.Logger == nil {
 		return io.Discard

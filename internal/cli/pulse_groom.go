@@ -9,7 +9,6 @@ import (
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
@@ -261,10 +260,10 @@ func groomChains(root, projectID, pulseSlug string, groups []groomGroup, kickoff
 		// consent trailer is unconditional here. It is what lets the
 		// index tell a groomed edge from an operator `chain edit` one.
 		trailers.Block{ChainedTo: adds, ChainedToRemoved: removes, Consent: currentRideMode.String()}.String()
-	err = sync.WithJournalPush(root, repolock.Options{
+	err = repolock.With(root, repolock.Options{
 		Purpose: "pulse-groom",
 		Run:     projectID + "/" + pulseSlug,
-	}, stdout, stderr, func() error {
+	}, func() error {
 		// Same shape as `moe chain edit`'s save: the edges are the
 		// truth, no file changed, so it is a trailer-only empty commit.
 		return git.Run(root, "commit", "--allow-empty", "-m", msg)

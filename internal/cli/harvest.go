@@ -12,7 +12,6 @@ import (
 	"github.com/modulecollective/moe/internal/lore"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
@@ -167,10 +166,10 @@ func harvestRunInProcess(root, workflow, projectID, runID string, skipEdit bool,
 			Project:  projectID,
 			Workflow: workflow,
 		}.String()
-	return sync.WithJournalPush(root, repolock.Options{
+	return repolock.With(root, repolock.Options{
 		Purpose: workflow + "-harvest",
 		Run:     projectID + "/" + runID,
-	}, stdout, stderr, func() error {
+	}, func() error {
 		if err := harvestFollowups(root, projectID, runID, workflow, skipEdit); err != nil {
 			return err
 		}

@@ -51,7 +51,6 @@ import (
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
@@ -207,7 +206,7 @@ func runChainEdit(args []string, stdout, stderr io.Writer) int {
 	subject := fmt.Sprintf("chain: edit (%d added, %d removed)", len(adds), len(removes))
 	msg := subject + "\n\n" + block.String()
 
-	err = sync.WithJournalPush(root, repolock.Options{Purpose: "chain-edit"}, stdout, stderr, func() error {
+	err = repolock.With(root, repolock.Options{Purpose: "chain-edit"}, func() error {
 		return git.Run(root, "commit", "--allow-empty", "-m", msg)
 	})
 	if err != nil {
@@ -285,7 +284,7 @@ func runChainClear(args []string, stdout, stderr io.Writer) int {
 	subject := fmt.Sprintf("chain: clear (%d removed)", len(removes))
 	msg := subject + "\n\n" + block.String()
 
-	err = sync.WithJournalPush(root, repolock.Options{Purpose: "chain-clear"}, stdout, stderr, func() error {
+	err = repolock.With(root, repolock.Options{Purpose: "chain-clear"}, func() error {
 		return git.Run(root, "commit", "--allow-empty", "-m", msg)
 	})
 	if err != nil {

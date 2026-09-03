@@ -510,19 +510,20 @@ func TestPromptStageNextStageAdvanceMarksAndDeclines(t *testing.T) {
 	}
 }
 
-// TestPromptStageNextStageAdvanceRacesMarkerToOrigin: the advance marker
-// is the one main commit written after the session-close push window, so
-// it has to race itself to origin. If it doesn't, a reader of origin
-// during the stale window still sees the run parked at the finished stage
-// and re-runs its agent — the re-run `a` exists to prevent, reintroduced
-// across the sync boundary. Sibling of TestCloseRacesCommitToOrigin.
-func TestPromptStageNextStageAdvanceRacesMarkerToOrigin(t *testing.T) {
+// TestPromptStageNextStageAdvanceCommitsMarkerLocally: the advance
+// marker is written after the session has already closed, in its own
+// lock window, and lands on local main like every other journal commit.
+// Serve's pusher takes it to origin within seconds — soon enough that a
+// reader of origin does not re-run the agent `a` just declined. Sibling
+// of TestCloseCommitsToLocalMainWithoutPushing.
+func TestPromptStageNextStageAdvanceCommitsMarkerLocally(t *testing.T) {
 	root := newTestBureaucracy(t)
 	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
 	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0)
 	origin := gittest.InitBare(t)
 	gittest.Run(t, root, "remote", "add", "origin", origin)
 	gittest.Run(t, root, "push", "-u", "origin", "main")
+	originBefore := gittest.HeadSHA(t, origin)
 
 	next := &Command{Name: "code", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
@@ -532,13 +533,12 @@ func TestPromptStageNextStageAdvanceRacesMarkerToOrigin(t *testing.T) {
 	if code := promptStageNextStage(next, nil, nil, root, md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
-	local, remote := gittest.HeadSHA(t, root), gittest.HeadSHA(t, origin)
-	if local != remote {
-		t.Fatalf("origin main = %s, want advance marker %s", remote, local)
+	if got := gittest.HeadSHA(t, origin); got != originBefore {
+		t.Fatalf("origin main advanced to %s (was %s); the pusher owns that leg", got, originBefore)
 	}
 	subject := strings.TrimSpace(gittest.Output(t, root, "log", "-1", "--format=%s"))
 	if subject != "advance: design" {
-		t.Fatalf("pushed tip subject = %q, want %q", subject, "advance: design")
+		t.Fatalf("local tip subject = %q, want %q", subject, "advance: design")
 	}
 }
 

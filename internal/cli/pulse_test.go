@@ -985,12 +985,12 @@ exit 0
 	}
 }
 
-// TestReconcileAtPulseStaysDiskOnlyWhenNothingMoved: the pulse's
-// reconcile wrapper pushes the journal only when something actually
-// moved. The common case is a project with nothing pushed, which must
-// stay a disk-only scan — a network leg on every fire, for every
-// project, is what the conditional exists to avoid.
-func TestReconcileAtPulseStaysDiskOnlyWhenNothingMoved(t *testing.T) {
+// TestReconcileAtPulseStaysDiskOnly: the pulse's reconcile wrapper has
+// no network leg of its own any more. It used to push conditionally,
+// when the walk moved a run; now whatever it commits reaches origin on
+// serve's pusher, so the whole wrapper is a disk-only scan on every
+// fire, for every project.
+func TestReconcileAtPulseStaysDiskOnly(t *testing.T) {
 	f := newReconcileFixture(t, run.StatusMerged) // not pushed: nothing to reconcile
 	origin := initBureaucracyOriginAt(t, f.root)
 	// Local work origin has not seen, so "origin unchanged" is a real
@@ -1002,24 +1002,26 @@ func TestReconcileAtPulseStaysDiskOnlyWhenNothingMoved(t *testing.T) {
 	reconcileAtPulse(f.root, f.projectID, nil /*pi*/, &stdout, &stderr)
 
 	if after := gittest.Output(t, origin, "rev-parse", "main"); after != before {
-		t.Fatalf("origin/main advanced to %s (was %s); AutoPush must not run when nothing moved", after, before)
+		t.Fatalf("origin/main advanced to %s (was %s); the pulse must not push", after, before)
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want silence on a clean disk-only scan", stderr.String())
 	}
 }
 
-// TestReconcileAtPulsePushesJournalWhenSomethingMoved: a PR merged out
-// of band flips the run before the survey reads its delta, and the
-// transition commit races to origin — the conditional AutoPush's other
-// leg.
-func TestReconcileAtPulsePushesJournalWhenSomethingMoved(t *testing.T) {
+// TestReconcileAtPulseCommitsLocallyWithoutPushing is the other leg: a
+// PR merged out of band flips the run before the survey reads its
+// delta, and that transition commit lands on local main only. It
+// reaches origin on the next pusher tick — the sweep pays nothing for
+// it.
+func TestReconcileAtPulseCommitsLocallyWithoutPushing(t *testing.T) {
 	f := newReconcileFixture(t, run.StatusPushed)
 	fakeGh(t, map[string]string{
 		f.prURL: `{"state":"MERGED","mergeCommit":{"oid":"abc1234deadbeef"}}`,
 	})
 	origin := initBureaucracyOriginAt(t, f.root)
 	before := gittest.Output(t, origin, "rev-parse", "main")
+	localBefore := gittest.Output(t, f.root, "rev-parse", "HEAD")
 
 	var stdout, stderr bytes.Buffer
 	reconcileAtPulse(f.root, f.projectID, nil /*pi*/, &stdout, &stderr)
@@ -1027,12 +1029,11 @@ func TestReconcileAtPulsePushesJournalWhenSomethingMoved(t *testing.T) {
 	if md := f.reload(); md.Status != run.StatusMerged {
 		t.Fatalf("status = %s, want merged; stderr=%q", md.Status, stderr.String())
 	}
-	after := gittest.Output(t, origin, "rev-parse", "main")
-	if after == before {
-		t.Fatal("origin/main unchanged; the transition commit never raced to origin")
+	if local := gittest.Output(t, f.root, "rev-parse", "HEAD"); local == localBefore {
+		t.Fatal("local main unchanged; the transition was never committed")
 	}
-	if local := gittest.Output(t, f.root, "rev-parse", "HEAD"); after != local {
-		t.Fatalf("origin/main = %s, want the local HEAD %s", after, local)
+	if after := gittest.Output(t, origin, "rev-parse", "main"); after != before {
+		t.Fatalf("origin/main advanced to %s (was %s); the pusher owns that leg now", after, before)
 	}
 }
 

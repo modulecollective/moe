@@ -13,7 +13,6 @@ import (
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
-	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
@@ -428,10 +427,10 @@ func runChainNote(args []string, stdout, stderr io.Writer) int {
 			Workflow: chainWorkflow,
 			Document: chainDoc,
 		}.String()
-	err = sync.WithJournalPush(root, repolock.Options{
+	err = repolock.With(root, repolock.Options{
 		Purpose: "chain-note",
 		Run:     projectID + "/" + runID,
-	}, stdout, stderr, func() error {
+	}, func() error {
 		return run.StageAndCommit(root, msg, run.DocDir(projectID, runID, chainDoc))
 	})
 	switch {

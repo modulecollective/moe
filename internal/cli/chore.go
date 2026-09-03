@@ -14,7 +14,6 @@ import (
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
-	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
@@ -398,7 +397,7 @@ func runChoreSkip(args []string, stdout, stderr io.Writer) int {
 	key := state.Definition.Key()
 	block := trailers.Block{ChoreSkipped: key}
 	msg := "chore: skip " + key + "\n\n" + block.String()
-	err = sync.WithJournalPush(root, repolock.Options{Purpose: "chore-skip", Run: key}, stdout, stderr, func() error {
+	err = repolock.With(root, repolock.Options{Purpose: "chore-skip", Run: key}, func() error {
 		return git.Run(root, "commit", "--allow-empty", "-m", msg)
 	})
 	if err != nil {

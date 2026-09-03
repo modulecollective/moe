@@ -33,10 +33,8 @@ func TestCloseWithAutoResolveLaunchesAgentOnRebaseFailure(t *testing.T) {
 	t.Cleanup(func() { launchRebaseResolve = prev })
 
 	calls := 0
-	var lastOkToPush bool
-	closeSess := func(okToPush bool) error {
+	closeSess := func() error {
 		calls++
-		lastOkToPush = okToPush
 		if calls == 1 {
 			return rfe
 		}
@@ -44,11 +42,8 @@ func TestCloseWithAutoResolveLaunchesAgentOnRebaseFailure(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	if err := closeWithAutoResolve(closeSess, true, &stdout, &stderr); err != nil {
+	if err := closeWithAutoResolve(closeSess, &stdout, &stderr); err != nil {
 		t.Fatalf("closeWithAutoResolve: %v", err)
-	}
-	if !lastOkToPush {
-		t.Errorf("retry should reuse the original okToPush; got false")
 	}
 	if calls != 2 {
 		t.Errorf("closeSess called %d times, want 2 (first triggers chain-back, second is the retry)", calls)
@@ -91,12 +86,12 @@ func TestCloseWithAutoResolveRetriesOnceThenSurfacesTypedError(t *testing.T) {
 	t.Cleanup(func() { launchRebaseResolve = prev })
 
 	calls := 0
-	closeSess := func(okToPush bool) error {
+	closeSess := func() error {
 		calls++
 		return rfe
 	}
 
-	err := closeWithAutoResolve(closeSess, true, &bytes.Buffer{}, &bytes.Buffer{})
+	err := closeWithAutoResolve(closeSess, &bytes.Buffer{}, &bytes.Buffer{})
 	if err == nil {
 		t.Fatal("expected typed error to surface after retry, got nil")
 	}
@@ -122,12 +117,12 @@ func TestCloseWithAutoResolvePassesNonRebaseErrorsUnchanged(t *testing.T) {
 
 	wantErr := errors.New("some other close failure")
 	calls := 0
-	closeSess := func(okToPush bool) error {
+	closeSess := func() error {
 		calls++
 		return wantErr
 	}
 
-	got := closeWithAutoResolve(closeSess, true, &bytes.Buffer{}, &bytes.Buffer{})
+	got := closeWithAutoResolve(closeSess, &bytes.Buffer{}, &bytes.Buffer{})
 	if !errors.Is(got, wantErr) {
 		t.Errorf("non-rebase error must pass through unchanged: got %v, want %v", got, wantErr)
 	}

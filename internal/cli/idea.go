@@ -16,7 +16,6 @@ import (
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
-	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
@@ -210,10 +209,10 @@ func runIdeaNew(args []string, stdout, stderr io.Writer) int {
 		SeedDocs: map[string]string{dash.IdeaDocID: body},
 	}
 	var md *run.Metadata
-	err = sync.WithJournalPush(root, repolock.Options{
+	err = repolock.With(root, repolock.Options{
 		Purpose: "idea-new",
 		Run:     projectID + "/" + slug,
-	}, stdout, stderr, func() error {
+	}, func() error {
 		m, err := run.New(root, projectID, opts)
 		if err != nil {
 			return err
@@ -346,10 +345,10 @@ func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 			Workflow: dash.IdeaWorkflow,
 			Document: dash.IdeaDocID,
 		}.String()
-	err = sync.WithJournalPush(root, repolock.Options{
+	err = repolock.With(root, repolock.Options{
 		Purpose: "idea-edit",
 		Run:     projectID + "/" + slug,
-	}, stdout, stderr, func() error {
+	}, func() error {
 		return run.StageAndCommit(root, msg, docDir)
 	})
 	switch {
@@ -678,10 +677,10 @@ func runIdeaMove(args []string, stdout, stderr io.Writer) int {
 			IdeaMovedFrom: fromProject + "/" + slug,
 		}.String()
 
-	err = sync.WithJournalPush(root, repolock.Options{
+	err = repolock.With(root, repolock.Options{
 		Purpose: "idea-move",
 		Run:     toProject + "/" + slug,
-	}, stdout, stderr, func() error {
+	}, func() error {
 		// git mv refuses if the destination's parent dir doesn't exist,
 		// and a project that has never opened a run has no runs/ yet.
 		if err := os.MkdirAll(filepath.Join(root, "projects", toProject, "runs"), 0o755); err != nil {

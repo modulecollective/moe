@@ -33,7 +33,6 @@ import (
 	"github.com/modulecollective/moe/internal/input"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
@@ -116,10 +115,10 @@ func Open(root, projectID string, opts run.Options, stdout, stderr io.Writer) (*
 		runRef = projectID + "/" + opts.ID
 	}
 	var md *run.Metadata
-	err := sync.WithJournalPush(root, repolock.Options{
+	err := repolock.With(root, repolock.Options{
 		Purpose: "run-new",
 		Run:     runRef,
-	}, stdout, stderr, func() error {
+	}, func() error {
 		m, err := run.New(root, projectID, opts)
 		if err != nil {
 			return err
@@ -254,10 +253,10 @@ func bumpIdeaPromoted(root string, md *run.Metadata, destProjectID, destSlug, co
 			PromotedTo: destProjectID + "/" + destSlug,
 			Consent:    consent,
 		}.String()
-	return sync.WithJournalPush(root, repolock.Options{
+	return repolock.With(root, repolock.Options{
 		Purpose: "idea-promote",
 		Run:     md.Project + "/" + md.ID,
-	}, stdout, stderr, func() error {
+	}, func() error {
 		if err := run.Save(root, md); err != nil {
 			return err
 		}
@@ -319,10 +318,10 @@ func TagIdea(root, projectID, slug, workflow string, designOnly bool, stdout, st
 			Workflow: dash.IdeaWorkflow,
 		}.String()
 	runJSONRel := filepath.Join(run.Dir(projectID, slug), "run.json")
-	return sync.WithJournalPush(root, repolock.Options{
+	return repolock.With(root, repolock.Options{
 		Purpose: purpose,
 		Run:     projectID + "/" + slug,
-	}, stdout, stderr, func() error {
+	}, func() error {
 		md.PromoteTo = workflow
 		md.DesignOnly = designOnly
 		if err := run.Save(root, md); err != nil {
@@ -403,10 +402,10 @@ func MarkAdvanced(root, projectID, slug, docID string, stdout, stderr io.Writer)
 	if sha == "" {
 		return fmt.Errorf("%w: %s has no work turn to advance past", ErrNotAdvanceable, docID)
 	}
-	return sync.WithJournalPush(root, repolock.Options{
+	return repolock.With(root, repolock.Options{
 		Purpose: "stage-advance",
 		Run:     projectID + "/" + slug,
-	}, stdout, stderr, func() error {
+	}, func() error {
 		return AdvanceMarker(root, md, docID, "")
 	})
 }
@@ -432,10 +431,10 @@ func CloseCapture(root, projectID, slug string, stdout, stderr io.Writer) error 
 			Project:  projectID,
 			Workflow: md.Workflow,
 		}.String()
-	return sync.WithJournalPush(root, repolock.Options{
+	return repolock.With(root, repolock.Options{
 		Purpose: md.Workflow + "-close",
 		Run:     projectID + "/" + slug,
-	}, stdout, stderr, func() error {
+	}, func() error {
 		md.Status = run.StatusClosed
 		if err := run.Save(root, md); err != nil {
 			return err
@@ -462,10 +461,10 @@ func Reopen(root string, md *run.Metadata, stdout, stderr io.Writer) error {
 			Project:  md.Project,
 			Workflow: md.Workflow,
 		}.String()
-	return sync.WithJournalPush(root, repolock.Options{
+	return repolock.With(root, repolock.Options{
 		Purpose: md.Workflow + "-reopen",
 		Run:     md.Project + "/" + md.ID,
-	}, stdout, stderr, func() error {
+	}, func() error {
 		md.Status = run.StatusInProgress
 		if err := run.Save(root, md); err != nil {
 			return err
@@ -586,10 +585,10 @@ func EditCapture(root, projectID, slug, body string, stdout, stderr io.Writer) e
 			Workflow: md.Workflow,
 			Document: docID,
 		}.String()
-	return sync.WithJournalPush(root, repolock.Options{
+	return repolock.With(root, repolock.Options{
 		Purpose: md.Workflow + "-edit",
 		Run:     projectID + "/" + slug,
-	}, stdout, stderr, func() error {
+	}, func() error {
 		return run.StageAndCommit(root, msg, docDir)
 	})
 }

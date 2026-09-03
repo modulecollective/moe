@@ -999,7 +999,7 @@ func TestCloseErrorPrintsOneSessionClosePrefix(t *testing.T) {
 
 	t.Run("closeBootstrapFailedSession", func(t *testing.T) {
 		var stderr bytes.Buffer
-		closeBootstrapFailedSession(func(bool) error { return closeErr }, &stderr)
+		closeBootstrapFailedSession(func() error { return closeErr }, &stderr)
 		assertOneSessionClosePrefix(t, stderr.String())
 	})
 }

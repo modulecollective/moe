@@ -622,75 +622,6 @@ func TestDoSyncAheadOnlyPushes(t *testing.T) {
 	}
 }
 
-// TestAutoPushAheadOnlyPushesAndIsCheap is the happy-path session-close
-// shape: a turn commit lives on local main, AutoPush gets it to origin
-// without doing pointer bumps or PR reconciliation (those are sync's
-// job). Asserts the local HEAD reaches origin and that no extra
-// bureaucracy commit was created (sync would have made one if it ran).
-func TestAutoPushAheadOnlyPushesAndIsCheap(t *testing.T) {
-	f := newSyncFixture(t)
-	f.initBureaucracyOrigin()
-
-	writeFile(t, filepath.Join(f.root, "turn.txt"), "turn\n")
-	gittest.Run(t, f.root, "add", "turn.txt")
-	gittest.Run(t, f.root, "commit", "-m", "work: turn commit")
-	local := f.bureaucracyHead()
-
-	var stdout, stderr bytes.Buffer
-	if err := sync.AutoPush(f.root, &stdout, &stderr); err != nil {
-		t.Fatalf("AutoPush: %v\nstdout=%s\nstderr=%s", err, stdout.String(), stderr.String())
-	}
-	if got := f.originHead(); got != local {
-		t.Fatalf("origin didn't receive push: want %s, got %s", local, got)
-	}
-	if f.bureaucracyHead() != local {
-		t.Fatalf("AutoPush mutated bureaucracy HEAD: %s -> %s (it should only push, not bump)", local, f.bureaucracyHead())
-	}
-}
-
-// TestAutoPushNoUpstreamIsSilentNoop is the brand-new-branch case: no
-// @{u} configured, AutoPush returns nil without trying to push.
-func TestAutoPushNoUpstreamIsSilentNoop(t *testing.T) {
-	f := newSyncFixture(t)
-	// Deliberately no initBureaucracyOrigin — main has no upstream.
-
-	var stdout, stderr bytes.Buffer
-	if err := sync.AutoPush(f.root, &stdout, &stderr); err != nil {
-		t.Fatalf("AutoPush: %v\nstderr=%s", err, stderr.String())
-	}
-	if stderr.Len() != 0 || stdout.Len() != 0 {
-		t.Fatalf("expected silent no-op, got stdout=%q stderr=%q", stdout.String(), stderr.String())
-	}
-}
-
-// TestAutoPushWarnsAndContinuesOnNetworkFailure: origin is unreachable
-// (path that doesn't exist). AutoPush must not fail the turn — it warns
-// to stderr and returns nil. Local HEAD must be untouched.
-func TestAutoPushWarnsAndContinuesOnNetworkFailure(t *testing.T) {
-	f := newSyncFixture(t)
-	f.initBureaucracyOrigin()
-	// Repoint origin at a path that doesn't exist so push fails locally
-	// (no network needed to reproduce).
-	bogus := filepath.Join(t.TempDir(), "does-not-exist.git")
-	gittest.Run(t, f.root, "remote", "set-url", "origin", bogus)
-
-	writeFile(t, filepath.Join(f.root, "turn.txt"), "turn\n")
-	gittest.Run(t, f.root, "add", "turn.txt")
-	gittest.Run(t, f.root, "commit", "-m", "work: turn commit")
-	headBefore := f.bureaucracyHead()
-
-	var stdout, stderr bytes.Buffer
-	if err := sync.AutoPush(f.root, &stdout, &stderr); err != nil {
-		t.Fatalf("AutoPush returned %v; should warn and continue on network failure", err)
-	}
-	if f.bureaucracyHead() != headBefore {
-		t.Fatal("AutoPush mutated HEAD on a failure path")
-	}
-	if !strings.Contains(stderr.String(), "[auto-sync skipped]") {
-		t.Fatalf("expected warn line on stderr, got %q", stderr.String())
-	}
-}
-
 // TestAutoPullPullsRebasedRemoteHead: remote advanced independently;
 // AutoPull rebases local onto origin/main without any local divergence.
 func TestAutoPullPullsRebasedRemoteHead(t *testing.T) {
@@ -809,7 +740,7 @@ func TestOpenStageSessionRunsAutoPullBeforeSessionOpen(t *testing.T) {
 	// commit, so closeSess will refuse via CanvasUnchangedError —
 	// auto-push wouldn't have a turn to ride either way.
 	t.Cleanup(func() {
-		if err := closeSess(true); err != nil {
+		if err := closeSess(); err != nil {
 			t.Logf("closeSess: %v", err)
 		}
 		_ = sess
@@ -824,22 +755,23 @@ func TestOpenStageSessionRunsAutoPullBeforeSessionOpen(t *testing.T) {
 	}
 }
 
-// TestCloseSessSuppressesAutoPushWhenTurnFailed is the silent-failure-
-// at-push regression: when the caller signals okToPush=false (agent run
-// errored, or pre-finalize gate fired), closeSess must still tear the
-// session worktree down and fast-forward local main, but the in-closure
-// sync.AutoPush must be suppressed. Without this gate, a failed push
-// synthesis turn auto-pushed the bureaucracy per-turn commit to origin
-// while the moe-side branch never reached its remote — bureaucracy
-// claimed the ship landed.
-func TestCloseSessSuppressesAutoPushWhenTurnFailed(t *testing.T) {
+// TestCloseSessLandsOnLocalMainWithoutPushing pins the close edge's new
+// shape: session.Close fast-forwards local main and the verb returns
+// with no network leg at all. Origin catches up on serve's pusher, not
+// here — so a stage turn's cost is the rebase, not the round trip.
+//
+// This replaced a pair of okToPush tests (push on success, suppressed on
+// failure). That gate only ever delayed a failed turn's commit until
+// some later verb carried it; with a drain running every couple of
+// seconds there is nothing left to delay.
+func TestCloseSessLandsOnLocalMainWithoutPushing(t *testing.T) {
 	f := newSyncFixture(t)
 	f.initBureaucracyOrigin()
 	originBefore := f.originHead()
 
 	in := stageTurnInputs{
 		Project:     "moe",
-		RunSlug:     "no-autopush-on-fail",
+		RunSlug:     "close-is-local",
 		DocID:       "code",
 		LockPurpose: "stage",
 	}
@@ -851,9 +783,9 @@ func TestCloseSessSuppressesAutoPushWhenTurnFailed(t *testing.T) {
 
 	// Land a canvas commit on the session branch so session.Close has a
 	// non-trivial fast-forward to perform — without it
-	// CanvasUnchangedError fires and we'd never reach the sync.AutoPush
-	// gate that's the actual subject under test.
-	canvasRel := run.ContentPath("moe", "no-autopush-on-fail", "code")
+	// CanvasUnchangedError fires and the close never reaches the point
+	// under test.
+	canvasRel := run.ContentPath("moe", "close-is-local", "code")
 	canvasAbs := filepath.Join(sess.WorktreePath, canvasRel)
 	if err := os.MkdirAll(filepath.Dir(canvasAbs), 0o755); err != nil {
 		t.Fatal(err)
@@ -864,65 +796,25 @@ func TestCloseSessSuppressesAutoPushWhenTurnFailed(t *testing.T) {
 	gittest.Run(t, sess.WorktreePath, "add", canvasRel)
 	gittest.Run(t, sess.WorktreePath, "commit", "-m", "work: turn")
 
-	if err := closeSess(false); err != nil {
-		t.Fatalf("closeSess(false): %v\nstderr=%s", err, stderr.String())
+	sessionTip, err := git.RevParse(sess.WorktreePath, "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := closeSess(); err != nil {
+		t.Fatalf("closeSess: %v\nstderr=%s", err, stderr.String())
 	}
 
-	// Local main fast-forwarded to the session branch tip…
+	// Local main took the turn commit…
 	localMain, err := git.RevParse(f.root, "main")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// …but origin must not have followed. The push gate is the whole
-	// fix; if the assertion below fails, the bug is back.
+	if localMain != sessionTip {
+		t.Errorf("local main = %s, want the session tip %s", localMain, sessionTip)
+	}
+	// …and origin is untouched: the close no longer pushes.
 	if got := f.originHead(); got != originBefore {
-		t.Errorf("origin advanced despite okToPush=false: want %s, got %s (local main = %s)",
-			originBefore, got, localMain)
-	}
-}
-
-// TestCloseSessRunsAutoPushWhenTurnSucceeded is the positive control:
-// okToPush=true keeps today's behavior — sync.AutoPush fires inside
-// closeSess and origin tracks local main. Without this counterpart,
-// the failing-turn test could pass against a closeSess that never
-// pushed under any condition.
-func TestCloseSessRunsAutoPushWhenTurnSucceeded(t *testing.T) {
-	f := newSyncFixture(t)
-	f.initBureaucracyOrigin()
-
-	in := stageTurnInputs{
-		Project:     "moe",
-		RunSlug:     "autopush-on-success",
-		DocID:       "code",
-		LockPurpose: "stage",
-	}
-	var stdout, stderr bytes.Buffer
-	sess, closeSess, err := openStageSession(f.root, in, &stdout, &stderr)
-	if err != nil {
-		t.Fatalf("openStageSession: %v", err)
-	}
-
-	canvasRel := run.ContentPath("moe", "autopush-on-success", "code")
-	canvasAbs := filepath.Join(sess.WorktreePath, canvasRel)
-	if err := os.MkdirAll(filepath.Dir(canvasAbs), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(canvasAbs, []byte("# canvas\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	gittest.Run(t, sess.WorktreePath, "add", canvasRel)
-	gittest.Run(t, sess.WorktreePath, "commit", "-m", "work: turn")
-
-	if err := closeSess(true); err != nil {
-		t.Fatalf("closeSess(true): %v\nstderr=%s", err, stderr.String())
-	}
-
-	localMain, err := git.RevParse(f.root, "main")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := f.originHead(); got != localMain {
-		t.Errorf("origin didn't track local main on okToPush=true: want %s, got %s", localMain, got)
+		t.Errorf("close pushed to origin: want %s unchanged, got %s", originBefore, got)
 	}
 }
 

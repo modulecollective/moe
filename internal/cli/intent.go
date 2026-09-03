@@ -13,7 +13,6 @@ import (
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
@@ -173,10 +172,10 @@ func runIntentNew(args []string, stdout, stderr io.Writer) int {
 		SeedDocs: map[string]string{dash.IntentDocID: body},
 	}
 	var md *run.Metadata
-	err = sync.WithJournalPush(root, repolock.Options{
+	err = repolock.With(root, repolock.Options{
 		Purpose: "intent-new",
 		Run:     projectID + "/" + slug,
-	}, stdout, stderr, func() error {
+	}, func() error {
 		m, err := run.New(root, projectID, opts)
 		if err != nil {
 			return err
@@ -262,10 +261,10 @@ func runIntentEdit(args []string, stdout, stderr io.Writer) int {
 			Workflow: dash.IntentWorkflow,
 			Document: dash.IntentDocID,
 		}.String()
-	err = sync.WithJournalPush(root, repolock.Options{
+	err = repolock.With(root, repolock.Options{
 		Purpose: "intent-edit",
 		Run:     projectID + "/" + slug,
-	}, stdout, stderr, func() error {
+	}, func() error {
 		return run.StageAndCommit(root, msg, docDir)
 	})
 	switch {

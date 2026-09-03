@@ -53,9 +53,8 @@ func commitSessionStart(root string, md *run.Metadata, docID string) error {
 // advance-mark route, which writes the same marker from the web. What
 // stays here is the ride's consent: a chain prompt answered mid-cascade
 // stamps the level it is riding at, which a click has nothing to say
-// about. Lock and push policy live at the callsite, like every other
-// main writer: the chain prompt's `a` branch wraps this in
-// sync.WithJournalPush.
+// about. Lock policy lives at the callsite, like every other main
+// writer: the chain prompt's `a` branch wraps this in repolock.With.
 func commitAdvance(root string, md *run.Metadata, docID string) error {
 	return runopen.AdvanceMarker(root, md, docID, walkConsent())
 }

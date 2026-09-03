@@ -84,8 +84,9 @@ func ReadShip(root, id string) ShipMode {
 // spellings can't drift apart on surfaces that read project.json
 // directly.
 //
-// The caller owns the repolock and the journal push (see
-// sync.WithJournalPush); this is the disk write and the commit.
+// The caller owns the repolock (see repolock.With at the callsites);
+// this is the disk write and the commit. Reaching origin is serve's
+// pusher, not this path.
 func SetShip(root, id string, ship ShipMode) error {
 	if !idPattern.MatchString(id) {
 		return fmt.Errorf("project: id %q must match %s", id, idPattern)

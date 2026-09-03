@@ -17,7 +17,6 @@ import (
 	"github.com/modulecollective/moe/internal/repolock"
 	// Aliased: serve.go in this package imports the stdlib sync, and one
 	// package can't spell the same identifier two ways.
-	moesync "github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/twin"
 )
 
@@ -301,10 +300,9 @@ func (s *Server) handleProjectMode(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "project mode: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	err = moesync.WithJournalPush(s.opts.Root, repolock.Options{Purpose: "project-mode"},
-		s.syncWriter(), s.syncWriter(), func() error {
-			return project.SetMode(s.opts.Root, projectID, mode)
-		})
+	err = repolock.With(s.opts.Root, repolock.Options{Purpose: "project-mode"}, func() error {
+		return project.SetMode(s.opts.Root, projectID, mode)
+	})
 	if err != nil {
 		s.logf("project mode %s: %v", projectID, err)
 		http.Error(w, "project mode: "+err.Error(), http.StatusInternalServerError)
@@ -330,10 +328,9 @@ func (s *Server) handleProjectShip(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "project ship: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	err = moesync.WithJournalPush(s.opts.Root, repolock.Options{Purpose: "project-ship"},
-		s.syncWriter(), s.syncWriter(), func() error {
-			return project.SetShip(s.opts.Root, projectID, ship)
-		})
+	err = repolock.With(s.opts.Root, repolock.Options{Purpose: "project-ship"}, func() error {
+		return project.SetShip(s.opts.Root, projectID, ship)
+	})
 	if err != nil {
 		s.logf("project ship %s: %v", projectID, err)
 		http.Error(w, "project ship: "+err.Error(), http.StatusInternalServerError)

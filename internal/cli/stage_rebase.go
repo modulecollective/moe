@@ -16,12 +16,8 @@ import (
 // still fails the caller sees the typed error and the operator falls
 // back to today's `moe session resolve` / `moe session abandon` path.
 // Other error types pass through unchanged.
-//
-// okToPush is threaded through to both attempts so the in-closure
-// sync.AutoPush is suppressed when the turn that triggered the close
-// didn't succeed. See openStageSession's closeSess for the rationale.
-func closeWithAutoResolve(closeSess func(okToPush bool) error, okToPush bool, stdout, stderr io.Writer) error {
-	err := closeSess(okToPush)
+func closeWithAutoResolve(closeSess func() error, stdout, stderr io.Writer) error {
+	err := closeSess()
 	var rebaseFail *session.RebaseFailureError
 	if !errors.As(err, &rebaseFail) {
 		return err
@@ -36,7 +32,7 @@ func closeWithAutoResolve(closeSess func(okToPush bool) error, okToPush bool, st
 	if agentErr := launchRebaseResolve(rebaseFail.WorktreePath, prompt, stdout, stderr); agentErr != nil {
 		moePrintf(stderr, "  auto-resolve agent: %v\n", agentErr)
 	}
-	return closeSess(okToPush)
+	return closeSess()
 }
 
 // buildSessionRebaseResolveKickoff is the agent-facing user prompt

@@ -1009,12 +1009,8 @@ type stageTurnSpec struct {
 // canvas-unchanged refusal — the new "no-op session" gate's loud-fail
 // behaviour — doesn't get swallowed alongside the session worktree it
 // leaves intact.
-//
-// okToPush is hard-wired to false: no turn ran, so origin must not
-// receive the bureaucracy-side per-turn commit. Same shape as the
-// post-executor path's failure case.
-func closeBootstrapFailedSession(closeSess func(okToPush bool) error, stderr io.Writer) {
-	if err := closeSess(false); err != nil {
+func closeBootstrapFailedSession(closeSess func() error, stderr io.Writer) {
+	if err := closeSess(); err != nil {
 		// Bare %v — close errors self-describe. See closeWithAutoResolve.
 		moePrintf(stderr, "%v\n", err)
 	}
@@ -1200,16 +1196,7 @@ func runStageTurn(root string, in stageTurnInputs, stdout, stderr io.Writer) int
 	// resolve, then retries close once. Falls through to today's
 	// "resolve by hand / moe session abandon" message if the agent
 	// can't take.
-	//
-	// okToPush gates the in-closure sync.AutoPush: the bureaucracy
-	// per-turn commit only races to origin when the agent's turn
-	// genuinely succeeded. runErr means it didn't (codex turn.failed),
-	// so we keep the local commit but suppress the push — origin won't
-	// see it until a later successful turn. commitErr is not a gate
-	// here: a CanvasUnchangedError surfaces through closeErr below
-	// regardless of the push toggle.
-	okToPush := runErr == nil
-	closeErr := closeWithAutoResolve(closeSess, okToPush, stdout, stderr)
+	closeErr := closeWithAutoResolve(closeSess, stdout, stderr)
 
 	return reportStageTurnExit(in, runErr, commitErr, closeErr, stdout, stderr)
 }
@@ -1220,25 +1207,15 @@ func runStageTurn(root string, in stageTurnInputs, stdout, stderr io.Writer) int
 // in runStageTurn is one `_ = closeSess(...)` line, and adding a new
 // path can't drift the lock purpose / Run key away from the open side.
 //
-// Auto-sync is woven into both lock windows: an auto-pull runs before
-// session.Open so the operator's first edit lands on current state,
-// and an auto-push runs after session.Close so the turn commit reaches
-// the other machine without the operator having to remember `moe sync`.
-// A rebase-conflict on auto-pull refuses-loud (the turn never starts);
-// a network failure on either side warns and continues. Heartbeat is on
-// because the network legs can sit for several seconds on a slow link
-// and we don't want a contending invocation to declare the lock stale.
-//
-// closeSess takes okToPush: when false, session.Close still runs (so
-// the worktree is torn down and any committed work lands on local
-// main), but sync.AutoPush is suppressed. The caller passes false when
-// the executor's turn failed — bureaucracy must not race ahead of the
-// project repo when the turn that motivated the commit didn't produce
-// shippable output. The silent-failure-at-push run was the motivating
-// incident: a failed push synthesis turn auto-pushed an empty "work:
-// update push" commit to origin while the moe branch never reached its
-// remote, leaving bureaucracy claiming the ship landed.
-func openStageSession(root string, in stageTurnInputs, stdout, stderr io.Writer) (*session.Session, func(okToPush bool) error, error) {
+// An auto-pull runs inside the open window, before session.Open, so the
+// operator's first edit lands on current state; a rebase-conflict there
+// refuses-loud (the turn never starts) and a network failure warns and
+// continues. The close window has no network leg of its own — the turn
+// commit lands on local main and serve's pusher drains it to origin
+// within seconds. Heartbeat is on because the pull can sit for several
+// seconds on a slow link and we don't want a contending invocation to
+// declare the lock stale.
+func openStageSession(root string, in stageTurnInputs, stdout, stderr io.Writer) (*session.Session, func() error, error) {
 	// Open (or resume) the session worktree under the repo lock.
 	// The local work is just `git worktree add` (or a lookup); the
 	// auto-pull before it can sit on the network briefly.
@@ -1275,16 +1252,10 @@ func openStageSession(root string, in stageTurnInputs, stdout, stderr io.Writer)
 	if claimErr != nil {
 		moePrintf(stderr, "session: could not record liveness for %s: %v\n", sess.Branch, claimErr)
 	}
-	closeSess := func(okToPush bool) error {
+	closeSess := func() error {
 		release()
 		return repolock.With(root, stageLockOptions(in, "close"), func() error {
-			if err := session.Close(sess); err != nil {
-				return err
-			}
-			if !okToPush {
-				return nil
-			}
-			return sync.AutoPush(root, stdout, stderr)
+			return session.Close(sess)
 		})
 	}
 	return sess, closeSess, nil
@@ -1300,9 +1271,11 @@ func openStageSession(root string, in stageTurnInputs, stdout, stderr io.Writer)
 // documented as how long an *interactive* caller waits, and a headless
 // turn has no such caller, so it takes the same CronBudget every other
 // unattended entry point (`moe sync`, reconcileAtPulse) already takes.
-// Both windows here span the network — AutoPull before Open, AutoPush
-// after Close — so a herd of sweeps starting on one tick can hold the
-// lock well past thirty seconds. A headless child that times out on
+// The open window spans the network — AutoPull before Open — so a herd
+// of sweeps starting on one tick can hold the lock well past thirty
+// seconds. Close keeps the same budget rather than a tighter one: it
+// contends with those same open windows even though it no longer adds a
+// network leg of its own. A headless child that times out on
 // *close* has already committed its turn: it exits non-zero leaving a
 // session branch that nothing retries, and the next tick's reap gets
 // it. Deferring costs a background process a few minutes; dying
@@ -1343,10 +1316,9 @@ const exitInterrupted = 130
 // non-zero exit even when the per-turn commit landed cleanly.
 //
 // An operator Ctrl-C is the one runErr that exits 130 (exitInterrupted)
-// rather than 1: the turn's commit is kept (the work is on disk, and
-// push is already suppressed upstream because okToPush gates on
-// runErr == nil), but the distinct code lets the cascade halt the whole
-// chain instead of mistaking the interrupt for a failed stage.
+// rather than 1: the turn's commit is kept (the work is on disk), but
+// the distinct code lets the cascade halt the whole chain instead of
+// mistaking the interrupt for a failed stage.
 func reportStageTurnExit(in stageTurnInputs, runErr, commitErr, closeErr error, stdout, stderr io.Writer) int {
 	if runErr != nil {
 		// in.Agent is populated by runStageTurn after agent resolution.

@@ -535,16 +535,20 @@ func TestIdeaCloseStillAllowsEmpty(t *testing.T) {
 	}
 }
 
-// TestCloseRacesCommitToOrigin: run close is a representative
-// journal-writing verb — with an upstream configured, the close commit
-// must reach origin before the verb returns (the WithJournalPush
-// write-edge), without the operator running `moe sync`.
-func TestCloseRacesCommitToOrigin(t *testing.T) {
+// TestCloseCommitsToLocalMainWithoutPushing: run close is a
+// representative journal-writing verb. Its commit lands on local main
+// and the verb returns; origin is serve's pusher's business, not the
+// verb's. Replaces a test that pinned the opposite — that the commit
+// reached origin before the verb returned — which is the seconds-long
+// network leg this change took off the path.
+func TestCloseCommitsToLocalMainWithoutPushing(t *testing.T) {
 	root := seedCloseFixture(t, "tele", "push-me", "idea", run.StatusInProgress)
 	addDocEntryAndCommit(t, root, "tele", "push-me", "idea", "# idea\n")
 	origin := gittest.InitBare(t)
 	gittest.Run(t, root, "remote", "add", "origin", origin)
 	gittest.Run(t, root, "push", "-u", "origin", "main")
+	originBefore := gittest.HeadSHA(t, origin)
+	localBefore := gittest.HeadSHA(t, root)
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
@@ -552,15 +556,19 @@ func TestCloseRacesCommitToOrigin(t *testing.T) {
 	if code := Run([]string{"idea", "close", "tele/push-me"}, &out, &errb); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if local, remote := gittest.HeadSHA(t, root), gittest.HeadSHA(t, origin); local != remote {
-		t.Fatalf("origin main = %s, want close commit %s", remote, local)
+	if gittest.HeadSHA(t, root) == localBefore {
+		t.Fatal("close commit missing from local main")
+	}
+	if got := gittest.HeadSHA(t, origin); got != originBefore {
+		t.Fatalf("origin main advanced to %s (was %s); the verb must not push", got, originBefore)
 	}
 }
 
-// TestCloseUnreachableOriginWarnsAndSucceeds: the push leg is
-// best-effort. A dead origin costs one stderr line; the verb still
-// exits 0 with the commit on local main.
-func TestCloseUnreachableOriginWarnsAndSucceeds(t *testing.T) {
+// TestCloseSucceedsSilentlyWithUnreachableOrigin: with the push off the
+// verb's path, an unreachable origin is not the verb's problem at all —
+// no attempt, no warn line, no cost. The commit sits on local main until
+// origin comes back and the pusher drains it.
+func TestCloseSucceedsSilentlyWithUnreachableOrigin(t *testing.T) {
 	root := seedCloseFixture(t, "tele", "offline", "idea", run.StatusInProgress)
 	addDocEntryAndCommit(t, root, "tele", "offline", "idea", "# idea\n")
 	origin := gittest.InitBare(t)
@@ -575,8 +583,8 @@ func TestCloseUnreachableOriginWarnsAndSucceeds(t *testing.T) {
 	if code := Run([]string{"idea", "close", "tele/offline"}, &out, &errb); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(errb.String(), "[auto-sync skipped]") {
-		t.Fatalf("missing warn line, stderr=%q", errb.String())
+	if strings.Contains(errb.String(), "auto-sync skipped") {
+		t.Fatalf("verb still reached for origin: stderr=%q", errb.String())
 	}
 	if gittest.HeadSHA(t, root) == headBefore {
 		t.Fatal("close commit missing from local main")

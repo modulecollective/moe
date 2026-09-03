@@ -104,11 +104,11 @@ func TestSessionListAndAbandon(t *testing.T) {
 	}
 }
 
-// TestSessionResolvePushesToOrigin: resolve lands the session branch
-// on local main and must race that commit to origin before the verb
-// returns — the same WithJournalPush write-edge every other verb that
-// lands commits on root main adopted.
-func TestSessionResolvePushesToOrigin(t *testing.T) {
+// TestSessionResolveLandsOnLocalMainWithoutPushing: resolve lands the
+// session branch on local main and returns — the same local-only write
+// edge every other verb that commits to root main now takes. Origin
+// catches up on serve's pusher.
+func TestSessionResolveLandsOnLocalMainWithoutPushing(t *testing.T) {
 	root := newSessionTestRoot(t)
 	s, err := session.Open(root, "demo", "r1", "design")
 	if err != nil {
@@ -120,6 +120,8 @@ func TestSessionResolvePushesToOrigin(t *testing.T) {
 	origin := gittest.InitBare(t)
 	gittest.Run(t, root, "remote", "add", "origin", origin)
 	gittest.Run(t, root, "push", "-u", "origin", "main")
+	originBefore := gittest.HeadSHA(t, origin)
+	localBefore := gittest.HeadSHA(t, root)
 
 	var stdout, stderr bytes.Buffer
 	withCwd(t, root, func() {
@@ -130,8 +132,11 @@ func TestSessionResolvePushesToOrigin(t *testing.T) {
 	if !strings.Contains(stdout.String(), "resolved") {
 		t.Errorf("stdout = %q, want to contain 'resolved'", stdout.String())
 	}
-	if local, remote := gittest.HeadSHA(t, root), gittest.HeadSHA(t, origin); local != remote {
-		t.Fatalf("origin main = %s, want resolved commit %s", remote, local)
+	if gittest.HeadSHA(t, root) == localBefore {
+		t.Fatal("resolve commit missing from local main")
+	}
+	if got := gittest.HeadSHA(t, origin); got != originBefore {
+		t.Fatalf("origin main advanced to %s (was %s); the verb must not push", got, originBefore)
 	}
 }
 
