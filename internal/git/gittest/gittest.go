@@ -187,9 +187,6 @@ func HeadSHA(t *testing.T, dir string) string {
 	return Output(t, dir, "rev-parse", "HEAD")
 }
 
-// requireGit skips the test if git is not on PATH. CI and developer
-// boxes have git; stripped containers do not, and a missing-binary
-// failure there should not turn the whole suite red.
 // RequireHTTPSTransport skips the test when git can't speak https. The
 // transport helper lives in git's exec-path rather than on PATH, and a
 // git built without curl simply doesn't ship it — so a test that needs
@@ -207,6 +204,9 @@ func RequireHTTPSTransport(t *testing.T) {
 	}
 }
 
+// requireGit skips the test if git is not on PATH. CI and developer
+// boxes have git; stripped containers do not, and a missing-binary
+// failure there should not turn the whole suite red.
 func requireGit(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
