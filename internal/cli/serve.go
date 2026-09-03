@@ -165,6 +165,11 @@ func serveOptions(root string, stderr io.Writer) serve.Options {
 		// run's own workflow through the close registry — the same
 		// (subject, cleanup) pair `moe <workflow> close` registered —
 		// so the in-process path and the CLI verb stay one pipeline.
+		// The close's stderr is serve's own log: nothing left on that
+		// path prompts, and the one thing it writes — the advisory for
+		// a canvas that claimed a followup it never filed — is a
+		// dropped thread. A close from the web must not be the quiet
+		// one, so the writer goes to the log, not to io.Discard.
 		CloseRun: func(project, runID string) error {
 			md, err := run.Load(root, project, runID)
 			if err != nil {
@@ -176,7 +181,7 @@ func serveOptions(root string, stderr io.Writer) serve.Options {
 					"workflow %s has no close pipeline", md.Workflow)}
 			}
 			return closeRunInProcess(root, md.Workflow, reg.subject,
-				reg.cleanup, project, runID, true, io.Discard)
+				reg.cleanup, project, runID, true, stderr)
 		},
 		// The workflow registries are init-time static, so the serve UI
 		// declarations cross the seam as a lookup plus a precomputed

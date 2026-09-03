@@ -3,10 +3,12 @@ package cli
 import (
 	"bytes"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/serve"
 )
 
@@ -76,5 +78,41 @@ func TestServeUsageDisclosesSteering(t *testing.T) {
 	}
 	if strings.Contains(usage, "code execution") {
 		t.Errorf("serve usage still carries the all-clear:\n%s", usage)
+	}
+}
+
+// TestServeCloseWarnsUnverifiedFollowupClaim: a close driven from the
+// web panel must leave the same advisory trail as `moe sdlc close`. The
+// CloseRun closure used to hand closeRunInProcess an io.Discard, which
+// swallowed the one line the close writes — a canvas claiming a
+// followup it never filed. This drives the real closure through the
+// real route and asserts the line lands in serve's log.
+func TestServeCloseWarnsUnverifiedFollowupClaim(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "close-me", "sdlc", run.StatusInProgress)
+	addDocEntryAndCommit(t, root, "tele", "close-me", "design",
+		"# Design\n\nFiled as followup `never-filed-thing`.\n")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	var logbuf bytes.Buffer
+	srv, err := serve.New(serveOptions(root, &logbuf))
+	if err != nil {
+		t.Fatalf("serve.New: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rr, httptest.NewRequest("POST", "/run/tele/close-me/close", strings.NewReader("")))
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("close: want 303, got %d body=%s log=%q", rr.Code, rr.Body.String(), logbuf.String())
+	}
+	if md, err := run.Load(root, "tele", "close-me"); err != nil {
+		t.Fatal(err)
+	} else if md.Status != run.StatusClosed {
+		t.Fatalf("status=%q, want closed", md.Status)
+	}
+
+	const want = "canvas design claims followup `never-filed-thing` that was never filed"
+	if !strings.Contains(logbuf.String(), want) {
+		t.Errorf("serve log missing the advisory:\nwant substring: %s\ngot: %q", want, logbuf.String())
 	}
 }
