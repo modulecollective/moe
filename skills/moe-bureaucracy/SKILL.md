@@ -80,7 +80,12 @@ Unchecked entries are harvested at termination into idea runs, one per
 entry, each opening with a line naming this run and the twin dir acting
 on it edits. Tag `(sdlc)` under the same rule as a followup — mechanical,
 bounded, verifiable — and leave it untagged when a human should decide.
-No other tag is valid: twin-ness rides in the idea's body, not the tag.
+Being out of scope for the change you're landing is a reason to file
+here, not a reason to leave the tag off: a note that is out of scope but
+still mechanical, bounded, and verifiable carries `(sdlc)` so the next
+pulse takes it. Only thin evidence or a call that's the operator's
+leaves it untagged. No other tag is valid: twin-ness rides in the idea's
+body, not the tag.
 
 A twin slug is a bare slug. The cross-project `<project>/` prefix
 followups allow is rejected here — a twin note is about *this* project's
