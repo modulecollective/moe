@@ -58,9 +58,14 @@ func runSync(args []string, stdout, stderr io.Writer) int {
 // outside every window because a push writes no worktree state and no
 // local ref — serve's pusher already races it today.
 //
-// What that gives up: two `moe sync` invocations racing can now both
-// commit an identical bump and the loser gets a non-fast-forward push
-// error. It's loud, the fix is to run `moe sync` again, and it costs
+// What that gives up: two `moe sync` invocations racing can now fail
+// each other, and the loser fails in its *pull* at least as often as
+// in its push. The winner's out-of-lock `git push` updates
+// refs/remotes/origin/main while the loser is fetching inside its own
+// first window, and the fetch reports `cannot lock ref
+// 'refs/remotes/origin/main'` — the non-fast-forward push both syncs
+// committing an identical bump would give is the other shape. Both
+// are loud, both are fixed by running `moe sync` again, and both cost
 // an operator typing the verb twice — cheaper than half a second of
 // `gh` per pushed run with the whole bureaucracy locked behind it.
 func doSync(root string, stdout, stderr io.Writer) error {
