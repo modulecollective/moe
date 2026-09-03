@@ -95,9 +95,9 @@ source of truth for the exact command surface; this page is a map.
   - `safe` — it sweeps and grooms as ever (survey, park, chore nomination), but
     the kick starts only threads carrying an explicit operator mark: a valid
     advance marker, a chore's standing intent, a workflow tag on the idea a run
-    was promoted from, or an undelivered note on the run — a `moe input add`
-    note or an answered question, consumed once a turn delivers it. Everything
-    else is held with a named reason.
+    was promoted from, or an undelivered note on any run in the thread — a
+    `moe input add` note or an answered question, consumed once a turn delivers
+    it. Everything else is held with a named reason.
   - `auto` — the default, and today's behaviour: every kickable parked thread
     the survey doesn't park gets started.
 
