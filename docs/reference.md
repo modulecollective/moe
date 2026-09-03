@@ -36,7 +36,10 @@ source of truth for the exact command surface; this page is a map.
   what the web wrote simply waits. Stopping the process retracts it. A `/serve`
   page owns that ticker's status and trace — what each recent tick decided, and
   the output tail of any sweep that failed — reachable from the menu and from
-  the one-line status cluster every board header carries.
+  the one-line status cluster every board header carries. `MOE_SERVE_NOTIFY_URL`
+  is the other env var: set it and serve POSTs a small JSON body to that URL
+  each time a heartbeat sweep exits, naming which project's sweep it was and
+  whether it succeeded. A failed POST is logged and blocks nothing.
 - `moe project mode <id> [paused|safe|auto]` caps what the heartbeat may start
   in one project, without stopping the process. See below.
 - `moe chore list|check|open|skip` lists due project chores, dry-runs a chore
@@ -90,8 +93,9 @@ source of truth for the exact command surface; this page is a map.
   - `safe` — it sweeps and grooms as ever (survey, park, chore nomination), but
     the kick starts only threads carrying an explicit operator mark: a valid
     advance marker, a chore's standing intent, a workflow tag on the idea a run
-    was promoted from, or an answered question on the run. Everything else is
-    held with a named reason.
+    was promoted from, or an undelivered note on the run — a `moe input add`
+    note or an answered question, consumed once a turn delivers it. Everything
+    else is held with a named reason.
   - `auto` — the default, and today's behaviour: every kickable parked thread
     the survey doesn't park gets started.
 
@@ -154,7 +158,7 @@ source of truth for the exact command surface; this page is a map.
   one design turn before the run holds; untagged ideas are operator-only.
 - `moe intent new|edit|close|list|cat|log|harvest` manages operator-authored
   standing direction.
-- `moe pulse new|pulse|close|cat|log` runs and inspects a project's read-only
+- `moe pulse new|close|cat|log` runs and inspects a project's read-only
   backlog sweep. `moe pulse new --dynamic <project>` runs it at the dynamic
   consent rung — the sweep starts every kickable parked thread on the board
   instead of parking them, which is what makes the verb callable by a clock.

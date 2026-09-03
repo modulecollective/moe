@@ -637,12 +637,12 @@ Per project, `moe project mode <id> paused|safe|auto` caps what that clock may
 do. `paused` means the heartbeat never sweeps the project at all. `safe` means
 it sweeps and grooms as ever but starts only threads you marked — a stage you
 advanced, a chore's standing intent, a workflow tag on the idea a run came
-from, a question on the run you answered — holding everything else with a
-named reason. `auto` is the default and
-today's behaviour. The mode binds the clock, not you: bangs, stage verbs, chain
-kicks and a hand-typed `moe pulse new --dynamic` run in every mode, because the
-typed word is the consent. Serve's **advance mark** is that same consent from
-the phone: it records the stage you just read as done — one journal commit, no
+from, a note or answer you left on the run that no turn has delivered yet —
+holding everything else with a named reason. `auto` is the default and today's
+behaviour. The mode binds the clock, not you: bangs, stage verbs, chain kicks
+and a hand-typed `moe pulse new --dynamic` run in every mode, because the typed
+word is the consent. Serve's **advance mark** is that same consent from the
+phone: it records the stage you just read as done — one journal commit, no
 agent — and `safe` starts on exactly such a mark. The project hub carries the
 same three-way switch, and the boards' serve cluster counts the projects that
 deviate.
