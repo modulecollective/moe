@@ -40,8 +40,9 @@
 // Under that switch, each project carries its own cap on the clock —
 // `moe project mode <id> paused|safe|auto`, stored in project.json and
 // read by the gate and the sweep child. Arming stays above it: an
-// unarmed serve automates nothing anywhere, whatever any project's mode
-// says.
+// unarmed serve starts no agent anywhere, whatever any project's mode
+// says. (It still drains the journal to origin — pusher.go — which
+// starts nothing.)
 package serve
 
 import (

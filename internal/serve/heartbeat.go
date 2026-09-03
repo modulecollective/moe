@@ -32,8 +32,9 @@ import (
 // Three properties are load-bearing:
 //
 //   - **Armed or nothing.** No Options.Dynamic, no ticker. An unarmed
-//     serve is today's MoE byte for byte, which makes the fallback for
-//     every failure here "the status quo".
+//     serve starts no agent work at all, which makes the fallback for
+//     every failure here "the status quo". (The journal pusher runs
+//     unarmed too; it drains commits, it starts nothing — pusher.go.)
 //   - **A quiet board is free.** The gate is read-only and cheap, so a
 //     project with no delta and no parked settled work costs no agent
 //     turn, no run and no journal noise. That is what lets the cadence

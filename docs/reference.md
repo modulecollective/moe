@@ -112,7 +112,7 @@ source of truth for the exact command surface; this page is a map.
   typed word is consent whatever the config says. Serve's advance mark is the
   same shape from the other direction: it writes an operator mark, which is
   exactly what `safe` looks for before it starts a thread.
-  Serve's arming stays above all three: an unarmed serve automates nothing
+  Serve's arming stays above all three: an unarmed serve starts no agent
   anywhere. The mode is stored in `projects/<id>/project.json` (absent means
   `auto`) and is settable from the project hub's switch as well.
 - `moe project ship <id> [pr|merge]` reads or sets how a finished run lands in
