@@ -465,9 +465,12 @@ form.new-run button:hover, form.new-run button:focus {
 
 /* The chore page's schedule rows (which borrow `.canvases`), the chain
    head's live member list, the provenance hop list, and the follow-up /
-   lore trace lists — same row shape, so one rule set. */
-.canvases ul, .chain-members ul, .provenance ul, .traces ul { list-style: none; padding: 0; margin: 0; }
-.canvases li, .chain-members li, .provenance li, .traces li {
+   lore trace lists — same row shape, so one rule set. The `.canvases`
+   selectors are child-scoped: on the run page that section also holds
+   the rendered canvas bodies (`.doc`), whose own markdown lists must
+   not inherit the row shape. */
+.canvases > ul, .chain-members ul, .provenance ul, .traces ul { list-style: none; padding: 0; margin: 0; }
+.canvases > ul > li, .chain-members li, .provenance li, .traces li {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem 0.75rem;
@@ -477,8 +480,8 @@ form.new-run button:hover, form.new-run button:focus {
   color: var(--muted);
   border-bottom: 1px solid var(--hairline);
 }
-.canvases li:last-child, .chain-members li:last-child, .provenance li:last-child, .traces li:last-child { border-bottom: none; }
-.canvases li .slug, .chain-members li .slug, .provenance li .slug, .traces li .slug { color: var(--fg); }
+.canvases > ul > li:last-child, .chain-members li:last-child, .provenance li:last-child, .traces li:last-child { border-bottom: none; }
+.canvases > ul > li .slug, .chain-members li .slug, .provenance li .slug, .traces li .slug { color: var(--fg); }
 /* The descent arrow that joins each hop to the one above it. */
 .provenance .arrow { color: var(--muted); }
 /* The recorded reason wraps onto its own full-width line, indented past
