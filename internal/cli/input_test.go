@@ -415,6 +415,44 @@ func TestSafeModeAdmitsAThreadWithAPendingNote(t *testing.T) {
 	})
 }
 
+// The licence is thread-scoped: operator prose lands at the run whose
+// next agent needs it, which is routinely queued behind the head the
+// floor evaluates. A note on the member alone starts the head, and
+// delivering that member's note re-arms the hold — so it is the
+// member's note doing the licensing, not anything else in the fixture.
+func TestSafeModeAdmitsAThreadOnAQueuedMembersNote(t *testing.T) {
+	root := quietFixture(t)
+	setMode(t, root, "moe", project.ModeSafe)
+	var member string
+	threadRoot, groomed := reapThread(t, root, func(minted map[string]string) {
+		member = minted["fix-b"]
+	})
+
+	asClock(func() {
+		if got := holdOf(t, root, threadRoot, groomed); !strings.Contains(got, "safe mode") {
+			t.Fatalf("hold = %q, want the safe-mode hold before any note", got)
+		}
+	})
+
+	addOn(t, root, "moe", member, "Go ahead — the API shape is settled.")
+	asClock(func() {
+		if got := holdOf(t, root, threadRoot, groomed); got != "" {
+			t.Fatalf("hold = %q, want none — a note on a queued member licenses the head", got)
+		}
+	})
+
+	// Delivering the member's own note re-arms the hold, which is what
+	// makes this a pin on fix-b's entry rather than on the fixture.
+	if err := input.MarkDelivered(root, "moe", member, "design", []int{1}, ""); err != nil {
+		t.Fatal(err)
+	}
+	asClock(func() {
+		if got := holdOf(t, root, threadRoot, groomed); !strings.Contains(got, "safe mode") {
+			t.Fatalf("hold = %q, want the hold back once the member's note is delivered", got)
+		}
+	})
+}
+
 // An open ping is not a mark: nobody has given the run anything yet.
 func TestSafeModeStillHoldsWithOnlyAnOpenPing(t *testing.T) {
 	root := quietFixture(t)
