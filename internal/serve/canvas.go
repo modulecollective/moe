@@ -53,7 +53,7 @@ func (s *Server) handleCanvas(w http.ResponseWriter, r *http.Request) {
 		Stage:   stage,
 		Path:    path,
 	}
-	body, err := os.ReadFile(path)
+	body, err := readCanvas(path, s.canvasReferenceResolver(projectID))
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			vm.Missing = true
@@ -64,14 +64,26 @@ func (s *Server) handleCanvas(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "canvas read: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	// A canvas is a run document, not part of the wiki/twin link graph,
-	// so it has no relative-link routes to resolve (nil resolver: any
-	// relative link renders with its source target untouched).
-	vm.Body = template.HTML(md.RenderWithReferences(string(body), nil, s.canvasReferenceResolver(projectID)))
+	vm.Body = body
 	if st, err := os.Stat(path); err == nil {
 		vm.ModTime = dash.HumanAgo(time.Now(), st.ModTime())
 	}
 	s.render(w, r, "canvas.html", vm)
+}
+
+// readCanvas reads a canvas file and renders its markdown. refs is a
+// resolver from canvasReferenceResolver; a caller rendering several
+// canvases into one page builds it once, since it caches run lookups.
+//
+// A canvas is a run document, not part of the wiki/twin link graph, so
+// it has no relative-link routes to resolve (nil route resolver: any
+// relative link renders with its source target untouched).
+func readCanvas(path string, refs func(md.Reference) string) (template.HTML, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return template.HTML(md.RenderWithReferences(string(body), nil, refs)), nil
 }
 
 func (s *Server) canvasReferenceResolver(currentProject string) func(md.Reference) string {
