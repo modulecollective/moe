@@ -58,7 +58,12 @@ var pushBackoffCap = 5 * time.Minute
 // the transitions are logged: one line when a run of failures starts,
 // one when it ends. A steady state of no commits is silent.
 func (s *Server) runPusher(ctx context.Context) {
-	interval := pushInterval
+	// Read the tunables once. The loop is not joined at shutdown, so it
+	// can outlive the ListenAndServe that started it by a tick — and a
+	// test that shortens these restores them in a cleanup that would
+	// otherwise race a live loop's re-read.
+	base, backoffCap := pushInterval, pushBackoffCap
+	interval := base
 	fails := 0
 	t := time.NewTimer(interval)
 	defer t.Stop()
@@ -75,10 +80,10 @@ func (s *Server) runPusher(ctx context.Context) {
 				s.logf("pusher: %v — retrying, backing off", err)
 			}
 			fails++
-			interval = min(interval*2, pushBackoffCap)
+			interval = min(interval*2, backoffCap)
 		case fails > 0:
 			s.logf("pusher: origin reachable again, pushed %d commit(s)", n)
-			fails, interval = 0, pushInterval
+			fails, interval = 0, base
 		case n > 0:
 			s.logf("pusher: pushed %d commit(s)", n)
 		}
@@ -96,6 +101,13 @@ func (s *Server) runPusher(ctx context.Context) {
 // mid-reconcile and HEAD is not a tip anyone should publish. An
 // unreadable ahead-count is the one genuine failure — it means git could
 // not answer about refs it should always be able to resolve.
+//
+// The rebase check is belt-and-braces for most of a rebase's life: git
+// detaches HEAD while replaying, so `@{u}` doesn't resolve and the
+// upstream check would skip anyway. It earns its line at the edges,
+// where the branch ref has already moved but the rebase state dir is
+// still there — a window where HEAD is attached, main is cleanly ahead,
+// and the tip is nonetheless not one to publish.
 func (s *Server) drainToOrigin() (int, error) {
 	root := s.opts.Root
 	if sync.RebaseInProgress(root) {
