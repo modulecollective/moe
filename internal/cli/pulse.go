@@ -17,7 +17,6 @@ import (
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/input"
-	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
 	"github.com/modulecollective/moe/internal/trailers"
@@ -190,26 +189,18 @@ func runPulse(root, projectID, emitRun string, stdout, stderr io.Writer) (int, b
 // owns pointer bumps; the pulse takes only the reconcile step.
 //
 // Warn-only like everything else in the pulse: a reconcile failure
-// (offline, no gh, a wedged lock) must not derail the sweep. The
-// repolock is taken here and held only for the walk — the survey's own
-// run-open takes its own. Whatever the walk commits reaches origin on
-// serve's pusher, so the common case (a project with nothing pushed)
-// stays a disk-only scan with no network leg of its own.
+// (offline, no gh, a wedged lock) must not derail the sweep. No lock is
+// taken here — the walk takes one short window per transition and holds
+// none of it across the `gh` calls, so a sweep over a project with
+// nothing pushed touches neither the lock nor the network. Whatever the
+// walk commits reaches origin on serve's pusher.
 func reconcileAtPulse(root, projectID string, pi *pulseInterrupt, stdout, stderr io.Writer) {
 	// Checkpoint: a Ctrl-C during chore auto-open skips the network walk
 	// too — the operator asked for the sweep to get out of the way.
 	if pi.interrupted() {
 		return
 	}
-	err := repolock.With(root, repolock.Options{
-		Purpose:   "pulse-reconcile",
-		Budget:    repolock.CronBudget,
-		Heartbeat: true,
-	}, func() error {
-		_, err := reconcilePushedRuns(root, projectID, stdout, stderr)
-		return err
-	})
-	if err != nil {
+	if _, err := reconcilePushedRuns(root, projectID, stdout, stderr); err != nil {
 		moePrintf(stderr, "pulse: reconcile pushed runs for %s: %v\n", projectID, err)
 	}
 }
