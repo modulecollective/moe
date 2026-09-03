@@ -25,16 +25,46 @@ func sha1New() hash.Hash { return sha1.New() }
 // deleteSpy records gh api DELETE calls the shim has handled. Call
 // spy.Lines() after the code under test has run to inspect them.
 type deleteSpy struct {
-	logPath string
+	logPath  string
+	lockPath string
 }
 
 // Lines returns one entry per `gh api --method DELETE` invocation
 // captured so far — each is the path argument, verbatim.
 func (s *deleteSpy) Lines() []string {
-	if s == nil || s.logPath == "" {
+	if s == nil {
 		return nil
 	}
-	b, err := os.ReadFile(s.logPath)
+	return readLogLines(s.logPath)
+}
+
+// LockProbes returns one entry per gh invocation, of the form
+// "<verb> locked" or "<verb> unlocked", recording whether the
+// bureaucracy's repolock file existed at the moment gh ran. Empty
+// unless the test called probeLockDuringGh first.
+func (s *deleteSpy) LockProbes() []string {
+	if s == nil {
+		return nil
+	}
+	return readLogLines(s.lockPath)
+}
+
+// probeLockDuringGh arms the shim's repolock probe against root. Set
+// before the code under test runs; the shim reads the env var at exec
+// time, so ordering against fakeGh doesn't matter.
+func probeLockDuringGh(t *testing.T, root string) {
+	t.Helper()
+	t.Setenv("MOE_FAKE_GH_LOCK_ROOT", root)
+}
+
+// readLogLines reads one of the shim's append-only logs, dropping
+// blanks. A missing file reads as no entries — "gh was never called"
+// and "the probe was never armed" are both legitimately empty.
+func readLogLines(path string) []string {
+	if path == "" {
+		return nil
+	}
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
@@ -50,7 +80,16 @@ func (s *deleteSpy) Lines() []string {
 // fakeGh installs a shim gh on PATH that dispatches on argv. state
 // maps PR URL → JSON body for `gh pr view`. The returned deleteSpy
 // lets the test inspect every `gh api --method DELETE` path after
-// the exercised code runs.
+// the exercised code runs, and — once probeLockDuringGh has armed it —
+// whether the repolock was held while each call ran.
+//
+// Two behaviours model GitHub rather than the caller. Deleting a ref
+// the shim has already deleted fails the way GitHub does ("Reference
+// does not exist", which DeleteRemoteBranch reads as success), so a
+// test can exercise a repeated delete without a knob. And
+// $MOE_FAKE_GH_HOOK, when set to a script, runs before every dispatch
+// — that's the seam for modelling a concurrent actor mutating the
+// bureaucracy underneath an in-flight gh call.
 //
 // The shim is a tiny shell script — no helper binary needed. Skipped
 // on Windows; reconcile runs against the real gh there.
@@ -73,11 +112,22 @@ func fakeGh(t *testing.T, state map[string]string) *deleteSpy {
 		}
 	}
 	logPath := filepath.Join(dir, "delete.log")
+	lockPath := filepath.Join(dir, "lock.log")
 	script := `#!/bin/sh
 set -e
 hash_url() {
   printf '%s' "$1" | ` + shaCmd() + ` | cut -d' ' -f1
 }
+if [ -n "$MOE_FAKE_GH_LOCK_ROOT" ]; then
+  if [ -f "$MOE_FAKE_GH_LOCK_ROOT/.moe/lock" ]; then
+    echo "$1 $2 locked" >> "` + lockPath + `"
+  else
+    echo "$1 $2 unlocked" >> "` + lockPath + `"
+  fi
+fi
+if [ -n "$MOE_FAKE_GH_HOOK" ]; then
+  sh "$MOE_FAKE_GH_HOOK"
+fi
 if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
   key=$(hash_url "$3")
   path="` + stateDir + `/${key}"
@@ -99,6 +149,11 @@ if [ "$1" = "pr" ] && [ "$2" = "create" ]; then
   exit 0
 fi
 if [ "$1" = "api" ] && [ "$2" = "--method" ] && [ "$3" = "DELETE" ]; then
+  if [ -f "` + logPath + `" ] && grep -qxF "$4" "` + logPath + `"; then
+    echo "$4" >> "` + logPath + `"
+    echo "gh: Reference does not exist (HTTP 422)" >&2
+    exit 1
+  fi
   echo "$4" >> "` + logPath + `"
   exit 0
 fi
@@ -111,7 +166,7 @@ exit 2
 	}
 	origPath := os.Getenv("PATH")
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+origPath)
-	return &deleteSpy{logPath: logPath}
+	return &deleteSpy{logPath: logPath, lockPath: lockPath}
 }
 
 // urlKey returns the same hash the shim computes — sha1 hex of the
@@ -312,5 +367,188 @@ func TestReconcileSkipsNonPushedRuns(t *testing.T) {
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("expected silence on non-pushed run, got %q", stdout.String())
+	}
+}
+
+// TestReconcileAtPulseHoldsNoLockDuringGitHubCalls is the point of the
+// two-phase walk. Every `gh` invocation the reconcile makes — the PR
+// query and the branch delete — must run with the repolock free, so a
+// UI action or a CLI verb landing mid-sweep isn't stuck behind half a
+// second of network per pushed run. The transition itself still takes
+// the lock; the assertion here is only about what gh saw.
+//
+// Driven through reconcileAtPulse rather than the walk directly,
+// because the pulse is where the lock used to be: the walk called bare
+// has never held one.
+func TestReconcileAtPulseHoldsNoLockDuringGitHubCalls(t *testing.T) {
+	f := newReconcileFixture(t, run.StatusPushed)
+	spy := fakeGh(t, map[string]string{
+		f.prURL: `{"state":"MERGED","mergeCommit":{"oid":"abc1234deadbeef"}}`,
+	})
+	probeLockDuringGh(t, f.root)
+
+	var stdout, stderr bytes.Buffer
+	reconcileAtPulse(f.root, f.projectID, nil /*pi*/, &stdout, &stderr)
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr=%s", stderr.String())
+	}
+	if md := f.reload(); md.Status != run.StatusMerged {
+		t.Fatalf("status = %q, want merged — the walk never ran", md.Status)
+	}
+
+	probes := spy.LockProbes()
+	if len(probes) == 0 {
+		t.Fatal("no gh invocations recorded; the probe never armed")
+	}
+	for _, p := range probes {
+		if strings.HasSuffix(p, " locked") {
+			t.Errorf("gh ran with the repolock held: %q (all probes: %v)", p, probes)
+		}
+	}
+	// Sanity: the walk really did do both legs outside the lock.
+	if len(probes) != 2 {
+		t.Errorf("probes = %v, want the pr view and the branch delete", probes)
+	}
+}
+
+// TestReconcileRejudgesUnderTheLock pins the line the two-phase split
+// is only safe because of. Phase one reads the status outside any
+// window, so phase two must re-read run.json under the lock and bail
+// when someone else already finalised the run. The shim plays the
+// concurrent actor: its side-effect script flips the fixture's
+// run.json to merged while gh is answering, which is exactly "another
+// sync got there between my read and my lock."
+//
+// Without the re-judge this walk would harvest and commit a second
+// transition on an already-merged run, and print a second stdout line
+// for it.
+func TestReconcileRejudgesUnderTheLock(t *testing.T) {
+	f := newReconcileFixture(t, run.StatusPushed)
+	fakeGh(t, map[string]string{
+		f.prURL: `{"state":"MERGED","mergeCommit":{"oid":"abc1234deadbeef"}}`,
+	})
+
+	// The concurrent actor, as a script the shim runs before it
+	// answers: rewrite run.json to merged, in place, uncommitted.
+	runJSON := filepath.Join(f.root, run.Dir(f.projectID, f.runID), "run.json")
+	hook := filepath.Join(t.TempDir(), "finalise.sh")
+	writeFile(t, hook, "#!/bin/sh\nsed -i.bak 's/\"pushed\"/\"merged\"/' "+runJSON+"\n")
+	t.Setenv("MOE_FAKE_GH_HOOK", hook)
+
+	before := lastCommitMessage(t, f.root)
+
+	var stdout, stderr bytes.Buffer
+	moved, err := reconcilePushedRuns(f.root, "" /*all projects*/, &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("reconcile: %v\nstderr=%s", err, stderr.String())
+	}
+
+	if moved != 0 {
+		t.Errorf("moved = %d, want 0 — the run was already finalised", moved)
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want silence; the other actor owns the line", stdout.String())
+	}
+	if after := lastCommitMessage(t, f.root); after != before {
+		t.Errorf("a second transition was committed:\nbefore=%q\nafter=%q", before, after)
+	}
+}
+
+// TestReconcileDeletesBranchBeforeTheFlip pins the reorder and its
+// safety net together. The delete used to sit between harvest and
+// commit; it now runs before the lock, so a transition that never
+// lands still leaves a `pushed` run with no remote branch — the state
+// the design accepted as recoverable.
+//
+// The fixture makes the harvest itself fail (a follow-up to fan out,
+// with every commit refused), which is the case that discriminates:
+// under the old order a failed harvest returned before the delete was
+// ever issued. Then the retry re-issues the delete against a ref
+// GitHub has already dropped, 422s, and DeleteRemoteBranch swallows it
+// — the idempotency the whole reorder leans on — so the run still
+// reaches merged with exactly one line of output.
+func TestReconcileDeletesBranchBeforeTheFlip(t *testing.T) {
+	f := newReconcileFixture(t, run.StatusPushed)
+	spy := fakeGh(t, map[string]string{
+		f.prURL: `{"state":"MERGED","mergeCommit":{"oid":"abc1234deadbeef"}}`,
+	})
+	writeFollowups(t, f.root, f.projectID, f.runID,
+		"# Follow-ups\n\n- [ ] `cleanup-foo` — Clean up foo helper\n\n")
+	unfail := failCommits(t, f.root)
+
+	var stdout, stderr bytes.Buffer
+	if _, err := reconcilePushedRuns(f.root, "" /*all projects*/, &stdout, &stderr); err != nil {
+		t.Fatalf("a failed harvest should warn and continue, not error: %v", err)
+	}
+	if !strings.Contains(stderr.String(), "harvest failed") {
+		t.Fatalf("stderr = %q, want the harvest failure named", stderr.String())
+	}
+	if md := f.reload(); md.Status != run.StatusPushed {
+		t.Fatalf("status = %q, want pushed after the failed harvest", md.Status)
+	}
+	if got := spy.Lines(); len(got) != 1 {
+		t.Fatalf("deletes after the failed attempt = %v, want exactly one issued before the flip", got)
+	}
+
+	unfail()
+	stdout.Reset()
+	stderr.Reset()
+	if _, err := reconcilePushedRuns(f.root, "" /*all projects*/, &stdout, &stderr); err != nil {
+		t.Fatalf("retry: %v\nstderr=%s", err, stderr.String())
+	}
+	if md := f.reload(); md.Status != run.StatusMerged {
+		t.Fatalf("status = %q after retry, want merged", md.Status)
+	}
+	if want := "fix-it: pushed -> merged (abc1234)\n"; stdout.String() != want {
+		t.Fatalf("stdout: want %q, got %q", want, stdout.String())
+	}
+	if strings.Contains(stderr.String(), "Reference does not exist") {
+		t.Errorf("the 422 leaked to stderr as a warning:\n%s", stderr.String())
+	}
+	if got := spy.Lines(); len(got) != 2 {
+		t.Errorf("deletes across both attempts = %v, want one per attempt", got)
+	}
+}
+
+// TestSyncReconcilesWithoutNestingTheLock is the end-to-end guard on
+// the caller split. `moe sync` used to wrap pull → bump → reconcile →
+// push in one window; now the reconcile takes its own per-transition
+// lock, so a sync that nested would fail hard with a NestedError
+// rather than degrade. Also pins that the reconcile's commit still
+// reaches origin on the same invocation, and that gh still ran unlocked
+// when driven through the real verb.
+func TestSyncReconcilesWithoutNestingTheLock(t *testing.T) {
+	f := newReconcileFixture(t, run.StatusPushed)
+	spy := fakeGh(t, map[string]string{
+		f.prURL: `{"state":"MERGED","mergeCommit":{"oid":"abc1234deadbeef"}}`,
+	})
+	probeLockDuringGh(t, f.root)
+	origin := initBureaucracyOriginAt(t, f.root)
+	t.Setenv("MOE_HOME", f.root)
+	t.Setenv("NO_COLOR", "1")
+
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"sync"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("moe sync exit=%d\nstdout=%s\nstderr=%s", code, stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "nested") {
+		t.Fatalf("sync nested the repolock:\n%s", stderr.String())
+	}
+
+	if md := f.reload(); md.Status != run.StatusMerged {
+		t.Fatalf("status = %q, want merged; stderr=%s", md.Status, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "fix-it: pushed -> merged") {
+		t.Errorf("transition line missing from sync output:\n%s", stdout.String())
+	}
+	// The push at the tail of sync carries the transition to origin.
+	head := gittest.Output(t, f.root, "rev-parse", "HEAD")
+	if got := gittest.Output(t, origin, "rev-parse", "main"); got != head {
+		t.Errorf("origin/main = %s, want the local HEAD %s", got, head)
+	}
+	for _, p := range spy.LockProbes() {
+		if strings.HasSuffix(p, " locked") {
+			t.Errorf("gh ran with the repolock held under `moe sync`: %q", p)
+		}
 	}
 }

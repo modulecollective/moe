@@ -249,8 +249,10 @@ func TestPulseDisposeCommitFailureRestoresRun(t *testing.T) {
 
 // failCommits points root's core.hooksPath at a pre-commit hook that
 // always refuses, so every later `git commit` under root fails while
-// every other git operation keeps working.
-func failCommits(t *testing.T, root string) {
+// every other git operation keeps working. The returned func lifts the
+// hook again, so a test can drive a failed attempt and its retry
+// against one fixture.
+func failCommits(t *testing.T, root string) func() {
 	t.Helper()
 	hooks := t.TempDir()
 	hook := filepath.Join(hooks, "pre-commit")
@@ -258,6 +260,10 @@ func failCommits(t *testing.T, root string) {
 		t.Fatal(err)
 	}
 	gittest.Output(t, root, "config", "core.hooksPath", hooks)
+	return func() {
+		t.Helper()
+		gittest.Output(t, root, "config", "--unset", "core.hooksPath")
+	}
 }
 
 // closedPulseRuns returns the ids of every closed pulse run under root.
