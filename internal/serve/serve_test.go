@@ -972,6 +972,11 @@ func TestRunPageReadOnlyForNonParented(t *testing.T) {
 		RunStages: func(_, _ string) ([]string, error) {
 			return []string{"design", "code", "test", "review", "push"}, nil
 		},
+		// One hop, so the provenance section renders and the
+		// section-ordering assertion below has something to sit against.
+		RunProvenance: func(_, _ string) ([]ProvHop, error) {
+			return []ProvHop{{Subject: "operator", Verb: "opened", Object: "this run"}}, nil
+		},
 	})
 
 	rr := httptest.NewRecorder()
@@ -1009,6 +1014,42 @@ func TestRunPageReadOnlyForNonParented(t *testing.T) {
 	if iDesign < 0 || iCode < 0 || iDesign > iCode {
 		t.Errorf("canvas links not in ladder order; design=%d code=%d\n%s",
 			iDesign, iCode, body)
+	}
+
+	// Both canvases render inline — the whole point of the section is
+	// that you don't click through to read the run's own document.
+	for _, want := range []string{"<h1>design body</h1>", "<h1>code body</h1>"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("canvas body not rendered inline: missing %q\n%s", want, body)
+		}
+	}
+
+	// Ladder-last open, the rest closed: code is the stage this run is
+	// at, design is one toggle away. Slice each disclosure from its
+	// opening tag to the stage link inside its summary.
+	for _, tc := range []struct {
+		stage string
+		open  bool
+	}{{"design", false}, {"code", true}} {
+		i := strings.Index(body, "canvas/"+tc.stage)
+		j := strings.LastIndex(body[:i], "<details")
+		if j < 0 {
+			t.Fatalf("no <details> wrapping the %s canvas\n%s", tc.stage, body)
+		}
+		if got := strings.Contains(body[j:i], " open"); got != tc.open {
+			t.Errorf("%s disclosure open=%v, want %v; tag was %q",
+				tc.stage, got, tc.open, body[j:i])
+		}
+	}
+
+	// Section order: the canvases precede provenance and the trace
+	// lists. Reading the run means reading its current canvas; the
+	// bookkeeping sections are what you scroll past to get back to it.
+	iCanvases := strings.Index(body, `<section class="canvases"`)
+	iProv := strings.Index(body, `<section class="provenance"`)
+	if iCanvases < 0 || iProv < 0 || iCanvases > iProv {
+		t.Errorf("canvases must precede provenance; canvases=%d provenance=%d\n%s",
+			iCanvases, iProv, body)
 	}
 }
 
@@ -1069,6 +1110,12 @@ func TestRunPageInProgressRunSurfacesWorktreeCanvas(t *testing.T) {
 	body := rr.Body.String()
 	if !strings.Contains(body, `href="/run/alpha/fix-it/canvas/design"`) {
 		t.Errorf("in-progress run page must link to the worktree canvas, body:\n%s", body)
+	}
+	// And render it: the live document is what the operator opened the
+	// page for, so the worktree copy has to reach the page as a body,
+	// not just as a link.
+	if !strings.Contains(body, "<h1>live edit</h1>") {
+		t.Errorf("in-progress run page must render the worktree canvas inline, body:\n%s", body)
 	}
 	// The other ladder stages have no canvas yet (worktree or canonical) —
 	// they should not get links. Asserting absence keeps the test honest

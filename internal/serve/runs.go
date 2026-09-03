@@ -220,6 +220,8 @@ type runAction struct {
 	Method string
 }
 
+// canvasLink is one stage's canvas on the per-run page: a disclosure
+// whose summary is the stage link and whose body is the canvas itself.
 type canvasLink struct {
 	Stage   string
 	URL     string // /run/<p>/<r>/canvas/<stage>
@@ -227,6 +229,13 @@ type canvasLink struct {
 	// Transcripts are the per-agent transcript links for this stage (one
 	// per backend thread on disk), rendered beside the canvas link.
 	Transcripts []transcriptLink
+	// Body is the rendered canvas, inline on the run page. Empty when
+	// the read failed after a successful Stat, which degrades the row to
+	// a bare link rather than failing the page.
+	Body template.HTML
+	// Open renders this disclosure expanded — set on the ladder-last
+	// canvas that exists, which is the stage the run is at or just left.
+	Open bool
 }
 
 type transcriptLink struct {
@@ -922,8 +931,13 @@ func (s *Server) buildRunVM(c *child, projectID, slug, id string) runVM {
 }
 
 // canvasLinks enumerates the run's stage canvas files (rendered in
-// workflow ladder order) with their mtimes. Only stages whose
-// content.md actually exists are surfaced.
+// workflow ladder order) with their mtimes and their rendered bodies.
+// Only stages whose content.md actually exists are surfaced.
+//
+// The bodies ride along because on the run page the canvas is what you
+// came to read — for an idea it is the whole run. The template renders
+// each as a disclosure and opens the ladder-last one: the stage the run
+// is at or just finished.
 //
 // Resolution routes through Options.ResolveCanvas — the same callback
 // the canvas route and `moe sdlc cat` use — so an in-progress run
@@ -948,6 +962,9 @@ func (s *Server) canvasLinks(projectID, slug string, now time.Time) []canvasLink
 	if err != nil {
 		return nil
 	}
+	// One resolver for the whole page: it caches run lookups, so
+	// building it per stage would re-walk the same ids.
+	refs := s.canvasReferenceResolver(projectID)
 	out := make([]canvasLink, 0, len(ladder))
 	for _, stage := range ladder {
 		path, err := s.opts.ResolveCanvas(projectID, slug, stage)
@@ -958,12 +975,24 @@ func (s *Server) canvasLinks(projectID, slug string, now time.Time) []canvasLink
 		if err != nil {
 			continue
 		}
+		// The Stat above says the file is there, so a read failure here
+		// is a race with a session commit (or a genuinely unreadable
+		// file). Log it and emit the row with no body — the reader still
+		// gets the stage link, same as before canvases rendered inline.
+		body, err := readCanvas(path, refs)
+		if err != nil {
+			s.logf("run page canvas %s: %v", path, err)
+		}
 		out = append(out, canvasLink{
 			Stage:       stage,
 			URL:         "/run/" + projectID + "/" + slug + "/canvas/" + stage,
 			ModTime:     dash.HumanAgo(now, st.ModTime()),
 			Transcripts: s.transcriptLinks(projectID, slug, stage),
+			Body:        body,
 		})
+	}
+	if len(out) > 0 {
+		out[len(out)-1].Open = true
 	}
 	return out
 }

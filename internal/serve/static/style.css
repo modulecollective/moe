@@ -463,9 +463,9 @@ form.new-run button:hover, form.new-run button:focus {
   line-height: 1.45;
 }
 
-/* Per-run canvases list, the chain head's live member list, the
-   provenance hop list, and the follow-up / lore trace lists — same row
-   shape, so one rule set. */
+/* The chore page's schedule rows (which borrow `.canvases`), the chain
+   head's live member list, the provenance hop list, and the follow-up /
+   lore trace lists — same row shape, so one rule set. */
 .canvases ul, .chain-members ul, .provenance ul, .traces ul { list-style: none; padding: 0; margin: 0; }
 .canvases li, .chain-members li, .provenance li, .traces li {
   display: flex;
@@ -485,6 +485,24 @@ form.new-run button:hover, form.new-run button:focus {
    its hop's arrow so it reads as that hop's footnote. */
 .provenance .why { flex-basis: 100%; margin: 0.15rem 0 0 1.1rem; font-style: italic; }
 .provenance .consent { color: var(--accent); }
+
+/* Per-run canvas disclosures. The summary is the old link row (stage,
+   mtime, transcripts); the body is the canvas itself. Left as
+   `display: list-item` so the native marker survives — flex would eat
+   it, and the marker is the same "expandable" signal the trace rows
+   use. The rendered `.doc` out-ranks the section header typographically;
+   on this page that's right, the canvas is the content. */
+.canvases .canvas { border-bottom: 1px solid var(--hairline); }
+.canvases .canvas:last-child { border-bottom: none; }
+.canvases summary {
+  padding: 0.35rem 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+.canvases summary > * + * { margin-left: 0.75rem; }
+.canvases summary .slug { color: var(--fg); }
+.canvases .doc { padding: 0 0 0.75rem 1.1rem; }
 
 /* Trace rows: monospace checkbox, and the indented `Why:` block folded
    away behind a disclosure — context, not headline. The twin note gets
