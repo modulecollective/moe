@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -118,13 +119,13 @@ func TestDrainToOriginReportsAheadCount(t *testing.T) {
 	root, origin := pusherFixture(t)
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
 
-	if n, err := s.drainToOrigin(); err != nil || n != 0 {
+	if n, err := s.drainToOrigin(t.Context(), pushTimeout); err != nil || n != 0 {
 		t.Fatalf("drainToOrigin on a caught-up main = (%d, %v), want (0, nil)", n, err)
 	}
 
 	gittest.Commit(t, root, "journal: one")
 	gittest.Commit(t, root, "journal: two")
-	n, err := s.drainToOrigin()
+	n, err := s.drainToOrigin(t.Context(), pushTimeout)
 	if err != nil {
 		t.Fatalf("drainToOrigin: %v", err)
 	}
@@ -138,7 +139,7 @@ func TestDrainToOriginReportsAheadCount(t *testing.T) {
 	// A commit landing after that push is the next tick's work, counted
 	// on its own.
 	gittest.Commit(t, root, "journal: three")
-	if n, err := s.drainToOrigin(); err != nil || n != 1 {
+	if n, err := s.drainToOrigin(t.Context(), pushTimeout); err != nil || n != 1 {
 		t.Fatalf("drainToOrigin after a later commit = (%d, %v), want (1, nil)", n, err)
 	}
 }
@@ -176,7 +177,7 @@ func TestDrainToOriginSkipsDuringRebase(t *testing.T) {
 	if !sync.RebaseInProgress(root) {
 		t.Fatal("no rebase paused after the conflicting pull")
 	}
-	if n, err := s.drainToOrigin(); err != nil || n != 0 {
+	if n, err := s.drainToOrigin(t.Context(), pushTimeout); err != nil || n != 0 {
 		t.Fatalf("drainToOrigin mid-rebase = (%d, %v), want (0, nil)", n, err)
 	}
 	if got := gittest.HeadSHA(t, origin); got != originHead {
@@ -188,7 +189,7 @@ func TestDrainToOriginSkipsDuringRebase(t *testing.T) {
 	gittest.Run(t, root, "rebase", "--abort")
 	gittest.Run(t, root, "reset", "--hard", "origin/main")
 	gittest.Commit(t, root, "journal: a commit the drain would otherwise take")
-	if n, err := s.drainToOrigin(); err != nil || n != 1 {
+	if n, err := s.drainToOrigin(t.Context(), pushTimeout); err != nil || n != 1 {
 		t.Fatalf("control: drainToOrigin = (%d, %v), want (1, nil) with no rebase in progress", n, err)
 	}
 	// Cleanly ahead by one, on top of what origin just took — so without
@@ -201,7 +202,7 @@ func TestDrainToOriginSkipsDuringRebase(t *testing.T) {
 	t.Cleanup(func() { _ = os.RemoveAll(stateDir) })
 
 	before := gittest.HeadSHA(t, origin)
-	if n, err := s.drainToOrigin(); err != nil || n != 0 {
+	if n, err := s.drainToOrigin(t.Context(), pushTimeout); err != nil || n != 0 {
 		t.Fatalf("drainToOrigin with a rebase state dir = (%d, %v), want (0, nil)", n, err)
 	}
 	if got := gittest.HeadSHA(t, origin); got != before {
@@ -219,7 +220,7 @@ func TestDrainToOriginSkipsWithoutUpstream(t *testing.T) {
 	gittest.Commit(t, root, "seed")
 
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
-	if n, err := s.drainToOrigin(); err != nil || n != 0 {
+	if n, err := s.drainToOrigin(t.Context(), pushTimeout); err != nil || n != 0 {
 		t.Fatalf("drainToOrigin with no upstream = (%d, %v), want (0, nil)", n, err)
 	}
 }
@@ -276,5 +277,87 @@ func TestPusherSkipDuringOutageIsNotRecovery(t *testing.T) {
 	}
 	if n := strings.Count(out, "retrying, backing off"); n != 1 {
 		t.Errorf("failure logged %d times across the outage, want exactly 1:\n%s", n, out)
+	}
+}
+
+// shortenPushTimeout shrinks the per-push deadline for a test and
+// restores the baked value after. Safe against the unjoined loop for
+// the same reason shortenPushInterval is: runPusher reads it once at
+// entry.
+func shortenPushTimeout(t *testing.T, timeout time.Duration) {
+	t.Helper()
+	prev := pushTimeout
+	pushTimeout = timeout
+	t.Cleanup(func() { pushTimeout = prev })
+}
+
+// TestPusherTimesOutOnABlackHoledOrigin is the failure this change
+// exists for: a transport that accepts the connection and then says
+// nothing. Before the deadline, the push never returned, so the loop
+// never got an error, never logged, never backed off, and never ticked
+// again — the drain wedged in silence while the ahead-count climbed.
+//
+// The origin here is an https URL behind a proxy that accepts and
+// stalls, so git gets as far as CONNECT and stops. Recovery is the
+// remote URL going back to the bare repo, which proves the timeout left
+// the loop able to push rather than poisoned.
+func TestPusherTimesOutOnABlackHoledOrigin(t *testing.T) {
+	gittest.RequireHTTPSTransport(t)
+	root, origin := pusherFixture(t)
+	gittest.Commit(t, root, "journal: record something")
+	local := gittest.HeadSHA(t, root)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			defer c.Close()
+		}
+	}()
+	gittest.Run(t, root, "config", "http.proxy", "http://"+ln.Addr().String())
+	gittest.Run(t, root, "remote", "set-url", "origin", "https://example.invalid/x.git")
+
+	shortenPushInterval(t, 5*time.Millisecond, 40*time.Millisecond)
+	shortenPushTimeout(t, 400*time.Millisecond)
+	log := &syncBuf{}
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, Logger: log})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		settle(func() bool { return strings.Contains(log.String(), "timed out") })
+		// git.Run rather than gittest.Run: a fixture helper's t.Fatalf
+		// from a non-test goroutine is a race the test would rather not
+		// own. A failure here just means recovery never happens and the
+		// assertion below says so.
+		if err := git.Run(root, "remote", "set-url", "origin", origin); err != nil {
+			return
+		}
+		settle(func() bool { return strings.Contains(log.String(), "reachable again") })
+		cancel()
+	}()
+	if err := s.ListenAndServe(ctx); err != nil {
+		t.Fatalf("ListenAndServe: %v", err)
+	}
+
+	out := log.String()
+	if n := strings.Count(out, "retrying, backing off"); n != 1 {
+		t.Errorf("failure logged %d times, want exactly 1:\n%s", n, out)
+	}
+	if !strings.Contains(out, "git push: timed out after 400ms") {
+		t.Errorf("log doesn't name the deadline the push blew:\n%s", out)
+	}
+	if !strings.Contains(out, "origin reachable again, pushed 1 commit(s)") {
+		t.Errorf("missing recovery line with the drained count:\n%s", out)
+	}
+	if got := gittest.HeadSHA(t, origin); got != local {
+		t.Fatalf("origin main = %s, want the stranded commit %s once recovered", got, local)
 	}
 }

@@ -2,10 +2,13 @@ package sync
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modulecollective/moe/internal/git/gittest"
 )
@@ -29,7 +32,7 @@ func TestPushMainLandsLocalCommitsOnOrigin(t *testing.T) {
 	root, origin := pushMainFixture(t)
 	gittest.Commit(t, root, "journal: record something")
 
-	if err := PushMain(root); err != nil {
+	if err := PushMain(t.Context(), root); err != nil {
 		t.Fatalf("PushMain: %v", err)
 	}
 	if local, remote := gittest.HeadSHA(t, root), gittest.HeadSHA(t, origin); local != remote {
@@ -45,7 +48,7 @@ func TestPushMainReturnsErrorWithGitStderr(t *testing.T) {
 	gittest.Run(t, root, "remote", "set-url", "origin", filepath.Join(t.TempDir(), "gone.git"))
 	gittest.Commit(t, root, "journal: record something")
 
-	err := PushMain(root)
+	err := PushMain(t.Context(), root)
 	if err == nil {
 		t.Fatal("PushMain: want error for unreachable origin, got nil")
 	}
@@ -209,5 +212,35 @@ func TestAdvanceSubmoduleAllowsStaleLocalBranch(t *testing.T) {
 	}
 	if bump == nil || bump.ToSHA != c1 {
 		t.Fatalf("want bump to %s, got %+v", c1, bump)
+	}
+}
+
+// TestPushMainReportsTheTimeoutItBlew: the pusher's whole recovery path
+// hangs off this error. It has to say the push timed out (the operator
+// reads it in the serve log), and it has to unwrap to
+// context.DeadlineExceeded so a caller can tell a dead transport from a
+// rejected ref.
+//
+// An already-expired context is the deterministic way in: exec.Cmd.Start
+// returns ctx.Err() before forking, so there's no live push to race.
+func TestPushMainReportsTheTimeoutItBlew(t *testing.T) {
+	root, _ := pushMainFixture(t)
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+
+	err := PushMain(ctx, root)
+	if err == nil {
+		t.Fatal("PushMain: want an error for an expired context, got nil")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("error = %v, want it to unwrap to context.DeadlineExceeded", err)
+	}
+	if got := err.Error(); !strings.HasPrefix(got, "git push: timed out after ") {
+		t.Errorf("error = %q, want the \"git push: timed out after ...\" shape", got)
+	}
+	// A killed push prints nothing; the empty "()" suffix the success
+	// path would append reads like git spoke and we dropped it.
+	if strings.Contains(err.Error(), "()") {
+		t.Errorf("error = %q, want no empty output suffix when git printed nothing", err)
 	}
 }

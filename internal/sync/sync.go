@@ -16,6 +16,7 @@ package sync
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -557,11 +558,21 @@ func AutoPull(root string, stdout, stderr io.Writer) error {
 // auto-push it replaced, failure comes back rather than being warned
 // away: the pusher needs the error to back off, and git's stderr is
 // folded in so the serve log says what origin actually refused.
-func PushMain(root string) error {
-	if out, err := git.Combined(root, "push"); err != nil {
-		return fmt.Errorf("git push: %w (%s)", err, strings.TrimSpace(out))
+//
+// ctx bounds the push. Nobody is watching this one — a transport that
+// black-holes would otherwise wedge the pusher's whole loop silently,
+// since a hang never returns the error the back-off is keyed on.
+func PushMain(ctx context.Context, root string) error {
+	out, err := git.CombinedContext(ctx, root, "push")
+	if err == nil {
+		return nil
 	}
-	return nil
+	// A killed push prints nothing, and a bare "()" reads like git had
+	// something to say and we lost it.
+	if out == "" {
+		return fmt.Errorf("git push: %w", err)
+	}
+	return fmt.Errorf("git push: %w (%s)", err, out)
 }
 
 // DeleteRemoteBranch asks GitHub to drop refs/heads/<branch> from

@@ -48,10 +48,25 @@ var pushInterval = 2 * time.Second
 // overnight outage mints a handful of log lines rather than a wall.
 var pushBackoffCap = 5 * time.Minute
 
+// pushTimeout bounds one push. Without it a black-holed transport hangs
+// forever — git exposes no knob that covers connect, proxy CONNECT, DNS
+// and the credential helper, and curl's own connect timeout is 300s — so
+// the drain stalls with no error to log and no error to back off on.
+//
+// A minute is ~10x the slowest push observed from the cloud-box (1-5s
+// end to end, worst tick-to-landed gap 7s) because the asymmetry runs
+// one way: too short is a permanent wedge, where a slow-but-alive push
+// is killed and retried and killed again forever, while too long costs
+// only detection latency on a link that was already dead. Variable
+// rather than const so tests can shorten it.
+var pushTimeout = 60 * time.Second
+
 // runPusher is the drain loop. Started by ListenAndServe for the
 // listener's lifetime; returns when ctx is cancelled. An in-flight push
-// is not joined on the way out — the drain is stateless, so whatever it
-// didn't finish is still ahead of origin at the next start.
+// is killed on the way out rather than joined: it runs under ctx, so a
+// process-group child can't outlive serve as an orphan. Nothing is lost
+// — the remote's ref update is atomic and the drain is stateless, so
+// whatever didn't land is still ahead of origin at the next start.
 //
 // Failure cools itself off. The interval doubles per consecutive
 // failure up to pushBackoffCap and resets on the first push that lands,
@@ -70,7 +85,7 @@ func (s *Server) runPusher(ctx context.Context) {
 	// can outlive the ListenAndServe that started it by a tick — and a
 	// test that shortens these restores them in a cleanup that would
 	// otherwise race a live loop's re-read.
-	base, backoffCap := pushInterval, pushBackoffCap
+	base, backoffCap, timeout := pushInterval, pushBackoffCap, pushTimeout
 	interval := base
 	fails := 0
 	t := time.NewTimer(interval)
@@ -81,7 +96,13 @@ func (s *Server) runPusher(ctx context.Context) {
 			return
 		case <-t.C:
 		}
-		n, err := s.drainToOrigin()
+		n, err := s.drainToOrigin(ctx, timeout)
+		// Shutdown cancels the push mid-flight, so the error it returns
+		// is our own doing. Logging it would blame the remote for a
+		// stop the operator asked for.
+		if ctx.Err() != nil {
+			return
+		}
 		switch {
 		case err != nil:
 			if fails == 0 {
@@ -116,7 +137,7 @@ func (s *Server) runPusher(ctx context.Context) {
 // where the branch ref has already moved but the rebase state dir is
 // still there — a window where HEAD is attached, main is cleanly ahead,
 // and the tip is nonetheless not one to publish.
-func (s *Server) drainToOrigin() (int, error) {
+func (s *Server) drainToOrigin(ctx context.Context, timeout time.Duration) (int, error) {
 	root := s.opts.Root
 	if sync.RebaseInProgress(root) {
 		return 0, nil
@@ -132,7 +153,9 @@ func (s *Server) drainToOrigin() (int, error) {
 	if n == 0 {
 		return 0, nil
 	}
-	if err := sync.PushMain(root); err != nil {
+	pushCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	if err := sync.PushMain(pushCtx, root); err != nil {
 		return 0, err
 	}
 	return n, nil
