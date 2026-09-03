@@ -66,7 +66,14 @@ func runProjectAdd(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	var md *project.Metadata
-	err = repolock.With(root, repolock.Options{Purpose: "project-add"}, func() error {
+	err = repolock.With(root, repolock.Options{
+		Purpose: "project-add",
+		// project.Register clones the submodule from its remote inside
+		// this window — a large repo on a slow link can sit past
+		// StaleThreshold. Same reason the harvest and push-merge
+		// windows keep theirs (see runClose).
+		Heartbeat: true,
+	}, func() error {
 		m, err := project.Register(root, url, project.Options{})
 		if err != nil {
 			return err
