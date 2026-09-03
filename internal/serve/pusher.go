@@ -54,9 +54,17 @@ var pushBackoffCap = 5 * time.Minute
 // didn't finish is still ahead of origin at the next start.
 //
 // Failure cools itself off. The interval doubles per consecutive
-// failure up to pushBackoffCap and resets on the first success, and only
-// the transitions are logged: one line when a run of failures starts,
-// one when it ends. A steady state of no commits is silent.
+// failure up to pushBackoffCap and resets on the first push that lands,
+// and only the transitions are logged: one line when a run of failures
+// starts, one when it ends. A steady state of no commits is silent.
+//
+// Recovery is a push that landed, not merely a tick that didn't error.
+// A drain that skipped returns (0, nil) too, so treating any quiet tick
+// as recovery lets a rebase paused during an outage — the pull fails
+// for the same reason the push does — mint a "reachable again" line for
+// a remote nobody reached, reset the cool-off, and let the next tick
+// re-log the failure. While failing, a skip stays silent and holds the
+// cool-off where it is.
 func (s *Server) runPusher(ctx context.Context) {
 	// Read the tunables once. The loop is not joined at shutdown, so it
 	// can outlive the ListenAndServe that started it by a tick — and a
@@ -81,7 +89,7 @@ func (s *Server) runPusher(ctx context.Context) {
 			}
 			fails++
 			interval = min(interval*2, backoffCap)
-		case fails > 0:
+		case fails > 0 && n > 0:
 			s.logf("pusher: origin reachable again, pushed %d commit(s)", n)
 			fails, interval = 0, base
 		case n > 0:

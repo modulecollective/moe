@@ -223,3 +223,58 @@ func TestDrainToOriginSkipsWithoutUpstream(t *testing.T) {
 		t.Fatalf("drainToOrigin with no upstream = (%d, %v), want (0, nil)", n, err)
 	}
 }
+
+// TestPusherSkipDuringOutageIsNotRecovery: a *skip* mid-outage must not
+// read as origin coming back.
+//
+// drainToOrigin returns (0, nil) for both "pushed nothing because there
+// was nothing to do" and "pushed nothing because the tree is
+// mid-reconcile". If the loop treats any non-error tick as recovery, a
+// rebase paused during a network outage — the pull that fails for the
+// same reason the push does — mints a "reachable again, pushed 0
+// commit(s)" line for a remote nobody reached, resets the back-off, and
+// lets the next tick log the failure all over again. The log discipline
+// the loop exists to keep ("one line per failure run") is gone exactly
+// when the operator is reading the log.
+func TestPusherSkipDuringOutageIsNotRecovery(t *testing.T) {
+	root, origin := pusherFixture(t)
+	gittest.Commit(t, root, "journal: record something")
+
+	away := origin + ".away"
+	if err := os.Rename(origin, away); err != nil {
+		t.Fatal(err)
+	}
+
+	shortenPushInterval(t, 5*time.Millisecond, 20*time.Millisecond)
+	log := &syncBuf{}
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, Logger: log})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		defer cancel()
+		if !settle(func() bool { return strings.Contains(log.String(), "retrying, backing off") }) {
+			return
+		}
+		// Origin is still gone. Pause a rebase on top of the outage and
+		// let the loop tick through it several times.
+		stateDir := filepath.Join(root, ".git", "rebase-merge")
+		if err := os.MkdirAll(stateDir, 0o755); err != nil {
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+		_ = os.RemoveAll(stateDir)
+		time.Sleep(200 * time.Millisecond)
+	}()
+	if err := s.ListenAndServe(ctx); err != nil {
+		t.Fatalf("ListenAndServe: %v", err)
+	}
+
+	out := log.String()
+	if strings.Contains(out, "reachable again") {
+		t.Errorf("a skip was logged as recovery while origin was still gone:\n%s", out)
+	}
+	if n := strings.Count(out, "retrying, backing off"); n != 1 {
+		t.Errorf("failure logged %d times across the outage, want exactly 1:\n%s", n, out)
+	}
+}
