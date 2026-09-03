@@ -30,6 +30,12 @@ source of truth for the exact command surface; this page is a map.
   agents because of them: whoever can reach the listener steers the machine.
   Reach is the only auth, so whatever sits in front of the listener is the
   security boundary. Interactive stage-driving happens in a terminal.
+  Separately from all that, and armed or not, serve drains the bureaucracy's
+  local main to origin every couple of seconds. Journal verbs commit and
+  return; the push is serve's. With no serve running, commits sit on local main
+  until `moe sync` or the next serve start takes them — `git status` in the
+  bureaucracy says how many are waiting, and serve's log carries any push
+  failure.
   `--dynamic` (or a non-empty `MOE_SERVE_DYNAMIC`) is the standing consent rung:
   it starts the resident heartbeat, a per-project ticker that runs `moe pulse
   new --dynamic` when the board warrants it. Unarmed, the ticker never fires and
