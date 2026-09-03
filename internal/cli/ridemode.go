@@ -188,9 +188,10 @@ func projectModeContextLine(root, projectID string) string {
 	}
 	return "This project is in **safe** mode: the clock may sweep it, but the kick will start only threads " +
 		"carrying an explicit operator mark — an advance marker, a chore's standing intent, a workflow " +
-		"tag on the idea a run was promoted from, or an answered question on the run. Everything else you " +
-		"groom is held with a reason and waits for the operator. Groom the board as you normally would; " +
-		"just don't count on an unmarked thread moving before someone looks at it."
+		"tag on the idea a run was promoted from, or an undelivered note on any run in the thread (a " +
+		"`moe input add` note or an answered question, consumed once a turn delivers it). Everything " +
+		"else you groom is held with a reason and waits for the operator. Groom the board as you " +
+		"normally would; just don't count on an unmarked thread moving before someone looks at it."
 }
 
 // rideModeForAnswer maps a chain-prompt bang answer to its mode. Only

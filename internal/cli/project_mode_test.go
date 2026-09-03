@@ -423,8 +423,15 @@ func TestSafeModeContextLineReachesOnlyTheClock(t *testing.T) {
 		t.Errorf("a hand-typed sweep got the mode line: %q", got)
 	}
 	asClock(func() {
-		if got := projectModeContextLine(root, "moe"); !strings.Contains(got, "**safe** mode") {
+		got := projectModeContextLine(root, "moe")
+		if !strings.Contains(got, "**safe** mode") {
 			t.Errorf("context line = %q, want the safe-mode block", got)
+		}
+		// The kick's admit is `operatorMarked || pendingInputOnThread`,
+		// and a plain `moe input add` note is pending input — so the
+		// line has to name the note leg, not just answered questions.
+		if !strings.Contains(got, "undelivered note") {
+			t.Errorf("context line = %q, want the undelivered-note leg the kick actually admits on", got)
 		}
 	})
 	setMode(t, root, "moe", project.ModeAuto)
