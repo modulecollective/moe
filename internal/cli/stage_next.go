@@ -101,7 +101,13 @@ func promptNextStageOverride(root string, md *run.Metadata, justFinished, overri
 			// Terminal stage — no successor to offer. Every workflow's
 			// terminal stage is opened with SkipNextStage or headless,
 			// so nothing routes a finished terminal stage back through
-			// the chain prompt on purpose.
+			// the chain prompt on purpose. The one path that does land
+			// here is dispatchCascade's tail after a `!!` whose push
+			// deferred to recovery twice (anchor "push", nothing
+			// shipped); the cascade summary has already said `— stopped`,
+			// and saying anything more — the old "sealed — close run
+			// now?" prompt — misreported an unshipped run. Pinned by
+			// TestDispatchCascadeTailAfterRedeferSaysNothingMore.
 			return 0
 		}
 	default:
