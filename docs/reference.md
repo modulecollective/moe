@@ -20,8 +20,9 @@ source of truth for the exact command surface; this page is a map.
 - `moe serve [--addr <host[:port]>] [--port <n>] [--dynamic]` runs the local
   web UI, bound to `127.0.0.1:4242` by default. Beyond runs and canvases, its
   read-only surface browses lore, a projects index with per-project hubs,
-  project knowledge topics, twin documents, and a dashboard with the same
-  daily-activity chart (and a project-scoped one on each project page).
+  project knowledge topics, twin documents, the token-spend report at
+  `/usage`, and a dashboard with the same daily-activity chart (and a
+  project-scoped one on each project page).
   **The web starts nothing.** Every action it offers writes a journal commit and
   stops there: capture or edit an idea, tag it for a workflow, close or reopen a
   run, mark the current stage advanced, answer a run's open question. Starting
@@ -81,7 +82,10 @@ source of truth for the exact command surface; this page is a map.
   defaults to `30d`; a whole stage is attributed to its last work turn's commit
   time, falling back to run activity. A transcript with no journal time remains
   in aggregate, rolling-window, and per-run totals, is omitted from `BY DAY`,
-  and is called out in the report.
+  and is called out in the report. `moe serve` renders the same report at
+  `/usage`: the totals and the workflow/stage/model table on top, a table of
+  runs below linking to each run page, both sortable by any column and
+  scoped by the same `project` and `since` filters.
 - `moe where` prints the resolved bureaucracy path.
 - `moe version` prints the moe version.
 - `moe <workflow> cat <project>/<run> [<stage>]` prints a canvas.

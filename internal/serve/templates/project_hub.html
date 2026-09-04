@@ -9,7 +9,7 @@
   <header class="page-header">
     <div class="banner">
       <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
-      <div class="banner-sub"><a href="/">dashboard</a> → <a href="/projects">projects</a> → {{.Project}}{{if .InputCount}} · <a href="/input?project={{.Project}}">input ({{.InputCount}})</a>{{end}}</div>
+      <div class="banner-sub"><a href="/">dashboard</a> → <a href="/projects">projects</a> → {{.Project}} · <a href="/usage?project={{.Project}}">usage</a>{{if .InputCount}} · <a href="/input?project={{.Project}}">input ({{.InputCount}})</a>{{end}}</div>
     </div>
     {{template "serveheader" .Serve}}
     {{template "headeractions" .}}
