@@ -651,11 +651,16 @@ Both surfaces show what the heartbeat is doing. `moe dash` reads the snapshot
 serve keeps on disk and carries its status in the banner's tail — armed or not,
 how long it has been up, when the next tick lands — spending a line on a project
 only when that project is sweeping, cooling off after a failure, or its last
-sweep died. The web boards carry the same one-line cluster, linked to a `/serve`
-page holding the trace: what each recent tick decided, and the output tail of
-any sweep that failed. That trace is the running process's memory rather than
-history — a restart starts it over, and the durable record of a sweep is still
-the run it opened.
+sweep died. The same tail says whether the journal has reached GitHub: `N
+unpushed` while commits are waiting, `pushed 2m ago` once serve's pusher has
+landed one, and `push failing 12m · 3 unpushed` with a row carrying git's reason
+when origin is refusing. The count comes from git at render, so it is honest
+about a serve that has crashed or was never running; the rest comes from the
+pusher's own record. The web boards carry the same one-line cluster, linked to a
+`/serve` page holding the trace: what each recent tick decided, and the output
+tail of any sweep that failed. That trace is the running process's memory rather
+than history — a restart starts it over, and the durable record of a sweep is
+still the run it opened.
 
 The tick decides nothing. It only asks the question you used to ask by typing a
 verb — everything about what a sweep may *do* is unchanged, including the

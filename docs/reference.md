@@ -16,7 +16,10 @@ source of truth for the exact command surface; this page is a map.
   without one. When a `moe serve` is running against this bureaucracy, its
   status rides the banner's tail — armed or not, uptime, next sweep — and a
   project earns a line of its own only when it is sweeping, cooling off, or its
-  last sweep died.
+  last sweep died. The tail also carries the drain to origin: `N unpushed` when
+  commits are waiting (read from git, so it shows with or without a serve), or
+  `pushed 2m ago` once serve's pusher has landed one. A push origin is refusing
+  earns a row of its own with git's reason.
 - `moe serve [--addr <host[:port]>] [--port <n>] [--dynamic]` runs the local
   web UI, bound to `127.0.0.1:4242` by default. Beyond runs and canvases, its
   read-only surface browses lore, a projects index with per-project hubs,
