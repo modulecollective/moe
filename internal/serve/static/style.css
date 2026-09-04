@@ -757,6 +757,13 @@ form.new-run button:hover, form.new-run button:focus {
 .usage-totals .k { color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
 .usage-totals .v { font-variant-numeric: tabular-nums; }
 
+/* .note elsewhere is always inside a row, so it is styled there. The
+   page's trailing notes — unpriced models, the star, the untimed count,
+   "not a bill" — sit directly under the section, and want the same
+   muted footnote register the CLI's trailing lines have rather than
+   reading as body copy. */
+.dash-section > .note { color: var(--muted); font-size: 0.85rem; margin: 0.3rem 0 0; }
+
 .usage-filter {
   display: flex;
   flex-wrap: wrap;
