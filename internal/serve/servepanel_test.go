@@ -372,3 +372,57 @@ func TestServePanelBadgesADeviantProject(t *testing.T) {
 		t.Errorf("/serve should badge beta as safe:\n%s", body)
 	}
 }
+
+// TestServePanelSaysTheJournalReachedOrigin is the seed's ask on the web
+// surface: the boards' one-line cluster gains the origin item, so an
+// operator on their phone can tell the bureaucracy sync happened without
+// opening a terminal. It rides the same slot the CLI banner uses, and
+// the same builder produces both.
+func TestServePanelSaysTheJournalReachedOrigin(t *testing.T) {
+	s := panelServer(t)
+	s.activity.recordPush(time.Now(), 2)
+
+	if got := s.activity.panel(time.Now()).Cluster; !strings.HasSuffix(got, " · pushed just now") {
+		t.Errorf("cluster = %q, want it to end with the landed push", got)
+	}
+	// And it is actually on the board, not just in the VM.
+	if body := getBody(t, s, "/"); !strings.Contains(body, "pushed just now") {
+		t.Error("the dash header didn't carry the landed push")
+	}
+}
+
+// TestServePanelSpendsARowOnARefusedPush: trouble earns a row on /serve
+// exactly as it does on the CLI, with git's own words. The root here is
+// git-backed and ahead of a bare origin, because the failure only shows
+// while commits are actually waiting — the ahead-count is what settles
+// that, and it is read from git at render.
+func TestServePanelSpendsARowOnARefusedPush(t *testing.T) {
+	root, _ := pusherFixture(t)
+	gittest.Commit(t, root, "journal: stranded")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, Dynamic: true})
+
+	now := time.Now()
+	s.activity.recordPushFail(now.Add(-12*time.Minute),
+		errors.New("git push: exit status 128 [rejected] main -> main non-fast-forward"),
+		// A second of headroom: the handler takes its own clock reading a
+		// hair after this one, and HumanDuration truncates — a flat 4m
+		// would render as "3m" often enough to flake.
+		now.Add(4*time.Minute+time.Second))
+
+	if got := s.activity.panel(now).Cluster; !strings.HasSuffix(got, " · push failing 12m · 1 unpushed") {
+		t.Errorf("cluster = %q, want it to end with the refused push", got)
+	}
+	body := getBody(t, s, "/serve")
+	for _, want := range []string{
+		"origin", "push failing", "12m · 1 commit · retry in 4m", "non-fast-forward",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("/serve did not carry %q", want)
+		}
+	}
+	// Same styling as a project in trouble — one look for one kind of
+	// news, no new CSS.
+	if !strings.Contains(body, `<span class="serve-state failed">push failing`) {
+		t.Error("/serve rendered the refused push without the failed styling")
+	}
+}

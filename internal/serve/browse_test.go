@@ -168,14 +168,29 @@ func TestProjectHubListsTwinDocsWithoutGitProvenance(t *testing.T) {
 
 	oldHook := git.Hook
 	t.Cleanup(func() { git.Hook = oldHook })
-	var gitCalls int
-	git.Hook = func(string, []string, time.Duration, error) { gitCalls++ }
+	var gitCalls [][]string
+	git.Hook = func(_ string, args []string, _ time.Duration, _ error) {
+		gitCalls = append(gitCalls, args)
+	}
 
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
 	hub := get(t, s, "/projects/alpha")
 	mustContain(t, hub, `<a class="slug" href="/projects/alpha/twin/architecture">architecture</a>`)
-	if gitCalls != 0 {
-		t.Fatalf("project hub made %d git calls, want none", gitCalls)
+
+	// What this pin protects is the history walk: provenance was a
+	// `git log -1` per twin doc, so the hub's git cost grew with the
+	// number of docs on it. The header cluster's ahead-count came later
+	// and is deliberately not that shape — a fixed handful of local-ref
+	// reads, the same ones the pusher's own two-second tick already
+	// makes, and bounded whatever the project holds.
+	for _, args := range gitCalls {
+		if len(args) > 0 && args[0] == "log" {
+			t.Fatalf("project hub walked history: git %v", args)
+		}
+	}
+	if len(gitCalls) > 4 {
+		t.Fatalf("project hub made %d git calls (%v), want only the ahead-count's fixed handful",
+			len(gitCalls), gitCalls)
 	}
 }
 

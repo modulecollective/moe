@@ -92,11 +92,21 @@
          and "why has nothing happened in alpha" has to be answerable
          here. Compact by exception — an all-auto board says nothing. */}}
     <h2><span>serve
-      {{if .Armed}}<span class="count">(armed · up {{.Up}}{{if .NextSweep}} · next sweep in {{.NextSweep}}{{end}}{{if .LastTick}} · last tick {{.LastTick}}{{end}}{{if .Paused}} · {{.Paused}} paused{{end}}{{if .Safe}} · {{.Safe}} safe{{end}})</span>
-      {{else}}<span class="count">(browse-only · up {{.Up}}{{if .Paused}} · {{.Paused}} paused{{end}}{{if .Safe}} · {{.Safe}} safe{{end}})</span>{{end}}
+      {{if .Armed}}<span class="count">(armed · up {{.Up}}{{if .NextSweep}} · next sweep in {{.NextSweep}}{{end}}{{if .LastTick}} · last tick {{.LastTick}}{{end}}{{if .Paused}} · {{.Paused}} paused{{end}}{{if .Safe}} · {{.Safe}} safe{{end}}{{with .Push.Item}} · {{.}}{{end}})</span>
+      {{else}}<span class="count">(browse-only · up {{.Up}}{{if .Paused}} · {{.Paused}} paused{{end}}{{if .Safe}} · {{.Safe}} safe{{end}}{{with .Push.Item}} · {{.}}{{end}})</span>{{end}}
     </span></h2>
-    {{if or .Projects .QuietCount}}
+    {{if or .Projects .QuietCount .Push.State}}
     <ul class="rows">
+      {{/* The drain to origin, above the projects: it is board-wide, and
+           it only appears when origin is refusing the push. Same row
+           shape and same `failed` styling as a project in trouble. */}}
+      {{if .Push.State}}
+      <li class="row">
+        <span class="slug">origin</span>
+        <span class="serve-state failed">{{.Push.State}} {{.Push.Detail}}</span>
+        <span class="note">{{.Push.Reason}}</span>
+      </li>
+      {{end}}
       {{range .Projects}}
       <li class="row">
         <a class="slug" href="/projects/{{.Project}}">{{.Project}}</a>
@@ -134,7 +144,7 @@
       </li>
       {{end}}
     </ul>
-    {{else if and (not .Projects) (not .QuietCount)}}<p class="empty">nothing yet — no tick has run</p>{{end}}
+    {{else if and (not .Projects) (not .QuietCount) (not .Push.State)}}<p class="empty">nothing yet — no tick has run</p>{{end}}
   </section>
 {{end}}
 

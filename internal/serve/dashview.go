@@ -13,6 +13,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/project"
+	"github.com/modulecollective/moe/internal/sync"
 )
 
 // noteHintRE matches a machine lineage hint's connector and target
@@ -307,6 +308,11 @@ type servePanelVM struct {
 	// Cluster is the brief status the page headers link to /serve with —
 	// the same line, byte for byte, that the CLI dash's banner carries.
 	Cluster string
+	// Push is the drain to origin: the item that rides the cluster, and
+	// the row the panel spends when the push is being refused. Item is
+	// empty when there is nothing to say; State is empty when the drain
+	// has earned no row, which is every state but a live failure.
+	Push servePushVM
 	// LastTick is how long ago the heartbeat last looked ("4m ago"), empty
 	// before the first one. It is the liveness a page of all-quiet tick
 	// entries used to communicate, in three words.
@@ -344,6 +350,25 @@ type serveProjectVM struct {
 	// Failed marks the states worth a colour: a dead last sweep, or a
 	// cool-off serving one out.
 	Failed bool
+}
+
+// servePushVM is the drain to origin as the panel renders it: the
+// cluster item, plus a row's worth when the push is failing.
+//
+// Same shape as serveProjectVM's state/detail/reason triple, and for the
+// same reason — the failing row sits in the same list, on the same
+// terms, and reuses its styling rather than minting a second look for a
+// second kind of trouble.
+type servePushVM struct {
+	// Item is what the header cluster carries ("3 unpushed", "pushed 2m
+	// ago"), empty when the drain has nothing to say.
+	Item string
+	// State is "push failing" on the row the panel earns, empty
+	// otherwise. Detail qualifies it ("12m · 3 commits · retry in 4m"),
+	// Reason is git's own first line.
+	State  string
+	Detail string
+	Reason string
 }
 
 // serveEventVM is one line of the recent-activity list.
@@ -431,6 +456,26 @@ func (a *activity) panel(now time.Time) servePanelVM {
 	}
 	vm.Cluster = dash.ServeCluster(vm.Armed, vm.Up, vm.NextSweep,
 		dash.ModeCounts{Paused: vm.Paused, Safe: vm.Safe}, failing)
+	// Read per render, for the same reason the modes are: the record says
+	// what the pusher did, git says whether anything is waiting *now*. A
+	// true "pushed 2m ago" beside a live "3 unpushed" is exactly the state
+	// after a burst of commits or a manual `moe sync`, and only the pair
+	// can say so. One rev-list against local refs on a page load that
+	// already forks git for the gather.
+	ahead, _ := sync.Unpushed(a.root)
+	vm.Push.Item = dash.PushItem(now, true, ahead, a.lastPush, a.pushFailSince)
+	if vm.Push.Item != "" {
+		vm.Cluster += " · " + vm.Push.Item
+	}
+	// A row only when it's wrong — the same rule the projects follow. A
+	// healthy drain has already said everything it has to say in the item.
+	if ahead > 0 && !a.pushFailSince.IsZero() {
+		detail := dash.HumanDuration(now.Sub(a.pushFailSince)) + " · " + dash.Plural(ahead, "commit")
+		if !a.pushRetryAt.IsZero() {
+			detail += " · retry in " + dash.HumanDuration(max(a.pushRetryAt.Sub(now), 0))
+		}
+		vm.Push.State, vm.Push.Detail, vm.Push.Reason = "push failing", "("+detail+")", a.pushErr
+	}
 	// Newest first: the ring stores in arrival order, and the question the
 	// list answers is "what just happened".
 	for i := len(a.events) - 1; i >= 0; i-- {
