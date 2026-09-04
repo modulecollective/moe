@@ -138,8 +138,9 @@ func TestUnarmedServeAllowsTheAdvanceMark(t *testing.T) {
 	}
 }
 
-// TestUnarmedServeDashKeepsTheIdeaLink: the idea is the web's one
-// capture door, and it is journal-only, so it survives being unarmed.
+// TestUnarmedServeDashKeepsTheIdeaLink: the idea door is journal-only,
+// so it survives being unarmed. Its intent sibling is pinned alongside
+// it in TestDashRendersTheIntentCaptureLink.
 func TestUnarmedServeDashKeepsTheIdeaLink(t *testing.T) {
 	gather := func(string) ([]dash.Row, int, int, []int, error) { return nil, 0, 0, nil, nil }
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), GatherDash: gather})

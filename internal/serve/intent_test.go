@@ -184,3 +184,146 @@ func setStatus(t *testing.T, root, projectID, slug, status string) {
 		t.Fatal(err)
 	}
 }
+
+// TestNewIntentFormRendersIntentKind: /intent/new serves the shared
+// capture form keyed to the intent kind — same fields as the idea
+// form, but the action posts back to /intent/new and the submit verb
+// is the CLI's ("park").
+func TestNewIntentFormRendersIntentKind(t *testing.T) {
+	root := t.TempDir()
+	seedProject(t, root, "alpha")
+	seedProject(t, root, "beta")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	rr := get(t, s, "/intent/new")
+	mustContain(t, rr,
+		`<form`, `action="/intent/new"`,
+		`name="id"`, `name="body"`,
+		`placeholder="project/slug"`,
+		`<datalist`, `value="alpha/"`, `value="beta/"`,
+		`<textarea`,
+		`park intent`,
+	)
+	for _, banned := range []string{`action="/idea/new"`, `name="workspace"`, `name="agent"`} {
+		if strings.Contains(rr.Body.String(), banned) {
+			t.Errorf("intent form must not carry %q\n%s", banned, rr.Body.String())
+		}
+	}
+}
+
+// TestNewIntentFormEmptyRoot: with nothing registered the form is
+// hidden behind the same empty state the idea door shows.
+func TestNewIntentFormEmptyRoot(t *testing.T) {
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir()})
+
+	rr := get(t, s, "/intent/new")
+	mustContain(t, rr, "no projects registered")
+	if strings.Contains(rr.Body.String(), "<form") {
+		t.Errorf("empty-root form should hide the form entirely\n%s", rr.Body.String())
+	}
+}
+
+// TestNewIntentSubmitOpensIntentRun: the POST opens a run with the
+// intent workflow and the typed body on the intent canvas — the same
+// shape `moe intent new` writes — then redirects to the run page.
+func TestNewIntentSubmitOpensIntentRun(t *testing.T) {
+	root := newGitServeRoot(t)
+	seedProject(t, root, "alpha")
+	gittest.Commit(t, root, "seed project")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	rr := postForm(t, s, "/intent/new", "id=alpha/steer-left&body=go+left")
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("want 303, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if got := rr.Header().Get("Location"); got != "/run/alpha/steer-left" {
+		t.Fatalf("Location=%q", got)
+	}
+	md, err := run.Load(root, "alpha", "steer-left")
+	if err != nil {
+		t.Fatalf("run.Load after park: %v", err)
+	}
+	if md.Workflow != dash.IntentWorkflow {
+		t.Errorf("workflow=%q, want %q", md.Workflow, dash.IntentWorkflow)
+	}
+	got, err := os.ReadFile(filepath.Join(root, run.ContentPath("alpha", "steer-left", dash.IntentDocID)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "go left" {
+		t.Errorf("intent canvas = %q, want %q", got, "go left")
+	}
+}
+
+// TestNewIntentSubmitBlankBodyStubs: an empty textarea stubs to the
+// slug heading, matching the CLI's seed.
+func TestNewIntentSubmitBlankBodyStubs(t *testing.T) {
+	root := newGitServeRoot(t)
+	seedProject(t, root, "alpha")
+	gittest.Commit(t, root, "seed project")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	if rr := postForm(t, s, "/intent/new", "id=alpha/steer-left&body="); rr.Code != http.StatusSeeOther {
+		t.Fatalf("want 303, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	got, err := os.ReadFile(filepath.Join(root, run.ContentPath("alpha", "steer-left", dash.IntentDocID)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "# steer-left\n" {
+		t.Errorf("intent canvas = %q, want the slug stub", got)
+	}
+}
+
+// TestNewIntentSubmitInvalidSlugKeepsTheIntentForm: the assertion that
+// pins the kind to the error path. A rejected intent submit must
+// re-render the *intent* form with the typed body intact — a re-render
+// hard-coded to the idea kind would bounce the operator onto the wrong
+// door with their text still in the box.
+func TestNewIntentSubmitInvalidSlugKeepsTheIntentForm(t *testing.T) {
+	root := t.TempDir()
+	seedProject(t, root, "alpha")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	rr := postForm(t, s, "/intent/new", "id=alpha/Bad_Slug&body=keep+this+text")
+	if rr.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("want 422, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{"slug:", `action="/intent/new"`, `value="alpha/Bad_Slug"`, "keep this text"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("error re-render missing %q\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, `action="/idea/new"`) {
+		t.Errorf("a failed intent submit must not land on the idea form\n%s", body)
+	}
+	if _, err := os.Stat(filepath.Join(root, "projects", "alpha", "runs")); !os.IsNotExist(err) {
+		t.Errorf("validation failure must not create runs dir (stat err=%v)", err)
+	}
+}
+
+// TestNewIntentMethodNotAllowed: same 405 + Allow contract the idea
+// door has, since both come off the one dispatcher.
+func TestNewIntentMethodNotAllowed(t *testing.T) {
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir()})
+
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("PUT", "/intent/new", nil))
+	if rr.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("want 405, got %d", rr.Code)
+	}
+	if got := rr.Header().Get("Allow"); !strings.Contains(got, "GET") || !strings.Contains(got, "POST") {
+		t.Errorf("Allow header should list GET and POST, got %q", got)
+	}
+}
+
+// TestDashRendersTheIntentCaptureLink: the button lives on the intents
+// heading, beside the list it grows — the same place "new idea" sits
+// relative to backlog.
+func TestDashRendersTheIntentCaptureLink(t *testing.T) {
+	gather := func(string) ([]dash.Row, int, int, []int, error) { return nil, 0, 0, nil, nil }
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), GatherDash: gather})
+
+	mustContain(t, get(t, s, "/"), `href="/intent/new"`, `href="/idea/new"`)
+}
