@@ -425,7 +425,7 @@ func scan(root string, cutoff time.Time, warn io.Writer) (*scanResult, error) {
 //
 // That keeps `moe usage` where it was: one process, one miss, the same
 // window it asked for and no more. Its one visible change is that parse
-// warnings are emitted once per HEAD rather than once per Gather, which
+// warnings are emitted once per scan rather than once per Gather, which
 // is the right behaviour for a server log and indistinguishable for a
 // single call.
 func cachedScan(root string, cutoff time.Time, warn io.Writer) (*scanResult, error) {
