@@ -1019,9 +1019,9 @@ func (s *Server) transcriptLinks(projectID, slug, stage string) []transcriptLink
 }
 
 // listProjectIDs returns the sorted set of registered project IDs.
-// Shared by the new-run and new-idea forms; the idea form needs
+// Shared by the new-run and new-capture forms; the capture form needs
 // nothing else from gatherNewRunVM, so this stays a small helper
-// rather than dragging a workspace listing through the idea path.
+// rather than dragging a workspace listing through the capture path.
 func (s *Server) listProjectIDs() ([]string, error) {
 	mds, warns, err := project.List(s.opts.Root)
 	if err != nil {
@@ -1056,39 +1056,43 @@ func (s *Server) requireKnownProject(projectID string) error {
 	return nil
 }
 
-// newIdeaVM backs the new-idea form. Projects are gathered from disk
-// at request time; there are no workspace / agent dropdowns because
-// idea runs don't host a PTY session and have no workspace binding.
-type newIdeaVM struct {
+// newCaptureVM backs the new-capture form for both kinds. Projects are
+// gathered from disk at request time; there are no workspace / agent
+// dropdowns because capture runs don't host a PTY session and have no
+// workspace binding. Kind is the capture's workflow (idea|intent), so
+// the page's chrome, form action and submit verb follow the door the
+// operator came in through — including on an error re-render.
+type newCaptureVM struct {
 	Projects    []string
+	Kind        string
 	ErrorBanner string
 	// ID, Body echo the operator's submitted values back on an error
-	// re-render so a validation failure doesn't wipe a typed-out idea.
+	// re-render so a validation failure doesn't wipe a typed-out capture.
 	// ID is the raw `project/slug` text, echoed verbatim.
 	ID   string
 	Body string
 }
 
-func (s *Server) handleNewIdeaForm(w http.ResponseWriter, r *http.Request) {
-	vm, err := s.gatherNewIdeaVM()
+func (s *Server) handleNewCaptureForm(w http.ResponseWriter, r *http.Request, kind string) {
+	vm, err := s.gatherNewCaptureVM(kind)
 	if err != nil {
-		s.logf("new-idea form gather: %v", err)
-		http.Error(w, "new-idea form: "+err.Error(), http.StatusInternalServerError)
+		s.logf("new-%s form gather: %v", kind, err)
+		http.Error(w, "new-"+kind+" form: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	s.render(w, r, "new_idea.html", vm)
 }
 
-// handleNewIdeaSubmit validates the form and opens an idea run
-// in-process via runopen.Open. No PTY spawn — idea runs are a
-// single-stage doc with no live agent — so the handler redirects
-// straight to the per-run page once the open commit lands.
+// handleNewCaptureSubmit validates the form and opens a capture run
+// in-process via runopen.Open. No PTY spawn — capture runs are a
+// single canvas with no live agent — so the handler redirects straight
+// to the per-run page once the open commit lands.
 //
 // Body is taken verbatim with CRLF normalised to LF (browsers send
-// \r\n in textarea bodies; canvases live on disk as LF). An empty
-// body falls back to "# {slug}\n", matching the CLI stub
-// (internal/cli/idea.go:185).
-func (s *Server) handleNewIdeaSubmit(w http.ResponseWriter, r *http.Request) {
+// \r\n in textarea bodies; canvases live on disk as LF). An empty body
+// falls back to "# {slug}\n", matching the CLI stubs
+// (internal/cli/idea.go, internal/cli/intent.go).
+func (s *Server) handleNewCaptureSubmit(w http.ResponseWriter, r *http.Request, kind, docID string) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "bad form: "+err.Error(), http.StatusBadRequest)
 		return
@@ -1096,8 +1100,8 @@ func (s *Server) handleNewIdeaSubmit(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimSpace(r.FormValue("id"))
 	body := strings.ReplaceAll(r.FormValue("body"), "\r\n", "\n")
 	// Echo the raw typed id and body on every error path so the operator
-	// never loses a multi-line idea to a validation slip.
-	fail := func(msg string) { s.renderIdeaFormError(w, r, id, body, msg) }
+	// never loses a multi-line capture to a validation slip.
+	fail := func(msg string) { s.renderCaptureFormError(w, r, kind, id, body, msg) }
 
 	projectID, slug, err := splitID(id)
 	if err != nil {
@@ -1119,8 +1123,8 @@ func (s *Server) handleNewIdeaSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	md, err := runopen.Open(s.opts.Root, projectID, run.Options{
 		ID:       slug,
-		Workflow: dash.IdeaWorkflow,
-		SeedDocs: map[string]string{dash.IdeaDocID: seed},
+		Workflow: kind,
+		SeedDocs: map[string]string{docID: seed},
 	})
 	if err != nil {
 		fail("open: " + err.Error())
@@ -1129,8 +1133,11 @@ func (s *Server) handleNewIdeaSubmit(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/run/"+md.Project+"/"+md.ID, http.StatusSeeOther)
 }
 
-func (s *Server) renderIdeaFormError(w http.ResponseWriter, r *http.Request, id, body, msg string) {
-	vm, err := s.gatherNewIdeaVM()
+// renderCaptureFormError re-renders the form at 422 with the banner.
+// The kind rides through so a failed intent submit lands back on the
+// intent form, not the idea one.
+func (s *Server) renderCaptureFormError(w http.ResponseWriter, r *http.Request, kind, id, body, msg string) {
+	vm, err := s.gatherNewCaptureVM(kind)
 	if err != nil {
 		http.Error(w, msg+" (and form gather failed: "+err.Error()+")", http.StatusInternalServerError)
 		return
@@ -1142,12 +1149,12 @@ func (s *Server) renderIdeaFormError(w http.ResponseWriter, r *http.Request, id,
 	s.render(w, r, "new_idea.html", vm)
 }
 
-func (s *Server) gatherNewIdeaVM() (newIdeaVM, error) {
+func (s *Server) gatherNewCaptureVM(kind string) (newCaptureVM, error) {
 	projectIDs, err := s.listProjectIDs()
 	if err != nil {
-		return newIdeaVM{}, err
+		return newCaptureVM{}, err
 	}
-	return newIdeaVM{Projects: projectIDs}, nil
+	return newCaptureVM{Projects: projectIDs, Kind: kind}, nil
 }
 
 // editCaptureVM backs the per-capture edit page (GET
@@ -1200,7 +1207,7 @@ func (s *Server) handleCaptureEditForm(w http.ResponseWriter, r *http.Request) {
 
 // handleCaptureEditSubmit writes the textarea body to the capture's
 // canvas and commits with the trailers the matching CLI edit verb
-// produces. CRLF is normalised to LF (mirrors handleNewIdeaSubmit).
+// produces. CRLF is normalised to LF (mirrors handleNewCaptureSubmit).
 // Defends against a replayed POST landing on a now-terminal capture by
 // re-checking the gate inside runopen.EditCapture.
 func (s *Server) handleCaptureEditSubmit(w http.ResponseWriter, r *http.Request) {

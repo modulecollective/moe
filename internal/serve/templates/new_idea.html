@@ -2,14 +2,14 @@
 <html lang="en">
 <head>
 {{template "head" .}}
-<title>new idea — MoE</title>
+<title>new {{.Kind}} — MoE</title>
 </head>
 <body>
 <main>
   <header class="page-header">
     <div class="banner">
       <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
-      <div class="banner-sub"><a href="/">dashboard</a> → new idea</div>
+      <div class="banner-sub"><a href="/">dashboard</a> → new {{.Kind}}</div>
     </div>
     {{template "headeractions" .}}
   </header>
@@ -19,7 +19,7 @@
   {{if not .Projects}}
   <p class="empty">no projects registered. Run <code>moe project add &lt;repo-url&gt;</code> on the serve host first.</p>
   {{else}}
-  <form method="post" action="/idea/new" class="new-run">
+  <form method="post" action="/{{.Kind}}/new" class="new-run">
     <label>
       project/slug
       <input type="text" name="id" required autofocus
@@ -38,7 +38,7 @@
       <textarea name="body" rows="12" class="idea-body">{{.Body}}</textarea>
     </label>
 
-    <button type="submit">capture idea</button>
+    <button type="submit">{{if eq .Kind "intent"}}park intent{{else}}capture idea{{end}}</button>
   </form>
   {{end}}
 </main>

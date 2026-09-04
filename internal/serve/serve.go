@@ -449,7 +449,10 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 
 func (s *Server) registerRoutes() {
 	s.router.HandleFunc("/", s.handleDash)
-	s.router.HandleFunc("/idea/new", s.handleNewIdea)
+	// Both capture doors run through one handler keyed by workflow; the
+	// form, validation and open are identical either side of the kind.
+	s.router.HandleFunc("/idea/new", s.handleNewCapture(dash.IdeaWorkflow))
+	s.router.HandleFunc("/intent/new", s.handleNewCapture(dash.IntentWorkflow))
 	// Per-run page. Uses Go 1.22+ pattern wildcards so the project
 	// and slug fall out of the URL without manual splitting.
 	s.router.HandleFunc("GET /run/{project}/{slug}", s.handleRunPage)
@@ -513,18 +516,28 @@ func (s *Server) registerRoutes() {
 	s.router.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
 }
 
-// handleNewIdea dispatches GET (form render) vs POST (open idea run)
-// on the single /idea/new path. No PTY spawn — idea runs are a single
+// handleNewCapture builds the handler for one capture door — /idea/new
+// or /intent/new — dispatching GET (form render) vs POST (open the
+// run) on the single path. No PTY spawn — capture runs are a single
 // canvas with no live agent.
-func (s *Server) handleNewIdea(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		s.handleNewIdeaForm(w, r)
-	case http.MethodPost:
-		s.handleNewIdeaSubmit(w, r)
-	default:
-		w.Header().Set("Allow", "GET, POST")
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+func (s *Server) handleNewCapture(kind string) http.HandlerFunc {
+	docID, ok := dash.CaptureDocID(kind)
+	if !ok {
+		// Both call sites pass a capture-workflow constant; a miss here
+		// means the route table was wired to something else entirely,
+		// which is a build-time mistake, not a request-time one.
+		panic("serve: new-capture route for non-capture workflow " + kind)
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			s.handleNewCaptureForm(w, r, kind)
+		case http.MethodPost:
+			s.handleNewCaptureSubmit(w, r, kind, docID)
+		default:
+			w.Header().Set("Allow", "GET, POST")
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		}
 	}
 }
 
