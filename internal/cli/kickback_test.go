@@ -304,3 +304,21 @@ func TestPromptNextStageOverrideRecoveryReoffersGate(t *testing.T) {
 		t.Fatalf("recovery turn must not reshape into a kickback, got: %q", got)
 	}
 }
+
+// TestPromptKickbackEOFParks: a bare Ctrl-D parks the run, same as `n`
+// — the Y default (kick back to code) must not be reachable by an
+// abort key. Sibling of TestPromptKickbackNParks; withStdinLine("")
+// rather than feedStdin because feedStdin's appended newline would
+// make this a reflex Enter instead.
+func TestPromptKickbackEOFParks(t *testing.T) {
+	ran, _ := stubKickback(t)
+	withStdinLine(t, "")
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+	var stdout, stderr bytes.Buffer
+	if code := promptKickback(sdlcGroup(t), nil, md, "review", blockedReviewCanvas, &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	if *ran {
+		t.Fatalf("bare Ctrl-D must not dispatch a kickback (stdout=%q)", stdout.String())
+	}
+}

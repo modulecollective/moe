@@ -1125,6 +1125,11 @@ func TestPromptCloseNextStageDispatchesOnAccept(t *testing.T) {
 		{name: "alias-x", input: "x\n", wantDispatch: true},
 		{name: "decline-n", input: "n\n", wantDispatch: false},
 		{name: "typo-declines", input: "wat\n", wantDispatch: false},
+		// This table writes its input raw, so "" is a bare Ctrl-D:
+		// zero bytes then EOF. It declines despite the Y default —
+		// close is the one state change on this chain the operator
+		// can't walk back with a re-run.
+		{name: "eof-declines", input: "", wantDispatch: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1204,5 +1209,32 @@ func TestPromptCloseNextStageRendersLabelAndLegend(t *testing.T) {
 	}
 	if !strings.Contains(got, "Y = close · n = decline · x = close (alias)") {
 		t.Fatalf("expected legend with close/decline/alias entries, got: %q", got)
+	}
+}
+
+// TestPromptStageNextStageEOFDeclines: a bare Ctrl-D at the chain's
+// [Y/n/…] prompt declines despite the Y default — an abort key must
+// never dispatch the next stage. withStdinLine("") is the exact shape:
+// a closed pipe with zero bytes, so the read returns io.EOF with an
+// empty line. (feedStdin is wrong here — it appends a newline, which
+// makes the row a real Enter.)
+func TestPromptStageNextStageEOFDeclines(t *testing.T) {
+	var ran bool
+	next := &Command{
+		Name: "code",
+		Run: func(_ []string, _, _ io.Writer) int {
+			ran = true
+			return 0
+		},
+	}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+	withStdinLine(t, "")
+
+	var stdout, stderr bytes.Buffer
+	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	}
+	if ran {
+		t.Fatalf("bare Ctrl-D must not dispatch the next stage (stdout=%q)", stdout.String())
 	}
 }

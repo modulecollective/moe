@@ -368,6 +368,11 @@ func renderPromptLegend(opts []promptOption) string {
 // after a botched code run), so the canvas read is informative, not
 // gating. Whitespace-only or missing canvas falls through to the bare
 // prompt, no header or decoration.
+//
+// Both abort keys decline despite the Y default: SIGINT echoes ^C, and
+// a bare Ctrl-D (EOF with nothing typed) returns without dispatching.
+// "I'm leaving" must never be read as "yes, run the next stage." Text
+// typed before the EOF still counts as the answer.
 func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root string, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
 	// Surface the just-finished stage's canvas above the prompt so the
 	// operator reads it before authorising the next stage. The pairing
@@ -466,6 +471,9 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 		moePrintf(stderr, "read stdin: %v\n", err)
 		return 1
 	}
+	if err == io.EOF && line == "" {
+		return 0
+	}
 	answer := strings.ToLower(strings.TrimSpace(line))
 	if dispatcher != nil && strings.HasPrefix(answer, "!") {
 		return dispatchCascade(answer, next.Name, root, md, stdout, stderr)
@@ -547,6 +555,11 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 // so the post-fix chain prompt re-offers review/test (the gate that
 // blocked), not its successor.
 //
+// Both abort keys park the run rather than following the Y default:
+// SIGINT echoes ^C, and a bare Ctrl-D (EOF with nothing typed) returns
+// without opening a kickback session. Text typed before the EOF still
+// counts as the answer.
+//
 // Caller responsibility: gate on stdinIsTerminal() before invoking
 // (promptNextStageOverride does, falling back to a back-pointing nudge
 // for non-TTY callers) — same contract as promptCloseNextStage.
@@ -579,6 +592,9 @@ func promptKickback(g *CommandGroup, scuttle *Command, md *run.Metadata, blocked
 	if err != nil && err != io.EOF {
 		moePrintf(stderr, "read stdin: %v\n", err)
 		return 1
+	}
+	if err == io.EOF && line == "" {
+		return 0
 	}
 	answer := strings.ToLower(strings.TrimSpace(line))
 	switch {
@@ -638,6 +654,12 @@ func runKickbackSession(md *run.Metadata, document, blockedStage, canvas string,
 // the other prompts, where `x` is "scuttle (close)" — at this gate
 // close IS the next step, so the alias collapses to the same dispatch).
 //
+// Both abort keys leave the run at done · close?: SIGINT echoes ^C, and
+// a bare Ctrl-D (EOF with nothing typed) returns without dispatching
+// close. Closing is the one irreversible-feeling step on this chain, so
+// the Y default must not be reachable by an abort key. Text typed
+// before the EOF still counts as the answer.
+//
 // Caller responsibility: gate on stdinIsTerminal() before invoking. The
 // non-TTY branch retains the print-only nudge so headless callers
 // (`moe sdlc design ... < /dev/null`) never close silently.
@@ -663,6 +685,9 @@ func promptCloseNextStage(closeCmd *Command, justFinished string, md *run.Metada
 	if err != nil && err != io.EOF {
 		moePrintf(stderr, "read stdin: %v\n", err)
 		return 1
+	}
+	if err == io.EOF && line == "" {
+		return 0
 	}
 	answer := strings.ToLower(strings.TrimSpace(line))
 	accepted := answer == "" || strings.HasPrefix(answer, "y") || answer == "x"
