@@ -465,6 +465,68 @@ func TestGatherReusesScanAcrossFilters(t *testing.T) {
 	}
 }
 
+// TestScanIsBoundedByTheWindow is the other half of the memo key: the
+// window bounds the walk, so the default `moe usage` doesn't pay to
+// parse the whole archive. A narrow scan holds only what its window
+// covers; a wider one misses and re-parses; and a narrow request after
+// that hits the wider entry, because a narrower window is a subset.
+func TestScanIsBoundedByTheWindow(t *testing.T) {
+	root := newTestBureaucracy(t)
+	now := time.Now().Local()
+	old := now.Add(-60 * 24 * time.Hour)
+	seedRun(t, root, "tele", "recent", "sdlc", run.StatusMerged, now, nil)
+	seedRun(t, root, "tele", "ancient", "sdlc", run.StatusMerged, old, nil)
+	gittest.Commit(t, root, "seed runs")
+	seedThreadAt(t, root, "tele", "recent", "design", "claude",
+		claudeTurn("r", "claude-fable-5", 1, 2, 3), now)
+	seedThreadAt(t, root, "tele", "ancient", "design", "claude",
+		claudeTurn("a", "claude-fable-5", 1, 2, 3), old)
+
+	narrow := Filter{Cutoff: now.Add(-24 * time.Hour)}
+	wide := Filter{Cutoff: now.Add(-90 * 24 * time.Hour)}
+
+	if got := gather(t, root, narrow).Transcripts; got != 1 {
+		t.Fatalf("narrow transcripts = %d, want the recent run alone", got)
+	}
+	scanMemo.Lock()
+	first := scanMemo.entries[root]
+	scanMemo.Unlock()
+	// The discriminating assert: without a cutoff in scan, the walk
+	// would have parsed the ancient transcript too and left two stages
+	// here, with Gather doing the dropping after the cost was paid.
+	if got := len(first.res.stages); got != 1 {
+		t.Errorf("narrow scan holds %d stages, want only the one in the window", got)
+	}
+
+	widened, err := Gather(root, wide, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if widened.Transcripts != 2 {
+		t.Errorf("wide transcripts = %d, want the wider window to re-parse", widened.Transcripts)
+	}
+	scanMemo.Lock()
+	second := scanMemo.entries[root]
+	scanMemo.Unlock()
+	if second.res == first.res {
+		t.Fatal("a wider window reused the narrow scan; it can't, the records aren't there")
+	}
+
+	renarrowed, err := Gather(root, narrow, &bytes.Buffer{})
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if renarrowed.Transcripts != 1 {
+		t.Errorf("re-narrowed transcripts = %d, want the recent run alone", renarrowed.Transcripts)
+	}
+	scanMemo.Lock()
+	third := scanMemo.entries[root]
+	scanMemo.Unlock()
+	if third.res != second.res {
+		t.Error("a narrower window rebuilt the scan; the wider entry is a superset of it")
+	}
+}
+
 // TestNotionalCostArithmetic pins the price formula against a hand
 // figure: 1M cache writes at Opus 4.8's $5/MTok input rate is $5 × 2 (a
 // 1-hour-TTL write), 1M cache reads is $5 × 0.10, and 1M output is $25.

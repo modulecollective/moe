@@ -114,7 +114,9 @@ func priceFor(model string) (modelPrice, bool) {
 	return best, found
 }
 
-// Filter narrows a Report without narrowing the scan behind it.
+// Filter narrows a Report. Project narrows only the aggregate, so
+// switching projects is free; Cutoff also bounds the scan behind it, so
+// a wider window costs a re-parse (see cachedScan).
 type Filter struct {
 	// Project limits the report to one project; empty counts every one.
 	Project string
@@ -193,12 +195,14 @@ func (r Report) Starred() bool { return PartialNotional(r.Total, r.UnpricedToken
 
 // Gather aggregates the scanned transcripts under root through f.
 //
-// The scan behind it is memoized on HEAD, so a second call with a
-// different window or project is an aggregate over records already in
-// memory rather than a re-parse of every JSONL on disk. warn receives
-// one line per unparseable transcript, once per HEAD.
+// The scan behind it is memoized on HEAD and the window it was taken
+// at, so a second call with a different project — or the same window, or
+// a narrower one — is an aggregate over records already in memory rather
+// than a re-parse of every JSONL on disk. A wider window re-parses, back
+// to the wider cutoff. warn receives one line per unparseable
+// transcript, once per scan.
 func Gather(root string, f Filter, warn io.Writer) (Report, error) {
-	sc, err := cachedScan(root, warn)
+	sc, err := cachedScan(root, f.Cutoff, warn)
 	if err != nil {
 		return Report{}, err
 	}
@@ -333,15 +337,20 @@ type stageUsage struct {
 	Usage transcript.Usage
 }
 
-// scanResult is the filter-independent half of the report: every
-// transcript on disk, plus the per-run last activity the run order
-// needs.
+// scanResult is the project-independent half of the report: every
+// transcript on disk back to cutoff, plus the per-run last activity the
+// run order needs. last is filled for every run on record regardless of
+// cutoff, so run order never depends on the window a scan was taken at.
 type scanResult struct {
 	stages []stageUsage
 	last   map[string]time.Time
 }
 
-// scan walks every run's mirrored transcripts and parses them.
+// scan walks every run's mirrored transcripts back to cutoff and parses
+// them. A dated stage older than cutoff is skipped before its JSONL is
+// read — parsing is the expensive half, and a window the caller has
+// already excluded is work nobody asked for. An undated stage is always
+// parsed, because Filter counts it regardless.
 //
 // A stage's *when* comes from the journal, not the filesystem: git
 // committer time of that stage's most recent work turn, falling back to
@@ -349,7 +358,7 @@ type scanResult struct {
 // worthless here — the bureaucracy is checked out into per-session
 // worktrees, so every file's mtime is its checkout time and `--since 1d`
 // would report the whole archive.
-func scan(root string, warn io.Writer) (*scanResult, error) {
+func scan(root string, cutoff time.Time, warn io.Writer) (*scanResult, error) {
 	mds, err := run.Scan(root)
 	if err != nil {
 		return nil, fmt.Errorf("scan runs: %w", err)
@@ -366,6 +375,9 @@ func scan(root string, warn io.Writer) (*scanResult, error) {
 			when := idx.WorkTurnTime[run.WorkTurnKey{Project: md.Project, Run: md.ID, Doc: stage}]
 			if when.IsZero() {
 				when = idx.LastActivity[runKey]
+			}
+			if !when.IsZero() && when.Before(cutoff) {
+				continue
 			}
 			for _, agent := range []string{"claude", "codex"} {
 				path := filepath.Join(root, run.ThreadPathFor(agent, md.Project, md.ID, stage))
@@ -400,43 +412,53 @@ func scan(root string, warn io.Writer) (*scanResult, error) {
 // That matters because the walk is the expensive half. Parsing 1.2 GB
 // of JSONL takes seconds — fine once in a CLI process, ten times the
 // dash's tolerable-latency stance on every page load. Behind the memo a
-// page hit costs the run scan and the aggregate, and changing the window
-// or the project costs only the aggregate.
+// page hit costs the run scan and the aggregate, and changing the
+// project costs only the aggregate.
 //
-// `moe usage` neither gains nor loses: one process, one miss, the same
-// work as before. Its one visible change is that parse warnings are
-// emitted once per HEAD rather than once per Gather, which is the right
-// behaviour for a server log and indistinguishable for a single call.
-func cachedScan(root string, warn io.Writer) (*scanResult, error) {
+// The window is the second half of the key, because scan skips the parse
+// for stages older than cutoff and so an entry only holds what its own
+// window covered. A request hits when HEAD matches *and* its cutoff is
+// no earlier than the entry's — a narrower window is a subset of what
+// the entry already holds, and Filter drops the surplus. A wider window
+// misses, rescans at the wider cutoff and replaces the entry, so after
+// the widest window anyone asks for, every narrower one hits.
+//
+// That keeps `moe usage` where it was: one process, one miss, the same
+// window it asked for and no more. Its one visible change is that parse
+// warnings are emitted once per HEAD rather than once per Gather, which
+// is the right behaviour for a server log and indistinguishable for a
+// single call.
+func cachedScan(root string, cutoff time.Time, warn io.Writer) (*scanResult, error) {
 	head, err := git.HEAD(root)
 	if err != nil {
 		// No readable HEAD (unborn branch, not a repo) — nothing to key
 		// on. Fall through to the walk, which fails the way callers
 		// already handle.
-		return scan(root, warn)
+		return scan(root, cutoff, warn)
 	}
 	scanMemo.Lock()
 	defer scanMemo.Unlock()
-	if e, ok := scanMemo.entries[root]; ok && e.head == head {
+	if e, ok := scanMemo.entries[root]; ok && e.head == head && !cutoff.Before(e.cutoff) {
 		return e.res, nil
 	}
-	res, err := scan(root, warn)
+	res, err := scan(root, cutoff, warn)
 	if err != nil {
 		return nil, err
 	}
 	if scanMemo.entries == nil {
 		scanMemo.entries = make(map[string]scanMemoEntry, 1)
 	}
-	scanMemo.entries[root] = scanMemoEntry{head: head, res: res}
+	scanMemo.entries[root] = scanMemoEntry{head: head, cutoff: cutoff, res: res}
 	return res, nil
 }
 
 // scanMemo caches the last scan per bureaucracy root. Keyed by root with
-// HEAD *inside* the value, so a new commit replaces the entry rather
-// than stranding a dead scan per commit; no eviction beyond that,
-// because a real process works one root. The lock is held across the
-// walk, so two concurrent misses cost one walk and the loser waits it
-// out — at single-operator scale that trade is free.
+// HEAD and the scanned cutoff *inside* the value, so a new commit or a
+// wider window replaces the entry rather than stranding a dead scan per
+// commit; no eviction beyond that, because a real process works one
+// root. The lock is held across the walk, so two concurrent misses cost
+// one walk and the loser waits it out — at single-operator scale that
+// trade is free.
 //
 // **The returned scanResult is shared between callers and must be
 // treated as read-only.** Gather only reads it; a caller that starts
@@ -448,7 +470,10 @@ var scanMemo struct {
 
 type scanMemoEntry struct {
 	head string
-	res  *scanResult
+	// cutoff is the window this entry was scanned at: it holds every
+	// dated stage at or after it, and every undated one.
+	cutoff time.Time
+	res    *scanResult
 }
 
 // Merge sums two models' usage.
