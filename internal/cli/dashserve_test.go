@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/serve"
@@ -335,5 +336,128 @@ func TestDashStillCallsADeadServeDeadInItsOwnNamespace(t *testing.T) {
 	got := serveCluster(t, root, now)
 	if want := fmt.Sprintf("serve dead (pid %d) · stale 3h 0m", pid); got != want {
 		t.Errorf("banner tail = %q, want %q", got, want)
+	}
+}
+
+// aheadOfOriginRoot is a bureaucracy root whose main tracks a bare
+// origin and holds n commits origin hasn't got — the shape the origin
+// item reads. Every other test in this file uses a plain tempdir, where
+// there is no upstream and the item is absent, which is what keeps them
+// unchanged.
+func aheadOfOriginRoot(t *testing.T, n int) string {
+	t.Helper()
+	root := t.TempDir()
+	gittest.InitAt(t, root)
+	gittest.Run(t, root, "checkout", "-b", "main")
+	gittest.Commit(t, root, "seed")
+	origin := gittest.InitBare(t)
+	gittest.Run(t, root, "remote", "add", "origin", origin)
+	gittest.Run(t, root, "push", "-u", "origin", "main")
+	for i := range n {
+		gittest.Commit(t, root, fmt.Sprintf("journal: %d", i))
+	}
+	return root
+}
+
+// TestDashCountsUnpushedWithoutAServe: the ahead-count is read from git,
+// not from serve's record, so an operator who has never run serve still
+// learns that their journal hasn't left the box. It is the only thing
+// the tail carries in that state — there is no serve to describe.
+func TestDashCountsUnpushedWithoutAServe(t *testing.T) {
+	root, now := aheadOfOriginRoot(t, 1), time.Now()
+	if got, want := serveCluster(t, root, now), "1 unpushed"; got != want {
+		t.Errorf("banner tail = %q, want %q", got, want)
+	}
+	// It is a count, not an alarm: nothing is wrong yet, so nothing earns
+	// a row.
+	if got := serveLines(t, root, now); got != "" {
+		t.Errorf("dash printed %q below the banner for a plain backlog, want nothing", got)
+	}
+}
+
+// TestDashSaysTheSyncHappened is the seed's actual ask: a positive
+// signal that the journal reached origin. It rides the cluster's tail
+// beside the serve status, in the same slot the count would use.
+func TestDashSaysTheSyncHappened(t *testing.T) {
+	root, now := aheadOfOriginRoot(t, 0), time.Now()
+	writeServeState(t, root, serve.ActivitySnapshot{
+		Pid: os.Getpid(), Armed: true,
+		Started:  now.Add(-4 * time.Minute),
+		LastPush: now.Add(-2 * time.Minute), LastPushCommits: 3,
+	})
+	if got, want := serveCluster(t, root, now), "serve armed · up 4m · pushed 2m ago"; got != want {
+		t.Errorf("banner tail = %q, want %q", got, want)
+	}
+}
+
+// TestDashWontVouchForADeadServesPush: "pushed 2m ago" from a process
+// that has since crashed is the one reading that sends the operator away
+// happy while their journal sits on the box. A dead serve's record is as
+// stale as its stamp, so the tail keeps its own "dead" headline and
+// drops the claim.
+func TestDashWontVouchForADeadServesPush(t *testing.T) {
+	self := repolock.PidNamespace()
+	if self == "" {
+		t.Skip("no pid namespace handle on this platform")
+	}
+	root, now := aheadOfOriginRoot(t, 0), time.Now()
+	pid := deadPid(t)
+	writeServeState(t, root, serve.ActivitySnapshot{
+		Pid: pid, PidNS: self, Armed: true,
+		Started: now.Add(-time.Hour), WrittenAt: now.Add(-3 * time.Hour),
+		LastPush: now.Add(-3 * time.Hour), LastPushCommits: 1,
+	})
+	got := serveCluster(t, root, now)
+	if want := fmt.Sprintf("serve dead (pid %d) · stale 3h 0m", pid); got != want {
+		t.Errorf("banner tail = %q, want %q", got, want)
+	}
+}
+
+// TestDashSpendsARowOnARefusedPush: trouble earns a row, health doesn't
+// — the same rule the project lines follow. The error text is the point:
+// a rejected non-fast-forward and a dead network want different
+// responses from the operator, and the banner's item can't say which.
+func TestDashSpendsARowOnARefusedPush(t *testing.T) {
+	root, now := aheadOfOriginRoot(t, 3), time.Now()
+	writeServeState(t, root, serve.ActivitySnapshot{
+		Pid: os.Getpid(), Armed: true,
+		Started:          now.Add(-time.Hour),
+		PushFailingSince: now.Add(-12 * time.Minute),
+		PushError:        "git push: exit status 128 (fatal: could not read from remote)",
+		PushRetryAt:      now.Add(4 * time.Minute),
+	})
+
+	if got, want := serveCluster(t, root, now),
+		"serve armed · up 1h 0m · push failing 12m · 3 unpushed"; got != want {
+		t.Errorf("banner tail = %q, want %q", got, want)
+	}
+	lines := serveLines(t, root, now)
+	for _, want := range []string{
+		"origin", "push failing", "(12m · 3 commits", "could not read from remote", "retry in 4m",
+	} {
+		if !strings.Contains(lines, want) {
+			t.Errorf("serve lines = %q, want it to carry %q", lines, want)
+		}
+	}
+}
+
+// TestDashDropsAFailureOnceTheQueueIsEmpty: a landed push or a manual
+// `moe sync` ends the outage as far as the operator is concerned, and a
+// record serve hasn't rewritten yet must not keep crying about it. The
+// ahead-count is what settles it, which is why it is read live.
+func TestDashDropsAFailureOnceTheQueueIsEmpty(t *testing.T) {
+	root, now := aheadOfOriginRoot(t, 0), time.Now()
+	writeServeState(t, root, serve.ActivitySnapshot{
+		Pid: os.Getpid(), Armed: true,
+		Started:          now.Add(-time.Hour),
+		PushFailingSince: now.Add(-12 * time.Minute),
+		PushError:        "git push: exit status 128",
+		LastPush:         now.Add(-20 * time.Minute),
+	})
+	if got := serveCluster(t, root, now); strings.Contains(got, "failing") {
+		t.Errorf("banner tail = %q, want no failure with nothing left to push", got)
+	}
+	if got := serveLines(t, root, now); got != "" {
+		t.Errorf("dash printed %q for a failure with an empty queue, want nothing", got)
 	}
 }

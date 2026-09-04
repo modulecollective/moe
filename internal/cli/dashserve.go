@@ -11,6 +11,7 @@ import (
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/serve"
+	"github.com/modulecollective/moe/internal/sync"
 )
 
 // The CLI dash's window onto a running serve.
@@ -25,8 +26,9 @@ import (
 // banner's tail as one cluster, in the same slot for every state, so an
 // operator who doesn't run serve sees the banner they always saw. A
 // project only earns a line of its own when it is sweeping, cooling, or
-// its last sweep died. --watch gets freshness for free — the 3s repaint
-// re-reads one small file.
+// its last sweep died, and the drain to origin only when it is being
+// refused. --watch gets freshness for free — the 3s repaint re-reads one
+// small file and one rev-list.
 
 // serveLiveness is what this reader can honestly say about the process
 // behind a state file. Three-valued because the pid probe is not always
@@ -60,6 +62,12 @@ type serveState struct {
 	// until the next tick — twenty minutes of the dash disagreeing with
 	// the command the operator just ran.
 	modes dash.ModeCounts
+	// ahead is how many commits local main holds that origin doesn't,
+	// read from git at render rather than out of the snapshot. The
+	// snapshot says what serve's pusher did; this says whether anything
+	// is waiting *now*, which is the half a crashed serve, a manual
+	// `moe sync` or a burst of fresh commits would otherwise get wrong.
+	ahead int
 }
 
 // readServeState reads the snapshot for one dash frame.
@@ -72,6 +80,10 @@ func readServeState(root string) serveState {
 	// Warn-only, like the snapshot read above it: an unreadable projects/
 	// costs the banner its mode counts, not the frame.
 	st.modes = projectModeCounts(root)
+	// Same terms — an unanswerable ahead-count costs the origin item, not
+	// the frame. A `rev-list --count` against local refs, beside the git
+	// the dash already runs to gather.
+	st.ahead, _ = sync.Unpushed(root)
 	return st
 }
 
@@ -119,11 +131,27 @@ func probeLiveness(snap serve.ActivitySnapshot) serveLiveness {
 	return serveDead
 }
 
-// bannerCluster is the serve status the banner carries in its tail:
-// whether the process may pulse, how long it has been up, when the next
-// tick lands, and how many projects are in trouble. Empty when no serve
-// has ever written a state file here — which is what keeps the banner
-// unchanged for an operator who doesn't run serve.
+// bannerCluster is everything the banner's tail carries: the serve
+// status, then the origin item. Empty when there is nothing to say at
+// all — which is what keeps the banner unchanged for an operator who
+// doesn't run serve and has nothing waiting to push.
+//
+// The two halves are independent on purpose. `N unpushed` is read from
+// git and true whether or not anything is resident, so a box with no
+// serve still shows a journal that hasn't left it; a serve with a quiet
+// drain still shows its uptime and next tick.
+func (s serveState) bannerCluster(now time.Time) string {
+	cluster, item := s.serveCluster(now), s.pushItem(now)
+	if cluster == "" || item == "" {
+		return cluster + item
+	}
+	return cluster + " · " + item
+}
+
+// serveCluster is the serve half: whether the process may pulse, how
+// long it has been up, when the next tick lands, and how many projects
+// are in trouble. Empty when no serve has ever written a state file
+// here.
 //
 // A file whose pid is gone is a serve that crashed: clean shutdown
 // removes the file, so its presence plus a dead pid is the whole signal.
@@ -137,7 +165,7 @@ func probeLiveness(snap serve.ActivitySnapshot) serveLiveness {
 // headline and relay it, which is how a sandboxed one came to tell its
 // operator their serve was down. The write stamp rides along as the one
 // signal that survives the namespace boundary intact.
-func (s serveState) bannerCluster(now time.Time) string {
+func (s serveState) serveCluster(now time.Time) string {
 	if !s.ok {
 		return ""
 	}
@@ -154,6 +182,22 @@ func (s serveState) bannerCluster(now time.Time) string {
 	}
 	return dash.ServeCluster(s.snap.Armed, dash.HumanDuration(now.Sub(s.snap.Started)),
 		next, s.modes, s.failing(now))
+}
+
+// pushItem is the origin half: has the journal reached GitHub.
+//
+// Only a serve that could plausibly still be pushing vouches for the
+// recorded fields. A provably dead one — and a root with no state file
+// at all — gets the ahead-count alone, because "pushed 2m ago" from a
+// process that has since crashed is the one reading that would send an
+// operator away happy while their journal sits on the box. Unknown
+// vouches: git answers from a sandbox, the process is probably fine, and
+// the headline already says the reader can't check.
+func (s serveState) pushItem(now time.Time) string {
+	if !s.ok || s.live == serveDead {
+		return dash.PushItem(now, false, s.ahead, time.Time{}, time.Time{})
+	}
+	return dash.PushItem(now, true, s.ahead, s.snap.LastPush, s.snap.PushFailingSince)
 }
 
 // failing counts the projects whose row would read "cooling" or
@@ -190,6 +234,11 @@ func (s serveState) renderLines(w io.Writer, now time.Time) {
 		return
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	// Same rule as the projects below: trouble earns a row, health
+	// doesn't. A healthy drain is already in the banner's tail.
+	if state, detail := s.pushLine(now); state != "" {
+		fmt.Fprintf(tw, "  origin\t%s\t%s\n", state, detail)
+	}
 	for _, p := range s.snap.Projects {
 		state, detail := serveProjectState(now, p)
 		if state == "" {
@@ -198,6 +247,32 @@ func (s serveState) renderLines(w io.Writer, now time.Time) {
 		fmt.Fprintf(tw, "  %s\t%s\t%s\n", p.Project, state, detail)
 	}
 	tw.Flush()
+}
+
+// pushLine decides whether the drain has earned a row of its own and
+// what it says. It has, and only has, when serve is being refused *and*
+// commits are actually waiting: that is the state the banner's item can
+// only name, and the error text is the thing the operator needs — a
+// rejected non-fast-forward and a dead network want different responses.
+//
+// An empty state is the normal case, and the one a root with no state
+// file falls into for free — its zero snapshot is failing since never.
+// Callers have already dropped the dead-serve frame, whose whole record
+// is stale.
+//
+// The error goes last, after the parenthetical, so the tabwriter's
+// columns are set by the short fixed parts rather than by however long
+// git's complaint happens to be. The web row is composed the same way.
+func (s serveState) pushLine(now time.Time) (state, detail string) {
+	if s.snap.PushFailingSince.IsZero() || s.ahead == 0 {
+		return "", ""
+	}
+	detail = dash.HumanDuration(now.Sub(s.snap.PushFailingSince)) +
+		" · " + dash.Plural(s.ahead, "commit")
+	if !s.snap.PushRetryAt.IsZero() {
+		detail += " · retry in " + dash.HumanDuration(max(s.snap.PushRetryAt.Sub(now), 0))
+	}
+	return "push failing", "(" + detail + ") — " + s.snap.PushError
 }
 
 // serveProjectState decides whether a project has earned a line and what
