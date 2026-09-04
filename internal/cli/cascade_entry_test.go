@@ -110,3 +110,36 @@ func TestDispatchCascadeRefusesVanishedRun(t *testing.T) {
 // dispatchCascade tests (TestDispatchCascadeBlockedReviewParksToPrompt
 // and the cascade-flag suite), which now seed run.json for the load
 // this guard added.
+
+// TestDispatchCascadeTailAfterRedeferSaysNothingMore: `!!` whose push
+// defers to headless recovery twice stops without shipping, and
+// dispatchCascade re-enters the chain anchored at "push" — sdlc's
+// terminal stage. That tail used to hit a terminal-stage branch that
+// announced "push sealed — run `moe sdlc close …`" (a `[Y/n/x]` close
+// prompt with Y default at a real terminal), which is a lie: nothing
+// shipped, and a reflex Enter would have closed an unshipped run. The
+// cascade summary is now the last word.
+func TestDispatchCascadeTailAfterRedeferSaysNothingMore(t *testing.T) {
+	root, md := seedCascadeEntryRun(t, run.StatusInProgress)
+	stubOpenSdlcStage(t, nil)
+	deferred := &PushDeferredError{Recovery: "rebase-conflict", Project: "tele", Run: "fix-it"}
+	stubPushFromCascadeSeq(t, []pushOutcome{
+		{exit: 0, deferred: deferred},
+		{exit: 0, deferred: deferred},
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := dispatchCascade("!!", "code", root, md, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("exit=%d, want 0 (both recoveries exited cleanly); stderr=%q", code, stderr.String())
+	}
+	got := stdout.String()
+	wantSummary := "cascade tele/fix-it: code ok · test ok · review ok · push deferred to recovery (rebase conflict) · push deferred to recovery (rebase conflict) — stopped\n"
+	if !strings.HasSuffix(got, wantSummary) {
+		t.Fatalf("stdout = %q, want it to end with the cascade summary %q", got, wantSummary)
+	}
+	if strings.Contains(got, "sealed") || strings.Contains(got, "close") {
+		t.Fatalf("stdout = %q, want no close nudge or prompt after a cascade that never shipped", got)
+	}
+}

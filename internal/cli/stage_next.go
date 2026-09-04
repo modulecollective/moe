@@ -98,26 +98,10 @@ func promptNextStageOverride(root string, md *run.Metadata, justFinished, overri
 	case justFinished != "":
 		stage = wf.Successor(justFinished)
 		if stage == "" {
-			// Terminal stage — no successor to offer. If the workflow
-			// has a close command and the run is still in_progress,
-			// offer the operator the same `[Y/n/x]` shape every other
-			// chain prompt uses, with `Y` dispatching close. Non-TTY
-			// callers (`moe sdlc design ... < /dev/null`) keep the
-			// print-only nudge — anti-silent-close, same rule the
-			// cascade's auto-close honours.
-			if md.Status == run.StatusInProgress {
-				if g, err := LookupGroup(md.Workflow); err == nil {
-					if closeCmd := g.Lookup("close"); closeCmd != nil {
-						if park || !stdinIsTerminal() {
-							moePrintf(stdout,
-								"%s sealed — run `moe %s close %s/%s` to mark the run terminal.\n",
-								justFinished, md.Workflow, md.Project, md.ID)
-							return 0
-						}
-						return promptCloseNextStage(closeCmd, justFinished, md, stdout, stderr)
-					}
-				}
-			}
+			// Terminal stage — no successor to offer. Every workflow's
+			// terminal stage is opened with SkipNextStage or headless,
+			// so nothing routes a finished terminal stage back through
+			// the chain prompt on purpose.
 			return 0
 		}
 	default:
@@ -562,7 +546,7 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 //
 // Caller responsibility: gate on stdinIsTerminal() before invoking
 // (promptNextStageOverride does, falling back to a back-pointing nudge
-// for non-TTY callers) — same contract as promptCloseNextStage.
+// for non-TTY callers).
 func promptKickback(g *CommandGroup, scuttle *Command, md *run.Metadata, blockedStage, canvas string, stdout, stderr io.Writer) int {
 	fmt.Fprint(stdout, canvas)
 	if !strings.HasSuffix(canvas, "\n") {
@@ -641,60 +625,6 @@ func runKickbackSession(md *run.Metadata, document, blockedStage, canvas string,
 	}
 	kickoff := buildKickbackKickoff(md.Workflow, blockedStage, canvas)
 	return openRecoveryStageSession(md, document, blockedStage, headless, kickoff, stdout, stderr)
-}
-
-// promptCloseNextStage is the terminal-stage analogue of
-// promptStageNextStage / promptPushNextStage: the last committed stage
-// left the run `done` but `in_progress`, and the workflow has a `close`
-// command, so the chain prompt asks `[Y/n/x]` instead of printing a
-// copy-paste hint. Y dispatches close interactively (no `--no-edit` —
-// the operator just typed Y, so opening the followups editor is the
-// right behaviour); n leaves the run at done · close? for the operator
-// to come back to; x is an alias for Y (muscle-memory consistency with
-// the other prompts, where `x` is "scuttle (close)" — at this gate
-// close IS the next step, so the alias collapses to the same dispatch).
-//
-// Both abort keys leave the run at done · close?: SIGINT echoes ^C, and
-// a bare Ctrl-D (EOF with nothing typed) returns without dispatching
-// close. Closing is the one irreversible-feeling step on this chain, so
-// the Y default must not be reachable by an abort key. Text typed
-// before the EOF still counts as the answer.
-//
-// Caller responsibility: gate on stdinIsTerminal() before invoking. The
-// non-TTY branch retains the print-only nudge so headless callers
-// (`moe sdlc design ... < /dev/null`) never close silently.
-func promptCloseNextStage(closeCmd *Command, justFinished string, md *run.Metadata, stdout, stderr io.Writer) int {
-	opts := []promptOption{
-		{key: 'Y', hint: "close"},
-		{key: 'n', hint: "decline"},
-		{key: 'x', hint: "close (alias)"},
-	}
-	label := renderPromptLabel(opts)
-	moePrintf(stdout, "%s sealed — close run now? %s\n", justFinished, label)
-	moePrintln(stdout, renderPromptLegend(opts))
-	sig, stopSig := installSigint()
-	defer stopSig()
-	line, interrupted, err := readLineWithSignal(stdinSharedReader(), sig)
-	if interrupted {
-		// SIGINT at this prompt collapses to decline, same shape the
-		// other chain prompts use — the operator can always re-run
-		// `moe <wf> close` later.
-		moePrintln(stdout, "^C")
-		return 0
-	}
-	if err != nil && err != io.EOF {
-		moePrintf(stderr, "read stdin: %v\n", err)
-		return 1
-	}
-	if err == io.EOF && line == "" {
-		return 0
-	}
-	answer := strings.ToLower(strings.TrimSpace(line))
-	accepted := answer == "" || strings.HasPrefix(answer, "y") || answer == "x"
-	if !accepted {
-		return 0
-	}
-	return closeCmd.Run([]string{md.Project + "/" + md.ID}, stdout, stderr)
 }
 
 // promptPushNextStage offers three choices: decline (default), merge
