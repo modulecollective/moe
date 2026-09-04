@@ -217,9 +217,9 @@ func openChat(projectID, runID, agentOverride string, stdout, stderr io.Writer) 
 //
 // The two abort keys agree and both leave the run open: SIGINT echoes ^C,
 // and a bare Ctrl-D (EOF with nothing typed) returns without dispatching.
-// That EOF rule differs from readChainAccept, which folds EOF into the
-// blank-line accept — closing is a state change, and the caller's tty gate
-// means this branch is only ever reached by a deliberate Ctrl-D.
+// readChainAccept declines on a bare EOF for the same reason: the caller's
+// tty gate means this branch is only ever reached by a deliberate Ctrl-D,
+// and an abort key should not commit a state change.
 //
 // Caller responsibility: invoke only after a successful sitting and gate
 // on stdinIsTerminal and serveAgentSuppress first. Keeping those routing

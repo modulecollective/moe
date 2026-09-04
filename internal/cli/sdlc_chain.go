@@ -234,11 +234,13 @@ func resolveSDLCRunSlugWithMode(verb, projectID, runID string, tty bool, stdout,
 
 // readChainAccept reads a Y/n answer from the shared stdin buffer.
 // Default is Y (blank line accepts) per the design's
-// `[Y/n]` legend; anything starting with `n` declines; SIGINT and
-// EOF decline as well — the safe default at a "did you mean" prompt
-// is to bail with the original not-found error, not to redirect
-// silently. Returns (accepted, exitCode); a non-zero exitCode means
-// the read itself failed and the caller should surface the failure.
+// `[Y/n]` legend; anything starting with `n` declines; SIGINT and a
+// bare EOF (Ctrl-D with nothing typed) decline as well — the safe
+// default at a "did you mean" prompt is to bail with the original
+// not-found error, not to redirect silently. An answer typed before
+// the EOF still counts as an answer. Returns (accepted, exitCode); a
+// non-zero exitCode means the read itself failed and the caller should
+// surface the failure.
 func readChainAccept(stderr io.Writer) (bool, int) {
 	sig, stopSig := installSigint()
 	defer stopSig()
@@ -249,6 +251,9 @@ func readChainAccept(stderr io.Writer) (bool, int) {
 	if err != nil && err != io.EOF {
 		moePrintf(stderr, "read stdin: %v\n", err)
 		return false, 1
+	}
+	if err == io.EOF && line == "" {
+		return false, 0
 	}
 	answer := strings.ToLower(strings.TrimSpace(line))
 	if answer == "" || strings.HasPrefix(answer, "y") {

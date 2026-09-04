@@ -336,6 +336,41 @@ func TestResolveSDLCRunSlugExactMatchPassthrough(t *testing.T) {
 	}
 }
 
+// TestReadChainAccept pins the Y/n reader's answer rule directly, one
+// row per shape the operator can produce at a `[Y/n]` prompt. The
+// load-bearing row is `eof`: a bare Ctrl-D used to fall through to the
+// blank-line default and accept, which at the reentry prompt mints a
+// run. The rest are regression pins for behaviour that already held.
+func TestReadChainAccept(t *testing.T) {
+	cases := []struct {
+		name  string
+		stdin string
+		want  bool
+	}{
+		{"blank", "\n", true},
+		{"y", "y\n", true},
+		{"upper y", "Y\n", true},
+		{"yes", "yes\n", true},
+		{"n", "n\n", false},
+		{"no", "no\n", false},
+		{"typo", "typo\n", false},
+		{"eof", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			withStdinLine(t, tc.stdin)
+			var errb bytes.Buffer
+			accepted, code := readChainAccept(&errb)
+			if code != 0 {
+				t.Fatalf("code=%d, want 0 (stderr=%q)", code, errb.String())
+			}
+			if accepted != tc.want {
+				t.Fatalf("accepted=%v, want %v", accepted, tc.want)
+			}
+		})
+	}
+}
+
 // withStdinLine replaces os.Stdin with a pipe carrying line, restoring
 // the original on cleanup. Mirrors the cascade_test pattern but kept
 // local so the chain tests don't accidentally outlive the redirection.
