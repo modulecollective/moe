@@ -108,6 +108,12 @@ cascade flags are mutually exclusive; `--agent` combines
 with them by switching the run's persisted agent before the cascade walks the
 stages, so every cascaded stage runs on the switched agent.
 
+**Leaving a prompt.** At every chain prompt, Ctrl-C and Ctrl-D both decline,
+whatever the default is — a `[Y/n]` gate does not run the next stage, kick
+back, or close the run just because you walked away from it. Ctrl-D declines
+at `moe init`'s "commit now?" prompt too, leaving the scaffold staged. Text
+typed before the Ctrl-D still counts as the answer.
+
 **Blocked gates.** When a `test` or `review` session closes blocked, the gate
 kicks the run back rather than parking. Interactively the chain prompt becomes a
 kickback offer `[Y/n/d/x]`: `Y` (default) reopens `code` seeded with the
