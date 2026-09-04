@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/git/gittest"
 )
 
@@ -61,5 +62,61 @@ func TestRunInitWithDevNullStdinLeavesStaged(t *testing.T) {
 	log := gittest.Output(t, dir, "rev-list", "--all", "--pretty=%s")
 	if strings.Contains(log, "Initialize bureaucracy") {
 		t.Fatalf("init self-committed under /dev/null stdin; log:\n%s", log)
+	}
+}
+
+// TestPromptInitCommit pins the answer rule at `moe init`'s "commit
+// now? [Y/n]" prompt. A reflex Enter and an explicit `y` commit; `n`
+// and a bare Ctrl-D both leave the tree staged. The EOF row is the
+// point of the test: Ctrl-D is how an operator says "I'm leaving,"
+// and until this branch existed it committed instead.
+//
+// Driving promptInitCommit rather than runInit is what makes the
+// answer observable at all — runInit's stdinIsTerminal() gate takes
+// the "not a terminal" branch before the read whenever stdin is a
+// pipe, so there is no way to feed it an answer from a test.
+func TestPromptInitCommit(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		input      string
+		wantCommit bool
+	}{
+		{name: "blank-commits", input: "\n", wantCommit: true},
+		{name: "explicit-y-commits", input: "y\n", wantCommit: true},
+		{name: "n-leaves-staged", input: "n\n", wantCommit: false},
+		// Raw "" — a closed pipe with zero bytes, i.e. a bare Ctrl-D.
+		{name: "eof-leaves-staged", input: "", wantCommit: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			gittest.SetupEnv(t)
+			dir := t.TempDir()
+			if err := bureaucracy.Init(dir, ""); err != nil {
+				t.Fatalf("bureaucracy.Init: %v", err)
+			}
+			withStdinLine(t, tc.input)
+
+			var stdout, stderr bytes.Buffer
+			if code := promptInitCommit(dir, &stdout, &stderr); code != 0 {
+				t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+			}
+			// `git log` errors on a repo with no commits; rev-list
+			// --all succeeds with empty output either way.
+			log := gittest.Output(t, dir, "rev-list", "--all", "--pretty=%s")
+			if got := strings.Contains(log, "Initialize bureaucracy"); got != tc.wantCommit {
+				t.Fatalf("committed=%v, want %v; log:\n%s", got, tc.wantCommit, log)
+			}
+			out := stdout.String()
+			if got := strings.Contains(out, "left staged"); got == tc.wantCommit {
+				t.Fatalf("'left staged' present=%v with wantCommit=%v; stdout=%q", got, tc.wantCommit, out)
+			}
+			if tc.name == "eof-leaves-staged" {
+				// A terminal echoes nothing for Ctrl-D and the prompt
+				// has no trailing newline, so the message would
+				// otherwise land on the tail of "[Y/n] ".
+				if !strings.Contains(out, "[Y/n] \nleft staged") {
+					t.Fatalf("expected the EOF message on its own line, got %q", out)
+				}
+			}
+		})
 	}
 }

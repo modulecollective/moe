@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"flag"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -60,6 +61,21 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stdout, "not a terminal — leaving staged; commit when ready.")
 		return 0
 	}
+	return promptInitCommit(abs, stdout, stderr)
+}
+
+// promptInitCommit asks whether to commit the freshly scaffolded
+// bureaucracy, and commits it on Y. Blank (a reflex Enter) accepts;
+// `n` or any other text leaves the tree staged; a bare Ctrl-D (EOF
+// with nothing typed) takes the same path as `n` — an abort key must
+// not perform the state change the default would. An answer typed
+// before the EOF still counts as an answer.
+//
+// Caller responsibility: gate on stdinIsTerminal() before invoking —
+// the same contract the stage_next.go chain prompts document. Split
+// out of runInit so a test can drive the answer through a pipe
+// without tripping that gate.
+func promptInitCommit(abs string, stdout, stderr io.Writer) int {
 	moePrint(stdout, "commit now? [Y/n] ")
 	reader := bufio.NewReader(os.Stdin)
 	line, err := reader.ReadString('\n')
@@ -68,7 +84,15 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	answer := strings.ToLower(strings.TrimSpace(line))
-	if answer != "" && !strings.HasPrefix(answer, "y") {
+	declined := answer != "" && !strings.HasPrefix(answer, "y")
+	if err == io.EOF && line == "" {
+		// A terminal echoes nothing for Ctrl-D and the prompt above
+		// has no trailing newline — break the line so the message
+		// lands on its own rather than trailing "[Y/n] ".
+		fmt.Fprintln(stdout)
+		declined = true
+	}
+	if declined {
 		moePrintln(stdout, "left staged; commit when ready.")
 		return 0
 	}
