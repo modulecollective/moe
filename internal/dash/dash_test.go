@@ -744,6 +744,61 @@ func TestServeCluster(t *testing.T) {
 	}
 }
 
+// TestPushItem pins the origin item both dashes append to the cluster.
+//
+// The precedence is the whole design: the live ahead-count outranks
+// anything the record says, because a serve that pushed at 10:00 and has
+// been refused since 10:05 has a true "pushed 5m ago" and three commits
+// nobody can see. And the failure only shows while commits are actually
+// waiting — once the queue is empty the outage is history.
+func TestPushItem(t *testing.T) {
+	now := time.Now()
+	failing := now.Add(-12 * time.Minute)
+	landed := now.Add(-2 * time.Minute)
+
+	for _, tc := range []struct {
+		name         string
+		serve        bool
+		ahead        int
+		lastPush     time.Time
+		failingSince time.Time
+		want         string
+	}{
+		{
+			name: "waiting and refused", serve: true, ahead: 3,
+			lastPush: landed, failingSince: failing,
+			want: "push failing 12m · 3 unpushed",
+		},
+		{name: "waiting, drain healthy", serve: true, ahead: 3, lastPush: landed, want: "3 unpushed"},
+		{name: "landed", serve: true, lastPush: landed, want: "pushed 2m ago"},
+		// A live serve that has pushed nothing yet says nothing. An
+		// ahead-count of zero reads the same on a caught-up box and on one
+		// with no origin at all, so a standing "in sync" would be
+		// permanently false on a local-only bureaucracy. The first journal
+		// commit of the session turns this into "pushed just now".
+		{name: "nothing to push, none landed yet", serve: true, want: ""},
+		// No serve vouching, nothing waiting: the banner is what it always
+		// was. The floor this whole change is measured against.
+		{name: "no serve, nothing waiting", want: ""},
+		// A dead or absent serve still can't hide commits. Its recorded
+		// fields are ignored — "pushed 2m ago" from a process that has
+		// since crashed is the one reading that sends the operator away
+		// happy while the journal sits on the box.
+		{
+			name: "no serve, commits waiting", ahead: 3,
+			lastPush: landed, failingSince: failing,
+			want: "3 unpushed",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := PushItem(now, tc.serve, tc.ahead, tc.lastPush, tc.failingSince)
+			if got != tc.want {
+				t.Errorf("PushItem = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // The two input hints read as action hints beside `· close?`: `· ask?`
 // for a question needing the operator, `· input` for prose already given
 // and not yet picked up. A run can wear both.

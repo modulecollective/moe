@@ -1191,6 +1191,51 @@ func ServeCluster(armed bool, up, next string, modes ModeCounts, failing int) st
 	return cluster
 }
 
+// PushItem spells the origin item both dashes append to the serve
+// cluster: whether the journal has reached GitHub, and what is wrong if
+// it hasn't. "" when there is nothing to say, which keeps a board with
+// no serve and nothing waiting exactly as quiet as it was.
+//
+//	3 unpushed
+//	push failing 12m · 3 unpushed
+//	pushed 2m ago
+//
+// Ahead-first, because the live count outranks anything recorded. A
+// serve that pushed at 10:00 and has been refused since 10:05 has a
+// perfectly true "pushed 5m ago" and three commits nobody can see;
+// reading git at render is what stops the item from being confidently
+// wrong. Conversely a recorded push is the only thing that can say a
+// sync *happened* — an ahead-count of zero is silence, not confirmation.
+//
+// serve reports whether a live serve vouches for lastPush and
+// failingSince. Without one they are stale or absent, so only the
+// ahead-count is trustworthy and a quiet board stays silent.
+//
+// failing only shows while commits are actually waiting: once a landed
+// push or a manual `moe sync` empties the queue the failure is history,
+// and the loop's own recovery line has the log covered.
+func PushItem(now time.Time, serve bool, ahead int, lastPush, failingSince time.Time) string {
+	if ahead > 0 {
+		item := fmt.Sprintf("%d unpushed", ahead)
+		if serve && !failingSince.IsZero() {
+			return "push failing " + HumanDuration(now.Sub(failingSince)) + " · " + item
+		}
+		return item
+	}
+	if !serve || lastPush.IsZero() {
+		// Nothing waiting and nothing pushed yet in this serve's life. The
+		// tempting item here is a standing "in sync", and it is the one
+		// this deliberately doesn't render: an ahead-count of zero also
+		// reads zero on a bureaucracy with no origin configured at all, so
+		// the claim would be confident and, on a local-only box,
+		// permanently false. A push that landed is the only positive this
+		// can actually stand behind — and the first journal commit of the
+		// session turns silence into one.
+		return ""
+	}
+	return "pushed " + HumanAgo(now, lastPush)
+}
+
 // Plural spells "1 tick" / "2 ticks". Both dashes count down the
 // heartbeat's cool-off in ticks, and "(1 tick(s) left)" is the kind of
 // line that reads as unfinished.
