@@ -489,6 +489,9 @@ func (s *Server) registerRoutes() {
 	// from os.ReadFile + the internal/md renderer.
 	s.router.HandleFunc("GET /lore", s.handleLoreIndex)
 	s.router.HandleFunc("GET /lore/{name}", s.handleLoreEntry)
+	// The spend report, same one `moe usage` prints. ?project and ?since
+	// mirror its two flags; the project hub links here scoped.
+	s.router.HandleFunc("GET /usage", s.handleUsage)
 	s.router.HandleFunc("GET /projects", s.handleProjectsIndex)
 	s.router.HandleFunc("GET /projects/{project}", s.handleProjectHub)
 	// The heartbeat's per-project brake: it writes config and starts

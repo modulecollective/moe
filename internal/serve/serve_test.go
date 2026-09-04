@@ -68,6 +68,10 @@ func TestDashRouteRendersBuckets(t *testing.T) {
 // on top of the shared one.
 func TestServePagesRenderSharedHead(t *testing.T) {
 	root := t.TempDir()
+	// /usage reads the journal, so this fixture needs a real repo where
+	// the others only need files on disk.
+	gittest.InitAt(t, root)
+	gittest.Commit(t, root, "seed")
 	seedRun(t, root, "alpha", "fix-it", "sdlc")
 	seedRun(t, root, "alpha", "my-idea", "idea")
 	canvasPath := writeCanvas(t, root, "alpha", "fix-it", "design", "# design\n")
@@ -106,6 +110,7 @@ func TestServePagesRenderSharedHead(t *testing.T) {
 		"/projects/alpha",                     // project_hub
 		"/projects/alpha/knowledge",           // knowledge_index
 		"/input",                              // input queue (empty state)
+		"/usage",                              // usage report (empty state)
 	}
 
 	// One route per full-page template, no exceptions: a template carrying

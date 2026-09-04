@@ -705,3 +705,82 @@ form.new-run button:hover, form.new-run button:focus {
 .input-reply button { align-self: flex-start; }
 .row.input-ping { flex-wrap: wrap; }
 .row.input-ping .input-reply { flex-basis: 100%; }
+
+/* Usage tables. The rest of the app is flex rows, but the spend report
+   is a real grid — nine columns that only mean something read down — so
+   it gets the app's one <table>, borrowing the hairline rule the rows
+   use. Tabular figures so the digits line up in a proportional-ish
+   fallback font, and a scroll wrapper because nine columns don't fit
+   the 38rem measure or a phone. */
+.table-scroll { overflow-x: auto; }
+.usage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.usage-table th, .usage-table td {
+  padding: 0.45rem 0.7rem 0.45rem 0;
+  border-bottom: 1px solid var(--hairline);
+  text-align: left;
+  white-space: nowrap;
+}
+.usage-table tbody tr:last-child td { border-bottom: none; }
+.usage-table th {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 0.75rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+/* The sort affordance is scoped to .sortable, which the page script adds:
+   with JS off the headers are inert, and they should look it. */
+.usage-table.sortable th { cursor: pointer; user-select: none; }
+.usage-table.sortable th:hover, .usage-table.sortable th:focus { color: var(--fg); }
+/* The active column names its direction rather than relying on the
+   reader inferring it from the rows. */
+.usage-table th[aria-sort] { color: var(--fg); }
+.usage-table th[aria-sort="descending"]::after { content: " ↓"; }
+.usage-table th[aria-sort="ascending"]::after { content: " ↑"; }
+.usage-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.usage-table td .slug { color: var(--accent); }
+
+/* The strip above the bucket table: the four token counts and the
+   notional total, as one line that wraps on a phone. */
+.usage-totals {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 1.1rem;
+  padding: 0 0 0.6rem;
+  margin: 0;
+}
+.usage-totals .k { color: var(--muted); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+.usage-totals .v { font-variant-numeric: tabular-nums; }
+
+.usage-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 1rem;
+}
+.usage-filter label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.usage-filter select, .usage-filter input {
+  font: 0.9rem/1.4 inherit;
+  color: var(--fg);
+  background: var(--bg);
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  padding: 0.35rem 0.5rem;
+  color-scheme: light dark;
+}
+.usage-filter select:focus, .usage-filter input:focus {
+  border-color: var(--accent);
+  outline: none;
+}

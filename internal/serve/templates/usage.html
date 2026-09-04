@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+{{template "head" .}}
+<title>usage — MoE</title>
+</head>
+<body>
+<main>
+  <header class="page-header">
+    <div class="banner">
+      <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
+      <div class="banner-sub"><a href="/">dashboard</a>{{if .Project}} → <a href="/projects">projects</a> → <a href="/projects/{{.Project}}">{{.Project}}</a>{{end}} → usage</div>
+    </div>
+    {{template "serveheader" .Serve}}
+    {{template "headeractions" .}}
+  </header>
+
+  {{/* No JS: the scope and the window are a plain GET form, so the page
+       is bookmarkable and the project hub's link is just this form
+       pre-filled. */}}
+  <form class="usage-filter" method="get" action="/usage">
+    <label>scope
+      <select name="project">
+        <option value=""{{if not .Project}} selected{{end}}>all projects</option>
+        {{range .Projects}}<option value="{{.}}"{{if eq . $.Project}} selected{{end}}>{{.}}</option>{{end}}
+      </select>
+    </label>
+    <label>window
+      <input type="text" name="since" value="{{.Since}}" size="6" aria-label="window, e.g. 7d or 24h">
+    </label>
+    <button class="action" type="submit">show</button>
+  </form>
+
+  <section class="dash-section">
+    <h2><span>usage <span class="count">({{.Scope}} · last {{.Since}} · {{.Transcripts}} transcripts)</span></span></h2>
+    {{if .Transcripts}}
+    <ul class="usage-totals">
+      <li><span class="k">steps</span> <span class="v">{{.Totals.Steps.Text}}</span></li>
+      <li><span class="k">input</span> <span class="v">{{.Totals.Input.Text}}</span></li>
+      <li><span class="k">output</span> <span class="v">{{.Totals.Output.Text}}</span></li>
+      <li><span class="k">total</span> <span class="v">{{.Totals.Total.Text}}</span></li>
+      <li><span class="k">notional</span> <span class="v">{{.Totals.Notional.Text}}</span></li>
+    </ul>
+
+    <div class="table-scroll">
+      <table class="usage-table">
+        <thead>
+          <tr>
+            <th scope="col">workflow</th>
+            <th scope="col">stage</th>
+            <th scope="col">model</th>
+            <th scope="col" class="num">runs</th>
+            <th scope="col" class="num">steps</th>
+            <th scope="col" class="num">cache-w</th>
+            <th scope="col" class="num">cache-r</th>
+            <th scope="col" class="num">output</th>
+            <th scope="col" class="num">notional</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Buckets}}
+          <tr>
+            <td>{{.Workflow}}</td>
+            <td>{{.Stage}}</td>
+            <td>{{.Model}}</td>
+            {{template "usagenum" .Runs}}
+            {{template "usagenum" .Steps}}
+            {{template "usagenum" .CacheW}}
+            {{template "usagenum" .CacheR}}
+            {{template "usagenum" .Output}}
+            {{template "usagenum" .Notional}}
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+
+    {{range .Unpriced}}
+    <p class="note">no price on record for {{.Model}} ({{.Tokens}} tokens uncounted in the notional column)</p>
+    {{end}}
+    {{if .Starred}}<p class="note">* starred totals exclude tokens from models with no price on record</p>{{end}}
+    {{if .Untimed}}<p class="note">{{.Untimed}} untimed transcript(s) included in the totals above</p>{{end}}
+    <p class="note">Notional dollars are API sticker prices, for comparing workflows — not a bill.</p>
+    {{else}}<p class="empty">no stage transcripts in the window</p>{{end}}
+  </section>
+
+  {{if .Runs}}
+  <section class="dash-section">
+    <h2><span>runs <span class="count">({{len .Runs}})</span></span></h2>
+    <div class="table-scroll">
+      <table class="usage-table">
+        <thead>
+          <tr>
+            <th scope="col">run</th>
+            <th scope="col">workflow</th>
+            <th scope="col" class="num">stages</th>
+            <th scope="col" class="num">steps</th>
+            <th scope="col" class="num">input</th>
+            <th scope="col" class="num">output</th>
+            <th scope="col" class="num">total</th>
+            <th scope="col" class="num">notional</th>
+            <th scope="col" class="num">last</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Runs}}
+          <tr>
+            <td><a class="slug" href="{{.URL}}">{{.Key}}</a></td>
+            <td>{{.Workflow}}</td>
+            {{template "usagenum" .Stages}}
+            {{template "usagenum" .Steps}}
+            {{template "usagenum" .Input}}
+            {{template "usagenum" .Output}}
+            {{template "usagenum" .Total}}
+            {{template "usagenum" .Notional}}
+            {{template "usagenum" .Last}}
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {{end}}
+</main>
+{{template "usagesortjs" .}}
+{{template "themejs" .}}
+</body>
+</html>
+
+{{/* One numeric cell. data-v is the raw figure the sort compares; the
+     text is the humanized form the reader gets. A cell with no raw
+     value (an unpriced dash, an untimed run) omits the attribute. */}}
+{{define "usagenum"}}<td class="num"{{if .V}} data-v="{{.V}}"{{end}}>{{.Text}}</td>{{end}}
+
+{{define "usagesortjs"}}
+<script>
+// Click a header to re-sort the table under it. Progressive
+// enhancement: with JS off the server order stands, which is run order
+// for the runs table and dollars-desc for the buckets — the two orders
+// worth landing on.
+//
+// The sort reads data-v, never the cell text: the display is humanized
+// ("147.3M", "$12.34"), so comparing what the reader sees would sort
+// 900 above 12K. Rows are re-appended rather than rebuilt, so the
+// links and markup the server rendered are the ones that stay.
+(function () {
+  var tables = document.querySelectorAll('.usage-table');
+  for (var i = 0; i < tables.length; i++) wire(tables[i]);
+
+  function wire(table) {
+    var head = table.tHead && table.tHead.rows[0];
+    var body = table.tBodies[0];
+    if (!head || !body) return;
+    var ths = head.cells;
+    // The pointer cursor and the hover highlight are this class, so a
+    // page without JS shows headers that look inert because they are.
+    table.classList.add('sortable');
+
+    // A column is numeric if any cell in it carries a raw value. Asking
+    // the data rather than the header class keeps the two in sync by
+    // construction.
+    function numeric(col) {
+      for (var i = 0; i < body.rows.length; i++) {
+        var cell = body.rows[i].cells[col];
+        if (cell && cell.hasAttribute('data-v')) return true;
+      }
+      return false;
+    }
+
+    function value(row, col) {
+      var cell = row.cells[col];
+      if (!cell || !cell.hasAttribute('data-v')) return null;
+      return parseFloat(cell.getAttribute('data-v'));
+    }
+
+    function text(row, col) {
+      var cell = row.cells[col];
+      return cell ? cell.textContent.trim() : '';
+    }
+
+    function sortBy(col, th) {
+      var isNum = numeric(col);
+      var prev = th.getAttribute('aria-sort');
+      // First click answers the question the column is for: biggest
+      // first on a number, A-Z on a name. After that it just flips.
+      var asc = prev === 'ascending' ? false : prev === 'descending' ? true : !isNum;
+      var rows = Array.prototype.slice.call(body.rows);
+      rows.sort(function (a, b) {
+        if (isNum) {
+          var va = value(a, col), vb = value(b, col);
+          // A cell with no raw value has no place on the ramp, so it
+          // sits at the bottom whichever way the column points.
+          if (va === null || vb === null) {
+            return va === vb ? 0 : va === null ? 1 : -1;
+          }
+          return asc ? va - vb : vb - va;
+        }
+        var ta = text(a, col), tb = text(b, col);
+        if (ta === tb) return 0;
+        return (ta < tb ? -1 : 1) * (asc ? 1 : -1);
+      });
+      for (var i = 0; i < ths.length; i++) ths[i].removeAttribute('aria-sort');
+      th.setAttribute('aria-sort', asc ? 'ascending' : 'descending');
+      for (var j = 0; j < rows.length; j++) body.appendChild(rows[j]);
+    }
+
+    for (var c = 0; c < ths.length; c++) bind(ths[c], c);
+    function bind(th, col) {
+      th.tabIndex = 0;
+      th.setAttribute('role', 'button');
+      th.addEventListener('click', function () { sortBy(col, th); });
+      th.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          sortBy(col, th);
+        }
+      });
+    }
+  }
+})();
+</script>
+{{end}}
