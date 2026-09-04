@@ -548,6 +548,39 @@ func AutoPull(root string, stdout, stderr io.Writer) error {
 	return nil
 }
 
+// Unpushed counts the commits local main holds that its upstream
+// doesn't — the work PushMain is about to drain, and what both dashes
+// report as "N unpushed".
+//
+// (0, nil) for the two states where nothing is owed and publishing
+// would be wrong: no upstream configured (the normal local-only setup,
+// and also what a rebase's detached HEAD reads as) and a paused rebase,
+// where the worktree is mid-reconcile and HEAD is not a tip anyone
+// should publish. An unreadable ahead-count is the one genuine failure
+// — it means git could not answer about refs it should always be able
+// to resolve.
+//
+// The rebase check is belt-and-braces for most of a rebase's life: git
+// detaches HEAD while replaying, so `@{u}` doesn't resolve and the
+// upstream check would answer 0 anyway. It earns its line at the edges,
+// where the branch ref has already moved but the rebase state dir is
+// still there — a window where HEAD is attached, main is cleanly ahead,
+// and the tip is nonetheless not one to publish.
+//
+// One predicate, three callers: serve's pusher acts on it, and both
+// dashes report it. What counts as unpushed can't drift between the
+// loop that does the pushing and the surfaces that say whether it has.
+func Unpushed(root string) (int, error) {
+	if RebaseInProgress(root) {
+		return 0, nil
+	}
+	upstream, _ := git.Upstream(root)
+	if upstream == "" {
+		return 0, nil
+	}
+	return git.AheadOf(root, upstream, "HEAD")
+}
+
 // PushMain drains local main to its upstream. It is the whole of the
 // bureaucracy's write-edge to origin: journal verbs commit and return,
 // and serve's pusher goroutine (internal/serve/pusher.go) calls this

@@ -244,3 +244,74 @@ func TestPushMainReportsTheTimeoutItBlew(t *testing.T) {
 		t.Errorf("error = %q, want no empty output suffix when git printed nothing", err)
 	}
 }
+
+// TestUnpushedCountsAndSkips is the one predicate three callers share —
+// serve's pusher acts on it, both dashes report it — so its four
+// answers are pinned here rather than inferred from any one of them.
+//
+// The two zeros are the point: "no upstream" and "mid-rebase" are
+// states where nothing is owed and publishing would be wrong, and both
+// must read as a quiet nothing rather than a failure, or the dashes
+// would cry "unpushed" at a local-only box and the drain would back off
+// against a remote that never refused anything.
+func TestUnpushedCountsAndSkips(t *testing.T) {
+	t.Run("no upstream is a quiet zero", func(t *testing.T) {
+		root := t.TempDir()
+		gittest.InitAt(t, root)
+		gittest.Run(t, root, "checkout", "-b", "main")
+		gittest.Commit(t, root, "seed")
+		if n, err := Unpushed(root); n != 0 || err != nil {
+			t.Fatalf("Unpushed with no upstream = (%d, %v), want (0, nil)", n, err)
+		}
+	})
+
+	t.Run("caught up is zero", func(t *testing.T) {
+		root, _ := pushMainFixture(t)
+		if n, err := Unpushed(root); n != 0 || err != nil {
+			t.Fatalf("Unpushed on a caught-up main = (%d, %v), want (0, nil)", n, err)
+		}
+	})
+
+	t.Run("counts the commits origin hasn't got", func(t *testing.T) {
+		root, _ := pushMainFixture(t)
+		gittest.Commit(t, root, "journal: one")
+		gittest.Commit(t, root, "journal: two")
+		n, err := Unpushed(root)
+		if err != nil {
+			t.Fatalf("Unpushed: %v", err)
+		}
+		if n != 2 {
+			t.Errorf("Unpushed = %d, want 2", n)
+		}
+	})
+
+	t.Run("a paused rebase is a quiet zero", func(t *testing.T) {
+		root, _ := pushMainFixture(t)
+		// Cleanly ahead, so without the rebase guard this would count 1 —
+		// the row above proves it does.
+		gittest.Commit(t, root, "journal: the commit the guard holds back")
+		if err := os.MkdirAll(filepath.Join(root, ".git", "rebase-merge"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if n, err := Unpushed(root); n != 0 || err != nil {
+			t.Fatalf("Unpushed with a rebase in progress = (%d, %v), want (0, nil)", n, err)
+		}
+	})
+
+	t.Run("an unreadable count is the one real error", func(t *testing.T) {
+		root, _ := pushMainFixture(t)
+		// A remote-tracking ref that names an object the repo doesn't
+		// have. @{u} still resolves — the name is intact — so the
+		// no-upstream skip doesn't fire, and rev-list is left unable to
+		// answer a question it should always be able to answer. Deleting
+		// the ref outright wouldn't do: that reads as no upstream at all,
+		// which is a legitimate zero.
+		ref := filepath.Join(root, ".git", "refs", "remotes", "origin", "main")
+		if err := os.WriteFile(ref, []byte(strings.Repeat("dead0000", 5)+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Unpushed(root); err == nil {
+			t.Fatal("Unpushed with an unresolvable upstream: got nil error, want one")
+		}
+	})
+}
