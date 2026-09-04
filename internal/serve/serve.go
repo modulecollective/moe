@@ -668,9 +668,9 @@ func (s *Server) logf(format string, a ...any) {
 	fmt.Fprintf(s.opts.Logger, format+"\n", a...)
 }
 
-// syncWriter is the io.Writer handed to the heartbeat gate's Due, the
-// one remaining consumer. Same sink as logf; never nil because Due
-// writes unconditionally.
+// syncWriter is the io.Writer handed to callers that write to it
+// unconditionally — the heartbeat gate's Due and usage.Gather's parse
+// warnings. Same sink as logf; never nil for that reason.
 func (s *Server) syncWriter() io.Writer {
 	if s.opts.Logger == nil {
 		return io.Discard
