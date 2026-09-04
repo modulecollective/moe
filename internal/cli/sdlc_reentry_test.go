@@ -234,6 +234,36 @@ func TestSDLCReentryTTYDeclineOfMintRefuses(t *testing.T) {
 	}
 }
 
+// TestSDLCReentryTTYEOFRefusesMint is the end-to-end leg for the bare-EOF
+// branch: Ctrl-D at the reopen prompt used to fall through to the
+// blank-line default and mint a dated successor, so an abort key made a
+// state change on disk. It must now refuse exactly as `n` does, leaving
+// the closed run the only run under the project.
+func TestSDLCReentryTTYEOFRefusesMint(t *testing.T) {
+	root := seedClosedSDLCRun(t, "tele", "widget", "# widget\n\nprior design body\n")
+	withStdinLine(t, "")
+
+	var out, errb bytes.Buffer
+	_, code := resolveSDLCReentryWithMode("sdlc code", "tele", "widget", true, &out, &errb)
+	if code == 0 {
+		t.Fatalf("expected non-zero on EOF; stdout=%q", out.String())
+	}
+	if !strings.Contains(errb.String(), "hint: moe sdlc reopen tele/widget") {
+		t.Fatalf("EOF should surface the reopen hint:\n%s", errb.String())
+	}
+	entries, err := os.ReadDir(filepath.Join(root, "projects", "tele", "runs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "widget" {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("EOF minted a successor: run dirs = %v, want [widget]", names)
+	}
+}
+
 // TestSDLCReentryAmbiguousChainLists: two live descendants off the same
 // terminal prior is ambiguous — the guard lists both as runnable
 // invocations and picks nothing, mirroring resolveSDLCRunSlug's
