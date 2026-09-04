@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modulecollective/moe/internal/bureaucracy"
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
 )
 
@@ -330,5 +332,77 @@ func TestPromptPushNextStageDeclinesOnSignal(t *testing.T) {
 	}
 	if rec.ran {
 		t.Errorf("push ran on SIGINT-decline path")
+	}
+}
+
+// TestPromptInitCommitLeavesStagedOnSignal pins the last cooked-mode
+// prompt in moe onto the same abort rule as the chain's: Ctrl-C at
+// `moe init`'s "commit now?" prompt declines and exits 0, rather than
+// letting Go's default handler kill the process. The scaffold is
+// staged either way, so nothing is lost when the runtime wins — what
+// the operator loses is the instruction telling them so, and the
+// promise that the two abort keys agree at every prompt.
+func TestPromptInitCommitLeavesStagedOnSignal(t *testing.T) {
+	gittest.SetupEnv(t)
+	dir := t.TempDir()
+	if err := bureaucracy.Init(dir, ""); err != nil {
+		t.Fatalf("bureaucracy.Init: %v", err)
+	}
+
+	// Write end held open for the whole test: the read must never
+	// produce, so the only way out of the prompt is the signal.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	defer w.Close()
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	var stdout, stderr safeBuffer
+	exit := make(chan int, 1)
+	go func() {
+		exit <- promptInitCommit(dir, &stdout, &stderr)
+	}()
+
+	// Wait for the prompt before raising, so the signal can't land
+	// before the helper is even entered. The prompt is printed just
+	// ahead of installSigint(), so this isn't proof the handler is
+	// registered — but the 10ms poll tick is orders of magnitude
+	// wider than that window, the same bet the sibling tests make.
+	deadline := time.Now().Add(2 * time.Second)
+	for !strings.Contains(stdout.String(), "[Y/n]") && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !strings.Contains(stdout.String(), "[Y/n]") {
+		t.Fatalf("prompt label never printed: %q", stdout.String())
+	}
+	if err := raiseSIGINT(); err != nil {
+		t.Fatalf("raise SIGINT: %v", err)
+	}
+
+	select {
+	case code := <-exit:
+		if code != 0 {
+			t.Fatalf("exit=%d, want 0 on SIGINT-decline; stderr=%q", code, stderr.String())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("promptInitCommit did not return after SIGINT")
+	}
+
+	// `git log` errors on a repo with no commits; rev-list --all
+	// succeeds with empty output either way.
+	log := gittest.Output(t, dir, "rev-list", "--all", "--pretty=%s")
+	if strings.Contains(log, "Initialize bureaucracy") {
+		t.Fatalf("committed on the SIGINT-decline path; log:\n%s", log)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "^C") {
+		t.Errorf("expected ^C feedback in stdout, got: %q", out)
+	}
+	if !strings.Contains(out, "left staged") {
+		t.Errorf("expected the staged-tree instruction in stdout, got: %q", out)
 	}
 }
