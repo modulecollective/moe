@@ -186,3 +186,60 @@ func TestUsageIsReachableFromTheBoards(t *testing.T) {
 	mustContain(t, get(t, s, "/projects/alpha"), `<a href="/usage?project=alpha">usage</a>`)
 	mustContain(t, get(t, s, "/lore"), `<a href="/usage">usage</a>`)
 }
+
+// TestUsagePageCostSitsBesideTheLabel: the notional column reads
+// immediately after the columns that name the row. Both tables are wider
+// than the 38rem measure and than a phone, so whatever sits at the tail
+// is behind a horizontal scroll with no visible cue — which is where the
+// per-run dollar figure was, on the page whose whole job is spend.
+// Sliding it forward is the fix, and column order is not something the
+// other usage tests pin.
+func TestUsagePageCostSitsBesideTheLabel(t *testing.T) {
+	s := usageFixture(t)
+	body := get(t, s, "/usage").Body.String()
+
+	// The bucket row's label columns end at the model; the run row's at
+	// the slug link. In both, the next cell is the cost.
+	for _, tc := range []struct{ after, want string }{
+		{`<td>claude-opus-5</td>`, `<td class="num" data-v="1.30">$1.30</td>`},
+		{`>alpha/big-one</a></td>`, `<td class="num" data-v="1.30">$1.30</td>`},
+	} {
+		i := strings.Index(body, tc.after)
+		if i < 0 {
+			t.Fatalf("usage page has no %q cell", tc.after)
+		}
+		rest := strings.TrimSpace(body[i+len(tc.after):])
+		if !strings.HasPrefix(rest, tc.want) {
+			t.Errorf("cell after %q is %.60q…\nwant it to start %q", tc.after, rest, tc.want)
+		}
+	}
+}
+
+// TestUsageRunCellWrapRuleServed: the reorder alone still loses the cost
+// when the slug is wider than the screen, so the run cell is the one
+// nowrap exception. That is pure CSS — no test can prove the layout, but
+// this proves the rules reach the wire. Scoped to the rule block: a
+// slice that runs to EOF would pass on any stylesheet that mentions
+// white-space anywhere later.
+func TestUsageRunCellWrapRuleServed(t *testing.T) {
+	// A bare server: the rule ships through //go:embed, so this needs no
+	// fixture, only the static route.
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir()})
+	css := getOK(t, s, "/static/style.css")
+	const sel = ".usage-table td.run {"
+	start := strings.Index(css, sel)
+	if start < 0 {
+		t.Fatalf("style.css lost its %s rule", sel)
+	}
+	start += len(sel)
+	end := strings.Index(css[start:], "}")
+	if end < 0 {
+		t.Fatalf("%s rule is unterminated", sel)
+	}
+	rule := css[start : start+end]
+	for _, decl := range []string{"white-space: normal;", "overflow-wrap: anywhere;", "min-width:"} {
+		if !strings.Contains(rule, decl) {
+			t.Errorf("%s is missing %q: %q", sel, decl, rule)
+		}
+	}
+}

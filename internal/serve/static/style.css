@@ -711,7 +711,9 @@ form.new-run button:hover, form.new-run button:focus {
    it gets the app's one <table>, borrowing the hairline rule the rows
    use. Tabular figures so the digits line up in a proportional-ish
    fallback font, and a scroll wrapper because nine columns don't fit
-   the 38rem measure or a phone. */
+   the 38rem measure or a phone. What scrolls off is the token detail:
+   the markup puts notional straight after the label columns, so the
+   figure the page is for is on screen at every width. */
 .table-scroll { overflow-x: auto; }
 .usage-table {
   width: 100%;
@@ -743,6 +745,16 @@ form.new-run button:hover, form.new-run button:focus {
 .usage-table th[aria-sort="ascending"]::after { content: " ↑"; }
 .usage-table .num { text-align: right; font-variant-numeric: tabular-nums; }
 .usage-table td .slug { color: var(--accent); }
+/* The run cell is the one that wraps. Every other cell is nowrap, so
+   auto layout gives this column what's left and a long slug breaks at
+   its hyphens rather than pushing notional off the right edge.
+   overflow-wrap keeps a hyphen-free id from setting the column's floor
+   to its own width; min-width is the floor instead. */
+.usage-table td.run {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  min-width: 10rem;
+}
 
 /* The strip above the bucket table: the four token counts and the
    notional total, as one line that wraps on a phone. */

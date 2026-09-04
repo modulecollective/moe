@@ -49,12 +49,12 @@
             <th scope="col">workflow</th>
             <th scope="col">stage</th>
             <th scope="col">model</th>
+            <th scope="col" class="num">notional</th>
             <th scope="col" class="num">runs</th>
             <th scope="col" class="num">steps</th>
             <th scope="col" class="num">cache-w</th>
             <th scope="col" class="num">cache-r</th>
             <th scope="col" class="num">output</th>
-            <th scope="col" class="num">notional</th>
           </tr>
         </thead>
         <tbody>
@@ -63,12 +63,12 @@
             <td>{{.Workflow}}</td>
             <td>{{.Stage}}</td>
             <td>{{.Model}}</td>
+            {{template "usagenum" .Notional}}
             {{template "usagenum" .Runs}}
             {{template "usagenum" .Steps}}
             {{template "usagenum" .CacheW}}
             {{template "usagenum" .CacheR}}
             {{template "usagenum" .Output}}
-            {{template "usagenum" .Notional}}
           </tr>
           {{end}}
         </tbody>
@@ -92,27 +92,27 @@
         <thead>
           <tr>
             <th scope="col">run</th>
+            <th scope="col" class="num">notional</th>
             <th scope="col">workflow</th>
             <th scope="col" class="num">stages</th>
             <th scope="col" class="num">steps</th>
             <th scope="col" class="num">input</th>
             <th scope="col" class="num">output</th>
             <th scope="col" class="num">total</th>
-            <th scope="col" class="num">notional</th>
             <th scope="col" class="num">last</th>
           </tr>
         </thead>
         <tbody>
           {{range .Runs}}
           <tr>
-            <td><a class="slug" href="{{.URL}}">{{.Key}}</a></td>
+            <td class="run"><a class="slug" href="{{.URL}}">{{.Key}}</a></td>
+            {{template "usagenum" .Notional}}
             <td>{{.Workflow}}</td>
             {{template "usagenum" .Stages}}
             {{template "usagenum" .Steps}}
             {{template "usagenum" .Input}}
             {{template "usagenum" .Output}}
             {{template "usagenum" .Total}}
-            {{template "usagenum" .Notional}}
             {{template "usagenum" .Last}}
           </tr>
           {{end}}
