@@ -111,6 +111,21 @@ type activity struct {
 	interval time.Duration
 
 	lastTick time.Time
+
+	// The pusher's outcome, so both dashes can answer "is the journal on
+	// origin yet" without reading git themselves. Runtime state like the
+	// rest of the record: a fresh serve has honestly not pushed anything.
+	//
+	// lastPush/lastPushN date the last push that landed and count what it
+	// carried. The three failure fields describe the *current* run of
+	// failures — pushFailSince is the run's start, matching the log's
+	// one-line-per-run rule — and are zero while the drain is healthy.
+	lastPush      time.Time
+	lastPushN     int
+	pushFailSince time.Time
+	pushErr       string
+	pushRetryAt   time.Time
+
 	projects map[string]*activityProject
 	events   []activityEvent
 }
@@ -228,6 +243,46 @@ func (a *activity) recordChildExit(id string, at time.Time, exitErr error, tail,
 	})
 }
 
+// recordPush folds in a push that landed: when, and how many commits it
+// carried. A landed push is also the end of any failure run, so the
+// three failure fields go with it — the dashes read "failing" off
+// pushFailSince alone, and a stale one would outlive the outage.
+func (a *activity) recordPush(at time.Time, n int) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.lastPush, a.lastPushN = at, n
+	a.pushFailSince, a.pushErr, a.pushRetryAt = time.Time{}, "", time.Time{}
+}
+
+// recordPushFail folds in an attempt origin refused. pushFailSince is
+// set only on the first failure of a run — it dates how long this has
+// been going wrong, which is the number worth reading, and the same
+// transition the log spends its one line on. The error and the retry
+// instant are overwritten every attempt, because those are about now.
+//
+// lastPush is deliberately left alone: "it last landed at 10:00" stays
+// true through an outage that started at 10:05, and the two facts
+// together are the whole story.
+func (a *activity) recordPushFail(at time.Time, err error, retryAt time.Time) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.pushFailSince.IsZero() {
+		a.pushFailSince = at
+	}
+	a.pushErr, a.pushRetryAt = firstLine(err.Error()), retryAt
+}
+
+// firstLine trims an error down to what fits on a dash row. git's push
+// failures are a paragraph — the hint block, the ref table — and the
+// first line is the one that names what happened.
+func firstLine(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = strings.TrimSpace(s[:i])
+	}
+	return s
+}
+
 // nextTick is when the ticker fires next: the last tick plus the baked
 // interval, or — before the first one — the process start plus it. The
 // cadence is fixed, so neither is a guess. Zero for an unarmed serve,
@@ -269,6 +324,14 @@ type ActivitySnapshot struct {
 	LastTick time.Time         `json:"last_tick,omitzero"`
 	NextTick time.Time         `json:"next_tick,omitzero"`
 	Projects []ActivityProject `json:"projects,omitempty"`
+	// The pusher's outcome — see the activity record's own fields. Zero
+	// on a serve that has neither pushed nor failed, and absent from a
+	// file written before they existed, which reads back the same way.
+	LastPush         time.Time `json:"last_push,omitzero"`
+	LastPushCommits  int       `json:"last_push_commits,omitempty"`
+	PushFailingSince time.Time `json:"push_failing_since,omitzero"`
+	PushError        string    `json:"push_error,omitempty"`
+	PushRetryAt      time.Time `json:"push_retry_at,omitzero"`
 	// WrittenAt is when serve last rewrote the file, and it is what makes
 	// a dead serve legible: a pid that no longer exists plus this stamp's
 	// age is "crashed, and roughly when".
@@ -321,6 +384,12 @@ func (a *activity) snapshot(now time.Time) ActivitySnapshot {
 		LastTick:  a.lastTick,
 		NextTick:  a.nextTick(),
 		WrittenAt: now,
+
+		LastPush:         a.lastPush,
+		LastPushCommits:  a.lastPushN,
+		PushFailingSince: a.pushFailSince,
+		PushError:        a.pushErr,
+		PushRetryAt:      a.pushRetryAt,
 	}
 	for _, id := range slices.Sorted(maps.Keys(a.projects)) {
 		p := a.projects[id]
@@ -365,8 +434,10 @@ func ReadActivitySnapshot(root string) (snap ActivitySnapshot, ok bool, err erro
 
 // writeSnapshot writes the state file atomically — tmp then rename — so
 // a reader mid-repaint never sees a half-written record. Called on
-// listen and on every tick, spawn and exit; at one event every few
-// minutes the write is free.
+// listen, on every tick, spawn and exit, and on every push that lands or
+// fails. Ticks and children are one event every few minutes; a sweep's
+// pushes burst to a handful a minute, each already behind a 1-5s network
+// push, so the write is still free.
 func writeSnapshot(root string, snap ActivitySnapshot) error {
 	dir, err := repolock.EnsureDir(root)
 	if err != nil {

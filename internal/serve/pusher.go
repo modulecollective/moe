@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/sync"
 )
 
@@ -103,6 +102,9 @@ func (s *Server) runPusher(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		// One clock read for the whole arm: the log line and the recorded
+		// instant describe the same event and shouldn't drift.
+		now := time.Now()
 		switch {
 		case err != nil:
 			if fails == 0 {
@@ -110,12 +112,20 @@ func (s *Server) runPusher(ctx context.Context) {
 			}
 			fails++
 			interval = min(interval*2, backoffCap)
+			s.activity.recordPushFail(now, err, now.Add(interval))
+			s.saveActivity()
 		case fails > 0 && n > 0:
 			s.logf("pusher: origin reachable again, pushed %d commit(s)", n)
 			fails, interval = 0, base
+			s.activity.recordPush(now, n)
+			s.saveActivity()
 		case n > 0:
 			s.logf("pusher: pushed %d commit(s)", n)
+			s.activity.recordPush(now, n)
+			s.saveActivity()
 		}
+		// A skip records nothing, exactly as it logs nothing: it is not
+		// news that there was nothing to push.
 		t.Reset(interval)
 	}
 }
@@ -125,33 +135,16 @@ func (s *Server) runPusher(ctx context.Context) {
 // when there was nothing to do, or when the tree is in a state where
 // pushing would be wrong).
 //
-// The skips are all "ask again next tick", never errors: no upstream is
-// the normal local-only setup, and a paused rebase means the worktree is
-// mid-reconcile and HEAD is not a tip anyone should publish. An
-// unreadable ahead-count is the one genuine failure — it means git could
-// not answer about refs it should always be able to resolve.
-//
-// The rebase check is belt-and-braces for most of a rebase's life: git
-// detaches HEAD while replaying, so `@{u}` doesn't resolve and the
-// upstream check would skip anyway. It earns its line at the edges,
-// where the branch ref has already moved but the rebase state dir is
-// still there — a window where HEAD is attached, main is cleanly ahead,
-// and the tip is nonetheless not one to publish.
+// What counts as ahead — and which states are a silent skip rather than
+// a failure — is sync.Unpushed's, not this loop's: the dashes report the
+// same number from the same predicate, so the drain and the surfaces
+// that describe it can't disagree. Its skips are all "ask again next
+// tick", never errors.
 func (s *Server) drainToOrigin(ctx context.Context, timeout time.Duration) (int, error) {
 	root := s.opts.Root
-	if sync.RebaseInProgress(root) {
-		return 0, nil
-	}
-	upstream, _ := git.Upstream(root)
-	if upstream == "" {
-		return 0, nil
-	}
-	n, err := git.AheadOf(root, upstream, "HEAD")
-	if err != nil {
+	n, err := sync.Unpushed(root)
+	if err != nil || n == 0 {
 		return 0, err
-	}
-	if n == 0 {
-		return 0, nil
 	}
 	pushCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()

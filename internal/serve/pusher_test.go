@@ -69,6 +69,12 @@ func TestUnarmedServeStillPushes(t *testing.T) {
 // an exponential back-off, not a line per tick, and the loop comes back
 // on its own once origin does — with the drained count in the recovery
 // line so the operator can see what was stranded.
+//
+// It also pins what the *dashes* see, because the log is not a surface:
+// the outage has to reach the state file while it is happening (that is
+// the whole point of putting the push on the record), and a landed push
+// has to clear it. Both are read from the file rather than the record,
+// since the file is the CLI dash's entire transport.
 func TestPusherLogsOnceThenRecovers(t *testing.T) {
 	root, origin := pusherFixture(t)
 	gittest.Commit(t, root, "journal: record something")
@@ -85,18 +91,62 @@ func TestPusherLogsOnceThenRecovers(t *testing.T) {
 	log := &syncBuf{}
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, Logger: log})
 
+	// Both snapshots are taken inside the run: clean shutdown removes the
+	// state file, so after ListenAndServe returns there is nothing to
+	// read. The cancel that ends the run is what orders these writes
+	// before the assertions below.
+	var outage, recovered ActivitySnapshot
+	failing := func() bool {
+		snap, ok, _ := ReadActivitySnapshot(root)
+		return ok && !snap.PushFailingSince.IsZero()
+	}
+	landed := func() bool {
+		snap, ok, _ := ReadActivitySnapshot(root)
+		return ok && !snap.LastPush.IsZero()
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() {
-		settle(func() bool { return strings.Contains(log.String(), "pusher:") })
+		defer cancel()
+		// The file, not the log line: the record is written after the
+		// logf, and the file is what the CLI dash actually reads.
+		settle(failing)
+		outage, _, _ = ReadActivitySnapshot(root)
 		if err := os.Rename(away, origin); err != nil {
 			return
 		}
 		settle(func() bool { return strings.Contains(log.String(), "reachable again") })
-		cancel()
+		settle(landed)
+		recovered, _, _ = ReadActivitySnapshot(root)
 	}()
 	if err := s.ListenAndServe(ctx); err != nil {
 		t.Fatalf("ListenAndServe: %v", err)
+	}
+
+	// Mid-outage the dashes have to be able to say what is wrong. "Failing
+	// since" is the operator's only clock on it; the error is what tells a
+	// rejected non-fast-forward from a dead network.
+	if outage.PushFailingSince.IsZero() {
+		t.Error("state file carried no push_failing_since during the outage")
+	}
+	if outage.PushError == "" {
+		t.Error("state file carried no push_error during the outage")
+	}
+	if !outage.LastPush.IsZero() {
+		t.Errorf("state file claimed a landed push (%v) during the outage", outage.LastPush)
+	}
+	// And once it lands, the failure is history — a stale push_failing_since
+	// would leave both dashes crying "push failing" over a healthy drain.
+	if recovered.LastPush.IsZero() {
+		t.Error("state file carried no last_push after recovery")
+	}
+	if got := recovered.LastPushCommits; got != 1 {
+		t.Errorf("last_push_commits = %d, want 1 (the stranded commit)", got)
+	}
+	if !recovered.PushFailingSince.IsZero() || recovered.PushError != "" {
+		t.Errorf("the outage outlived its recovery: since=%v err=%q",
+			recovered.PushFailingSince, recovered.PushError)
 	}
 
 	out := log.String()
