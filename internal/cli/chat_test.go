@@ -63,10 +63,11 @@ func TestChatWorkflowSingleStage(t *testing.T) {
 	}
 }
 
-// TestPromptChatClose pins chat's inverse close policy: leaving the run
-// open is the default, and only an explicit y/yes archives it. The helper
-// dispatches the registered close shape without --no-edit so an
-// operator-driven close retains its editor and harvest behaviour.
+// TestPromptChatClose pins chat's close policy: closing is the default,
+// so Enter and any y-prefixed answer archive the run, while `n`, a typo,
+// or a bare EOF leave it open. The helper dispatches the registered close
+// shape without --no-edit so an operator-driven close retains its editor
+// and harvest behaviour.
 func TestPromptChatClose(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -75,13 +76,15 @@ func TestPromptChatClose(t *testing.T) {
 		wantDispatch bool
 		wantCode     int
 	}{
-		{name: "blank", input: "\n"},
+		{name: "blank", input: "\n", wantDispatch: true},
 		{name: "n", input: "n\n"},
+		{name: "no", input: "no\n"},
 		{name: "eof"},
 		{name: "typo", input: "close it\n"},
 		{name: "y", input: "y\n", wantDispatch: true},
 		{name: "uppercase-y", input: "Y\n", wantDispatch: true},
 		{name: "yes", input: "yes\n", wantDispatch: true},
+		{name: "yeah", input: "yeah\n", wantDispatch: true},
 		{name: "close-failure", input: "y\n", closeCode: 23, wantDispatch: true, wantCode: 23},
 	}
 	for _, tc := range cases {
@@ -122,8 +125,8 @@ func TestPromptChatClose(t *testing.T) {
 					t.Fatalf("close args=%q want %q (no --no-edit)", got, "moe/ponder")
 				}
 			}
-			const want = "chat sitting ended — close this run? [y/N]\n" +
-				"  y = close (resume reopens) · N = leave open\n"
+			const want = "chat sitting ended — close this run? [Y/n]\n" +
+				"  Y = close (resume reopens) · n = leave open\n"
 			if got := stdout.String(); got != want {
 				t.Fatalf("stdout=%q want %q", got, want)
 			}

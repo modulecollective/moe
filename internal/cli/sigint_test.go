@@ -222,7 +222,9 @@ func TestPromptStageNextStageDeclinesOnSignal(t *testing.T) {
 
 // TestPromptChatCloseLeavesOpenOnSignal pins chat's safe cooked-mode
 // interrupt: Ctrl-C acknowledges the abort and returns success without
-// dispatching close, just like the prompt's default N answer.
+// dispatching close. Load-bearing now that the prompt defaults to close —
+// this is one of the two abort keys (with Ctrl-D) that deliberately
+// diverge from the default rather than collapsing onto it.
 func TestPromptChatCloseLeavesOpenOnSignal(t *testing.T) {
 	var dispatched bool
 	closeCmd := &Command{
@@ -250,10 +252,10 @@ func TestPromptChatCloseLeavesOpenOnSignal(t *testing.T) {
 	}()
 
 	deadline := time.Now().Add(2 * time.Second)
-	for !strings.Contains(stdout.String(), "[y/N]") && time.Now().Before(deadline) {
+	for !strings.Contains(stdout.String(), "[Y/n]") && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if !strings.Contains(stdout.String(), "[y/N]") {
+	if !strings.Contains(stdout.String(), "[Y/n]") {
 		t.Fatalf("prompt label never printed: %q", stdout.String())
 	}
 	if err := raiseSIGINT(); err != nil {
