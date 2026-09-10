@@ -68,6 +68,8 @@ func TestServeUsageDisclosesSteering(t *testing.T) {
 	}
 	usage := errb.String()
 	for _, want := range []string{
+		"idea or intent",
+		"paused|safe|auto",
 		"No request executes code",
 		"whoever can reach the listener steers",
 		"Reach is the only auth",

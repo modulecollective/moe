@@ -220,7 +220,7 @@ has moved past its first stage; a seed-only root stays with the operator.
 
 Those guards apply afresh at every tail. A kicked ride may groom, spawn, and
 kick another generation without a structural depth bound. Each generation is
-still visible on the dash and still passes review and test; the ride ends when
+still visible on the dash and still passes test and review; the ride ends when
 a survey adds nothing. Ctrl-C is the operator's brake on one already in flight.
 
 Underneath those, nothing that made step 2 safe was traded away. A clock did
@@ -228,7 +228,7 @@ arrive since: an armed `moe serve --dynamic` carries a resident heartbeat that
 looks at each project's board every twenty minutes. It only wakes the machine
 to look, and every guard that follows applies to the sweep it fires exactly as
 it applies to a typed one. The survey sandbox is read-only; the agent proposes
-JSON and the harness stamps it. Every ridden run still walks review and test.
+JSON and the harness stamps it. Every ridden run still walks test and review.
 Every merge is still fast-forward behind the push hooks. Parked chains never
 move on their own — appending to a parked chain is curation, not execution. And
 the retreat is built in: stop typing the fourth bang, stop the armed serve, or

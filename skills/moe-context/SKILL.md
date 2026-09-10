@@ -104,8 +104,9 @@ trace via the `moe-bureaucracy` skill instead of editing the source.
 stage: it is a write target for a run whose own evidence moved the
 project's recorded intent. The `moe-twin` skill has the contract.
 
-Your own canvas lives at the path the always-on stage prompt named;
-that is the only file under the bureaucracy root you write to.
+Your own canvas lives at the path the always-on stage prompt named. The
+stage prompt also owns any additional write targets for this turn; this
+read-oriented skill grants none.
 
 ## Worked shape
 

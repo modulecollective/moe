@@ -32,7 +32,7 @@ import (
 // Nothing here decides anything the operator hasn't already licensed.
 // The tick only asks the question a bang answer used to ask by being
 // typed; what a sweep may *do* once looking is unchanged — settled
-// designs, nobody inside, review and test on every ride.
+// designs, nobody inside, test and review on every ride.
 
 // heartbeatGate implements serve.Heartbeat against a bureaucracy root.
 //

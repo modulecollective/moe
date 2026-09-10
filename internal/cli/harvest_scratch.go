@@ -25,7 +25,7 @@ type checklistEntry struct {
 // below skips it.
 var atxHeadingRE = regexp.MustCompile(`^#{1,6}\s`)
 
-// parseChecklist scans a followups/lore scratch file into its raw lines
+// parseChecklist scans a followup or feedback scratch file into its raw lines
 // plus the unchecked entries to harvest. Beyond the per-line validation
 // (malformed checkbox, empty title, duplicate slug — each fatal with a
 // 1-based line number), it carries a whole-file backstop: if the scan

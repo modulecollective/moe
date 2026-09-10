@@ -442,7 +442,7 @@ func TestChatCloseRefusesEmptyCanvas(t *testing.T) {
 }
 
 // TestIntentCloseSkipsHarvest: intent is a capture workflow, so its
-// close skips the followups/lore harvest the same way idea's does.
+// close skips the feedback harvest the same way idea's does.
 // Regression canary for enterTerminal's isCaptureWorkflow gate — with
 // the older `!= dash.IdeaWorkflow` guard, the hand-authored scratch
 // files below get harvested (fanned out into an idea run and

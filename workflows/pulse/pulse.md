@@ -467,7 +467,7 @@ their own thread: that is the placing this paragraph promises, and it
 is an ordinary groom — name the runs in a group with no `onto`. If they
 do, leave them and say so in the report; that is a real answer, not a
 miss. Bias toward moving, on the same ledger as everything else here: a
-wrong move costs a run that still has to clear review and test, while a
+wrong move costs a run that still has to clear test and review, while a
 wrong leave strands ready work behind a door only the operator opens.
 
 **Park when you can name why the operator should look first.** Write
@@ -490,7 +490,7 @@ The asymmetry is measured, not assumed. A wrong park strands a whole
 generation until a human notices — four of those have happened, one of
 them the sweep that prompted this rewrite and one a pair of sweeps that
 read a stalled thread, agreed it should run, and left it. A wrong kick
-spends a run that still has to clear its own review and test gates
+spends a run that still has to clear its own test and review gates
 before it ships, and the operator can Ctrl-C the ride. Bias toward
 motion.
 

@@ -27,13 +27,14 @@ source of truth for the exact command surface; this page is a map.
   `/usage`, and a dashboard with the same daily-activity chart (and a
   project-scoped one on each project page).
   **The web starts nothing.** Every action it offers writes a journal commit and
-  stops there: capture or edit an idea, tag it for a workflow, close or reopen a
-  run, mark the current stage advanced, answer a run's open question. Starting
-  agents is the heartbeat's job alone. No request executes code — but agents
-  read those writes in their prompts, and an armed serve's heartbeat starts
-  agents because of them: whoever can reach the listener steers the machine.
-  Reach is the only auth, so whatever sits in front of the listener is the
-  security boundary. Interactive stage-driving happens in a terminal.
+  stops there: capture or edit an idea or intent, tag an idea for a workflow,
+  close or reopen a run, mark the current stage advanced, answer a run's open
+  question. Starting agents is the heartbeat's job alone. No request executes
+  code — but agents read those writes in their prompts, and an armed serve's
+  heartbeat starts agents because of them: whoever can reach the listener
+  steers the machine. Reach is the only auth, so whatever sits in front of the
+  listener is the security boundary. Interactive stage-driving happens in a
+  terminal.
   Separately from all that, and armed or not, serve drains the bureaucracy's
   local main to origin every couple of seconds. Journal verbs commit and
   return; the push is serve's. With no serve running, commits sit on local main
@@ -187,10 +188,11 @@ source of truth for the exact command surface; this page is a map.
   slug.
 
 `moe <workflow> harvest [--no-edit] <project>/<run>` re-runs a run's
-`followups.md` and `feedback/lore.md` harvests — into ideas and `lore/`
-respectively — without closing it. It picks up captures a re-run regenerated
-after the run was already closed, and it is the recovery verb for a
-conversational session whose own session-end harvest failed partway.
+`followups.md`, `feedback/lore.md`, and `feedback/twin.md` harvests — into
+ideas, `lore/`, and twin-edit ideas respectively — without closing it. It picks
+up captures regenerated after the run was already closed, and it is the
+recovery verb for a conversational session whose own session-end harvest
+failed partway.
 
 Conversational sessions (`moe idea edit --chat`, `moe intent edit --chat`,
 `moe chat`) harvest at session end rather than at close: the capture
@@ -331,11 +333,11 @@ bureaucracy:
 Use `moe hook fire <project> dev-env|dev-env-teardown|pre-push` to exercise one
 event in a transient sandbox without creating a run.
 
-Hooks, chore definitions, and knowledge topics are bureaucracy-side
-artifacts: edit them by hand, or let an sdlc run land them. An sdlc stage's
-per-turn commit picks up `projects/<project>/hooks`, `chores`, and
-`knowledge`, so `moe sdlc design → code → close` is the journaled route
-with no push involved.
+Hooks, chore definitions, knowledge topics, and twin documents are
+bureaucracy-side artifacts: edit them by hand, or let an sdlc run land them. An
+sdlc stage's per-turn commit picks up `projects/<project>/hooks`, `chores`,
+`knowledge`, and `digital-twin`, so `moe sdlc design → code → close` is the
+journaled route with no push involved.
 
 ### Chore definitions
 

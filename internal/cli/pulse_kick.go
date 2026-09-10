@@ -68,7 +68,7 @@ import (
 // ride no longer sweeps at its own tail, so this loop is the only walker
 // and the board it snapshotted stays the board it walks. What holds the
 // open-ended part safe is the guard above plus the ladder itself — each
-// generation is real shipped work behind review and test, it shows up on
+// generation is real shipped work behind test and review, it shows up on
 // the dash as it lands, and a Ctrl-C halts the ride. Escalation by
 // visibility, not by counting.
 //

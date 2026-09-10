@@ -341,6 +341,8 @@ moe intent close <project>/<slug>          # satisfied or abandoned (status -> c
 
 Intents are just runs in a single-stage `intent` workflow, the same shape as
 ideas, and capture stays cheap the same way — `intent new` launches no agent.
+The web dashboard's `new intent` action reaches the same capture seam from a
+phone or browser: it writes the intent and returns without starting an agent.
 `intent edit --chat` opens the same document-only session `idea edit --chat`
 does, with one difference that is all prose: the agent is a scribe there. It
 types what the conversation converges on and asks the question that tightens
@@ -366,9 +368,9 @@ Where intents reach the robots:
   backlog, on both the CLI dash and `moe serve`. The heading renders even at
   zero: an empty list is itself a signal that the robots are running unaimed.
 
-No agent mints or edits intents. If a theme looks missing, an agent names it in
-a report; the operator decides whether to park it. Deliberately no `move`, no
-`reopen`, no `log`, and no run↔intent linkage in v1 — an intent's effect shows
+No autonomous agent mints or edits intents. If a theme looks missing, an agent
+names it in a report; the operator decides whether to park it. Deliberately no
+`move`, no `reopen`, and no run↔intent linkage in v1 — an intent's effect shows
 up in what gets filed and ranked, not in an edge table.
 
 ## Chores
@@ -671,23 +673,23 @@ still the run it opened.
 
 The tick decides nothing. It only asks the question you used to ask by typing a
 verb — everything about what a sweep may *do* is unchanged, including the
-settled-design floor, the occupancy guard, the review-and-test walk on every
+settled-design floor, the occupancy guard, the test-and-review walk on every
 ride, and the journal marks on every machine turn. A tick sweeps when the
 project's journal moved since its last heartbeat sweep; when a chore's clock
 says so (a mechanically due chore, or a judged chore whose cooldown has expired
 without a sweep since — one probe per expiry, not one per tick); or when
 startable work is parked with nobody inside it *and no sweep has looked at that
 board since it last changed* — a settled thread, or an open idea you tagged,
-since the tag is the licence to start it. A thread a survey saw and deliberately parked with a
-reason is not re-offered until something moves. That parked leg looks one step
-past a held door: settled work queued behind a thread head that is itself
-waiting on your design still counts, because a sweep grooms before it kicks and
-the groom is what can move that work out from behind the head. A `chain` head
-you minted yourself is the exception — it fences its whole batch, since staging
-one by hand is the point. The heartbeat stands down while anything is live in
-the project — a ride mid-hop, you sitting in a stage, a survey mid-turn — and
-for one full tick after anything you did by hand. A quiet board costs nothing —
-no agent turn, no run, no journal line.
+since the tag is the licence to start it. A thread a survey saw and deliberately
+parked with a reason is not re-offered until something moves. That parked leg
+looks one step past a held door: settled work queued behind a thread head that
+is itself waiting on your design still counts, because a sweep grooms before
+it kicks and the groom is what can move that work out from behind the head. A
+`chain` head you minted yourself is the exception — it fences its whole batch,
+since staging one by hand is the point. The heartbeat stands down while
+anything is live in the project — a ride mid-hop, you sitting in a stage, a
+survey mid-turn — and for one full tick after anything you did by hand. A quiet
+board costs nothing — no agent turn, no run, no journal line.
 
 Failure cools itself off: consecutive failed sweeps back a project's tick off
 exponentially, so a night of exhausted plan limits leaves a couple of open

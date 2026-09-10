@@ -306,9 +306,9 @@ func TestCascadeFromGateRidesIntoLiveChainChild(t *testing.T) {
 	// Child's first pending stage is `design` (nothing committed
 	// against the child's docs yet). The chain ride opens the child
 	// there, then the child's own cascadeFromGate walks design → code
-	// → review → test via openSdlcStage and ships at push. That gives
-	// seven dispatches: parent (code, review, test), child (design,
-	// code, review, test).
+	// → test → review via openSdlcStage and ships at push. That gives
+	// seven dispatches: parent (code, test, review), child (design,
+	// code, test, review).
 	// push happens via pushFromCascade for both.
 	wantStages := []string{"code", "test", "review", "design", "code", "test", "review"}
 	gotStages := make([]string, 0, len(*openCaptured))
@@ -369,7 +369,7 @@ func TestCascadeFromGateShipDoesNotRide(t *testing.T) {
 	if !res.shipped {
 		t.Fatalf("parent cascade must ship: %+v", res)
 	}
-	// Parent only: code, review, test, push. The child is never opened.
+	// Parent only: code, test, review, push. The child is never opened.
 	if got := len(*pushCaptured); got != 1 {
 		t.Fatalf("pushFromCascade dispatched %d times, want 1 (`!!` ships this run only)", got)
 	}
@@ -651,7 +651,7 @@ func TestCascadeFromGateRideInterruptHaltsParent(t *testing.T) {
 	t.Chdir(root)
 	// The child starts at design; interrupt it there. Parent starts at
 	// code, so design only ever fires for the child — the parent's own
-	// walk (code, review, test) is unaffected.
+	// walk (code, test, review) is unaffected.
 	openCaptured := stubOpenSdlcStage(t, map[string]int{"design": exitInterrupted})
 	pushCaptured := stubPushFromCascade(t, 0, nil)
 
@@ -663,8 +663,8 @@ func TestCascadeFromGateRideInterruptHaltsParent(t *testing.T) {
 	if !res.shipped {
 		t.Fatalf("parent shipped before the ride; res.shipped must stay true: %+v", res)
 	}
-	// Parent: code, review, test, push (ship). Child: design only —
-	// interrupted there, so the child's code/review/test never dispatch.
+	// Parent: code, test, review, push (ship). Child: design only —
+	// interrupted there, so the child's code/test/review never dispatch.
 	wantStages := []string{"code", "test", "review", "design"}
 	gotStages := make([]string, 0, len(*openCaptured))
 	for _, inv := range *openCaptured {

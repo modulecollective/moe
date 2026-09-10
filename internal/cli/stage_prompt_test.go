@@ -827,3 +827,24 @@ func TestOperationalCoreNamesProjectCommitDirs(t *testing.T) {
 		}
 	}
 }
+
+// TestSDLCPromptsDoNotRevokeProjectCommitDirs pins the assembled permission
+// boundary: the operational core advertises the sdlc-only project trees, so a
+// stage fragment must not later reduce the bureaucracy write surface to the
+// canvas alone.
+func TestSDLCPromptsDoNotRevokeProjectCommitDirs(t *testing.T) {
+	root := newTestBureaucracy(t)
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: sdlcWorkflow}
+	for _, docID := range []string{"design", "code", "test", "push"} {
+		got, _, err := buildSystemPrompt(root, md, docID, "", false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(got, "only document you should write to") {
+			t.Errorf("%s prompt revokes its project commit dirs:\n%s", docID, got)
+		}
+		if !strings.Contains(got, "projects/tele/digital-twin") {
+			t.Errorf("%s prompt does not advertise its project commit dirs:\n%s", docID, got)
+		}
+	}
+}

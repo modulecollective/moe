@@ -3,11 +3,11 @@
 // dash, read canvases and transcripts, and hand the machine consent.
 //
 // The web starts nothing. Every POST it serves writes a journal commit
-// and stops: capture or edit an idea, tag it for a workflow, close or
-// reopen a run, mark the current stage advanced. Starting agents is the
-// resident heartbeat's job alone (heartbeat.go), which is what makes
-// those two halves compose — the web writes licences, the clock spends
-// them.
+// and stops: capture or edit an idea or intent, tag an idea for a
+// workflow, close or reopen a run, mark the current stage advanced.
+// Starting agents is the resident heartbeat's job alone (heartbeat.go),
+// which is what makes those two halves compose — the web writes licences,
+// the clock spends them.
 //
 // That is not an all-clear. No request executes code, but agents read
 // those writes in their prompts, and an armed serve's heartbeat starts
@@ -197,7 +197,7 @@ type Options struct {
 	NotifyURL string
 
 	// CloseRun closes an in-progress non-idea run in-process:
-	// the full cli close pipeline — workspace release, follow-up/lore
+	// the full cli close pipeline — workspace release, feedback harvest,
 	// harvest, status flip, trailered commit — run with --no-edit
 	// semantics. cli/serve.go wires this to the cli close core so the
 	// serve package stays free of the workflow registry and the

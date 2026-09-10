@@ -994,7 +994,7 @@ func TestCascadeFromGateHeadlessCleanRecoveryRetriesAndShips(t *testing.T) {
 			if !res.shipped {
 				t.Fatalf("res.shipped = false after a clean recovery + retry that passed the gate: %+v", res)
 			}
-			// code, review, test, push (deferred), push (ok) — five steps.
+			// code, test, review, push (deferred), push (ok) — five steps.
 			wantStages := []string{"code", "test", "review", "push", "push"}
 			if len(res.ran) != len(wantStages) {
 				t.Fatalf("ran %d steps, want %d (%+v)", len(res.ran), len(wantStages), res.ran)

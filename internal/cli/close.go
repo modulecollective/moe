@@ -19,7 +19,7 @@ import (
 // isCaptureWorkflow reports whether a workflow is one of the cheap
 // operator-authored capture surfaces — ideas and intents. Both share the
 // same close shape: the run *is* the capture, so close skips the
-// followups/lore harvest, gates on a fully clean tree, keeps the short
+// feedback harvest, gates on a fully clean tree, keeps the short
 // `Close <wf> <p>/<r>` subject, and exempts the canvas from the
 // non-empty seal (an empty capture on close is operator intent, not a
 // missed write). Everything else is a staged workflow whose close runs
@@ -135,7 +135,7 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 }
 
 // closeRunInProcess runs the shared close pipeline — state guards,
-// workflow cleanup, follow-up/lore harvest, status flip, trailered
+// workflow cleanup, feedback harvest, status flip, trailered
 // commit — for an already-resolved run, returning an error instead of
 // printing. Both the CLI wrapper (runClose) and `moe serve` (via the
 // CloseRun option, wired in cli/serve.go) drive it; the CLI wrapper owns

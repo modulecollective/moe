@@ -40,8 +40,8 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "Ctrl-C to stop.")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "The web starts nothing. Every action it offers writes a journal")
-		moePrintln(stderr, "commit and stops there: capture or edit an idea, tag it for a")
-		moePrintln(stderr, "workflow, close or reopen a run, mark the current stage advanced,")
+		moePrintln(stderr, "commit and stops there: capture or edit an idea or intent, tag an")
+		moePrintln(stderr, "idea for a workflow, close or reopen a run, mark the current stage advanced,")
 		moePrintln(stderr, "answer a run's open question. No request executes code — but agents")
 		moePrintln(stderr, "read those writes in their prompts, and an armed serve's heartbeat")
 		moePrintln(stderr, "starts agents because of them: whoever can reach the listener steers")
@@ -54,9 +54,10 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "what the web wrote simply waits. Stopping the process is the whole")
 		moePrintln(stderr, "retraction.")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "`moe project mode <id> paused|safe` holds one project back without")
+		moePrintln(stderr, "`moe project mode <id> paused|safe|auto` sets one project's clock cap")
 		moePrintln(stderr, "stopping anything: paused is never swept, safe is swept and groomed")
-		moePrintln(stderr, "but starts only what you marked. Both bind the clock, not you.")
+		moePrintln(stderr, "but starts only what you marked, and auto is uncapped. Mode binds the")
+		moePrintln(stderr, "clock, not you.")
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -161,7 +162,7 @@ func serveOptions(root string, stderr io.Writer) serve.Options {
 		},
 		// serve can't host $EDITOR inside an HTTP POST, so close runs
 		// with --no-edit semantics (skipEdit=true): harvest the
-		// followups/lore files as they sit on disk. Dispatch is by the
+		// feedback files as they sit on disk. Dispatch is by the
 		// run's own workflow through the close registry — the same
 		// (subject, cleanup) pair `moe <workflow> close` registered —
 		// so the in-process path and the CLI verb stay one pipeline.

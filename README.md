@@ -34,15 +34,10 @@ Purpose](#anti-social-on-purpose) has the reasoning.
 MoE is built with MoE — every change ships through the same workflows it
 provides, and these days most of those runs open themselves.
 
-Everything works from the CLI:
-
-![MoE CLI dashboard - open runs and backlog in CLI](docs/dash-cli.png)
-
-And there's also a small web server available which is useful for quick checks
-from a phone (via something like Tailscale) or for use locally to browse runs
-and canvas files, lore, per-project hubs, project knowledge, and twin docs:
-
-![MoE web dashboard - open runs and backlog with local web server](docs/dash-web.png)
+Everything works from the CLI. A small web server is useful from a phone (via
+something like Tailscale) or locally: capture ideas and intents, answer a
+run's question, and browse runs and canvases, lore, per-project hubs, project
+knowledge, and twin docs.
 
 ## The 60-Second Taste
 
@@ -55,7 +50,7 @@ moe sdlc new --from-idea my-project/add-batch-support  # promote it to a run
 
 Promoting the idea offers to jump straight into the design stage: one
 conversation that shapes the note into a reviewable plan. When the stage ends,
-MoE prints a chain prompt. Type `!!` there, and the run codes, reviews, tests,
+MoE prints a chain prompt. Type `!!` there, and the run codes, tests, reviews,
 and ships itself headlessly — each stage reading the canvas the previous stage
 wrote, each turn committed to the journal.
 
@@ -67,7 +62,7 @@ is in [docs/workflows.md](docs/workflows.md#sdlc).
 
 `!!!` is where the economics turn: shape a few runs during the day,
 `moe chain edit` them into a sequence, and fire `!!!` once as you step away.
-The chain then codes, reviews, tests, and ships on capacity your flat-rate dev
+The chain then codes, tests, reviews, and ships on capacity your flat-rate dev
 subscription already pays for while you sleep — each run still gated,
 journaled, and revertible in the morning.
 
@@ -160,12 +155,12 @@ full treatment.
 | [`pulse`](docs/workflows.md#pulse) | `pulse` | a read-only survey, fired by the armed serve's heartbeat or by hand, that feeds the backlog, grooms queued work into lanes, and under `--dynamic` starts what's ready |
 | [`chain`](docs/workflows.md#chains) | one `chain` purpose note, no stages | a placeholder head: the batch chained behind it rides as one on `moe chain kick` |
 
-Three bureaucracy-side artifacts have no workflow of their own — project
-[hooks](docs/workflows.md#hooks), [chores](docs/workflows.md#chores), and
-[knowledge topics](docs/workflows.md#knowledge). Edit them by hand, or let an
-sdlc run land them: a stage's per-turn commit picks all three up. Such a run
-ships nothing to the target repo — its test gate says so (`ship: none`) and
-`push` closes it.
+Four bureaucracy-side artifacts have no workflow of their own — project
+[hooks](docs/workflows.md#hooks), [chores](docs/workflows.md#chores),
+[knowledge topics](docs/workflows.md#knowledge), and the
+[digital twin](docs/workflows.md#twin). Edit them by hand, or let an sdlc run
+land them: a stage's per-turn commit picks all four up. Such a run ships nothing
+to the target repo — its test gate says so (`ship: none`) and `push` closes it.
 
 ## Going Deeper
 

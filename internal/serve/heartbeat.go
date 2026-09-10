@@ -26,7 +26,7 @@ import (
 // sweeps a paused project, and a safe one's kick starts only
 // operator-marked threads. The sweep that child runs is the only
 // automatic pulse there is, held to a fixed floor: only settled designs
-// with nobody inside get started, every ride walks review and test, and
+// with nobody inside get started, every ride walks test and review, and
 // every act it takes is journal-marked.
 //
 // Three properties are load-bearing:
