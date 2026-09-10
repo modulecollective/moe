@@ -198,7 +198,7 @@ type Options struct {
 
 	// CloseRun closes an in-progress non-idea run in-process:
 	// the full cli close pipeline — workspace release, feedback harvest,
-	// harvest, status flip, trailered commit — run with --no-edit
+	// status flip, trailered commit — run with --no-edit
 	// semantics. cli/serve.go wires this to the cli close core so the
 	// serve package stays free of the workflow registry and the
 	// cli-resident teardown helpers.
