@@ -364,6 +364,38 @@ func TestUsageMixedPriceTotalsAreStarred(t *testing.T) {
 	}
 }
 
+// TestUsageNewPricesAggregateThroughParsers covers the report boundary:
+// newly priced Claude and Codex models contribute dollars after their real
+// transcript adapters run, while an unrelated unknown model still preserves
+// its tokens and marks the mixed total partial.
+func TestUsageNewPricesAggregateThroughParsers(t *testing.T) {
+	root := newTestBureaucracy(t)
+	now := time.Now().Local()
+	seedRun(t, root, "tele", "new-prices", "sdlc", run.StatusMerged, now, nil)
+	gittest.Commit(t, root, "seed run")
+	seedThread(t, root, "tele", "new-prices", "design", "claude",
+		claudeTurn("fable", "claude-fable-5-1", 0, 1_000_000, 0)+
+			claudeTurn("unknown", "some-unlisted-model", 0, 0, 1_000_000))
+	seedThread(t, root, "tele", "new-prices", "code", "codex",
+		codexTurn("gpt-6-astra", 2_000_000, 1_000_000, 1_000_000))
+	seedThread(t, root, "tele", "new-prices", "test", "codex",
+		codexTurn("gpt-5.6-terra", 2_000_000, 1_000_000, 1_000_000))
+	seedThread(t, root, "tele", "new-prices", "review", "codex",
+		codexTurn("gpt-5.6-luna", 2_000_000, 1_000_000, 1_000_000))
+
+	rep := gather(t, root, Filter{Cutoff: now.Add(-24 * time.Hour)})
+	wantDollars := 0.25001 + 61 + 14.20 + 1.42
+	if rep.Dollars < wantDollars-0.000001 || rep.Dollars > wantDollars+0.000001 {
+		t.Errorf("dollars = %v, want %v", rep.Dollars, wantDollars)
+	}
+	if len(rep.Unpriced) != 1 || rep.Unpriced["some-unlisted-model"] != 1_000_001 {
+		t.Errorf("unpriced = %v, want the unknown model's input and output tokens", rep.Unpriced)
+	}
+	if !rep.Starred() {
+		t.Error("Starred() = false, want the mixed priced/unpriced total starred")
+	}
+}
+
 func TestUsageUntimedTranscriptStaysOutOfByDay(t *testing.T) {
 	root := newTestBureaucracy(t)
 	now := time.Now().Local()
@@ -529,7 +561,7 @@ func TestScanIsBoundedByTheWindow(t *testing.T) {
 
 // TestNotionalCostArithmetic pins the price formula against a hand
 // figure: 1M cache writes at Opus 4.8's $5/MTok input rate is $5 × 2 (a
-// 1-hour-TTL write), 1M cache reads is $5 × 0.10, and 1M output is $25.
+// 1-hour-TTL write), 1M cache reads is $0.50, and 1M output is $25.
 func TestNotionalCostArithmetic(t *testing.T) {
 	got, ok := NotionalCost("claude-opus-4-8", transcript.ModelUsage{
 		CacheWrite: 1_000_000, CacheRead: 1_000_000, Output: 1_000_000,
@@ -543,6 +575,57 @@ func TestNotionalCostArithmetic(t *testing.T) {
 	}
 }
 
+func TestNotionalCostPublishedRates(t *testing.T) {
+	cases := []struct {
+		model string
+		usage transcript.ModelUsage
+		want  float64
+	}{
+		{"claude-fable-5-1", transcript.ModelUsage{Input: 1_000_000, CacheWrite: 1_000_000, CacheRead: 1_000_000, Output: 1_000_000}, 80.25},
+		{"claude-sonnet-5", transcript.ModelUsage{Input: 1_000_000, CacheWrite: 1_000_000, CacheRead: 1_000_000, Output: 1_000_000}, 16.20},
+		{"gpt-6-astra", transcript.ModelUsage{Input: 1_000_000, CacheRead: 1_000_000, Output: 1_000_000}, 61},
+		{"gpt-5.6-sol", transcript.ModelUsage{Input: 1_000_000, CacheRead: 1_000_000, Output: 1_000_000}, 24.40},
+		{"gpt-5.6-terra", transcript.ModelUsage{Input: 1_000_000, CacheRead: 1_000_000, Output: 1_000_000}, 14.20},
+		{"gpt-5.6-luna", transcript.ModelUsage{Input: 1_000_000, CacheRead: 1_000_000, Output: 1_000_000}, 1.42},
+	}
+	for _, tc := range cases {
+		t.Run(tc.model, func(t *testing.T) {
+			got, ok := NotionalCost(tc.model, tc.usage)
+			if !ok {
+				t.Fatal("model must be in the price map")
+			}
+			if got < tc.want-0.000001 || got > tc.want+0.000001 {
+				t.Errorf("cost = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestModelPricesMatchPublishedRates(t *testing.T) {
+	cases := []modelPrice{
+		{"claude-fable-5-1", 10, 0.25, 50},
+		{"claude-fable-5", 10, 1, 50},
+		{"claude-opus-5", 5, 0.50, 25},
+		{"claude-opus-4-8", 5, 0.50, 25},
+		{"claude-opus-4-7", 5, 0.50, 25},
+		{"claude-sonnet-5", 2, 0.20, 10},
+		{"claude-haiku-4-5", 1, 0.10, 5},
+		{"gpt-6-astra", 10, 1, 50},
+		{"gpt-5.6-sol", 4, 0.40, 20},
+		{"gpt-5.6-terra", 2, 0.20, 12},
+		{"gpt-5.6-luna", 0.20, 0.02, 1.20},
+		{"gpt-5.5", 5, 0.50, 30},
+	}
+	for _, want := range cases {
+		t.Run(want.prefix, func(t *testing.T) {
+			got, ok := priceFor(want.prefix)
+			if !ok || got != want {
+				t.Errorf("priceFor(%q) = %+v ok=%v, want %+v", want.prefix, got, ok, want)
+			}
+		})
+	}
+}
+
 // TestPriceForLongestPrefixWins: model ids carry date suffixes, so the
 // map matches by prefix — and a more specific entry must beat a shorter
 // one that also matches.
@@ -552,6 +635,15 @@ func TestPriceForLongestPrefixWins(t *testing.T) {
 	}
 	if _, ok := priceFor("claude-opus"); ok {
 		t.Error("a prefix shorter than every entry must not match")
+	}
+	for model, want := range map[string]float64{
+		"claude-fable-5":       1,
+		"claude-fable-5-1[1m]": 0.25,
+	} {
+		got, ok := NotionalCost(model, transcript.ModelUsage{CacheRead: 1_000_000})
+		if !ok || got != want {
+			t.Errorf("NotionalCost(%q, 1M cache reads) = %v ok=%v, want %v", model, got, ok, want)
+		}
 	}
 	// The bureaucracy's largest single share of tokens; without an entry
 	// every daily and per-run total in the report goes starred.
@@ -563,8 +655,8 @@ func TestPriceForLongestPrefixWins(t *testing.T) {
 		t.Errorf("priceFor(context-tagged id) = %+v ok=%v, want the opus-4-8 entry", p, ok)
 	}
 	// The codex stages run these; without an entry their rows go unpriced.
-	if p, ok := priceFor("gpt-5.6-sol"); !ok || p.input != 5 || p.output != 30 {
-		t.Errorf("priceFor(gpt-5.6-sol) = %+v ok=%v, want $5/$30", p, ok)
+	if p, ok := priceFor("gpt-5.6-sol"); !ok || p.input != 4 || p.cacheRead != 0.40 || p.output != 20 {
+		t.Errorf("priceFor(gpt-5.6-sol) = %+v ok=%v, want $4/$0.40/$20", p, ok)
 	}
 }
 
