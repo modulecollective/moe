@@ -72,7 +72,10 @@ const pulseKickoff = "Run the pulse for this project: a delta-first, read-only s
 	"bounded, and verifiable, all three, and the stage guidance holds it. A `loose` entry may instead set " +
 	"`\"design_only\": true`, which opens the run, rides it one headless design turn and parks it for the operator — a " +
 	"lower bar for a shorter ride, and the one place a finding that needs judgment rather than a fix may go; the stage " +
-	"guidance holds that bar too. Either way, `why` is the one line the operator reads next to the verdict.\n\n" +
+	"guidance holds that bar too. For an existing tagged idea, judge whether it has a clear objective, a bounded method, " +
+	"and a credible verification source. Routine fact collection belongs in the destination workflow's design stage and " +
+	"need not be in the seed. Withhold when the objective or acceptance criterion depends on an operator choice, or the evidence points " +
+	"to a redesign. Either way, `why` is the one line the operator reads next to the verdict.\n\n" +
 	"A `\"threads\"` list holds runs in execution order, each thread attached after an existing run (`\"onto\"`), under a " +
 	"freshly named head (`\"head\"`), or self-rooted as its own thread (neither key). A thread's `\"runs\"` entry is either a **string** " +
 	"naming any parked run in the project — naming one chained elsewhere moves it — or an **object** in the same shape as a " +

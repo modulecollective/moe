@@ -70,7 +70,9 @@ Start from the delta, not the whole project:
 
 This turn recurs on every pulse. It is a sweep, not an investigation.
 Anything that needs deep digging becomes a followup *naming the
-question* — not the answer, and not the dig.
+question* — not the answer, and not the dig. Routine fact collection
+already named by a tagged task is different: decide whether the task is
+ready to begin, then let its destination workflow collect the facts.
 
 ## Noise resistance is the whole game
 
@@ -203,8 +205,12 @@ separate bar.
 
 **The bar: mechanical, bounded, and verifiable.** All three, not two:
 
-- **Mechanical** — the fix is obvious from the evidence. You are not
-  proposing a judgment call, an approach, or a design.
+- **Mechanical** — the path to the answer is established. For a fresh
+  fix spec, the fix is obvious from the evidence: you are not proposing
+  a judgment call, an approach, or a design. For an existing tagged
+  task, routine collection of facts through a known method does not make
+  the task non-mechanical merely because the facts are absent from its
+  seed.
 - **Bounded** — you can say what "done" looks like in one line, and it
   is small.
 - **Verifiable** — there is a signal that flips when it's fixed: a red
@@ -297,12 +303,24 @@ the one line that names the evidence — the failing test, the URL, the
 contradicted line.
 
 A tagged idea that clears the same mechanical/bounded/verifiable bar is
-proposed under its existing slug. Do not invent a fresh slug or repeat
-its design: the harness promotes rather than duplicates it. The tag is
-necessary, not sufficient — you still make the scheduling judgment.
-An untagged idea stays advisory-only. Promotion is not closing an idea;
-the normal promotion transition records where the work went, so the
-backlog-hygiene rule to never close ideas still stands.
+proposed under its existing slug. Judge whether it has a clear objective,
+a bounded method, and a credible verification source — whether it is ready
+to begin, not whether its work is already done. Routine fact collection
+belongs in the destination workflow's design stage. For example, a tagged
+request to refresh an existing price table from authoritative vendor
+sources need not already list current models or rates: identifying them is
+the task. Use the existing slug, omit `design`, and let design resolve the
+lookup or close if nothing changed.
+
+Withhold when the objective or acceptance criterion depends on an operator
+choice, or when the evidence says the task needs a pricing-system redesign.
+Name that concrete blocker rather than treating facts the agent can collect
+as one. Do not invent a fresh slug or repeat the idea's design: the harness
+promotes rather than duplicates it. The tag is necessary, not sufficient —
+you still make the scheduling judgment. An untagged idea stays advisory-only.
+Promotion is not closing an idea; the normal promotion transition records
+where the work went, so the backlog-hygiene rule to never close ideas still
+stands.
 
 An idea whose tag reads **design only** on the board is proposed the
 same way — loose, under its own slug — but it clears the design-only

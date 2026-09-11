@@ -458,8 +458,9 @@ func TestPulseWorkflowSingleStage(t *testing.T) {
 // TestBuildSystemPromptInjectsPulseFragment is the wiring check:
 // workflows/pulse/pulse.md lands in the prompt at the pulse stage.
 // Sentinels on the stage heading and the idioms the fragment owns (the
-// lane bar, the spawn bar) so the assertion flags a fragment rename or
-// a dropped idiom.
+// lane bar, the spawn bar, and tagged-task readiness) so the assertion
+// flags a fragment rename or a dropped idiom. The tagged-task rule must
+// also survive the abbreviated first-turn kickoff.
 func TestBuildSystemPromptInjectsPulseFragment(t *testing.T) {
 	root := newTestBureaucracy(t)
 	md := &run.Metadata{
@@ -479,6 +480,19 @@ func TestBuildSystemPromptInjectsPulseFragment(t *testing.T) {
 	}
 	if !strings.Contains(got, "mechanical, bounded, and verifiable") {
 		t.Fatalf("pulse.md missing the spawn bar it owns:\n%s", got)
+	}
+
+	for name, text := range map[string]string{
+		"assembled system prompt": got,
+		"first-turn kickoff":      pulseKickoff,
+	} {
+		text = strings.Join(strings.Fields(text), " ")
+		if !strings.Contains(text, "Routine fact collection belongs in the destination workflow's design stage") {
+			t.Errorf("%s missing the fact-collection rule", name)
+		}
+		if !strings.Contains(text, "Withhold when the objective or acceptance criterion depends on an operator choice") {
+			t.Errorf("%s missing the operator-choice boundary", name)
+		}
 	}
 }
 
