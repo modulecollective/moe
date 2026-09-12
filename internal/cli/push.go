@@ -449,17 +449,29 @@ func closeNoShipRun(root string, md *run.Metadata, pj *project.Metadata, clonePa
 	return 0, true
 }
 
-// init registers the rebase-onto-default check as the first pre-push
-// built-in. Built-ins run before project scripts (in pre-push.d/) so
-// the scripts see the tree the rebase produced — the one about to be
-// pushed. Vetting the pre-rebase tree is how a stale call site against
-// a sibling branch's API change slips past local hooks and breaks CI.
+// init registers the ordered pre-push built-ins: rebase first, then
+// dev-env refresh. Project scripts therefore see both the tree about to
+// be pushed and an environment that incorporates this run's committed
+// hook edits. Vetting the pre-rebase tree is how a stale call site
+// against a sibling branch's API change slips past local hooks and
+// breaks CI.
 func init() {
 	registerBuiltinHook(hookEventPrePush, builtinHook{
 		Name: "rebase-onto-default",
 		Run: func(env hookEnv, stdout, stderr io.Writer) error {
 			branch := branchPrefix + env.Run
 			return push.EnsureRebasedOntoDefault(env.Sandbox, branch, env.TargetBranch, stdout)
+		},
+	})
+	registerBuiltinHook(hookEventPrePush, builtinHook{
+		Name: "dev-env",
+		Run: func(env hookEnv, stdout, stderr io.Writer) error {
+			md, err := run.Load(env.Bureaucracy, env.Project, env.Run)
+			if err != nil {
+				return err
+			}
+			_, _, err = devEnvSetupEnv(env.Bureaucracy, env.Sandbox, md, stdout, stderr)
+			return err
 		},
 	})
 }

@@ -2,15 +2,25 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 )
+
+func newDevEnvTestRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	gittest.Run(t, "", "init", "-b", "main", root)
+	gittest.Run(t, root, "commit", "--allow-empty", "-m", "seed bureaucracy")
+	return root
+}
 
 // TestParseDevEnvLinesValidKeys: well-shaped KEY=VALUE lines land in
 // the map; blank lines and comments are ignored.
@@ -112,6 +122,119 @@ func TestDevEnvCacheRoundTrip(t *testing.T) {
 			t.Errorf("got[%q] = %q, want %q", k, got[k], v)
 		}
 	}
+}
+
+func TestDevEnvCacheRevisionRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	cachePath := filepath.Join(dir, devEnvCacheRel)
+	revision := strings.Repeat("a", 40)
+	if err := writeDevEnvCacheRevision(cachePath, map[string]string{"TOKEN": "secret"}, "tele/fix-it", revision); err != nil {
+		t.Fatal(err)
+	}
+
+	cache, ok, err := readDevEnvCacheRevision(cachePath)
+	if err != nil || !ok {
+		t.Fatalf("read cache: ok=%v err=%v", ok, err)
+	}
+	if cache.owner != "tele/fix-it" || cache.revision != revision {
+		t.Fatalf("metadata = %q %q", cache.owner, cache.revision)
+	}
+	if cache.env["TOKEN"] != "secret" {
+		t.Fatalf("TOKEN = %q", cache.env["TOKEN"])
+	}
+	if _, exported := cache.env["moe-dev-env-v1"]; exported {
+		t.Fatal("cache metadata was exported as an environment variable")
+	}
+	body, err := os.ReadFile(cachePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantHeader := devEnvCacheHeaderPrefix + "tele/fix-it " + revision + "\n"
+	if !strings.HasPrefix(string(body), wantHeader) {
+		t.Fatalf("cache missing header %q:\n%s", wantHeader, body)
+	}
+}
+
+func TestDevEnvCacheRevisionRejectsMalformedAndUnsupportedMetadata(t *testing.T) {
+	for _, header := range []string{
+		"# moe-dev-env-v1 missing-revision",
+		"# moe-dev-env-v1 tele/fix-it not-a-revision",
+		"# moe-dev-env-v2 tele/fix-it " + strings.Repeat("a", 40),
+	} {
+		t.Run(header, func(t *testing.T) {
+			cachePath := filepath.Join(t.TempDir(), "cache")
+			if err := os.WriteFile(cachePath, []byte(header+"\nK=v\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := readDevEnvCacheRevision(cachePath); err == nil {
+				t.Fatalf("metadata %q should fail", header)
+			}
+			env, ok, err := readDevEnvCache(cachePath)
+			if err != nil || !ok || env["K"] != "v" {
+				t.Fatalf("raw teardown reader should ignore metadata: ok=%v env=%v err=%v", ok, env, err)
+			}
+		})
+	}
+}
+
+func TestDevEnvHookRevisionScopesToCommittedExactRunChanges(t *testing.T) {
+	root := newDevEnvTestRoot(t)
+	md := &run.Metadata{Project: "tele", ID: "fix-it"}
+	hook := filepath.Join(root, project.Dir("tele"), "hooks", devEnvDirRel, "10-env.sh")
+	writeFile(t, hook, "v1\n")
+	gittest.Run(t, root, "add", "-A")
+	gittest.Run(t, root, "commit", "-m", "seed hooks")
+
+	assertRevision := func(want string) {
+		t.Helper()
+		got, err := devEnvHookRevision(root, md)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("revision = %q, want %q", got, want)
+		}
+	}
+	assertRevision(devEnvNoHookRevision)
+
+	commit := func(path, body, message string) {
+		t.Helper()
+		writeFile(t, filepath.Join(root, path), body)
+		gittest.Run(t, root, "add", "-A")
+		gittest.Run(t, root, "commit", "-m", message)
+	}
+	commit(filepath.Join(project.Dir("tele"), "hooks", devEnvDirRel, "10-env.sh"), "other-run\n",
+		"other run\n\nMoE-Project: tele\nMoE-Run: fix-it-2\n")
+	commit(filepath.Join(project.Dir("tele"), "hooks", devEnvDirRel, "10-env.sh"), "hand-edit\n", "hand edit")
+	commit(filepath.Join(project.Dir("other"), "hooks", devEnvDirRel, "10-env.sh"), "other-project\n",
+		"other project\n\nMoE-Project: other\nMoE-Run: fix-it\n")
+	commit("README.md", "unrelated\n", "unrelated\n\nMoE-Project: tele\nMoE-Run: fix-it\n")
+	assertRevision(devEnvNoHookRevision)
+
+	gittest.Run(t, root, "checkout", "-b", "session")
+	commit(filepath.Join(project.Dir("tele"), "hooks", devEnvDirRel, "10-env.sh"), "unlanded\n",
+		"session hook\n\nMoE-Project: tele\nMoE-Run: fix-it\n")
+	gittest.Run(t, root, "checkout", "main")
+	assertRevision(devEnvNoHookRevision)
+
+	commit(filepath.Join(project.Dir("tele"), "hooks", devEnvDirRel, "20-own.sh"), "own\n",
+		"own hook\n\nMoE-Project: tele\nMoE-Run: fix-it\n")
+	assertRevision(gittest.HeadSHA(t, root))
+
+	if err := os.Chmod(hook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, root, "add", hook)
+	gittest.Run(t, root, "commit", "-m", "mode hook\n\nMoE-Project: tele\nMoE-Run: fix-it\n")
+	assertRevision(gittest.HeadSHA(t, root))
+	gittest.Run(t, root, "mv",
+		filepath.Join(project.Dir("tele"), "hooks", devEnvDirRel, "10-env.sh"),
+		filepath.Join(project.Dir("tele"), "hooks", devEnvDirRel, "renamed.sh"))
+	gittest.Run(t, root, "commit", "-m", "rename hooks\n\nMoE-Project: tele\nMoE-Run: fix-it\n")
+	assertRevision(gittest.HeadSHA(t, root))
+	gittest.Run(t, root, "rm", "-r", filepath.Join(project.Dir("tele"), "hooks", devEnvDirRel))
+	gittest.Run(t, root, "commit", "-m", "delete hooks\n\nMoE-Project: tele\nMoE-Run: fix-it\n")
+	assertRevision(gittest.HeadSHA(t, root))
 }
 
 // TestDevEnvWritableDirsHappyPath: both recognised keys point at
@@ -282,7 +405,7 @@ func TestStaleDevEnvWritableDirStatErrorOutranksStalePath(t *testing.T) {
 // dev-env.d/* script runs it on first call, caches the parsed output,
 // and re-sources the cache on subsequent calls without re-running.
 func TestDevEnvSetupEnvCachesScriptOutput(t *testing.T) {
-	root := t.TempDir()
+	root := newDevEnvTestRoot(t)
 	projID := "tele"
 	if err := os.MkdirAll(filepath.Join(root, project.Dir(projID)), 0o755); err != nil {
 		t.Fatal(err)
@@ -338,8 +461,212 @@ echo "DATABASE_URL=postgres://localhost/devenv-${MOE_RUN}"
 	}
 }
 
-func TestDevEnvSetupEnvValidWritableDirCacheHit(t *testing.T) {
+func TestDevEnvSetupEnvRebuildsAfterOwnCommittedHookChange(t *testing.T) {
+	root := newDevEnvTestRoot(t)
+	projectID := "tele"
+	runID := "fix-it"
+	setupDir := filepath.Join(root, project.Dir(projectID), "hooks", devEnvDirRel)
+	teardownDir := filepath.Join(root, project.Dir(projectID), "hooks", devEnvTeardownDirRel)
+	receipt := filepath.Join(t.TempDir(), "receipt")
+	writeSetup := func(generation string) {
+		t.Helper()
+		body := fmt.Sprintf(`#!/bin/sh
+if [ -e "$MOE_SANDBOX/.moe/dev-env.env" ]; then
+  exit 9
+fi
+printf 'setup:%s\n' >> %q
+printf 'GEN=%s\n'
+`, generation, receipt, generation)
+		writeFile(t, filepath.Join(setupDir, "10-env.sh"), body)
+	}
+	writeSetup("v1")
+	writeFile(t, filepath.Join(teardownDir, "10-clean.sh"), fmt.Sprintf(`#!/bin/sh
+printf 'teardown:%%s\n' "$GEN" >> %q
+`, receipt))
+	if err := os.Chmod(filepath.Join(setupDir, "10-env.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(teardownDir, "10-clean.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, root, "add", "-A")
+	gittest.Run(t, root, "commit", "-m", "seed dev env")
+
+	workTree := t.TempDir()
+	md := &run.Metadata{ID: runID, Project: projectID, Workflow: "sdlc"}
+	env, fresh, err := devEnvSetupEnv(root, workTree, md, io.Discard, io.Discard)
+	if err != nil || !fresh || env["GEN"] != "v1" {
+		t.Fatalf("initial setup: env=%v fresh=%v err=%v", env, fresh, err)
+	}
+	// Model an environment minted by the pre-header implementation. Once
+	// this run gains a hook commit, the legacy cache cannot prove it
+	// incorporated that commit and must rebuild once.
+	if err := writeDevEnvCache(filepath.Join(workTree, devEnvCacheRel), env); err != nil {
+		t.Fatal(err)
+	}
+
+	writeSetup("v2")
+	if err := os.Chmod(filepath.Join(setupDir, "10-env.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, root, "add", "-A")
+	gittest.Run(t, root, "commit", "-m",
+		"update dev env\n\nMoE-Project: "+projectID+"\nMoE-Run: "+runID+"\n")
+	wantRevision := gittest.HeadSHA(t, root)
+
+	var stderr bytes.Buffer
+	env, fresh, err = devEnvSetupEnv(root, workTree, md, io.Discard, &stderr)
+	if err != nil || !fresh || env["GEN"] != "v2" {
+		t.Fatalf("rebuild: env=%v fresh=%v err=%v stderr=%s", env, fresh, err, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "hook revision") {
+		t.Fatalf("missing stale revision diagnostic: %q", stderr.String())
+	}
+	receiptBody, err := os.ReadFile(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(receiptBody), "setup:v1\nteardown:v1\nsetup:v2\n"; got != want {
+		t.Fatalf("lifecycle = %q, want %q", got, want)
+	}
+	cache, ok, err := readDevEnvCacheRevision(filepath.Join(workTree, devEnvCacheRel))
+	if err != nil || !ok || cache.owner != projectID+"/"+runID || cache.revision != wantRevision {
+		t.Fatalf("cache metadata: ok=%v cache=%+v err=%v", ok, cache, err)
+	}
+
+	_, fresh, err = devEnvSetupEnv(root, workTree, md, io.Discard, io.Discard)
+	if err != nil || fresh {
+		t.Fatalf("second v2 call: fresh=%v err=%v", fresh, err)
+	}
+	receiptBody, err = os.ReadFile(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(receiptBody) != "setup:v1\nteardown:v1\nsetup:v2\n" {
+		t.Fatalf("cache hit reran hooks: %q", receiptBody)
+	}
+}
+
+func TestDevEnvSetupEnvAdoptsLegacyCacheWithoutOwnHookChange(t *testing.T) {
+	root := newDevEnvTestRoot(t)
+	projectID := "tele"
+	hookDir := filepath.Join(root, project.Dir(projectID), "hooks", devEnvDirRel)
+	writeFile(t, filepath.Join(hookDir, "10-must-not-run.sh"), "#!/bin/sh\nexit 9\n")
+	if err := os.Chmod(filepath.Join(hookDir, "10-must-not-run.sh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, root, "add", "-A")
+	gittest.Run(t, root, "commit", "-m", "outside hook edit")
+
+	workTree := t.TempDir()
+	cachePath := filepath.Join(workTree, devEnvCacheRel)
+	if err := writeDevEnvCache(cachePath, map[string]string{"GEN": "warm"}); err != nil {
+		t.Fatal(err)
+	}
+	md := &run.Metadata{ID: "new-run", Project: projectID, Workflow: "sdlc"}
+	env, fresh, err := devEnvSetupEnv(root, workTree, md, io.Discard, io.Discard)
+	if err != nil || fresh || env["GEN"] != "warm" {
+		t.Fatalf("legacy adoption: env=%v fresh=%v err=%v", env, fresh, err)
+	}
+	cache, ok, err := readDevEnvCacheRevision(cachePath)
+	if err != nil || !ok || cache.owner != "tele/new-run" || cache.revision != devEnvNoHookRevision {
+		t.Fatalf("adopted metadata: ok=%v cache=%+v err=%v", ok, cache, err)
+	}
+}
+
+func TestDevEnvSetupEnvMetadataErrorDoesNotRunTeardown(t *testing.T) {
+	root := newDevEnvTestRoot(t)
+	projectID := "tele"
+	receipt := filepath.Join(t.TempDir(), "receipt")
+	teardown := filepath.Join(root, project.Dir(projectID), "hooks", devEnvTeardownDirRel, "10-clean.sh")
+	writeFile(t, teardown, "#!/bin/sh\ntouch "+receipt+"\n")
+	if err := os.Chmod(teardown, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	workTree := t.TempDir()
+	cachePath := filepath.Join(workTree, devEnvCacheRel)
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "# moe-dev-env-v2 tele/fix-it " + strings.Repeat("a", 40) + "\nGEN=old\n"
+	if err := os.WriteFile(cachePath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	md := &run.Metadata{ID: "fix-it", Project: projectID, Workflow: "sdlc"}
+	if _, _, err := devEnvSetupEnv(root, workTree, md, io.Discard, io.Discard); err == nil {
+		t.Fatal("malformed metadata should fail")
+	}
+	if _, err := os.Stat(receipt); !os.IsNotExist(err) {
+		t.Fatalf("teardown ran through metadata error: %v", err)
+	}
+	got, err := os.ReadFile(cachePath)
+	if err != nil || string(got) != body {
+		t.Fatalf("cache changed: body=%q err=%v", got, err)
+	}
+}
+
+func TestDevEnvInspectCacheFindsOwnRevisionAndKeepsNewRunWarm(t *testing.T) {
+	root := newDevEnvTestRoot(t)
+	projectID := "tele"
+	hook := filepath.Join(root, project.Dir(projectID), "hooks", devEnvDirRel, "10-env.sh")
+	writeFile(t, hook, "v1\n")
+	gittest.Run(t, root, "add", "-A")
+	gittest.Run(t, root, "commit", "-m", "outside hook")
+
+	workTree := t.TempDir()
+	cachePath := filepath.Join(workTree, devEnvCacheRel)
+	if err := writeDevEnvCacheRevision(cachePath, map[string]string{"GEN": "warm"}, "tele/fix-it", devEnvNoHookRevision); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, hook, "v2\n")
+	gittest.Run(t, root, "add", "-A")
+	gittest.Run(t, root, "commit", "-m", "own hook\n\nMoE-Project: tele\nMoE-Run: fix-it\n")
+
+	oldRun := &run.Metadata{Project: projectID, ID: "fix-it"}
+	_, ok, staleDir, staleRevision, err := devEnvInspectCache(root, workTree, oldRun)
+	if err != nil || !ok || staleDir != nil || !staleRevision {
+		t.Fatalf("old holder: ok=%v staleDir=%v staleRevision=%v err=%v", ok, staleDir, staleRevision, err)
+	}
+	newRun := &run.Metadata{Project: projectID, ID: "next-run"}
+	env, ok, staleDir, staleRevision, err := devEnvInspectCache(root, workTree, newRun)
+	if err != nil || !ok || staleDir != nil || staleRevision || env["GEN"] != "warm" {
+		t.Fatalf("new holder: env=%v ok=%v staleDir=%v staleRevision=%v err=%v", env, ok, staleDir, staleRevision, err)
+	}
+}
+
+func TestDevEnvSetupEnvGitErrorPreservesCacheAndSkipsTeardown(t *testing.T) {
 	root := t.TempDir()
+	projectID := "tele"
+	receipt := filepath.Join(t.TempDir(), "receipt")
+	teardown := filepath.Join(root, project.Dir(projectID), "hooks", devEnvTeardownDirRel, "10-clean.sh")
+	writeFile(t, teardown, "#!/bin/sh\ntouch "+receipt+"\n")
+	if err := os.Chmod(teardown, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	workTree := t.TempDir()
+	cachePath := filepath.Join(workTree, devEnvCacheRel)
+	body := "GEN=old\n"
+	if err := os.MkdirAll(filepath.Dir(cachePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cachePath, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	md := &run.Metadata{ID: "fix-it", Project: projectID, Workflow: "sdlc"}
+	if _, _, err := devEnvSetupEnv(root, workTree, md, io.Discard, io.Discard); err == nil || !strings.Contains(err.Error(), "resolve hook revision") {
+		t.Fatalf("expected git revision error, got %v", err)
+	}
+	if _, err := os.Stat(receipt); !os.IsNotExist(err) {
+		t.Fatalf("teardown ran through git error: %v", err)
+	}
+	got, err := os.ReadFile(cachePath)
+	if err != nil || string(got) != body {
+		t.Fatalf("cache changed: body=%q err=%v", got, err)
+	}
+}
+
+func TestDevEnvSetupEnvValidWritableDirCacheHit(t *testing.T) {
+	root := newDevEnvTestRoot(t)
 	projID := "tele"
 	hookDir := filepath.Join(root, project.Dir(projID), "hooks", devEnvDirRel)
 	if err := os.MkdirAll(hookDir, 0o755); err != nil {
@@ -373,7 +700,7 @@ func TestDevEnvSetupEnvValidWritableDirCacheHit(t *testing.T) {
 }
 
 func TestDevEnvSetupEnvRebuildsStaleWritableDirCache(t *testing.T) {
-	root := t.TempDir()
+	root := newDevEnvTestRoot(t)
 	projID := "tele"
 	setupDir := filepath.Join(root, project.Dir(projID), "hooks", devEnvDirRel)
 	teardownDir := filepath.Join(root, project.Dir(projID), "hooks", devEnvTeardownDirRel)
@@ -455,7 +782,7 @@ func TestDevEnvSetupEnvRebuildsStaleWritableDirCache(t *testing.T) {
 }
 
 func TestDevEnvSetupEnvStaleCacheTeardownFailurePreservesCache(t *testing.T) {
-	root := t.TempDir()
+	root := newDevEnvTestRoot(t)
 	projID := "tele"
 	teardownDir := filepath.Join(root, project.Dir(projID), "hooks", devEnvTeardownDirRel)
 	if err := os.MkdirAll(teardownDir, 0o755); err != nil {
@@ -485,7 +812,7 @@ func TestDevEnvSetupEnvStaleCacheTeardownFailurePreservesCache(t *testing.T) {
 }
 
 func TestDevEnvSetupEnvStaleCacheSetupFailureLeavesNoCache(t *testing.T) {
-	root := t.TempDir()
+	root := newDevEnvTestRoot(t)
 	projID := "tele"
 	setupDir := filepath.Join(root, project.Dir(projID), "hooks", devEnvDirRel)
 	if err := os.MkdirAll(setupDir, 0o755); err != nil {
@@ -514,7 +841,7 @@ func TestDevEnvSetupEnvStaleCacheSetupFailureLeavesNoCache(t *testing.T) {
 // "operator's real env" baseline that the design specifies as the
 // no-hook case.
 func TestDevEnvSetupEnvNoHooksDirectory(t *testing.T) {
-	root := t.TempDir()
+	root := newDevEnvTestRoot(t)
 	projID := "tele"
 	if err := os.MkdirAll(filepath.Join(root, project.Dir(projID)), 0o755); err != nil {
 		t.Fatal(err)
@@ -538,7 +865,7 @@ func TestDevEnvSetupEnvNoHooksDirectory(t *testing.T) {
 // run sees MOE_WORKSPACE in the script's environment so the script can
 // branch on sandbox-vs-workspace.
 func TestDevEnvSetupEnvWorkspaceExportsMoeWorkspace(t *testing.T) {
-	root := t.TempDir()
+	root := newDevEnvTestRoot(t)
 	projID := "tele"
 	hookDir := filepath.Join(root, project.Dir(projID), "hooks", devEnvDirRel)
 	if err := os.MkdirAll(hookDir, 0o755); err != nil {
@@ -568,7 +895,7 @@ echo "WS=${MOE_WORKSPACE:-NONE}"
 // (project.json, hooks/, etc.) without walking up from MOE_SANDBOX.
 // Pre-push hooks already see this var; this test pins the dev-env side.
 func TestDevEnvSetupEnvExportsMoeBureaucracy(t *testing.T) {
-	root := t.TempDir()
+	root := newDevEnvTestRoot(t)
 	projID := "tele"
 	hookDir := filepath.Join(root, project.Dir(projID), "hooks", devEnvDirRel)
 	if err := os.MkdirAll(hookDir, 0o755); err != nil {
@@ -597,7 +924,7 @@ echo "BUR=${MOE_BUREAUCRACY:-MISSING}"
 // order and later ones see earlier ones' exports — projects can
 // layer state across scripts.
 func TestDevEnvSetupEnvLaterScriptSeesEarlierVars(t *testing.T) {
-	root := t.TempDir()
+	root := newDevEnvTestRoot(t)
 	projID := "tele"
 	hookDir := filepath.Join(root, project.Dir(projID), "hooks", devEnvDirRel)
 	if err := os.MkdirAll(hookDir, 0o755); err != nil {
@@ -631,7 +958,7 @@ echo "BACKEND_URL=http://localhost:$PORT"
 // TestDevEnvRunTeardownSourcesCache: teardown scripts see the cached
 // env as exported variables.
 func TestDevEnvRunTeardownSourcesCache(t *testing.T) {
-	root := t.TempDir()
+	root := newDevEnvTestRoot(t)
 	projID := "tele"
 	teardownDir := filepath.Join(root, project.Dir(projID), "hooks", devEnvTeardownDirRel)
 	if err := os.MkdirAll(teardownDir, 0o755); err != nil {
@@ -672,7 +999,7 @@ echo "tearing down DATABASE_URL=$DATABASE_URL MOE_HOME=$MOE_HOME" > ` + receipt 
 // TestDevEnvRunTeardownNoCacheNoOp: no cache means setup never ran;
 // teardown is a silent no-op.
 func TestDevEnvRunTeardownNoCacheNoOp(t *testing.T) {
-	root := t.TempDir()
+	root := newDevEnvTestRoot(t)
 	projID := "tele"
 	teardownDir := filepath.Join(root, project.Dir(projID), "hooks", devEnvTeardownDirRel)
 	if err := os.MkdirAll(teardownDir, 0o755); err != nil {

@@ -78,18 +78,17 @@ func shellRunWorkspace(root, projectID, runID string, stdout, stderr io.Writer) 
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	extraEnv, _, err := devEnvLoadCache(wp)
-	if err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-	stale, err := staleDevEnvWritableDir(extraEnv)
+	extraEnv, _, stale, staleRevision, err := devEnvInspectCache(root, wp, md)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 	if stale != nil {
 		moePrintf(stderr, "dev-env: cached %s directory %q is stale; reopen a sandbox-backed stage to rebuild it\n", stale.key, stale.path)
+		return 1
+	}
+	if staleRevision {
+		moePrintln(stderr, "dev-env: cached environment predates this run's hook revision; reopen a sandbox-backed stage to rebuild it")
 		return 1
 	}
 	moePrintf(stdout, "shell in %s (run %s/%s)\n", wp, md.Project, md.ID)
@@ -127,14 +126,33 @@ func shellNamedWorkspace(root, projectID, name string, stdout, stderr io.Writer)
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	extraEnv, _, err := devEnvLoadCache(wp)
+	var extraEnv map[string]string
+	var stale *staleDevEnvDir
+	var staleRevision bool
+	if holder != nil {
+		holderProject, holderRun, splitErr := splitProjectRun(holder.Run)
+		if splitErr != nil {
+			moePrintf(stderr, "workspace: invalid claim run %q: %v\n", holder.Run, splitErr)
+			return 1
+		}
+		md, loadErr := run.Load(root, holderProject, holderRun)
+		if loadErr != nil {
+			moePrintf(stderr, "%v\n", loadErr)
+			return 1
+		}
+		extraEnv, _, stale, staleRevision, err = devEnvInspectCache(root, wp, md)
+	} else {
+		extraEnv, _, err = devEnvLoadCache(wp)
+		if err == nil {
+			stale, err = staleDevEnvWritableDir(extraEnv)
+		}
+	}
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	stale, err := staleDevEnvWritableDir(extraEnv)
-	if err != nil {
-		moePrintf(stderr, "%v\n", err)
+	if staleRevision {
+		moePrintf(stderr, "dev-env: cached environment predates the holding run's hook revision; run `moe workspace refresh %s/%s`\n", projectID, name)
 		return 1
 	}
 	if stale != nil {

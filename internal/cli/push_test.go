@@ -14,6 +14,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/git/gittest"
+	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/push"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
@@ -2189,6 +2190,76 @@ echo "script" >> %q
 	want := "builtin\nscript"
 	if got != want {
 		t.Fatalf("hook order: want %q, got %q", want, got)
+	}
+}
+
+func TestPrePushBuiltinsRebaseThenDevEnv(t *testing.T) {
+	hooks := builtinHooks[hookEventPrePush]
+	if len(hooks) < 2 {
+		t.Fatalf("pre-push builtins = %v", hooks)
+	}
+	if hooks[0].Name != "rebase-onto-default" || hooks[1].Name != "dev-env" {
+		t.Fatalf("pre-push builtin order = %q, %q", hooks[0].Name, hooks[1].Name)
+	}
+}
+
+func TestPushRefreshesDevEnvBeforeProjectHooks(t *testing.T) {
+	f := newPushFixture(t)
+
+	setup := filepath.Join(f.root, project.Dir(f.projectID), "hooks", devEnvDirRel, "10-env.sh")
+	writeFile(t, setup, "#!/bin/sh\nprintf 'GEN=v2\\n'\n")
+	if err := os.Chmod(setup, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, f.root, "add", "-A")
+	gittest.Run(t, f.root, "commit", "-m",
+		"update dev env\n\nMoE-Project: "+f.projectID+"\nMoE-Run: "+f.runID+"\n")
+
+	receipt := filepath.Join(t.TempDir(), "receipt")
+	writeHookScript(t, f.root, f.projectID, "pre-push", "10-read-env.sh", fmt.Sprintf(`#!/bin/sh
+. "$MOE_SANDBOX/.moe/dev-env.env"
+printf 'project-hook:%%s\n' "$GEN" > %q
+`, receipt))
+	gittest.Run(t, f.root, "add", "-A")
+	gittest.Run(t, f.root, "commit", "-m", "add project gate")
+
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
+	if code != 0 {
+		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
+	}
+	body, err := os.ReadFile(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(body), "project-hook:v2\n"; got != want {
+		t.Fatalf("project hook receipt = %q, want %q", got, want)
+	}
+}
+
+func TestPushDevEnvFailureStopsProjectHooksAndPublication(t *testing.T) {
+	f := newPushFixture(t)
+
+	setup := filepath.Join(f.root, project.Dir(f.projectID), "hooks", devEnvDirRel, "10-fail.sh")
+	writeFile(t, setup, "#!/bin/sh\nexit 7\n")
+	if err := os.Chmod(setup, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	receipt := filepath.Join(t.TempDir(), "receipt")
+	writeHookScript(t, f.root, f.projectID, "pre-push", "10-must-not-run.sh", "#!/bin/sh\ntouch "+receipt+"\n")
+	gittest.Run(t, f.root, "add", "-A")
+	gittest.Run(t, f.root, "commit", "-m",
+		"break dev env\n\nMoE-Project: "+f.projectID+"\nMoE-Run: "+f.runID+"\n")
+	mainBefore := f.originHead()
+
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
+	if code == 0 {
+		t.Fatalf("push should fail\nstdout=%s\nstderr=%s", stdout, stderr)
+	}
+	if _, err := os.Stat(receipt); !os.IsNotExist(err) {
+		t.Fatalf("project hook ran after dev-env failure: %v", err)
+	}
+	if got := f.originHead(); got != mainBefore {
+		t.Fatalf("origin main advanced: got %s want %s", got, mainBefore)
 	}
 }
 

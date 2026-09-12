@@ -325,7 +325,9 @@ Project hooks live under `projects/<project>/hooks/<event>.d/*` in the
 bureaucracy:
 
 - `dev-env.d/*` emits `KEY=VALUE` lines that MoE caches and supplies to agent
-  sessions and workspace shells.
+  sessions and workspace shells. A run that commits a change in this directory
+  refreshes its cache before its next stage or real push; unrelated hook edits
+  leave the run's cache warm.
 - `dev-env-teardown.d/*` cleans up when a run or workspace closes.
 - `pre-push.d/*` is an invocation-time ship gate; a failing script halts the
   push path and opens a recovery code session.
@@ -381,7 +383,8 @@ and sources them into the agent session and `moe workspace shell`. Decryption
 runs operator-side at stage open, before the agent subprocess exists, so the
 agent receives only the decrypted vars for its own project and never reads the
 key. Per-project scoping is structural: only that project's `dev-env.d` runs for
-its trees.
+its trees. The cache header is a comment, so sourcing the file still exports
+only the hook's `KEY=VALUE` body.
 
 Store the ciphertext as a sibling of the hook dir,
 `projects/<project>/secrets.env.age`, encrypted with
@@ -402,12 +405,14 @@ age -d -i /<volume>/age/keys.txt \
 age decrypts with no passphrase, so the same hook survives the headless `!!!`
 cascade, which has no operator to answer a prompt. Keep the keyfile outside the
 bureaucracy (e.g. on a persistent volume, with the secret line backed up in a
-password manager); a leaked bureaucracy clone is then ciphertext only. Rotating a
-secret re-decrypts on the next run; a named workspace needs `moe workspace
-refresh` to pick up new values. If a framework insists on reading a `.env` off
-disk, redirect the same `age -d` output to `"$MOE_SANDBOX/.env"` instead — but
-only when the target repo already gitignores that file, since `pre-push` refuses
-to ship with any untracked file present.
+password manager); a leaked bureaucracy clone is then ciphertext only. A run
+that commits the hook change re-decrypts before its next stage or push. Changes
+to ciphertext or other inputs are not cache invalidators; use `moe workspace
+refresh` for a named workspace, or reopen with a fresh per-run tree. If a
+framework insists on reading a `.env` off disk, redirect the same `age -d`
+output to `"$MOE_SANDBOX/.env"` instead — but only when the target repo already
+gitignores that file, since `pre-push` refuses to ship with any untracked file
+present.
 
 ## Cleanup And Recovery
 

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/modulecollective/moe/internal/git/gittest"
+	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 	"github.com/modulecollective/moe/internal/workspace"
@@ -344,6 +345,72 @@ func TestShellRunWorkspaceRefusesStaleDevEnvCache(t *testing.T) {
 	}
 	if _, err := os.Stat(cwdLog); !os.IsNotExist(err) {
 		t.Fatalf("shell stub was invoked: %v", err)
+	}
+}
+
+func TestClaimedShellsRefuseStaleDevEnvHookRevision(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell stub uses POSIX shell semantics")
+	}
+	for _, tc := range []struct {
+		name      string
+		workspace string
+		want      string
+	}{
+		{name: "run sandbox", want: "reopen a sandbox-backed stage"},
+		{name: "named workspace", workspace: "dev", want: "moe workspace refresh tele/dev"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := newTestBureaucracy(t)
+			markBureaucracy(t, root)
+			seedProjectWithSubmodule(t, root, "tele")
+			t.Setenv("MOE_HOME", root)
+			t.Setenv("NO_COLOR", "1")
+			stubEditor(t)
+			suppressNextStagePrompt(t)
+
+			args := []string{"tele/fix-it"}
+			if tc.workspace != "" {
+				args = []string{"--workspace=" + tc.workspace, "tele/fix-it"}
+			}
+			if code := runNew("sdlc", args, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+				t.Fatal("seed run failed")
+			}
+			md, err := run.Load(root, "tele", "fix-it")
+			if err != nil {
+				t.Fatal(err)
+			}
+			wp, err := attachRunWorkspace(root, md, "moe/fix-it")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := writeDevEnvCacheRevision(filepath.Join(wp, devEnvCacheRel), map[string]string{"GEN": "v1"}, "tele/fix-it", devEnvNoHookRevision); err != nil {
+				t.Fatal(err)
+			}
+			hook := filepath.Join(root, project.Dir("tele"), "hooks", devEnvDirRel, "10-env.sh")
+			writeFile(t, hook, "#!/bin/sh\nprintf 'GEN=v2\\n'\n")
+			if err := os.Chmod(hook, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			gittest.Run(t, root, "add", "-A")
+			gittest.Run(t, root, "commit", "-m", "update hook\n\nMoE-Project: tele\nMoE-Run: fix-it\n")
+
+			cwdLog, stubShell := writeShellStub(t)
+			t.Setenv("SHELL", stubShell)
+			var out, errb bytes.Buffer
+			var code int
+			if tc.workspace == "" {
+				code = runShell([]string{"tele/fix-it"}, &out, &errb)
+			} else {
+				code = runWorkspaceShell([]string{"tele/dev"}, &out, &errb)
+			}
+			if code == 0 || !strings.Contains(errb.String(), tc.want) {
+				t.Fatalf("exit=%d stderr=%q, want %q", code, errb.String(), tc.want)
+			}
+			if _, err := os.Stat(cwdLog); !os.IsNotExist(err) {
+				t.Fatalf("shell stub was invoked: %v", err)
+			}
+		})
 	}
 }
 

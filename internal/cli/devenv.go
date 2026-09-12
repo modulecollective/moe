@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -14,8 +15,10 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/banner"
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/trailers"
 )
 
 // dev-env is the project hook event that turns a working tree (per-run
@@ -25,7 +28,10 @@ import (
 // merged result is cached at <tree>/.moe/dev-env.env. Valid caches are
 // sourced into the claude subprocess env on subsequent stage opens
 // against the same tree and by `moe sdlc shell` so the operator's
-// manual spot-check sees the same world the agent did.
+// manual spot-check sees the same world the agent did. A versioned
+// comment header records the newest dev-env hook commit attributed to
+// the owning run, so that run's later hook edits invalidate its cache
+// without flushing caches because somebody else edited shared hooks.
 //
 // Teardown scripts under projects/<p>/hooks/dev-env-teardown.d/* run
 // with the cached env sourced; sandbox runs invoke them at run close
@@ -41,7 +47,11 @@ import (
 // KEY=VALUE output is cached after the first setup run. .moe/ is
 // already moe-managed for workspaces (claim.json) and sandbox layout
 // — adding dev-env.env alongside is shape-consistent.
-const devEnvCacheRel = ".moe/dev-env.env"
+const (
+	devEnvCacheRel          = ".moe/dev-env.env"
+	devEnvCacheHeaderPrefix = "# moe-dev-env-v1 "
+	devEnvNoHookRevision    = "none"
+)
 
 // devEnvDirRel is the per-project hooks directory dev-env setup
 // scripts live in. dev-env-teardown lives next to it under
@@ -59,8 +69,10 @@ const (
 // and the standard MOE_* exported (plus MOE_WORKSPACE when md.Workspace
 // is set), parses stdout as `KEY=VALUE` lines, and writes the merged
 // result to <workTree>/.moe/dev-env.env. Subsequent calls re-source a
-// cache whose allowlisted local directories still exist. A stale cache
-// runs teardown against the old env, clears the cache, and rebuilds it.
+// cache whose allowlisted local directories still exist and whose
+// header incorporates this run's newest committed dev-env hook change.
+// A stale cache runs teardown against the old env, clears the cache,
+// and rebuilds it.
 //
 // Returns the parsed map and true if the cache was minted on this
 // call (so callers can log "running dev-env setup..." on first touch
@@ -68,15 +80,34 @@ const (
 // empty map — the single-driver default.
 func devEnvSetupEnv(root, workTree string, md *run.Metadata, stdout, stderr io.Writer) (map[string]string, bool, error) {
 	cachePath := filepath.Join(workTree, devEnvCacheRel)
-	if env, ok, err := readDevEnvCache(cachePath); err != nil {
+	cache, ok, err := readDevEnvCacheRevision(cachePath)
+	if err != nil {
 		return nil, false, err
-	} else if ok {
-		stale, err := staleDevEnvWritableDir(env)
+	}
+	var staleDir *staleDevEnvDir
+	if ok {
+		staleDir, err = staleDevEnvWritableDir(cache.env)
 		if err != nil {
 			return nil, false, err
 		}
-		if stale != nil {
-			moePrintf(stderr, "dev-env: cached %s directory %q is stale; rebuilding\n", stale.key, stale.path)
+	}
+	revision, err := devEnvHookRevision(root, md)
+	if err != nil {
+		return nil, false, err
+	}
+	if ok {
+		cachedRevision := devEnvNoHookRevision
+		owner := md.Project + "/" + md.ID
+		if cache.owner == owner {
+			cachedRevision = cache.revision
+		}
+		staleRevision := cachedRevision != revision
+		if staleDir != nil || staleRevision {
+			if staleDir != nil {
+				moePrintf(stderr, "dev-env: cached %s directory %q is stale; rebuilding\n", staleDir.key, staleDir.path)
+			} else {
+				moePrintf(stderr, "dev-env: cached environment predates this run's hook revision; rebuilding\n")
+			}
 			if err := devEnvRunTeardown(root, workTree, md, stdout, stderr); err != nil {
 				return nil, false, err
 			}
@@ -84,23 +115,50 @@ func devEnvSetupEnv(root, workTree string, md *run.Metadata, stdout, stderr io.W
 				return nil, false, err
 			}
 		} else {
+			if cache.owner != owner {
+				if err := writeDevEnvCacheRevision(cachePath, cache.env, owner, revision); err != nil {
+					return nil, false, err
+				}
+			}
 			// Cache hit short-circuits the setup walker — print one line
 			// so the operator can tell a fast stage open (sourced cache)
 			// apart from one that re-ran the scripts. Without this line
 			// the cached path is silent and the operator can't tell why
 			// a "running …" notice they expected didn't appear.
 			banner.HookCacheHit(stdout, "dev-env", devEnvCacheRel)
-			return env, false, nil
+			return cache.env, false, nil
 		}
 	}
 	env, err := runDevEnvSetup(root, workTree, md, stdout, stderr)
 	if err != nil {
 		return nil, false, err
 	}
-	if err := writeDevEnvCache(cachePath, env); err != nil {
+	if err := writeDevEnvCacheRevision(cachePath, env, md.Project+"/"+md.ID, revision); err != nil {
 		return nil, false, err
 	}
 	return env, true, nil
+}
+
+// devEnvHookRevision returns the newest committed dev-env hook change
+// attributed to this exact project/run and reachable from the calling
+// bureaucracy HEAD. Outside edits and unlanded session commits therefore
+// cannot invalidate this run's cache.
+func devEnvHookRevision(root string, md *run.Metadata) (string, error) {
+	dir := filepath.Join(project.Dir(md.Project), "hooks", devEnvDirRel)
+	out, err := git.Output(root,
+		"log", "-1", "--format=%H", "--all-match",
+		"--grep="+trailers.GrepPattern("MoE-Project", md.Project),
+		"--grep="+trailers.GrepPattern("MoE-Run", md.ID),
+		"HEAD", "--", dir,
+	)
+	if err != nil {
+		return "", fmt.Errorf("dev-env: resolve hook revision: %w", err)
+	}
+	revision := strings.TrimSpace(out)
+	if revision == "" {
+		return devEnvNoHookRevision, nil
+	}
+	return revision, nil
 }
 
 // devEnvLoadCache returns the cached dev-env vars without re-running
@@ -109,6 +167,31 @@ func devEnvSetupEnv(root, workTree string, md *run.Metadata, stdout, stderr io.W
 // if some upstream call already minted it.
 func devEnvLoadCache(workTree string) (map[string]string, bool, error) {
 	return readDevEnvCache(filepath.Join(workTree, devEnvCacheRel))
+}
+
+// devEnvInspectCache checks both cache contracts without changing the file:
+// allowlisted directories must still exist, and the active run's newest
+// committed hook revision must be the one the cache incorporated. Shell
+// callers use this read-only path and point the operator at the owning rebuild
+// verb instead of running lifecycle hooks themselves.
+func devEnvInspectCache(root, workTree string, md *run.Metadata) (map[string]string, bool, *staleDevEnvDir, bool, error) {
+	cache, ok, err := readDevEnvCacheRevision(filepath.Join(workTree, devEnvCacheRel))
+	if err != nil || !ok {
+		return cache.env, ok, nil, false, err
+	}
+	staleDir, err := staleDevEnvWritableDir(cache.env)
+	if err != nil {
+		return nil, true, nil, false, err
+	}
+	revision, err := devEnvHookRevision(root, md)
+	if err != nil {
+		return nil, true, nil, false, err
+	}
+	cachedRevision := devEnvNoHookRevision
+	if cache.owner == md.Project+"/"+md.ID {
+		cachedRevision = cache.revision
+	}
+	return cache.env, true, staleDir, cachedRevision != revision, nil
 }
 
 // devEnvRunTeardown invokes projects/<p>/hooks/dev-env-teardown.d/* in
@@ -166,11 +249,75 @@ func readDevEnvCache(cachePath string) (map[string]string, bool, error) {
 	return env, true, nil
 }
 
-// writeDevEnvCache writes env back to cachePath as sorted KEY=VALUE
-// lines, creating <workTree>/.moe/ if it doesn't already exist. Sorted
-// output keeps the file diff-friendly for the rare case an operator
-// peeks at it.
+type devEnvCacheRevision struct {
+	env      map[string]string
+	owner    string
+	revision string
+}
+
+// readDevEnvCacheRevision is the freshness reader. Unlike the raw env
+// reader used by teardown, it validates the versioned first-line header so
+// ambiguous bookkeeping never triggers destructive recovery.
+func readDevEnvCacheRevision(cachePath string) (devEnvCacheRevision, bool, error) {
+	b, err := os.ReadFile(cachePath)
+	if errors.Is(err, os.ErrNotExist) {
+		return devEnvCacheRevision{}, false, nil
+	}
+	if err != nil {
+		return devEnvCacheRevision{}, false, fmt.Errorf("dev-env: read cache: %w", err)
+	}
+	env, err := parseDevEnvLines(bytes.NewReader(b), nil)
+	if err != nil {
+		return devEnvCacheRevision{}, false, fmt.Errorf("dev-env: parse cache %s: %w", cachePath, err)
+	}
+	cache := devEnvCacheRevision{env: env}
+	lines := strings.Split(string(b), "\n")
+	for i, line := range lines {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "# moe-dev-env-") {
+			continue
+		}
+		if i != 0 || !strings.HasPrefix(line, devEnvCacheHeaderPrefix) {
+			return devEnvCacheRevision{}, false, fmt.Errorf("dev-env: unsupported cache metadata %q", line)
+		}
+		fields := strings.Fields(strings.TrimPrefix(line, devEnvCacheHeaderPrefix))
+		if len(fields) != 2 || !validDevEnvOwner(fields[0]) || !validDevEnvRevision(fields[1]) {
+			return devEnvCacheRevision{}, false, fmt.Errorf("dev-env: malformed cache metadata %q", line)
+		}
+		cache.owner = fields[0]
+		cache.revision = fields[1]
+	}
+	return cache, true, nil
+}
+
+func validDevEnvOwner(owner string) bool {
+	projectID, runID, ok := strings.Cut(owner, "/")
+	return ok && projectID != "" && runID != "" && !strings.Contains(runID, "/")
+}
+
+func validDevEnvRevision(revision string) bool {
+	if revision == devEnvNoHookRevision {
+		return true
+	}
+	if len(revision) != 40 && len(revision) != 64 {
+		return false
+	}
+	for _, r := range revision {
+		if !strings.ContainsRune("0123456789abcdef", r) {
+			return false
+		}
+	}
+	return true
+}
+
+// writeDevEnvCache writes a legacy headerless cache for compatibility
+// fixtures and raw lifecycle callers. Production setup uses the
+// revisioned sibling below.
 func writeDevEnvCache(cachePath string, env map[string]string) error {
+	return writeDevEnvCacheRevision(cachePath, env, "", "")
+}
+
+func writeDevEnvCacheRevision(cachePath string, env map[string]string, owner, revision string) error {
 	if err := os.MkdirAll(filepath.Dir(cachePath), 0o755); err != nil {
 		return fmt.Errorf("dev-env: mkdir cache dir: %w", err)
 	}
@@ -180,14 +327,38 @@ func writeDevEnvCache(cachePath string, env map[string]string) error {
 	}
 	sort.Strings(keys)
 	var b strings.Builder
+	if owner != "" {
+		b.WriteString(devEnvCacheHeaderPrefix)
+		b.WriteString(owner)
+		b.WriteByte(' ')
+		b.WriteString(revision)
+		b.WriteByte('\n')
+	}
 	for _, k := range keys {
 		b.WriteString(k)
 		b.WriteByte('=')
 		b.WriteString(env[k])
 		b.WriteByte('\n')
 	}
-	if err := os.WriteFile(cachePath, []byte(b.String()), 0o644); err != nil {
-		return fmt.Errorf("dev-env: write cache: %w", err)
+	tmp, err := os.CreateTemp(filepath.Dir(cachePath), ".dev-env.env-*")
+	if err != nil {
+		return fmt.Errorf("dev-env: create cache temp: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(0o644); err != nil {
+		tmp.Close()
+		return fmt.Errorf("dev-env: chmod cache temp: %w", err)
+	}
+	if _, err := io.WriteString(tmp, b.String()); err != nil {
+		tmp.Close()
+		return fmt.Errorf("dev-env: write cache temp: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("dev-env: close cache temp: %w", err)
+	}
+	if err := os.Rename(tmpPath, cachePath); err != nil {
+		return fmt.Errorf("dev-env: publish cache: %w", err)
 	}
 	return nil
 }
