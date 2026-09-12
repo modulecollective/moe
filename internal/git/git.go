@@ -343,11 +343,11 @@ func AheadOf(dir, base, head string) (int, error) {
 
 // LsRemoteDefault returns the default-branch name advertised by url —
 // the "<branch>" of `ref: refs/heads/<branch>\tHEAD` in
-// `ls-remote --symref <url> HEAD` output. Pure URL operation: runs
+// `ls-remote --symref -- <url> HEAD` output. Pure URL operation: runs
 // outside any repo (dir == "").
 func LsRemoteDefault(url string) (string, error) {
 	stdout, stderr, err := execGit(context.Background(), "",
-		[]string{"ls-remote", "--symref", url, "HEAD"},
+		[]string{"ls-remote", "--symref", "--", url, "HEAD"},
 		false, readRetryCap)
 	if err != nil {
 		return "", fmt.Errorf("git ls-remote --symref %s: %w (%s)",

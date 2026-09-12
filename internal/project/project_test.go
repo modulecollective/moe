@@ -144,6 +144,28 @@ func TestRegisterHappyPath(t *testing.T) {
 	}
 }
 
+func TestRegisterDoesNotExecuteOptionShapedRemote(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+
+	helper := filepath.Join(t.TempDir(), "upload-pack")
+	if err := os.WriteFile(helper, []byte("#!/bin/sh\nprintf 'ran\\n' > \"$0.ran\"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := helper + ".ran"
+
+	_, err := Register(t.TempDir(), "--upload-pack="+helper, Options{Now: fixedTime})
+	if err == nil {
+		t.Fatal("Register with option-shaped remote: got nil error, want error")
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Fatal("Register executed the option-shaped remote")
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("stat helper marker: %v", err)
+	}
+}
+
 func TestRegisterRejectsDuplicate(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")

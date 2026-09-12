@@ -94,7 +94,7 @@ func Register(root, url string, opts Options) (*Metadata, error) {
 		return nil, err
 	}
 
-	if err := git.Run(root, "submodule", "add", "-b", branch, url, submodulePath); err != nil {
+	if err := git.Run(root, "submodule", "add", "-b", branch, "--", url, submodulePath); err != nil {
 		return nil, fmt.Errorf("project: git submodule add: %w", err)
 	}
 
