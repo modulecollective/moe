@@ -302,7 +302,7 @@ interactive session on the idea's own document, so the thread persists in
 `moe chat` — no clone of the project's source, so the agent sharpens your
 framing rather than checking claims about the code. Reach for `moe chat` when
 you want to think *with* the project; reach for `edit --chat` to sharpen one
-note. Every other workflow's `new` accepts
+note. `moe sdlc new` and `moe chat new` both accept
 `--from-idea <project>/<slug>`, promoting the idea into a run and preserving
 lineage in the journal. `idea reopen` is for a promoted idea whose destination
 run was abandoned and should become backlog again.
@@ -444,8 +444,11 @@ due — it still refuses if a run is already open.
 
 Editing a definition is a plain file edit, or an sdlc run: a stage's per-turn
 commit picks up `projects/<project>/chores/`, so `moe sdlc design → code →
-close` is the journaled route. Due-ness notices either way — a definition edit
-committed by any means makes the chore due as "definition changed."
+close` is the journaled route. For a mechanical chore, due-ness notices either
+way: subject to the open-run and cooldown guards, a definition edit committed
+by any means makes the chore due as "definition changed." A judged chore's
+edited criterion remains for the survey to evaluate; editing it does not make
+the chore mechanically due.
 
 ## Pulse
 
@@ -505,12 +508,17 @@ moe pulse close [--no-edit] <project>/<run>  # close a failed or interrupted swe
 
 A sweep is machine-paced and has no re-open verb: a failed one is read with
 `cat` / `log`, ended with `close` (the filings still harvest), and retried by
-running another. The survey blocks with a `Ctrl-C to skip` banner; interrupting
-it abandons the sweep and leaves the run open until you close it — the next
-sweep runs fresh either way. `moe pulse new` is also the verb an external cron
-would call — the primitives are cron-safe, but MoE ships no cron of anyone
-else's. The one clock it does carry is the armed serve's own heartbeat,
-described below.
+running another. The survey blocks with a `Ctrl-C to skip` banner. Interrupting
+before a pulse run opens leaves no run to clean up. If the run has been minted
+but the survey agent has not started, MoE closes the unused run with a skip
+note. Once the agent has started, interrupting leaves the run open for
+inspection and closing. An interrupted survey applies no gate proposals,
+grooming, or kicks, and the next survey starts fresh; chores already opened by
+the pre-survey pass are not rolled back.
+
+`moe pulse new` is also the verb an external cron would call — the primitives
+are cron-safe, but MoE ships no cron of anyone else's. The one clock it does
+carry is the armed serve's own heartbeat, described below.
 
 The survey's first turn carries a GitHub context block the harness gathered:
 PRs merged since the last pulse (marking the ones that landed outside moe, which
