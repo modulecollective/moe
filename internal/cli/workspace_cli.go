@@ -461,26 +461,28 @@ func runWorkspaceRefresh(args []string, stdout, stderr io.Writer) int {
 	}
 	wp := workspace.Path(root, projectID, name)
 
-	// The teardown scripts take a run.Metadata for the MOE_* env vars
-	// they get exported. The workspace isn't necessarily claimed by a
-	// run right now (the operator may be refreshing between runs), so
-	// we synthesise a minimal metadata struct keyed off the workspace
-	// rather than refusing the verb when the workspace is unclaimed.
-	// The synthesised run id stays empty so a teardown script that
-	// branches on MOE_RUN sees the unclaimed state honestly.
+	// The teardown and setup scripts take a run.Metadata for their MOE_*
+	// env. A claimed workspace uses its holder's real metadata so hook
+	// attribution and cache ownership see the unqualified run ID. An
+	// unclaimed workspace retains an empty ID: scripts see MOE_RUN empty,
+	// and setup publishes a headerless cache a later run can adopt.
 	holder, err := workspace.ReadClaim(root, projectID, name)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	syntheticRunID := ""
+	md := &run.Metadata{Project: projectID, Workspace: name}
 	if holder != nil {
-		syntheticRunID = holder.Run
-	}
-	md := &run.Metadata{
-		Project:   projectID,
-		ID:        syntheticRunID,
-		Workspace: name,
+		holderProject, holderRun, splitErr := splitProjectRun(holder.Run)
+		if splitErr != nil {
+			moePrintf(stderr, "workspace: invalid claim run %q: %v\n", holder.Run, splitErr)
+			return 1
+		}
+		md, err = run.Load(root, holderProject, holderRun)
+		if err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 1
+		}
 	}
 
 	if err := devEnvRunTeardown(root, wp, md, stdout, stderr); err != nil {

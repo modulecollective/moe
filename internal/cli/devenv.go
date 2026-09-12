@@ -91,14 +91,18 @@ func devEnvSetupEnv(root, workTree string, md *run.Metadata, stdout, stderr io.W
 			return nil, false, err
 		}
 	}
-	revision, err := devEnvHookRevision(root, md)
-	if err != nil {
-		return nil, false, err
+	owner := ""
+	revision := devEnvNoHookRevision
+	if md.ID != "" {
+		owner = md.Project + "/" + md.ID
+		revision, err = devEnvHookRevision(root, md)
+		if err != nil {
+			return nil, false, err
+		}
 	}
 	if ok {
 		cachedRevision := devEnvNoHookRevision
-		owner := md.Project + "/" + md.ID
-		if cache.owner == owner {
+		if owner != "" && cache.owner == owner {
 			cachedRevision = cache.revision
 		}
 		staleRevision := cachedRevision != revision
@@ -133,7 +137,7 @@ func devEnvSetupEnv(root, workTree string, md *run.Metadata, stdout, stderr io.W
 	if err != nil {
 		return nil, false, err
 	}
-	if err := writeDevEnvCacheRevision(cachePath, env, md.Project+"/"+md.ID, revision); err != nil {
+	if err := writeDevEnvCacheRevision(cachePath, env, owner, revision); err != nil {
 		return nil, false, err
 	}
 	return env, true, nil

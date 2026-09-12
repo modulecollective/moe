@@ -7,7 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/project"
+	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/workspace"
 )
 
@@ -292,6 +294,130 @@ func TestWorkspaceRefreshRebuildsCacheEagerly(t *testing.T) {
 	}
 	if !strings.Contains(string(body), "REFRESHED=yes") {
 		t.Fatalf("cache = %q, expected REFRESHED=yes", body)
+	}
+}
+
+func TestWorkspaceRefreshUnclaimedPublishesAdoptableCache(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProjectWithSubmodule(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	if _, err := workspace.Ensure(root, "tele", "dev"); err != nil {
+		t.Fatal(err)
+	}
+	wp := workspace.Path(root, "tele", "dev")
+	receipt := filepath.Join(t.TempDir(), "setup.log")
+	setupDir := filepath.Join(root, project.Dir("tele"), "hooks", devEnvDirRel)
+	if err := os.MkdirAll(setupDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	setup := "#!/bin/sh\n" +
+		"printf 'REFRESH_RUN=%s\\n' \"$MOE_RUN\"\n" +
+		"printf 'setup\\n' >> " + receipt + "\n"
+	if err := os.WriteFile(filepath.Join(setupDir, "10-emit.sh"), []byte(setup), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if code := Run([]string{"workspace", "refresh", "tele/dev"}, &out, &errb); code != 0 {
+		t.Fatalf("refresh: exit=%d stderr=%q", code, errb.String())
+	}
+	cachePath := filepath.Join(wp, devEnvCacheRel)
+	cache, ok, err := readDevEnvCacheRevision(cachePath)
+	if err != nil || !ok {
+		t.Fatalf("read refreshed cache: ok=%v err=%v", ok, err)
+	}
+	if cache.owner != "" || cache.revision != "" {
+		t.Fatalf("unclaimed cache metadata = owner %q revision %q, want legacy cache", cache.owner, cache.revision)
+	}
+	if got := cache.env["REFRESH_RUN"]; got != "" {
+		t.Fatalf("refresh hook MOE_RUN = %q, want empty", got)
+	}
+
+	md := &run.Metadata{Project: "tele", ID: "later", Workspace: "dev"}
+	env, fresh, err := devEnvSetupEnv(root, wp, md, &out, &errb)
+	if err != nil {
+		t.Fatalf("adopt refreshed cache: %v", err)
+	}
+	if fresh {
+		t.Fatal("later run rebuilt the unclaimed cache instead of adopting it")
+	}
+	if got := env["REFRESH_RUN"]; got != "" {
+		t.Fatalf("adopted REFRESH_RUN = %q, want empty", got)
+	}
+	cache, ok, err = readDevEnvCacheRevision(cachePath)
+	if err != nil || !ok {
+		t.Fatalf("read adopted cache: ok=%v err=%v", ok, err)
+	}
+	if cache.owner != "tele/later" || cache.revision != devEnvNoHookRevision {
+		t.Fatalf("adopted cache metadata = owner %q revision %q", cache.owner, cache.revision)
+	}
+	if got, err := os.ReadFile(receipt); err != nil || string(got) != "setup\n" {
+		t.Fatalf("setup receipt = %q, %v; want one execution", got, err)
+	}
+}
+
+func TestWorkspaceRefreshClaimedPublishesHoldingRunRevision(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProjectWithSubmodule(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	runDir := filepath.Join(root, run.Dir("tele", "run-a"))
+	writeFile(t, filepath.Join(runDir, "run.json"),
+		`{"id":"run-a","project":"tele","status":"in_progress","workflow":"sdlc","workspace":"dev","documents":{}}`+"\n")
+	wp, err := workspace.Acquire(root, "tele", "dev", "tele/run-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt := filepath.Join(t.TempDir(), "setup.log")
+	setupPath := filepath.Join(root, project.Dir("tele"), "hooks", devEnvDirRel, "10-emit.sh")
+	setup := "#!/bin/sh\n" +
+		"printf 'REFRESH_RUN=%s\\n' \"$MOE_RUN\"\n" +
+		"printf 'setup\\n' >> " + receipt + "\n"
+	writeFile(t, setupPath, setup)
+	if err := os.Chmod(setupPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, root, "add", "-A")
+	gittest.Run(t, root, "commit", "-m", "add run hook\n\nMoE-Project: tele\nMoE-Run: run-a\n")
+	wantRevision := gittest.Output(t, root, "rev-parse", "HEAD")
+
+	var out, errb bytes.Buffer
+	if code := Run([]string{"workspace", "refresh", "tele/dev"}, &out, &errb); code != 0 {
+		t.Fatalf("refresh: exit=%d stderr=%q", code, errb.String())
+	}
+	cachePath := filepath.Join(wp, devEnvCacheRel)
+	cache, ok, err := readDevEnvCacheRevision(cachePath)
+	if err != nil || !ok {
+		t.Fatalf("read refreshed cache: ok=%v err=%v", ok, err)
+	}
+	if cache.owner != "tele/run-a" || cache.revision != wantRevision {
+		t.Fatalf("cache metadata = owner %q revision %q, want tele/run-a %q", cache.owner, cache.revision, wantRevision)
+	}
+	if got := cache.env["REFRESH_RUN"]; got != "run-a" {
+		t.Fatalf("refresh hook MOE_RUN = %q, want run-a", got)
+	}
+
+	md, err := run.Load(root, "tele", "run-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, fresh, err := devEnvSetupEnv(root, wp, md, &out, &errb)
+	if err != nil {
+		t.Fatalf("consume refreshed cache: %v", err)
+	}
+	if fresh {
+		t.Fatal("next consumer rebuilt the freshly refreshed cache")
+	}
+	if got := env["REFRESH_RUN"]; got != "run-a" {
+		t.Fatalf("consumed REFRESH_RUN = %q, want run-a", got)
+	}
+	if got, err := os.ReadFile(receipt); err != nil || string(got) != "setup\n" {
+		t.Fatalf("setup receipt = %q, %v; want one execution", got, err)
 	}
 }
 
