@@ -211,6 +211,7 @@ func TestExecuteArgsResumePrependsSid(t *testing.T) {
 	if args[len(args)-1] != "follow-up" {
 		t.Errorf("InitialPrompt should be the last positional arg, got %q", args[len(args)-1])
 	}
+	assertGitWritableProfile(t, args)
 }
 
 // TestExecuteArgsModel pins interactive `--model`: set → a `--model
@@ -307,11 +308,15 @@ func assertGitWritableProfile(t *testing.T, args []string) {
 	if !containsPair(args, "-c", "default_permissions=moe-workspace-git") {
 		t.Errorf("args missing `-c default_permissions=moe-workspace-git` pair: %v", args)
 	}
+	if !containsPair(args, "-c", "permissions.moe-workspace-git.network.enabled=true") {
+		t.Errorf("args missing command network permission: %v", args)
+	}
 	// The profile is defined by MoE, not borrowed from the operator's
-	// ~/.codex/config.toml, and grants `.git` write on both root kinds.
+	// ~/.codex/config.toml, and grants command networking plus `.git`
+	// write on both root kinds.
 	profile := ""
 	for i, a := range args {
-		if a == "-c" && i+1 < len(args) && strings.HasPrefix(args[i+1], "permissions.moe-workspace-git.") {
+		if a == "-c" && i+1 < len(args) && strings.HasPrefix(args[i+1], "permissions.moe-workspace-git.filesystem=") {
 			profile = args[i+1]
 		}
 	}

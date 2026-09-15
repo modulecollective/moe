@@ -443,7 +443,8 @@ func executeOneShotArgs(r agent.OneShotRequest) []string {
 // for every codex turn. It reproduces what `--sandbox workspace-write`
 // grants (root read, tmpdir + /tmp write, cwd and every `--add-dir`
 // root writable) and adds the one thing that mode withholds: `.git`
-// write inside those roots.
+// write inside those roots. Command networking is enabled separately so
+// stage tools such as gh can use the operator's existing credentials.
 //
 // Defined inline rather than referenced from the operator's
 // `~/.codex/config.toml` because a profile MoE depends on but doesn't
@@ -470,6 +471,7 @@ const (
 	gitWritableProfile     = `permissions.` + gitWritableProfileName + `.filesystem={ ` +
 		`":root" = "read", ":tmpdir" = "write", ":slash_tmp" = "write", ` +
 		`":workspace_roots" = { "." = "write", ".git" = "write" } }`
+	gitWritableProfileNetwork = `permissions.` + gitWritableProfileName + `.network.enabled=true`
 )
 
 // commonArgs builds the codex flag set shared across exec / interactive
@@ -503,6 +505,10 @@ func commonArgs(clonePath, systemPrompt string) []string {
 	// `.git` genuinely writable, chain shape irrelevant. The sandbox
 	// stays on: the profile bounds writes exactly as before.
 	args = append(args, "-c", gitWritableProfile)
+	// Network access defaults off in a permissions profile. Enable it for
+	// ordinary development tools; without the proxy this is intentionally
+	// direct command networking rather than a destination allowlist.
+	args = append(args, "-c", gitWritableProfileNetwork)
 	args = append(args, "-c", "default_permissions="+gitWritableProfileName)
 	if clonePath != "" {
 		args = append(args, "--add-dir", clonePath)
