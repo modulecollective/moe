@@ -427,24 +427,43 @@ func TestArmedServeJoinsTheHeartbeat(t *testing.T) {
 	t.Cleanup(func() { heartbeatInterval = 20 * time.Minute })
 
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan error, 1)
-	go func() { done <- s.ListenAndServe(ctx) }()
+	done := make(chan struct{})
+	var result error
+	release := sync.OnceFunc(func() { close(gate.release) })
+	t.Cleanup(func() {
+		cancel()
+		release()
+		select {
+		case <-done:
+		case <-time.After(10 * time.Second):
+			t.Error("ListenAndServe did not return during cleanup")
+		}
+	})
+	go func() {
+		result = s.ListenAndServe(ctx)
+		close(done)
+	}()
 
-	<-gate.entered
+	select {
+	case <-gate.entered:
+	case <-done:
+		t.Fatalf("ListenAndServe returned before the heartbeat entered: %v", result)
+	case <-time.After(10 * time.Second):
+		t.Fatal("heartbeat never entered after ListenAndServe started")
+	}
 	cancel()
 
 	select {
 	case <-done:
-		t.Fatal("ListenAndServe returned with a heartbeat tick still in flight")
+		t.Fatalf("ListenAndServe returned with a heartbeat tick still in flight: %v", result)
 	case <-time.After(100 * time.Millisecond):
 	}
 
-	close(gate.release)
+	release()
 	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("ListenAndServe: %v", err)
+	case <-done:
+		if result != nil {
+			t.Fatalf("ListenAndServe: %v", result)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("ListenAndServe never returned after the tick finished")
