@@ -206,10 +206,12 @@ Run the verb above for the reviewing form.
 The `codex` backend needs no setup in `~/.codex/config.toml`. MoE defines its
 own sandbox permissions profile (`moe-workspace-git`) inline on every Codex
 turn and selects it — read-only root, writable tmp, and writable `.` plus
-`.git` on the working directory and each `--add-dir` root. Codex's stock
-`workspace-write` mode leaves `.git` read-only, which fails a `git commit`
-inside the per-run clone; shipping the profile with MoE keeps that from
-depending on operator config.
+`.git` on the working directory and each `--add-dir` root. The profile also
+enables direct command networking on every interactive, resumed, and headless
+turn, so development tools such as `gh` can use the operator's existing
+credentials to reach their services. Codex's stock `workspace-write` mode
+leaves `.git` read-only, which fails a `git commit` inside the per-run clone;
+shipping the profile with MoE keeps that from depending on operator config.
 
 Separately, MoE pins `GIT_EDITOR=true` and `GIT_SEQUENCE_EDITOR=true` for every
 Codex turn (interactive and headless): Codex never has a TTY for an editor, so a
