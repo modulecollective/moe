@@ -16,8 +16,7 @@ import (
 
 func newDevEnvTestRoot(t *testing.T) string {
 	t.Helper()
-	root := t.TempDir()
-	gittest.Run(t, "", "init", "-b", "main", root)
+	root := gittest.Init(t)
 	gittest.Run(t, root, "commit", "--allow-empty", "-m", "seed bureaucracy")
 	return root
 }
