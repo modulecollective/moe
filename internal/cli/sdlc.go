@@ -231,7 +231,7 @@ func openSdlcDesign(projectID, runID string, headless bool, agentOverride string
 			EnforceSandboxBoundary: true,
 			Headless:               headless,
 			Agent:                  agentOverride,
-			ExtraStagePaths:        stageProjectDirs,
+			ExtraStagePaths:        stageCommitPathsPresent,
 		}, stdout, stderr)
 }
 
@@ -257,7 +257,7 @@ func openSdlcCode(projectID, runID string, headless bool, agentOverride string, 
 			NeedsSandbox:    true,
 			Headless:        headless,
 			Agent:           agentOverride,
-			ExtraStagePaths: stageProjectDirs,
+			ExtraStagePaths: stageCommitPathsPresent,
 		}, stdout, stderr)
 }
 
@@ -284,7 +284,7 @@ func openSdlcReview(projectID, runID string, headless bool, agentOverride string
 			Headless:               headless,
 			CanvasSkeleton:         reviewCanvasSkeleton,
 			Agent:                  agentOverride,
-			ExtraStagePaths:        stageProjectDirs,
+			ExtraStagePaths:        stageCommitPathsPresent,
 		}, stdout, stderr)
 }
 
@@ -307,7 +307,7 @@ func openSdlcTest(projectID, runID string, headless bool, agentOverride string, 
 			Headless:        headless,
 			CanvasSkeleton:  testCanvasSkeleton,
 			Agent:           agentOverride,
-			ExtraStagePaths: stageProjectDirs,
+			ExtraStagePaths: stageCommitPathsPresent,
 		}, stdout, stderr)
 }
 

@@ -14,6 +14,7 @@ import (
 	"github.com/modulecollective/moe/internal/lore"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/stylesheet"
 	"github.com/modulecollective/moe/internal/twin"
 )
 
@@ -503,36 +504,37 @@ read-only context; do not edit those paths.
 The harness commits run artifacts after the turn; never run ` + "`git add` or `git commit`" + ` in the bureaucracy worktree.
 `
 
-	// Names the project dirs that ride the turn commit. Without it the
+	// Names the paths that ride the turn commit. Without it the
 	// read-only-context sentence above reads as covering the whole
 	// bureaucracy, and a stage that writes a hook, a chore, or a
 	// knowledge topic has no way to know it landed. Rendered from
-	// projectCommitDirs so the prompt can't drift from what
-	// stageProjectDirs actually stages; empty for the workflows that
+	// stageCommitPaths so the prompt can't drift from what
+	// stageCommitPathsPresent actually stages; empty for workflows that
 	// stage none, so most turns pay nothing.
 	//
-	// Each dir gets a one-line routing cue and the skill carries the
+	// Each path gets a one-line routing cue and the skill carries the
 	// rest — the same inline-the-routing / skill-for-the-how split
 	// followupsReferenceSection makes. The knowledge line is the one
 	// that has to *invite*: nothing else tells an agent that a durable
 	// domain fact it just learned has a home.
-	if dirs := projectCommitDirs(md.Workflow); len(dirs) > 0 {
+	if allowed := stageCommitPaths(md); len(allowed) > 0 {
 		routing := map[string]string{
-			"hooks":     "drop-in scripts under `<event>.d/`; `moe hook fire` is the loop",
-			"chores":    "chore definitions (`chore.json` + `prompt.md`); `moe chore check` is the dry run",
-			"knowledge": "the project's durable domain reference — research findings, external surveys, facts worth citing across runs",
-			twin.DirRel: "the project's recorded intent; the `moe-twin` skill has the writing contract",
+			filepath.Join(project.Dir(md.Project), "hooks"):     "drop-in scripts under `<event>.d/`; `moe hook fire` is the loop",
+			filepath.Join(project.Dir(md.Project), "chores"):    "chore definitions (`chore.json` + `prompt.md`); `moe chore check` is the dry run",
+			filepath.Join(project.Dir(md.Project), "knowledge"): "the project's durable domain reference — research findings, external surveys, facts worth citing across runs",
+			filepath.Join(project.Dir(md.Project), twin.DirRel): "the project's recorded intent; the `moe-twin` skill has the writing contract",
+			stylesheet.FileName: "global model/backend selection; edit this session-worktree file for subsequent turns after landing",
 		}
-		paths := make([]string, len(dirs))
-		for i, name := range dirs {
-			paths[i] = filepath.Join(project.Dir(md.Project), name)
+		paths := make([]string, len(allowed))
+		for i, name := range allowed {
+			paths[i] = name
 			if cue := routing[name]; cue != "" {
 				paths[i] += "\n      " + cue
 			}
 		}
 		out += fmt.Sprintf(`
-The exception: you may write under the paths below. This turn's
-commit also picks up edits under them, so what you write there lands
+The exception: you may write at the paths below in this session
+worktree. This turn's commit also picks up edits to them, so they land
 with the canvas rather than dropping when the session worktree is
 pruned.
 

@@ -9,9 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
+	"github.com/modulecollective/moe/internal/stylesheet"
 	"github.com/modulecollective/moe/internal/trailers"
 	"github.com/modulecollective/moe/internal/twin"
 )
@@ -64,8 +66,8 @@ func commitAdvance(root string, md *run.Metadata, docID string) error {
 // §"Runs, Stages, And Canvases" for the trailer convention.
 //
 // extraPaths lists additional path specs (relative to root) to stage
-// alongside the document dir — the projectCommitDirs trees an sdlc
-// stage may write — so the operator always sees the agent's edits
+// alongside the document dir — the stageCommitPaths an sdlc stage
+// may write — so the operator always sees the agent's edits
 // there and the canvas snapshot moving together in git history.
 //
 // timedOut is the headless cap that killed this turn, or zero when the
@@ -152,9 +154,7 @@ func stageableFollowups(root string, md *run.Metadata) (string, bool) {
 // pointer. Extending this whitelist is a one-line change if a future
 // artifact class needs it.
 //
-// Also the single source of truth for the prompt sentence that tells
-// the agent these dirs are writable — see operationalCore — and for
-// whether a turn owes the project-doc hygiene gate.
+// The project-doc hygiene gate uses this narrower list.
 func projectCommitDirs(workflow string) []string {
 	if workflow == sdlcWorkflow {
 		return []string{"hooks", "chores", "knowledge", twin.DirRel}
@@ -162,20 +162,41 @@ func projectCommitDirs(workflow string) []string {
 	return nil
 }
 
-// stageProjectDirs is the ExtraStagePaths callback the sdlc workflow
-// hands runStageSession. It resolves projectCommitDirs against the
-// run's project and drops the ones that don't exist in the session
-// worktree — `git add --` fails on a pathspec matching nothing, and
-// most projects lack some of the dirs. Same conditional-stage shape as
-// stageableFollowups.
-func stageProjectDirs(workRoot string, md *run.Metadata) ([]string, error) {
+// stageCommitPaths is the single write-and-commit allowlist for paths
+// outside the run. The root stylesheet is global to every sdlc run.
+func stageCommitPaths(md *run.Metadata) []string {
 	var out []string
 	for _, name := range projectCommitDirs(md.Workflow) {
-		rel := filepath.Join(project.Dir(md.Project), name)
-		if _, err := os.Stat(filepath.Join(workRoot, rel)); err != nil {
+		out = append(out, filepath.Join(project.Dir(md.Project), name))
+	}
+	if md.Workflow == sdlcWorkflow {
+		out = append(out, stylesheet.FileName)
+	}
+	return out
+}
+
+// stageCommitPathsPresent is the ExtraStagePaths callback for sdlc
+// sessions. An absent project tree is skipped. The stylesheet is
+// included when present or tracked, so git add stages its deletion
+// without failing on a never-existing file.
+func stageCommitPathsPresent(workRoot string, md *run.Metadata) ([]string, error) {
+	var out []string
+	for _, rel := range stageCommitPaths(md) {
+		if _, err := os.Stat(filepath.Join(workRoot, rel)); err == nil {
+			out = append(out, rel)
 			continue
+		} else if !errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("stat stage path %s: %w", rel, err)
 		}
-		out = append(out, rel)
+		if rel == stylesheet.FileName {
+			tracked, err := git.Output(workRoot, "ls-files", "--", rel)
+			if err != nil {
+				return nil, err
+			}
+			if strings.TrimSpace(tracked) == rel {
+				out = append(out, rel)
+			}
+		}
 	}
 	return out, nil
 }

@@ -101,7 +101,7 @@ func runPushSynthesisSession(projectID, runID string, headless bool, stdout, std
 		Headless:        headless,
 		SkipNextStage:   true,
 		CanvasSkeleton:  pushCanvasSkeleton,
-		ExtraStagePaths: stageProjectDirs,
+		ExtraStagePaths: stageCommitPathsPresent,
 	}
 	return runStageSession(projectID, runID, "push", opts, stdout, stderr)
 }

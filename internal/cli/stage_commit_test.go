@@ -7,8 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/stylesheet"
 )
 
 // TestProjectCommitDirsPerWorkflow pins the whitelist: sdlc stages
@@ -35,12 +37,12 @@ func TestProjectCommitDirsPerWorkflow(t *testing.T) {
 // chores/. The callback stats before returning, so a project with only
 // one of the two still commits cleanly.
 func TestStageProjectDirsSkipsMissingDirs(t *testing.T) {
-	root := t.TempDir()
+	root := newTestBureaucracy(t)
 	if err := os.MkdirAll(filepath.Join(root, "projects", "tele", "chores"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	md := &run.Metadata{Project: "tele", ID: "fix-it", Workflow: sdlcWorkflow}
-	paths, err := stageProjectDirs(root, md)
+	paths, err := stageCommitPathsPresent(root, md)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,12 +52,115 @@ func TestStageProjectDirsSkipsMissingDirs(t *testing.T) {
 
 	// No project dirs at all: nothing to stage, no error.
 	bare := &run.Metadata{Project: "ghost", ID: "fix-it", Workflow: sdlcWorkflow}
-	paths, err = stageProjectDirs(root, bare)
+	paths, err = stageCommitPathsPresent(root, bare)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(paths) != 0 {
 		t.Fatalf("got %v, want none", paths)
+	}
+}
+
+func TestCommitTurnStagesRootStylesheet(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		initial    string
+		final      string
+		wantChange string
+	}{
+		{name: "modify", initial: "sdlc.code { model: old; }\n", final: "sdlc.code { model: new; }\n", wantChange: "M"},
+		{name: "create", final: "sdlc.code { model: new; }\n", wantChange: "A"},
+		{name: "delete", initial: "sdlc.code { model: old; }\n", wantChange: "D"},
+		{name: "never existed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := newTestBureaucracy(t)
+			if tc.initial != "" {
+				gittest.WriteAndCommit(t, root, stylesheet.FileName, tc.initial, "seed stylesheet")
+			}
+			gittest.WriteAndCommit(t, root, "unrelated.txt", "before\n", "seed unrelated")
+			if err := os.WriteFile(filepath.Join(root, "unrelated.txt"), []byte("after\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			unrelatedRel := filepath.Join("projects", "other", "knowledge", "stray.md")
+			gittest.WriteAndCommit(t, root, unrelatedRel, "before\n", "seed other project")
+			unrelatedProject := filepath.Join(root, unrelatedRel)
+			if err := os.WriteFile(unrelatedProject, []byte("stray\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			stylesheetPath := filepath.Join(root, stylesheet.FileName)
+			if tc.final != "" {
+				if err := os.WriteFile(stylesheetPath, []byte(tc.final), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			} else if tc.initial != "" {
+				if err := os.Remove(stylesheetPath); err != nil {
+					t.Fatal(err)
+				}
+			}
+			md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: sdlcWorkflow, Documents: map[string]*run.Document{}}
+			if _, _, err := run.EnsureDocument(root, md, "code"); err != nil {
+				t.Fatal(err)
+			}
+			canvas := run.ContentPath("tele", "fix-it", "code")
+			if err := os.WriteFile(filepath.Join(root, canvas), []byte("# code\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			chore := filepath.Join("projects", "tele", "chores", "check", "chore.json")
+			gittest.WriteAndCommit(t, root, chore, "old\n", "seed project artifact")
+			if err := os.WriteFile(filepath.Join(root, chore), []byte("new\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			extras, err := stageCommitPathsPresent(root, md)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := commitTurn(root, md, "code", 0, extras...); err != nil {
+				t.Fatal(err)
+			}
+			changes := gittest.Output(t, root, "diff-tree", "--no-commit-id", "--name-status", "-r", "HEAD")
+			for _, rel := range []string{canvas, chore} {
+				if !strings.Contains(changes, "\t"+rel+"\n") {
+					t.Errorf("turn commit missing %s:\n%s", rel, changes)
+				}
+			}
+			if strings.Contains(changes, "unrelated.txt") || strings.Contains(changes, filepath.Join("projects", "other")) {
+				t.Errorf("turn commit included unrelated paths:\n%s", changes)
+			}
+			want := tc.wantChange + "\t" + stylesheet.FileName + "\n"
+			if tc.wantChange != "" && !strings.Contains(changes, want) {
+				t.Errorf("turn commit missing stylesheet change %q:\n%s", want, changes)
+			}
+			if tc.wantChange == "" && strings.Contains(changes, "\t"+stylesheet.FileName+"\n") {
+				t.Errorf("turn commit unexpectedly included stylesheet:\n%s", changes)
+			}
+			if tc.final != "" {
+				got, err := git.Output(root, "show", "HEAD:"+stylesheet.FileName)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got != tc.final {
+					t.Errorf("committed stylesheet = %q, want %q", got, tc.final)
+				}
+			}
+		})
+	}
+}
+
+func TestNonSDLCCommitPathsExcludeStylesheet(t *testing.T) {
+	root := newTestBureaucracy(t)
+	if err := os.WriteFile(filepath.Join(root, stylesheet.FileName), []byte("sdlc.code { model: new; }\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, workflow := range []string{chatWorkflow, "pulse", "idea"} {
+		md := &run.Metadata{Project: "tele", Workflow: workflow}
+		paths, err := stageCommitPathsPresent(root, md)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(paths) != 0 {
+			t.Errorf("%s paths = %v, want none", workflow, paths)
+		}
 	}
 }
 
@@ -84,7 +189,7 @@ func TestCommitTurnCarriesSdlcChoreEdit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	extras, err := stageProjectDirs(root, md)
+	extras, err := stageCommitPathsPresent(root, md)
 	if err != nil {
 		t.Fatal(err)
 	}

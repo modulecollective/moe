@@ -165,9 +165,8 @@ type stageSessionOpts struct {
 	// root and the run metadata; it may write files inside the
 	// worktree (e.g. publish a synthesized artifact) and returns
 	// extra path specs (relative to workRoot) to stage in the same
-	// per-turn commit. Used by sdlc to stage the project's hooks/,
-	// chores/, and knowledge/ dirs alongside the canvas, so the
-	// edits the agent made there ride in one commit.
+	// per-turn commit. Used by sdlc to stage its allowed project trees
+	// and the root model stylesheet alongside the canvas.
 	ExtraStagePaths func(workRoot string, md *run.Metadata) ([]string, error)
 	// projectDocFixTurn marks a turn the project-doc hygiene gate itself
 	// dispatched to clear its findings. It suppresses the gate for that

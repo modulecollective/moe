@@ -8,6 +8,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/lore"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/stylesheet"
 	"github.com/modulecollective/moe/internal/twin"
 )
 
@@ -779,7 +780,7 @@ func TestBuildSystemPromptIncludesPriorRunsAfterProjectGuidance(t *testing.T) {
 // sentence tells the agent every bureaucracy path outside the run is
 // off-limits, so the dirs that *do* ride the turn commit need naming —
 // otherwise a stage that writes a chore assumes it dropped. Rendered
-// from projectCommitDirs, so it appears exactly where staging does.
+// from stageCommitPaths, so it appears exactly where staging does.
 func TestOperationalCoreNamesProjectCommitDirs(t *testing.T) {
 	root := newTestBureaucracy(t)
 	cases := []struct {
@@ -792,6 +793,8 @@ func TestOperationalCoreNamesProjectCommitDirs(t *testing.T) {
 			want: []string{
 				"projects/tele/hooks", "projects/tele/chores", "projects/tele/knowledge",
 				"projects/tele/digital-twin",
+				stylesheet.FileName,
+				"global model/backend selection; edit this session-worktree file for subsequent turns after landing",
 				// The knowledge line has to invite, not just permit —
 				// nothing else tells an agent a durable domain fact has a
 				// home, or that the close gate polices the tree's shape.
@@ -815,7 +818,7 @@ func TestOperationalCoreNamesProjectCommitDirs(t *testing.T) {
 			t.Fatal(err)
 		}
 		if tc.absent {
-			if strings.Contains(got, "commit also picks up edits under") {
+			if strings.Contains(got, "The exception:") {
 				t.Errorf("workflow %q should not advertise extra commit dirs:\n%s", tc.workflow, got)
 			}
 			continue
@@ -824,6 +827,35 @@ func TestOperationalCoreNamesProjectCommitDirs(t *testing.T) {
 			if !strings.Contains(got, want) {
 				t.Errorf("workflow %q prompt missing %q:\n%s", tc.workflow, want, got)
 			}
+		}
+	}
+}
+
+func TestSDLCPromptsAuthorizeRootStylesheet(t *testing.T) {
+	root := newTestBureaucracy(t)
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: sdlcWorkflow}
+	for _, stage := range []string{"design", "code", "test", "review", "push"} {
+		for _, readOnly := range []bool{false, true} {
+			got, _, err := buildSystemPrompt(root, md, stage, "/sandbox/clone", readOnly)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{
+				"session\nworktree. This turn's commit",
+				"projects/tele/hooks", "projects/tele/chores", "projects/tele/knowledge",
+				"projects/tele/digital-twin", stylesheet.FileName,
+				"never run `git add` or `git commit` in the bureaucracy worktree",
+			} {
+				if !strings.Contains(got, want) {
+					t.Errorf("%s readOnly=%t prompt missing %q", stage, readOnly, want)
+				}
+			}
+		}
+	}
+	for _, workflow := range []string{chatWorkflow, "pulse", "idea"} {
+		got := operationalCore(root, &run.Metadata{ID: "fix-it", Project: "tele", Workflow: workflow}, workflow, "", false)
+		if strings.Contains(got, stylesheet.FileName) {
+			t.Errorf("%s prompt grants stylesheet write", workflow)
 		}
 	}
 }
