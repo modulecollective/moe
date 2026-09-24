@@ -76,6 +76,9 @@ var modelPrices = []modelPrice{
 	// codex reports cumulative per-rollout totals that can't be split
 	// per request, so everything prices at the short-context rate.
 	{"gpt-6-astra", 10, 1, 50},
+	// GPT-6 Sol standard short-context rate verified 2026-09-24:
+	// https://developers.openai.com/api/docs/models/gpt-6-sol
+	{"gpt-6-sol", 2, 0.20, 10},
 	// Published promotional rate through at least 2026-11-21. There is no
 	// announced replacement rate, so the monthly pricing chore will
 	// re-verify it rather than guessing an automatic reversion.

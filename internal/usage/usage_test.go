@@ -382,9 +382,11 @@ func TestUsageNewPricesAggregateThroughParsers(t *testing.T) {
 		codexTurn("gpt-5.6-terra", 2_000_000, 1_000_000, 1_000_000))
 	seedThread(t, root, "tele", "new-prices", "review", "codex",
 		codexTurn("gpt-5.6-luna", 2_000_000, 1_000_000, 1_000_000))
+	seedThread(t, root, "tele", "new-prices", "push", "codex",
+		codexTurn("gpt-6-sol", 2_000_000, 1_000_000, 1_000_000))
 
 	rep := gather(t, root, Filter{Cutoff: now.Add(-24 * time.Hour)})
-	wantDollars := 0.25001 + 61 + 14.20 + 1.42
+	wantDollars := 0.25001 + 61 + 14.20 + 1.42 + 12.20
 	if rep.Dollars < wantDollars-0.000001 || rep.Dollars > wantDollars+0.000001 {
 		t.Errorf("dollars = %v, want %v", rep.Dollars, wantDollars)
 	}
@@ -584,6 +586,7 @@ func TestNotionalCostPublishedRates(t *testing.T) {
 		{"claude-fable-5-1", transcript.ModelUsage{Input: 1_000_000, CacheWrite: 1_000_000, CacheRead: 1_000_000, Output: 1_000_000}, 80.25},
 		{"claude-sonnet-5", transcript.ModelUsage{Input: 1_000_000, CacheWrite: 1_000_000, CacheRead: 1_000_000, Output: 1_000_000}, 16.20},
 		{"gpt-6-astra", transcript.ModelUsage{Input: 1_000_000, CacheRead: 1_000_000, Output: 1_000_000}, 61},
+		{"gpt-6-sol", transcript.ModelUsage{Input: 1_000_000, CacheRead: 1_000_000, Output: 1_000_000}, 12.20},
 		{"gpt-5.6-sol", transcript.ModelUsage{Input: 1_000_000, CacheRead: 1_000_000, Output: 1_000_000}, 24.40},
 		{"gpt-5.6-terra", transcript.ModelUsage{Input: 1_000_000, CacheRead: 1_000_000, Output: 1_000_000}, 14.20},
 		{"gpt-5.6-luna", transcript.ModelUsage{Input: 1_000_000, CacheRead: 1_000_000, Output: 1_000_000}, 1.42},
@@ -611,6 +614,7 @@ func TestModelPricesMatchPublishedRates(t *testing.T) {
 		{"claude-sonnet-5", 2, 0.20, 10},
 		{"claude-haiku-4-5", 1, 0.10, 5},
 		{"gpt-6-astra", 10, 1, 50},
+		{"gpt-6-sol", 2, 0.20, 10},
 		{"gpt-5.6-sol", 4, 0.40, 20},
 		{"gpt-5.6-terra", 2, 0.20, 12},
 		{"gpt-5.6-luna", 0.20, 0.02, 1.20},
@@ -635,6 +639,18 @@ func TestPriceForLongestPrefixWins(t *testing.T) {
 	}
 	if _, ok := priceFor("claude-opus"); ok {
 		t.Error("a prefix shorter than every entry must not match")
+	}
+	// This suffix is a lookup fixture, not a claimed vendor model ID.
+	if p, ok := priceFor("gpt-6-sol-test-suffix"); !ok || p.prefix != "gpt-6-sol" {
+		t.Errorf("priceFor(gpt-6-sol-test-suffix) = %+v ok=%v, want gpt-6-sol", p, ok)
+	}
+	for _, model := range []string{"gpt-6", "some-unlisted-model"} {
+		if _, ok := priceFor(model); ok {
+			t.Errorf("priceFor(%q) unexpectedly matched", model)
+		}
+	}
+	if got, ok := NotionalCost("some-unlisted-model", transcript.ModelUsage{Input: 1_000_000}); ok || got != 0 {
+		t.Errorf("NotionalCost(unknown) = %v ok=%v, want 0 false", got, ok)
 	}
 	for model, want := range map[string]float64{
 		"claude-fable-5":       1,
