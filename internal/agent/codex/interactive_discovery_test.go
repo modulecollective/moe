@@ -27,6 +27,10 @@ func rolloutMeta(id, cwd, source string) string {
 	return fmt.Sprintf(`{"type":"session_meta","payload":{"id":%q,"cwd":%q,"source":%q}}`+"\n", id, cwd, source)
 }
 
+func subagentRolloutMeta(id, cwd string) string {
+	return fmt.Sprintf(`{"type":"session_meta","payload":{"id":%q,"cwd":%q,"source":{"subagent":{"thread_spawn":{"parent_thread_id":%q,"depth":1}}}}}`+"\n", id, cwd, chatID)
+}
+
 func TestDiscoverSessionIDOwnedNewRollout(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CODEX_HOME", home)
@@ -68,7 +72,10 @@ func TestDiscoverSessionIDRejectsUnsafeOwnership(t *testing.T) {
 			return []struct{ id, body string }{{chatID, rolloutMeta(chatID, cwd, "exec")}}
 		}},
 		{"subagent source", func(cwd, foreign string) []struct{ id, body string } {
-			return []struct{ id, body string }{{chatID, rolloutMeta(chatID, cwd, "subagent")}}
+			return []struct{ id, body string }{{chatID, subagentRolloutMeta(chatID, cwd)}}
+		}},
+		{"invalid source", func(cwd, foreign string) []struct{ id, body string } {
+			return []struct{ id, body string }{{chatID, strings.Replace(rolloutMeta(chatID, cwd, "cli"), `"source":"cli"`, `"source":{"subagent":{}}`, 1)}}
 		}},
 		{"missing metadata", func(cwd, foreign string) []struct{ id, body string } {
 			return []struct{ id, body string }{{chatID, `{"type":"session_meta","payload":{"id":"x"}}`}}
@@ -97,6 +104,9 @@ func TestDiscoverSessionIDRejectsUnsafeOwnership(t *testing.T) {
 			got, err := discoverSessionID(before, cwd)
 			if got != "" || err == nil {
 				t.Fatalf("got %q, %v; want empty ID and error", got, err)
+			}
+			if tc.name == "invalid source" && !strings.Contains(err.Error(), "invalid session source") {
+				t.Fatalf("invalid source error hidden: %v", err)
 			}
 		})
 	}
@@ -137,9 +147,11 @@ func TestExecuteMirrorsOwnedInteractiveSession(t *testing.T) {
 	foreign := t.TempDir()
 	chatBody := rolloutMeta(chatID, root, "cli") + "chat\n"
 	pulseBody := rolloutMeta(pulseID, foreign, "exec") + "pulse\n"
-	script := fmt.Sprintf("#!/bin/sh\ncat > %q <<'EOF'\n%sEOF\ncat > %q <<'EOF'\n%sEOF\n",
+	subagentBody := subagentRolloutMeta(secondID, root) + "subagent\n"
+	script := fmt.Sprintf("#!/bin/sh\ncat > %q <<'EOF'\n%sEOF\ncat > %q <<'EOF'\n%sEOF\ncat > %q <<'EOF'\n%sEOF\n",
 		rolloutDest(t, home, "2026/09/24", chatID), chatBody,
-		rolloutDest(t, home, "2026/09/25", pulseID), pulseBody)
+		rolloutDest(t, home, "2026/09/25", pulseID), pulseBody,
+		rolloutDest(t, home, "2026/09/26", secondID), subagentBody)
 	script += fmt.Sprintf("touch -d '2030-01-01 00:00:00 UTC' %q\n", rolloutDest(t, home, "2026/09/25", pulseID))
 	fakeCodexOnPath(t, script)
 	md := &run.Metadata{Project: "p", ID: "r"}
@@ -156,12 +168,13 @@ func TestExecuteMirrorsOwnedInteractiveSession(t *testing.T) {
 
 func TestExecuteDiscoveryFailurePreservesMirrorAndChildError(t *testing.T) {
 	for _, tc := range []struct {
-		name, extra string
-		exit        int
+		name, extra, source string
+		exit                int
 	}{
-		{"foreign only", "", 0},
-		{"ambiguous", "local", 0},
-		{"child failure", "", 7},
+		{"foreign only", "", "", 0},
+		{"subagent only", "", "subagent", 0},
+		{"ambiguous", "local", "", 0},
+		{"child failure", "", "", 7},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			home := t.TempDir()
@@ -175,8 +188,12 @@ func TestExecuteDiscoveryFailurePreservesMirrorAndChildError(t *testing.T) {
 			if err := os.WriteFile(mirror, []byte("previous"), 0o644); err != nil {
 				t.Fatal(err)
 			}
+			body := rolloutMeta(pulseID, foreign, "cli")
+			if tc.source == "subagent" {
+				body = subagentRolloutMeta(pulseID, root)
+			}
 			script := fmt.Sprintf("#!/bin/sh\ncat > %q <<'EOF'\n%sEOF\n",
-				rolloutDest(t, home, "2026/09/24", pulseID), rolloutMeta(pulseID, foreign, "cli"))
+				rolloutDest(t, home, "2026/09/24", pulseID), body)
 			if tc.extra != "" {
 				script += fmt.Sprintf("cat > %q <<'EOF'\n%sEOF\n", rolloutDest(t, home, "2026/09/25", chatID), rolloutMeta(chatID, root, "cli"))
 				script += fmt.Sprintf("cat > %q <<'EOF'\n%sEOF\n", rolloutDest(t, home, "2026/09/26", secondID), rolloutMeta(secondID, root, "cli"))

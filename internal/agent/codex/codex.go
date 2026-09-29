@@ -591,9 +591,9 @@ func discoverSessionID(before map[string]struct{}, cwd string) (string, error) {
 		var meta struct {
 			Type    string `json:"type"`
 			Payload struct {
-				ID     string `json:"id"`
-				Cwd    string `json:"cwd"`
-				Source string `json:"source"`
+				ID     string          `json:"id"`
+				Cwd    string          `json:"cwd"`
+				Source json.RawMessage `json:"source"`
 			} `json:"payload"`
 		}
 		decodeErr := json.NewDecoder(file).Decode(&meta)
@@ -604,14 +604,18 @@ func discoverSessionID(before map[string]struct{}, cwd string) (string, error) {
 		if closeErr != nil {
 			return "", fmt.Errorf("close %s: %w", path, closeErr)
 		}
-		if meta.Type != "session_meta" || meta.Payload.ID == "" || meta.Payload.Cwd == "" || meta.Payload.Source == "" {
+		if meta.Type != "session_meta" || meta.Payload.ID == "" || meta.Payload.Cwd == "" || len(meta.Payload.Source) == 0 {
 			return "", fmt.Errorf("incomplete session metadata in %s", path)
+		}
+		cli, err := cliSessionSource(meta.Payload.Source)
+		if err != nil {
+			return "", fmt.Errorf("invalid session source in %s: %w", path, err)
 		}
 		id := parseSessionIDFromFilename(path)
 		if !validSessionID(id) || meta.Payload.ID != id {
 			return "", fmt.Errorf("session ID mismatch in %s", path)
 		}
-		if meta.Payload.Source != "cli" || !filepath.IsAbs(meta.Payload.Cwd) || filepath.Clean(meta.Payload.Cwd) != filepath.Clean(cwd) {
+		if !cli || !filepath.IsAbs(meta.Payload.Cwd) || filepath.Clean(meta.Payload.Cwd) != filepath.Clean(cwd) {
 			continue
 		}
 		if sid != "" {
@@ -623,6 +627,86 @@ func discoverSessionID(before map[string]struct{}, cwd string) (string, error) {
 		return "", fmt.Errorf("no interactive rollout for %s", cwd)
 	}
 	return sid, nil
+}
+
+// Codex serializes SessionSource as a string for unit variants and as a
+// tagged object for custom, internal, and subagent variants.
+func cliSessionSource(raw json.RawMessage) (bool, error) {
+	var name string
+	if raw[0] == '"' {
+		if err := json.Unmarshal(raw, &name); err != nil {
+			return false, err
+		}
+		if name == "" {
+			return false, errors.New("empty source")
+		}
+		return name == "cli", nil
+	}
+	if raw[0] != '{' {
+		return false, fmt.Errorf("expected string or object, got %s", raw)
+	}
+	var variants map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &variants); err != nil {
+		return false, err
+	}
+	if len(variants) != 1 {
+		return false, errors.New("source object must have one variant")
+	}
+	for variant, value := range variants {
+		switch variant {
+		case "custom", "internal":
+			if value[0] != '"' {
+				return false, fmt.Errorf("%s source must be a string", variant)
+			}
+			if err := json.Unmarshal(value, &name); err != nil {
+				return false, err
+			}
+			if variant == "internal" && name != "memory_consolidation" {
+				return false, fmt.Errorf("unknown internal source %q", name)
+			}
+		case "subagent":
+			if value[0] == '"' {
+				if err := json.Unmarshal(value, &name); err != nil {
+					return false, err
+				}
+				if name != "review" && name != "compact" && name != "memory_consolidation" {
+					return false, fmt.Errorf("unknown subagent source %q", name)
+				}
+			} else {
+				var subagent map[string]json.RawMessage
+				if err := json.Unmarshal(value, &subagent); err != nil {
+					return false, err
+				}
+				if len(subagent) != 1 {
+					return false, errors.New("subagent source must have one variant")
+				}
+				for kind, details := range subagent {
+					switch kind {
+					case "other":
+						if details[0] != '"' {
+							return false, errors.New("subagent other source must be a string")
+						}
+					case "thread_spawn":
+						var spawn struct {
+							ParentThreadID string `json:"parent_thread_id"`
+							Depth          *int   `json:"depth"`
+						}
+						if err := json.Unmarshal(details, &spawn); err != nil {
+							return false, err
+						}
+						if !validSessionID(spawn.ParentThreadID) || spawn.Depth == nil {
+							return false, errors.New("incomplete subagent thread spawn")
+						}
+					default:
+						return false, fmt.Errorf("unknown subagent source variant %q", kind)
+					}
+				}
+			}
+		default:
+			return false, fmt.Errorf("unknown source variant %q", variant)
+		}
+	}
+	return false, nil
 }
 
 func validSessionID(id string) bool {
