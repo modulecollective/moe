@@ -2,6 +2,7 @@ package transcript
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -107,5 +108,52 @@ func TestSummariseCustomToolInput(t *testing.T) {
 	in = "*** Add File: new.txt\nhello\n"
 	if got := summariseCustomToolInput(in); got != "new.txt" {
 		t.Errorf("got %q, want new.txt", got)
+	}
+}
+
+func TestParseCodexTaskCompleteError(t *testing.T) {
+	cases := []struct {
+		name string
+		line string
+		want []string
+	}{
+		{
+			// Verbatim shape from the 2026-09-29 update-sol incident.
+			"json-envelope",
+			`{"timestamp":"2026-09-29T11:23:52.000Z","type":"event_msg","payload":{"type":"task_complete","last_agent_message":null,"error":{"message":"{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account.\"}}","codex_error_info":"other"}}}`,
+			[]string{"codex turn failed (400 invalid_request_error): The 'gpt-6.1-sol' model is not supported when using Codex with a ChatGPT account."},
+		},
+		{
+			"plain-text",
+			`{"type":"event_msg","payload":{"type":"task_complete","last_agent_message":null,"error":{"message":"This content was flagged for possible cybersecurity risk.","codex_error_info":"other"}}}`,
+			[]string{"codex turn failed: This content was flagged for possible cybersecurity risk."},
+		},
+		{
+			// Every successful turn ends like this; it must stay silent.
+			"no-error",
+			`{"type":"event_msg","payload":{"type":"task_complete","last_agent_message":"done","error":null}}`,
+			nil,
+		},
+		{
+			"no-error-field",
+			`{"type":"event_msg","payload":{"type":"task_complete","last_agent_message":"done"}}`,
+			nil,
+		},
+	}
+	for _, c := range cases {
+		events, err := parseCodex(strings.NewReader(c.line + "\n"))
+		if err != nil {
+			t.Fatalf("%s: parse: %v", c.name, err)
+		}
+		var got []string
+		for _, e := range events {
+			if e.Kind != KindSystem {
+				t.Errorf("%s: event kind = %v, want KindSystem", c.name, e.Kind)
+			}
+			got = append(got, e.Text)
+		}
+		if strings.Join(got, "\n") != strings.Join(c.want, "\n") || len(got) != len(c.want) {
+			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
+		}
 	}
 }

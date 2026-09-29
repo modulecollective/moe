@@ -42,6 +42,11 @@ type codexPayload struct {
 	Output string `json:"output,omitempty"`
 	// event_msg variants we surface
 	Reason string `json:"reason,omitempty"`
+	// task_complete: non-nil when the turn ended on an API or policy
+	// error rather than a finished answer.
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error,omitempty"`
 	// turn_context: the model codex ran the turn under. Tracked as parse
 	// state and stamped onto every event until the next turn_context.
 	Model string `json:"model,omitempty"`
@@ -168,15 +173,48 @@ func codexEventMsg(p codexPayload, ts time.Time) []Event {
 	// user_message ~= response_item.message user) or are pure
 	// bookkeeping (token_count, task_started, task_complete,
 	// patch_apply_end). turn_aborted is the one the operator needs:
-	// it's the proximate signal that the one-shot bailed.
-	if p.Type == "turn_aborted" {
+	// it's the proximate signal that the one-shot bailed. A
+	// task_complete carrying an error is the other: codex's only record
+	// of why the turn died (a rejected model, a policy refusal).
+	switch {
+	case p.Type == "turn_aborted":
 		msg := "codex turn aborted"
 		if p.Reason != "" {
 			msg = "codex turn aborted: " + p.Reason
 		}
 		return []Event{{Kind: KindSystem, Time: ts, Text: msg}}
+	case p.Type == "task_complete" && p.Error != nil:
+		return []Event{{Kind: KindSystem, Time: ts, Text: codexTurnError(p.Error.Message)}}
 	}
 	return nil
+}
+
+// codexTurnError renders a task_complete error message. API errors
+// arrive as a JSON envelope ({"type":"error","status":400,"error":
+// {"type":…,"message":…}}) and unwrap to status, type and the inner
+// message; anything else (policy refusals are plain text) renders raw.
+func codexTurnError(raw string) string {
+	var env struct {
+		Status int `json:"status"`
+		Error  struct {
+			Type    string `json:"type"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if json.Unmarshal([]byte(raw), &env) != nil || env.Error.Message == "" {
+		return "codex turn failed: " + raw
+	}
+	var tag []string
+	if env.Status != 0 {
+		tag = append(tag, fmt.Sprint(env.Status))
+	}
+	if env.Error.Type != "" {
+		tag = append(tag, env.Error.Type)
+	}
+	if len(tag) == 0 {
+		return "codex turn failed: " + env.Error.Message
+	}
+	return fmt.Sprintf("codex turn failed (%s): %s", strings.Join(tag, " "), env.Error.Message)
 }
 
 func flattenCodexContent(blocks []struct {
