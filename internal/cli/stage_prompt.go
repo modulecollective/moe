@@ -523,7 +523,7 @@ The harness commits run artifacts after the turn; never run ` + "`git add` or `g
 			filepath.Join(project.Dir(md.Project), "chores"):    "chore definitions (`chore.json` + `prompt.md`); `moe chore check` is the dry run",
 			filepath.Join(project.Dir(md.Project), "knowledge"): "the project's durable domain reference — research findings, external surveys, facts worth citing across runs",
 			filepath.Join(project.Dir(md.Project), twin.DirRel): "the project's recorded intent; the `moe-twin` skill has the writing contract",
-			stylesheet.FileName: "global model/backend selection; edit this session-worktree file for subsequent turns after landing",
+			proposedStylesheetPath(md):                          "proposed model/backend selection: a full replacement for the root `" + stylesheet.FileName + "` (copy it here, then edit); moe applies it when this run ships, and turns keep using the root file until then",
 		}
 		paths := make([]string, len(allowed))
 		for i, name := range allowed {

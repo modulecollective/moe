@@ -16,6 +16,7 @@ import (
 	"github.com/modulecollective/moe/internal/push"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/stylesheet"
 	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/trailers"
 )
@@ -246,6 +247,10 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 		moePrintf(stderr, "%v\n", err)
 		return 1, nil
 	}
+	if err := checkProposedStylesheet(root, md); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1, nil
+	}
 
 	clonePath, err := sandboxClonePath(root, md)
 	if err != nil {
@@ -440,8 +445,10 @@ func closeNoShipRun(root string, md *run.Metadata, pj *project.Metadata, clonePa
 	// honestly at a glance: this close ended a run that shipped nothing,
 	// not one the operator abandoned.
 	subject := reg.subject + " — no ship: no project change"
-	if err := closeRunInProcess(root, md.Workflow, subject, reg.cleanup, md.Project, md.ID,
+	cleanup, restoreStylesheet := stylesheetCloseCleanup(reg.cleanup)
+	if err := closeRunInProcess(root, md.Workflow, subject, cleanup, md.Project, md.ID,
 		opts.SkipTerminalEdit, stderr); err != nil {
+		restoreStylesheet(root)
 		moePrintf(stderr, "%v\n", err)
 		return 1, true
 	}
@@ -577,6 +584,18 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch stri
 		if firstPush {
 			consent = walkConsent()
 		}
+		// The PR route's last point moe controls is the PR opening —
+		// the merge happens on GitHub — so the proposed stylesheet
+		// applies with this record.
+		paths := []string{runJSON}
+		sheetRel, err := applyProposedStylesheet(root, md)
+		if err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 1
+		}
+		if sheetRel != "" {
+			paths = append(paths, sheetRel)
+		}
 		msg := fmt.Sprintf("push: %s/%s\n\n", md.Project, md.ID) +
 			trailers.Block{
 				Run:      md.ID,
@@ -586,15 +605,15 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch stri
 				PR:       url,
 				Consent:  consent,
 			}.String()
-		err := repolock.With(root, repolock.Options{
+		err = repolock.With(root, repolock.Options{
 			Purpose: "push-pr",
 			Run:     md.Project + "/" + md.ID,
 		}, func() error {
-			return run.StageAndCommit(root, msg, runJSON)
+			return run.StageAndCommit(root, msg, paths...)
 		})
 		if err != nil {
 			moePrintf(stderr, "commit push record: %v\n", err)
-			if werr := savePRRecordPending(root, md, &pendingPRRecord{Msg: msg, URL: url}); werr != nil {
+			if werr := savePRRecordPending(root, md, &pendingPRRecord{Msg: msg, URL: url, Stylesheet: sheetRel != ""}); werr != nil {
 				moePrintf(stderr, "warning: save %s: %v\n", prRecordPendingName, werr)
 			}
 			moePrintf(stderr, "       the PR exists; only the local push record is missing —\n"+
@@ -621,9 +640,12 @@ const prRecordPendingName = "pr-record.pending"
 // pendingPRRecord preserves the inputs a later invocation cannot infer
 // faithfully. In particular, Msg carries MoE-Consent from the shipping
 // walk verbatim; URL is retained for the recovery success print.
+// Stylesheet says the record applied the run's proposed stylesheet, so
+// the resume stages the root file the failed commit left modified.
 type pendingPRRecord struct {
-	Msg string `json:"msg"`
-	URL string `json:"url"`
+	Msg        string `json:"msg"`
+	URL        string `json:"url"`
+	Stylesheet bool   `json:"stylesheet,omitempty"`
 }
 
 func prRecordPendingPath(root string, md *run.Metadata) string {
@@ -673,12 +695,15 @@ var removePRRecordPending = func(root string, md *run.Metadata) error {
 // push, and GitHub calls. ErrNothingToCommit means an operator already
 // landed the staged record by hand, which is successful recovery.
 func resumePRRecord(root string, md *run.Metadata, pending *pendingPRRecord, stdout, stderr io.Writer) int {
-	runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
+	paths := []string{filepath.Join(run.Dir(md.Project, md.ID), "run.json")}
+	if pending.Stylesheet {
+		paths = append(paths, stylesheet.FileName)
+	}
 	err := repolock.With(root, repolock.Options{
 		Purpose: "push-pr",
 		Run:     md.Project + "/" + md.ID,
 	}, func() error {
-		if err := run.StageAndCommit(root, pending.Msg, runJSON); err != nil && !errors.Is(err, run.ErrNothingToCommit) {
+		if err := run.StageAndCommit(root, pending.Msg, paths...); err != nil && !errors.Is(err, run.ErrNothingToCommit) {
 			return err
 		}
 		return nil
@@ -781,6 +806,17 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 		return 1, nil
 	}
 	paths = append(paths, pushCanvasPath)
+	// After the ff-push, so a rejected merge leaves the root untouched.
+	// Riding paths means a failed record commit's pending marker carries
+	// the root stylesheet into resumeMergeRecord too.
+	sheetRel, err := applyProposedStylesheet(root, md)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1, nil
+	}
+	if sheetRel != "" {
+		paths = append(paths, sheetRel)
+	}
 
 	// This merge path is the one `!!`/`!!!` cascades ship through, so
 	// the stamp doubles as the provenance claim the run page reads —

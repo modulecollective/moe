@@ -246,10 +246,15 @@ with no registered backend all refuse at load — with the offending line and th
 set of known names — so a typo that would otherwise match nothing forever
 surfaces on the next turn. Model values are the one exception (see below).
 
-An SDLC stage may edit or remove the root `model-stylesheet.css` in its
-bureaucracy session worktree. The edit lands with that turn's canvas and
-affects subsequent turns after landing; the current turn uses the rules it
-loaded at entry. This file is global across projects.
+This file is global across projects, so SDLC stages don't edit it directly. A
+stage proposes a change by writing a full replacement at
+`projects/<p>/runs/<id>/model-stylesheet.css`, which lands with that turn's
+canvas. `moe push` validates the proposal before any origin work — a sheet that
+wouldn't load refuses the push — and copies it over the root file in the commit
+where the run ships: the ff-merge record, the PR record when the PR opens, or
+the `ship: none` close. Until then every turn, the proposing run's included,
+keeps using the root file. A run closed by hand never applies its proposal; the
+run copy stays as the record of what was proposed.
 
 **Grammar.** CSS-ish `selector { property: value; ... }` rules plus `/* ... */`
 comments. Two properties in v1:

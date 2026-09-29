@@ -61,7 +61,10 @@ func TestStageProjectDirsSkipsMissingDirs(t *testing.T) {
 	}
 }
 
-func TestCommitTurnStagesRootStylesheet(t *testing.T) {
+// TestCommitTurnStagesProposedStylesheet: a stage proposes a model switch
+// in its run dir, and the turn commit carries every shape of that edit.
+func TestCommitTurnStagesProposedStylesheet(t *testing.T) {
+	proposed := filepath.Join(run.Dir("tele", "fix-it"), stylesheet.FileName)
 	for _, tc := range []struct {
 		name       string
 		initial    string
@@ -76,7 +79,7 @@ func TestCommitTurnStagesRootStylesheet(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			root := newTestBureaucracy(t)
 			if tc.initial != "" {
-				gittest.WriteAndCommit(t, root, stylesheet.FileName, tc.initial, "seed stylesheet")
+				gittest.WriteAndCommit(t, root, proposed, tc.initial, "seed stylesheet")
 			}
 			gittest.WriteAndCommit(t, root, "unrelated.txt", "before\n", "seed unrelated")
 			if err := os.WriteFile(filepath.Join(root, "unrelated.txt"), []byte("after\n"), 0o644); err != nil {
@@ -88,7 +91,16 @@ func TestCommitTurnStagesRootStylesheet(t *testing.T) {
 			if err := os.WriteFile(unrelatedProject, []byte("stray\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			stylesheetPath := filepath.Join(root, stylesheet.FileName)
+			// The root stylesheet is no longer a stage path: an edit
+			// there must stay out of the turn commit, not go live.
+			gittest.WriteAndCommit(t, root, stylesheet.FileName, "* { model: live; }\n", "seed root stylesheet")
+			if err := os.WriteFile(filepath.Join(root, stylesheet.FileName), []byte("* { model: early; }\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			stylesheetPath := filepath.Join(root, proposed)
+			if err := os.MkdirAll(filepath.Dir(stylesheetPath), 0o755); err != nil {
+				t.Fatal(err)
+			}
 			if tc.final != "" {
 				if err := os.WriteFile(stylesheetPath, []byte(tc.final), 0o644); err != nil {
 					t.Fatal(err)
@@ -127,15 +139,18 @@ func TestCommitTurnStagesRootStylesheet(t *testing.T) {
 			if strings.Contains(changes, "unrelated.txt") || strings.Contains(changes, filepath.Join("projects", "other")) {
 				t.Errorf("turn commit included unrelated paths:\n%s", changes)
 			}
-			want := tc.wantChange + "\t" + stylesheet.FileName + "\n"
+			if strings.Contains(changes, "\t"+stylesheet.FileName+"\n") {
+				t.Errorf("turn commit included the root stylesheet:\n%s", changes)
+			}
+			want := tc.wantChange + "\t" + proposed + "\n"
 			if tc.wantChange != "" && !strings.Contains(changes, want) {
 				t.Errorf("turn commit missing stylesheet change %q:\n%s", want, changes)
 			}
-			if tc.wantChange == "" && strings.Contains(changes, "\t"+stylesheet.FileName+"\n") {
+			if tc.wantChange == "" && strings.Contains(changes, "\t"+proposed+"\n") {
 				t.Errorf("turn commit unexpectedly included stylesheet:\n%s", changes)
 			}
 			if tc.final != "" {
-				got, err := git.Output(root, "show", "HEAD:"+stylesheet.FileName)
+				got, err := git.Output(root, "show", "HEAD:"+proposed)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -149,11 +164,15 @@ func TestCommitTurnStagesRootStylesheet(t *testing.T) {
 
 func TestNonSDLCCommitPathsExcludeStylesheet(t *testing.T) {
 	root := newTestBureaucracy(t)
-	if err := os.WriteFile(filepath.Join(root, stylesheet.FileName), []byte("sdlc.code { model: new; }\n"), 0o644); err != nil {
+	proposed := filepath.Join(root, run.Dir("tele", "fix-it"), stylesheet.FileName)
+	if err := os.MkdirAll(filepath.Dir(proposed), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(proposed, []byte("sdlc.code { model: new; }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	for _, workflow := range []string{chatWorkflow, "pulse", "idea"} {
-		md := &run.Metadata{Project: "tele", Workflow: workflow}
+		md := &run.Metadata{Project: "tele", ID: "fix-it", Workflow: workflow}
 		paths, err := stageCommitPathsPresent(root, md)
 		if err != nil {
 			t.Fatal(err)

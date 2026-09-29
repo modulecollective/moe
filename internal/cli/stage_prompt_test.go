@@ -793,8 +793,9 @@ func TestOperationalCoreNamesProjectCommitDirs(t *testing.T) {
 			want: []string{
 				"projects/tele/hooks", "projects/tele/chores", "projects/tele/knowledge",
 				"projects/tele/digital-twin",
-				stylesheet.FileName,
-				"global model/backend selection; edit this session-worktree file for subsequent turns after landing",
+				"projects/tele/runs/fix-it/model-stylesheet.css",
+				"proposed model/backend selection: a full replacement for the root `model-stylesheet.css`",
+				"moe applies it when this run ships",
 				// The knowledge line has to invite, not just permit —
 				// nothing else tells an agent a durable domain fact has a
 				// home, or that the close gate polices the tree's shape.
@@ -831,7 +832,7 @@ func TestOperationalCoreNamesProjectCommitDirs(t *testing.T) {
 	}
 }
 
-func TestSDLCPromptsAuthorizeRootStylesheet(t *testing.T) {
+func TestSDLCPromptsAuthorizeProposedStylesheet(t *testing.T) {
 	root := newTestBureaucracy(t)
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: sdlcWorkflow}
 	for _, stage := range []string{"design", "code", "test", "review", "push"} {
@@ -843,7 +844,7 @@ func TestSDLCPromptsAuthorizeRootStylesheet(t *testing.T) {
 			for _, want := range []string{
 				"session\nworktree. This turn's commit",
 				"projects/tele/hooks", "projects/tele/chores", "projects/tele/knowledge",
-				"projects/tele/digital-twin", stylesheet.FileName,
+				"projects/tele/digital-twin", "projects/tele/runs/fix-it/" + stylesheet.FileName,
 				"never run `git add` or `git commit` in the bureaucracy worktree",
 			} {
 				if !strings.Contains(got, want) {

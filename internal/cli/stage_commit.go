@@ -163,22 +163,32 @@ func projectCommitDirs(workflow string) []string {
 }
 
 // stageCommitPaths is the single write-and-commit allowlist for paths
-// outside the run. The root stylesheet is global to every sdlc run.
+// outside the run's documents. sdlc runs may also propose a model
+// stylesheet: a run-scoped full replacement for the root file, which
+// push applies when the run ships (applyProposedStylesheet). Stages never
+// write the root file itself — a switch that went live at turn close
+// would steer every run on the box before this one's code had shipped.
 func stageCommitPaths(md *run.Metadata) []string {
 	var out []string
 	for _, name := range projectCommitDirs(md.Workflow) {
 		out = append(out, filepath.Join(project.Dir(md.Project), name))
 	}
 	if md.Workflow == sdlcWorkflow {
-		out = append(out, stylesheet.FileName)
+		out = append(out, proposedStylesheetPath(md))
 	}
 	return out
 }
 
+// proposedStylesheetPath is the run's proposed replacement for the root
+// model stylesheet, relative to the bureaucracy root.
+func proposedStylesheetPath(md *run.Metadata) string {
+	return filepath.Join(run.Dir(md.Project, md.ID), stylesheet.FileName)
+}
+
 // stageCommitPathsPresent is the ExtraStagePaths callback for sdlc
-// sessions. An absent project tree is skipped. The stylesheet is
-// included when present or tracked, so git add stages its deletion
-// without failing on a never-existing file.
+// sessions. An absent project tree is skipped. The proposed stylesheet
+// is included when present or tracked, so git add stages a withdrawn
+// proposal's deletion without failing on a never-existing file.
 func stageCommitPathsPresent(workRoot string, md *run.Metadata) ([]string, error) {
 	var out []string
 	for _, rel := range stageCommitPaths(md) {
@@ -188,7 +198,7 @@ func stageCommitPathsPresent(workRoot string, md *run.Metadata) ([]string, error
 		} else if !errors.Is(err, fs.ErrNotExist) {
 			return nil, fmt.Errorf("stat stage path %s: %w", rel, err)
 		}
-		if rel == stylesheet.FileName {
+		if rel == proposedStylesheetPath(md) {
 			tracked, err := git.Output(workRoot, "ls-files", "--", rel)
 			if err != nil {
 				return nil, err
