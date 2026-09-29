@@ -79,6 +79,9 @@ var modelPrices = []modelPrice{
 	// GPT-6 Sol standard short-context rate verified 2026-09-24:
 	// https://developers.openai.com/api/docs/models/gpt-6-sol
 	{"gpt-6-sol", 2, 0.20, 10},
+	// GPT-6.1 Sol standard rate verified 2026-09-29:
+	// https://openai.com/index/introducing-gpt-6-1-sol/
+	{"gpt-6.1-sol", 2, 0.10, 10},
 	// Published promotional rate through at least 2026-11-21. There is no
 	// announced replacement rate, so the monthly pricing chore will
 	// re-verify it rather than guessing an automatic reversion.
