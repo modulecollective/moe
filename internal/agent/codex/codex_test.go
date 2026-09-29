@@ -113,36 +113,6 @@ func TestCopyTranscriptAbsent(t *testing.T) {
 	}
 }
 
-// TestDiscoverSessionIDPicksNewestSinceTurnStart verifies the
-// post-turn id-readback: plant two rollout files, one older than the
-// turn-start cutoff and one newer; the newer one's id is returned.
-func TestDiscoverSessionIDPicksNewestSinceTurnStart(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("CODEX_HOME", tmp)
-
-	now := time.Now().UTC()
-	shard := filepath.Join(now.Format("2006"), now.Format("01"), now.Format("02"))
-
-	oldSid := "00000000-0000-0000-0000-000000000001"
-	newSid := "00000000-0000-0000-0000-000000000002"
-	oldPath := writeFakeRollout(t, tmp, shard, oldSid, "old\n")
-	newPath := writeFakeRollout(t, tmp, shard, newSid, "new\n")
-
-	// Backdate the "old" file's mtime to before our turnStart, and
-	// touch "new" to now so it wins the newest-after-since contest.
-	turnStart := now.Add(-1 * time.Second)
-	if err := os.Chtimes(oldPath, now.Add(-1*time.Hour), now.Add(-1*time.Hour)); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chtimes(newPath, now, now); err != nil {
-		t.Fatal(err)
-	}
-
-	if got := discoverSessionID(turnStart); got != newSid {
-		t.Errorf("discoverSessionID = %q, want %q", got, newSid)
-	}
-}
-
 // TestExecuteArgsAppendsAddDirsBeforeApproval pins the codex
 // interactive-path shape: every AddDirs entry becomes a `--add-dir <dir>`
 // pair, the pairs land after commonArgs (which adds the clone path

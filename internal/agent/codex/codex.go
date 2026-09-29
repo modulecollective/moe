@@ -47,7 +47,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/procgroup"
@@ -130,10 +129,7 @@ type Agent struct{}
 // passed in); otherwise it's r.SessionID echoed back.
 //
 // The interactive TUI has no JSON stdout to read, so first-turn id
-// readback uses the rollout-file glob: list
-// `~/.codex/sessions/<today>/rollout-*.jsonl` for files mtime'd
-// during the turn window, pick the newest, parse the `<uuid>` suffix
-// out of its filename.
+// readback finds a newly created rollout whose metadata names this cwd.
 func (Agent) Execute(r agent.Request) (string, error) {
 	bin, err := exec.LookPath("codex")
 	if err != nil {
@@ -167,7 +163,13 @@ func (Agent) Execute(r agent.Request) (string, error) {
 		cmd.Stderr = os.Stderr
 	}
 
-	turnStart := time.Now()
+	var before map[string]struct{}
+	if r.NewSession {
+		before, err = rolloutSnapshot()
+		if err != nil {
+			return "", fmt.Errorf("codex: snapshot interactive rollouts: %w", err)
+		}
+	}
 	// Route through agent.StartCommand so an operator Ctrl-C while
 	// codex is running becomes a non-nil runErr (ErrInterrupted) rather
 	// than a clean-looking exit; non-zero codex exits keep their
@@ -180,15 +182,11 @@ func (Agent) Execute(r agent.Request) (string, error) {
 		runErr = ac.Wait()
 	}
 
-	// First-turn id discovery: glob rollout files created since
-	// turnStart, take the newest, parse its <uuid> suffix. On miss
-	// (codex was killed before writing turn 1) keep r.SessionID so
-	// stage.go's pre-flight will catch the absent transcript and
-	// re-mint on the next turn.
 	sid := r.SessionID
 	if r.NewSession {
-		if found := discoverSessionID(turnStart); found != "" {
-			sid = found
+		sid, err = discoverSessionID(before, r.Root)
+		if err != nil {
+			return "", errors.Join(runErr, fmt.Errorf("codex: discover interactive session: %w", err))
 		}
 	}
 
@@ -529,46 +527,118 @@ func tomlMultilineBasic(s string) string {
 	return `"""` + s + `"""`
 }
 
-// discoverSessionID picks the newest rollout file modified at or after
-// since (the turn-start timestamp), parses its session uuid suffix,
-// and returns it. Returns "" when no fresh rollout exists — caller
-// keeps its prior id and lets the next turn's pre-flight catch the
-// missing transcript.
-func discoverSessionID(since time.Time) string {
+// rolloutSnapshot records paths across every date shard. Paths, rather
+// than mtimes, exclude old sessions touched during this turn.
+func rolloutSnapshot() (map[string]struct{}, error) {
 	root := sessionsDir()
 	if root == "" {
-		return ""
+		return nil, errors.New("sessions directory unavailable")
 	}
-	// Glob today and yesterday — a turn that straddles UTC midnight
-	// would otherwise miss its own rollout. Costlier globs (full
-	// month) buy nothing in this two-window case.
-	today := time.Now().UTC()
-	candidates := []string{
-		filepath.Join(root, today.Format("2006"), today.Format("01"), today.Format("02"), "rollout-*.jsonl"),
-		filepath.Join(root, today.Add(-24*time.Hour).Format("2006"), today.Add(-24*time.Hour).Format("01"), today.Add(-24*time.Hour).Format("02"), "rollout-*.jsonl"),
+	snapshot := make(map[string]struct{})
+	info, err := os.Stat(root)
+	if errors.Is(err, fs.ErrNotExist) {
+		return snapshot, nil // Codex may not have created sessions/ yet.
 	}
-	var newestPath string
-	var newestMtime time.Time
-	for _, pat := range candidates {
-		matches, err := filepath.Glob(pat)
+	if err != nil {
+		return nil, fmt.Errorf("stat sessions directory: %w", err)
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("sessions path %s is not a directory", root)
+	}
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		return nil, fmt.Errorf("resolve sessions directory: %w", err)
+	}
+	err = filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(root, path)
 		if err != nil {
+			return err
+		}
+		parts := strings.Split(rel, string(os.PathSeparator))
+		if entry.IsDir() && len(parts) > 3 {
+			return filepath.SkipDir
+		}
+		if !entry.IsDir() && len(parts) == 4 && strings.HasPrefix(entry.Name(), "rollout-") && strings.HasSuffix(entry.Name(), ".jsonl") {
+			snapshot[path] = struct{}{}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("scan rollouts: %w", err)
+	}
+	return snapshot, nil
+}
+
+// discoverSessionID accepts exactly one new interactive rollout owned by
+// cwd. A missing or ambiguous owner cannot safely bind the run.
+func discoverSessionID(before map[string]struct{}, cwd string) (string, error) {
+	after, err := rolloutSnapshot()
+	if err != nil {
+		return "", err
+	}
+	var sid string
+	for path := range after {
+		if _, existed := before[path]; existed {
 			continue
 		}
-		for _, m := range matches {
-			info, err := os.Stat(m)
-			if err != nil || info.ModTime().Before(since) {
-				continue
+		file, err := os.Open(path)
+		if err != nil {
+			return "", fmt.Errorf("open %s: %w", path, err)
+		}
+		var meta struct {
+			Type    string `json:"type"`
+			Payload struct {
+				ID     string `json:"id"`
+				Cwd    string `json:"cwd"`
+				Source string `json:"source"`
+			} `json:"payload"`
+		}
+		decodeErr := json.NewDecoder(file).Decode(&meta)
+		closeErr := file.Close()
+		if decodeErr != nil {
+			return "", fmt.Errorf("decode %s session metadata: %w", path, decodeErr)
+		}
+		if closeErr != nil {
+			return "", fmt.Errorf("close %s: %w", path, closeErr)
+		}
+		if meta.Type != "session_meta" || meta.Payload.ID == "" || meta.Payload.Cwd == "" || meta.Payload.Source == "" {
+			return "", fmt.Errorf("incomplete session metadata in %s", path)
+		}
+		id := parseSessionIDFromFilename(path)
+		if !validSessionID(id) || meta.Payload.ID != id {
+			return "", fmt.Errorf("session ID mismatch in %s", path)
+		}
+		if meta.Payload.Source != "cli" || !filepath.IsAbs(meta.Payload.Cwd) || filepath.Clean(meta.Payload.Cwd) != filepath.Clean(cwd) {
+			continue
+		}
+		if sid != "" {
+			return "", fmt.Errorf("multiple interactive rollouts for %s", cwd)
+		}
+		sid = id
+	}
+	if sid == "" {
+		return "", fmt.Errorf("no interactive rollout for %s", cwd)
+	}
+	return sid, nil
+}
+
+func validSessionID(id string) bool {
+	if len(id) != 36 {
+		return false
+	}
+	for i, c := range id {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if c != '-' {
+				return false
 			}
-			if info.ModTime().After(newestMtime) {
-				newestPath = m
-				newestMtime = info.ModTime()
-			}
+		} else if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
 		}
 	}
-	if newestPath == "" {
-		return ""
-	}
-	return parseSessionIDFromFilename(newestPath)
+	return true
 }
 
 // parseSessionIDFromFilename extracts the trailing UUID from a codex
