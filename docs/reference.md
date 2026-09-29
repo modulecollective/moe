@@ -249,12 +249,12 @@ surfaces on the next turn. Model values are the one exception (see below).
 This file is global across projects, so SDLC stages don't edit it directly. A
 stage proposes a change by writing a full replacement at
 `projects/<p>/runs/<id>/model-stylesheet.css`, which lands with that turn's
-canvas. `moe push` validates the proposal before any origin work — a sheet that
-wouldn't load refuses the push — and copies it over the root file in the commit
-where the run ships: the ff-merge record, the PR record when the PR opens, or
-the `ship: none` close. Until then every turn, the proposing run's included,
-keeps using the root file. A run closed by hand never applies its proposal; the
-run copy stays as the record of what was proposed.
+canvas. `moe sdlc push` validates the proposal before any origin work — a sheet
+that wouldn't load refuses the push — and copies it over the root file in the
+commit where the run ships: the ff-merge record, the PR record when the PR
+opens, or the `ship: none` close. Until then every turn, the proposing run's
+included, keeps using the root file. A run closed by hand never applies its
+proposal; the run copy stays as the record of what was proposed.
 
 **Grammar.** CSS-ish `selector { property: value; ... }` rules plus `/* ... */`
 comments. Two properties in v1:
