@@ -121,6 +121,144 @@ func TestRenderBlocks(t *testing.T) {
 	}
 }
 
+func TestRenderTables(t *testing.T) {
+	const open = "<div class=\"table-scroll\"><table>\n<thead><tr>"
+	const middle = "</tr></thead>\n<tbody>\n"
+	const close = "</tbody>\n</table></div>\n"
+	cases := []struct {
+		name, in, want string
+	}{
+		{
+			"outer pipes and trimmed cells", "| Package | Owner |\n| --- | --- |\n| `internal/md` | **renderer** |",
+			open + `<th scope="col" class="align-left">Package</th><th scope="col" class="align-left">Owner</th>` + middle +
+				"<tr><td class=\"align-left\"><code>internal/md</code></td><td class=\"align-left\"><strong>renderer</strong></td></tr>\n" + close,
+		},
+		{
+			"no outer pipes and alignment", "L | C | R | Default\n:- | :-: | -: | -\na | b | c | d",
+			open + `<th scope="col" class="align-left">L</th><th scope="col" class="align-center">C</th><th scope="col" class="align-right">R</th><th scope="col" class="align-left">Default</th>` + middle +
+				"<tr><td class=\"align-left\">a</td><td class=\"align-center\">b</td><td class=\"align-right\">c</td><td class=\"align-left\">d</td></tr>\n" + close,
+		},
+		{
+			"empty headers and cells with uneven rows", "| A || C |\n| - | - | - |\n| x || z |\n| short |\n| a | b | c | ignored |",
+			open + `<th scope="col" class="align-left">A</th><th scope="col" class="align-left"></th><th scope="col" class="align-left">C</th>` + middle +
+				"<tr><td class=\"align-left\">x</td><td class=\"align-left\"></td><td class=\"align-left\">z</td></tr>\n" +
+				"<tr><td class=\"align-left\">short</td><td class=\"align-left\"></td><td class=\"align-left\"></td></tr>\n" +
+				"<tr><td class=\"align-left\">a</td><td class=\"align-left\">b</td><td class=\"align-left\">c</td></tr>\n" + close,
+		},
+		{
+			"single column header only", "| Name |\n| - |",
+			open + `<th scope="col" class="align-left">Name</th>` + middle + close,
+		},
+		{
+			"leading outer pipe only and CRLF", "| Name\r\n| ---\r\n| value\r\n",
+			open + `<th scope="col" class="align-left">Name</th>` + middle + "<tr><td class=\"align-left\">value</td></tr>\n" + close,
+		},
+		{
+			"trailing outer pipe only", "Name |\n--- |\nvalue |",
+			open + `<th scope="col" class="align-left">Name</th>` + middle + "<tr><td class=\"align-left\">value</td></tr>\n" + close,
+		},
+		{
+			"escaped edge pipes", `\| Name \| | B` + "\n--- | ---\n" + `\| value \| | end`,
+			open + `<th scope="col" class="align-left">| Name |</th><th scope="col" class="align-left">B</th>` + middle +
+				"<tr><td class=\"align-left\">| value |</td><td class=\"align-left\">end</td></tr>\n" + close,
+		},
+		{
+			"escaped pipes in text and code", "A | B\n- | -\na\\|b | `c\\|d`",
+			open + `<th scope="col" class="align-left">A</th><th scope="col" class="align-left">B</th>` + middle +
+				"<tr><td class=\"align-left\">a|b</td><td class=\"align-left\"><code>c|d</code></td></tr>\n" + close,
+		},
+		{
+			"odd and even backslash runs", "A | B\n- | -\n" + `a\\|b | surplus` + "\n" + `a\\\|b | end`,
+			open + `<th scope="col" class="align-left">A</th><th scope="col" class="align-left">B</th>` + middle +
+				"<tr><td class=\"align-left\">a\\\\</td><td class=\"align-left\">b</td></tr>\n" +
+				"<tr><td class=\"align-left\">a\\\\|b</td><td class=\"align-left\">end</td></tr>\n" + close,
+		},
+		{
+			"unescaped pipes still split inline code", "A | B\n- | -\n`a|b`",
+			open + `<th scope="col" class="align-left">A</th><th scope="col" class="align-left">B</th>` + middle +
+				"<tr><td class=\"align-left\">`a</td><td class=\"align-left\">b`</td></tr>\n" + close,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Render(tc.in, nil); got != tc.want {
+				t.Errorf("got:\n%s\nwant:\n%s", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRenderTableBoundaries(t *testing.T) {
+	for _, suffix := range []string{
+		"\nnext | paragraph", "# Heading | text", "- list | item",
+		"1. list | item", "2. list | item", "---", "```\ncode | text\n```",
+	} {
+		t.Run(suffix, func(t *testing.T) {
+			got := Render("before\nA | B\n- | -\nx | y\n"+suffix, nil)
+			if !strings.HasPrefix(got, "<p>before</p>\n<div class=\"table-scroll\"><table>") {
+				t.Fatalf("table did not interrupt preceding prose:\n%s", got)
+			}
+			if !strings.HasSuffix(got, "</table></div>\n"+Render(suffix, nil)) {
+				t.Fatalf("following block consumed into table:\n%s", got)
+			}
+		})
+	}
+	got := Render("A | B\n- | -\nx | y\nfollowing prose", nil)
+	if !strings.HasSuffix(got, "</table></div>\n<p>following prose</p>\n") {
+		t.Errorf("non-pipe prose consumed into table:\n%s", got)
+	}
+}
+
+func TestRenderNonTables(t *testing.T) {
+	cases := []string{
+		"A | B\nx | y", "A | B\n--- | nope", "A | B\n--- | --- | ---",
+		"A | B\n::--- | ---", "A | B\n: | ---", "A | B\n- - | ---",
+		"Name\n---", "Name\n-", `A\|B` + "\n--- | ---", "A | B\n---\\|---",
+		"|\n|", "```\nA | B\n- | -\nx | y\n```", "# A | B\n- | -",
+		"- A | B\n  - | -", "prose\n2024. A | B\n- | -",
+	}
+	for _, in := range cases {
+		t.Run(in, func(t *testing.T) {
+			if got := Render(in, nil); strings.Contains(got, "<table>") {
+				t.Errorf("non-table recognized:\n%s", got)
+			}
+		})
+	}
+	if got := Render("A | B\n--- | nope", nil); got != "<p>A | B\n--- | nope</p>\n" {
+		t.Errorf("failed recognition changed prose: %q", got)
+	}
+}
+
+func TestRenderTableInlineAndResolvers(t *testing.T) {
+	in := "| **Header** | `alpha/fix-it` |\n| - | - |\n" +
+		"| *text* & <script> | [doc](topics/doc.md) abc1234 |\n" +
+		"| [bad](javascript:evil) | [data](data:text/html,evil) |"
+	got := RenderWithReferences(in, func(target string) string {
+		if target == "topics/doc.md" {
+			return "/knowledge/" + target
+		}
+		return ""
+	}, func(ref Reference) string {
+		return "/reference/" + ref.Text
+	})
+	for _, want := range []string{
+		`<th scope="col" class="align-left"><strong>Header</strong></th>`,
+		`<code><a href="/reference/alpha/fix-it">alpha/fix-it</a></code>`,
+		`<td class="align-left"><em>text</em> &amp; &lt;script&gt;</td>`,
+		`<a href="/knowledge/topics/doc.md">doc</a> <a href="/reference/abc1234">abc1234</a>`,
+		`<td class="align-left">bad</td><td class="align-left">data</td>`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+	for _, deny := range []string{"<script>", `href="javascript:`, `href="data:`} {
+		if strings.Contains(got, deny) {
+			t.Errorf("unsafe cell HTML %q in:\n%s", deny, got)
+		}
+	}
+}
+
 func TestRenderInline(t *testing.T) {
 	cases := []struct {
 		name string

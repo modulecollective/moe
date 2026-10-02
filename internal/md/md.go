@@ -1,9 +1,9 @@
 // Package md is a tiny, stdlib-only Markdown→HTML renderer. It is
 // deliberately *not* a CommonMark implementation: it targets the subset
 // the bureaucracy corpus actually uses (ATX headings, paragraphs,
-// one-level lists, fenced code, horizontal rules; inline code, bold,
+// one-level lists, fenced code, horizontal rules, pipe tables; inline code, bold,
 // italic, links, bare-URL autolinks, and `[[wikilinks]]`). Markup it
-// doesn't understand — GFM tables, images, nested lists past one level —
+// doesn't understand — images, nested lists past one level —
 // renders as its literal escaped text rather than as broken HTML.
 //
 // Every text node is HTML-escaped and the result is returned as
@@ -29,6 +29,8 @@ var headingRe = regexp.MustCompile(`^(#{1,6})\s+(.*)$`)
 // listItemRe matches a single list item line: optional indentation, a
 // bullet (`-`/`*`) or ordered (`1.`) marker, a space, then the content.
 var listItemRe = regexp.MustCompile(`^\s*([-*]|\d{1,9}\.)\s+(.*)$`)
+
+var tableDelimiterRe = regexp.MustCompile(`^:?-+:?$`)
 
 // wikilinkSlugRe is the conservative wikilink target: a bare slug of
 // word chars, dots, slashes, and hyphens — no spaces, quotes, or
@@ -166,6 +168,36 @@ func RenderWithReferences(src string, resolve func(target string) string, resolv
 			continue
 		}
 
+		if header, align := tableHeader(lines, i); header != nil {
+			b.WriteString("<div class=\"table-scroll\"><table>\n<thead><tr>")
+			for col, cell := range header {
+				fmt.Fprintf(&b, `<th scope="col" class="align-%s">%s</th>`, align[col], renderInline(cell, resolve, resolveReference))
+			}
+			b.WriteString("</tr></thead>\n<tbody>\n")
+			i += 2 // header and delimiter
+			for i < len(lines) {
+				if isBlockStart(lines[i]) || listItemRe.MatchString(lines[i]) {
+					break
+				}
+				cells, ok := tableRow(lines[i])
+				if !ok {
+					break
+				}
+				b.WriteString("<tr>")
+				for col := range header {
+					cell := ""
+					if col < len(cells) {
+						cell = cells[col]
+					}
+					fmt.Fprintf(&b, `<td class="align-%s">%s</td>`, align[col], renderInline(cell, resolve, resolveReference))
+				}
+				b.WriteString("</tr>\n")
+				i++
+			}
+			b.WriteString("</tbody>\n</table></div>\n")
+			continue
+		}
+
 		// Paragraph — gather lines until a blank line or the next block
 		// start. Joined with newlines; HTML collapses them to spaces, so
 		// unfenced multi-line ASCII reflows (a known, authoring-fixable
@@ -173,6 +205,9 @@ func RenderWithReferences(src string, resolve func(target string) string, resolv
 		var para []string
 		for i < len(lines) {
 			if strings.TrimSpace(lines[i]) == "" || isBlockStart(lines[i]) {
+				break
+			}
+			if header, _ := tableHeader(lines, i); header != nil {
 				break
 			}
 			para = append(para, lines[i])
@@ -183,6 +218,78 @@ func RenderWithReferences(src string, resolve func(target string) string, resolv
 		b.WriteString("</p>\n")
 	}
 	return b.String()
+}
+
+// tableHeader is a non-consuming lookahead shared with paragraph gathering.
+// Existing blocks take precedence, including ordered markers past 1, which
+// must retain their existing paragraph-interruption behaviour.
+func tableHeader(lines []string, i int) (header, align []string) {
+	if i+1 >= len(lines) || isBlockStart(lines[i]) || listItemRe.MatchString(lines[i]) {
+		return nil, nil
+	}
+	header, ok := tableRow(lines[i])
+	if !ok || len(header) == 0 {
+		return nil, nil
+	}
+	delimiters, ok := tableRow(lines[i+1])
+	if !ok || len(header) != len(delimiters) {
+		return nil, nil
+	}
+	for _, cell := range delimiters {
+		if !tableDelimiterRe.MatchString(cell) {
+			return nil, nil
+		}
+		a := "left"
+		if strings.HasSuffix(cell, ":") {
+			a = "right"
+			if strings.HasPrefix(cell, ":") {
+				a = "center"
+			}
+		}
+		align = append(align, a)
+	}
+	return header, align
+}
+
+// tableRow splits only on unescaped pipes. An odd backslash run escapes a
+// pipe even inside code; remove just that escaping backslash. Outer pipes
+// are structural, while interior empty cells are retained.
+func tableRow(line string) ([]string, bool) {
+	line = strings.TrimSpace(line)
+	var cells []string
+	var cell []byte
+	backslashes, lastPipe := 0, -1
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		if c == '|' {
+			if backslashes%2 == 1 {
+				cell = cell[:len(cell)-1]
+				cell = append(cell, c)
+			} else {
+				cells = append(cells, strings.TrimSpace(string(cell)))
+				cell = nil
+				lastPipe = i
+			}
+		} else {
+			cell = append(cell, c)
+		}
+		if c == '\\' {
+			backslashes++
+		} else {
+			backslashes = 0
+		}
+	}
+	if lastPipe < 0 {
+		return nil, false
+	}
+	cells = append(cells, strings.TrimSpace(string(cell)))
+	if line[0] == '|' {
+		cells = cells[1:]
+	}
+	if lastPipe == len(line)-1 {
+		cells = cells[:len(cells)-1]
+	}
+	return cells, true
 }
 
 // isBlockStart reports whether line opens a block-level construct, used
