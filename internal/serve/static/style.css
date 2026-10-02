@@ -552,6 +552,21 @@ form.new-run button:hover, form.new-run button:focus {
 }
 .doc pre code { background: none; padding: 0; font-size: inherit; }
 .doc hr { border: none; border-top: 1px solid var(--hairline); margin: 1.2rem 0; }
+.doc .table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0.6rem 0;
+}
+.doc table { border-collapse: collapse; }
+.doc th, .doc td {
+  border: 1px solid var(--hairline);
+  padding: 0.35rem 0.6rem;
+  vertical-align: top;
+}
+.doc th { font-weight: 600; }
+.doc .align-left { text-align: left; }
+.doc .align-center { text-align: center; }
+.doc .align-right { text-align: right; }
 
 /* Unresolved wikilink — legible, distinct from a real link (resolution
    to a target route is a follow-up). */
@@ -708,7 +723,7 @@ form.new-run button:hover, form.new-run button:focus {
 
 /* Usage tables. The rest of the app is flex rows, but the spend report
    is a real grid — nine columns that only mean something read down — so
-   it gets the app's one <table>, borrowing the hairline rule the rows
+   it gets a dedicated <table>, borrowing the hairline rule the rows
    use. Tabular figures so the digits line up in a proportional-ish
    fallback font, and a scroll wrapper because nine columns don't fit
    the 38rem measure or a phone. What scrolls off is the token detail:

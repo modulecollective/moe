@@ -54,6 +54,84 @@ func TestCanvasRouteRendersBody(t *testing.T) {
 	}
 }
 
+func TestCanvasTableOnStandaloneAndRunPage(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	seedRun(t, root, "alpha", "target-run", "sdlc")
+	setProjectRemote(t, root, "alpha", "https://github.com/owner/repo.git")
+	canvasPath := writeCanvas(t, root, "alpha", "fix-it", "design",
+		"| Reference | Detail |\n| --- | ---: |\n| `target-run` | abc1234 |\n")
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: root,
+		ResolveCanvas: func(_, _, _ string) (string, error) {
+			return canvasPath, nil
+		},
+		RunStages: func(_, _ string) ([]string, error) {
+			return []string{"design"}, nil
+		},
+	})
+	for _, route := range []string{"/run/alpha/fix-it/canvas/design", "/run/alpha/fix-it"} {
+		t.Run(route, func(t *testing.T) {
+			rr := get(t, s, route)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+			}
+			body := rr.Body.String()
+			for _, want := range []string{
+				`class="doc"`,
+				`<div class="table-scroll"><table>`,
+				`<thead><tr><th scope="col" class="align-left">Reference</th><th scope="col" class="align-right">Detail</th></tr></thead>`,
+				"<tbody>\n<tr><td class=\"align-left\"><code><a href=\"/run/alpha/target-run\">target-run</a></code></td>",
+				`<td class="align-right"><a href="https://github.com/owner/repo/commit/abc1234">abc1234</a></td></tr>`,
+				"</tbody>\n</table></div>",
+			} {
+				if !strings.Contains(body, want) {
+					t.Errorf("body missing %q\n%s", want, body)
+				}
+			}
+			if strings.Contains(body, "| --- |") {
+				t.Errorf("table delimiter leaked into page:\n%s", body)
+			}
+		})
+	}
+}
+
+// Pin the document rules on the served stylesheet. This verifies delivery
+// and selector scope; browser layout still needs a separate check.
+func TestDocumentTableStylesServed(t *testing.T) {
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir()})
+	css := getOK(t, s, "/static/style.css")
+	for _, tc := range []struct {
+		selector string
+		want     []string
+	}{
+		{".doc .table-scroll {", []string{"max-width: 100%;", "overflow-x: auto;"}},
+		{".doc table {", []string{"border-collapse: collapse;"}},
+		{".doc th, .doc td {", []string{"border: 1px solid var(--hairline);", "padding: 0.35rem 0.6rem;", "vertical-align: top;"}},
+		{".doc th {", []string{"font-weight: 600;"}},
+		{".doc .align-left {", []string{"text-align: left;"}},
+		{".doc .align-center {", []string{"text-align: center;"}},
+		{".doc .align-right {", []string{"text-align: right;"}},
+	} {
+		start := strings.Index(css, tc.selector)
+		if start < 0 {
+			t.Fatalf("stylesheet missing %s", tc.selector)
+		}
+		start += len(tc.selector)
+		end := strings.Index(css[start:], "}")
+		if end < 0 {
+			t.Fatalf("unterminated rule %s", tc.selector)
+		}
+		rule := css[start : start+end]
+		for _, want := range tc.want {
+			if !strings.Contains(rule, want) {
+				t.Errorf("%s missing %q: %q", tc.selector, want, rule)
+			}
+		}
+	}
+}
+
 func TestCanvasRouteLinksCommitAndRunReferences(t *testing.T) {
 	cases := []struct {
 		name       string
