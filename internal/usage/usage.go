@@ -36,7 +36,7 @@ import (
 )
 
 // Model prices in US dollars per million tokens, published API rates.
-// Standard-processing, short-context rates verified 2026-09-10 against:
+// Standard-processing, short-context rates verified 2026-10-20 against:
 //   - https://platform.claude.com/docs/en/about-claude/pricing
 //   - https://developers.openai.com/api/docs/pricing
 //
@@ -62,6 +62,8 @@ type modelPrice struct {
 var modelPrices = []modelPrice{
 	{"claude-fable-5-1", 10, 0.25, 50},
 	{"claude-fable-5", 10, 1, 50},
+	// https://platform.claude.com/docs/en/models/opus-5-5/overview
+	{"claude-opus-5-5", 4, 0.20, 20},
 	// Standard speed, deliberately: fast mode bills $10/$50, but a
 	// transcript records only the model id, not the speed. Stages run
 	// headless `claude -p` at standard speed, so this is the right
