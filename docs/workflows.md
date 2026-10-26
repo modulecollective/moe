@@ -526,6 +526,21 @@ the journal never saw) and the latest CI verdict per workflow on the default
 branch. It's what makes "what landed" honest when work reaches the repo without
 going through a run.
 
+Current checks on recorded PRs belonging to pushed sdlc runs appear in a
+separate block, including the head, check URLs and prior repair claims. A
+survey can nominate `{"run":"<exact-slug>","repair":"ci"}` as the only
+entry in a `threads[].runs` group, with no `onto` or `head`; `park` can
+withhold it. Under dynamic consent the harness rechecks the current PR,
+claims an attempt in the journal, and continues the same run through code,
+fresh test and review, then updates that PR without merging or riding other
+chain members. Safe-mode heartbeats still need an operator mark; add a note
+with `moe input add <project>/<run>` to authorize repair. One automatic
+attempt is allowed per head across restarts. A fresh note can authorize a
+retry on the same head, and each note can license only one claim. Unavailable
+checks are unknown, and successful, pending or cancelled checks do not
+nominate repair. The survey judges whether failure warrants a repair or a
+concrete hold; the heartbeat never starts code directly.
+
 ### Proposed work and grooming
 
 Most of what a survey finds becomes a followup. When it finds work that is
@@ -698,16 +713,22 @@ says so (a mechanically due chore, or a judged chore whose cooldown has expired
 without a sweep since — one probe per expiry, not one per tick); or when
 startable work is parked with nobody inside it *and no sweep has looked at that
 board since it last changed* — a settled thread, or an open idea you tagged,
-since the tag is the licence to start it. A thread a survey saw and deliberately
-parked with a reason is not re-offered until something moves. That parked leg
-looks one step past a held door: settled work queued behind a thread head that
-is itself waiting on your design still counts, because a sweep grooms before
-it kicks and the groom is what can move that work out from behind the head. A
-`chain` head you minted yourself is the exception — it fences its whole batch,
-since staging one by hand is the point. The heartbeat stands down while
+since the tag is the licence to start it. A thread a survey saw and
+deliberately parked with a reason is not re-offered until something moves. That
+parked leg looks one step past a held door: settled work queued behind a thread
+head that is itself waiting on your design still counts, because a sweep grooms
+before it kicks and the groom is what can move that work out from behind the
+head. A `chain` head you minted yourself is the exception — it fences its whole
+batch, since staging one by hand is the point. The heartbeat stands down while
 anything is live in the project — a ride mid-hop, you sitting in a stage, a
 survey mid-turn — and for one full tick after anything you did by hand. A quiet
-board costs nothing — no agent turn, no run, no journal line.
+board costs no agent turn, run or journal line. Recorded pushed PRs are polled
+at this cadence outside the journal lock. A new actionable failure can wake a
+survey even when the journal has not moved. Stable failure observations are
+acknowledged only after a successful sweep, against the exact snapshot handed
+to that survey; failures arriving during its rides remain visible to the next
+tick. Healthy and pending changes alone spend no turn. No recorded pushed PR
+means no added network read.
 
 Failure cools itself off: consecutive failed sweeps back a project's tick off
 exponentially, so a night of exhausted plan limits leaves a couple of open

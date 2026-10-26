@@ -174,18 +174,24 @@ source of truth for the exact command surface; this page is a map.
   one design turn before the run holds; untagged ideas are operator-only.
 - `moe intent new|edit|close|list|cat|log|harvest` manages operator-authored
   standing direction.
-- `moe pulse new|close|cat|log` runs and inspects a project's read-only
-  backlog sweep. `moe pulse new --dynamic <project>` runs it at the dynamic
-  consent rung — the sweep starts every kickable parked thread on the board
-  instead of parking them, which is what makes the verb callable by a clock.
-  The heartbeat inside `moe serve --dynamic` calls exactly this, and reads the
-  exit status — which describes the whole invocation, including the rides the
-  sweep started. `moe pulse new` exits non-zero when the sweep died, concluded
-  nothing, or a kicked ride stalled, which drives the failure backoff. A skip
-  exits 130, not a failure. It also passes `--emit-run <path>`: the sweep writes
-  the run it opens there, so /serve can link a sweep to the pulse run it minted
-  rather than leaving the operator to hunt the dash for a matching `pulse-*`
-  slug.
+- `moe pulse new|close|cat|log` runs and inspects a project's read-only backlog
+  sweep. `moe pulse new --dynamic <project>` runs it at the dynamic consent
+  rung — the sweep starts every kickable parked thread on the board instead of
+  parking them, which is what makes the verb callable by a clock. The heartbeat
+  inside `moe serve --dynamic` calls exactly this, and reads the exit status —
+  which describes the whole invocation, including the rides the sweep started.
+  `moe pulse new` exits non-zero when the sweep died, concluded nothing, or a
+  kicked ride stalled, which drives the failure backoff. A skip exits 130, not
+  a failure. It also passes `--emit-run <path>`: the sweep writes the run it
+  opens there, so /serve can link a sweep to the pulse run it minted rather
+  than leaving the operator to hunt the dash for a matching `pulse-*` slug. It
+  also passes its exact owned-PR observation through the internal `--pr-checks`
+  argument, so a successful sweep acknowledges what its survey saw. New
+  actionable failures on recorded pushed PRs can wake a sweep without a journal
+  change. A survey may nominate same-run CI repair with
+  `{"run":"<slug>","repair":"ci"}` in a singleton thread group. Dynamic consent
+  and safe-mode operator marks still apply; a fresh run note licenses retry
+  after the one-attempt-per-head journal claim is spent.
 
 `moe <workflow> harvest [--no-edit] <project>/<run>` re-runs a run's
 `followups.md`, `feedback/lore.md`, and `feedback/twin.md` harvests — into
