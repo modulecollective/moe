@@ -80,7 +80,7 @@ func TestPRCheckVerdicts(t *testing.T) {
 	t.Run("unfinished failure is not current", func(t *testing.T) {
 		prev := runGH
 		runGH = func(...string) ([]byte, error) {
-			return []byte(`{"state":"OPEN","url":"` + repairURL + `","headRefOid":"sha","statusCheckRollup":[{"__typename":"CheckRun","status":"IN_PROGRESS","conclusion":"FAILURE"}]}`), nil
+			return []byte(`{"state":"OPEN","url":"` + repairURL + `","headRefOid":"sha","statusCheckRollup":[{"__typename":"CheckRun","name":"test","status":"IN_PROGRESS","conclusion":"FAILURE"}]}`), nil
 		}
 		t.Cleanup(func() { runGH = prev })
 		if p := gatherPRChecks("moe/fix", repairURL); p.actionable() {
