@@ -86,6 +86,8 @@ type HeartbeatDecision struct {
 	Sweep   bool
 	Held    bool
 	Reason  string
+	// PRChecks is the exact external observation the CLI gate offers this survey.
+	PRChecks string `json:"-"`
 }
 
 // Heartbeat is the cli-side gate the ticker consults. Implemented by
@@ -231,9 +233,13 @@ func (s *Server) heartbeatTick() {
 		// otherwise spelled exactly like the one an operator types, and the
 		// per-project mode caps the clock rather than the operator — so
 		// without it the child could not tell the two apart.
-		child, err := s.children.spawn(id, s.opts.MoeBin,
-			[]string{"pulse", "new", "--dynamic", "--heartbeat",
-				"--emit-run", sweepRunPath(s.opts.Root, projectID), projectID},
+		args := []string{"pulse", "new", "--dynamic", "--heartbeat",
+			"--emit-run", sweepRunPath(s.opts.Root, projectID)}
+		if d.PRChecks != "" {
+			args = append(args, "--pr-checks", d.PRChecks)
+		}
+		args = append(args, projectID)
+		child, err := s.children.spawn(id, s.opts.MoeBin, args,
 			s.opts.Root, s.opts.Logger)
 		if err != nil {
 			s.logf("heartbeat: spawn %s: %v", projectID, err)

@@ -46,6 +46,9 @@ const branchPrefix = "moe/"
 type pushRunOptions struct {
 	HeadlessRecovery bool
 	SkipTerminalEdit bool
+	// RepairPR pins a same-PR recovery; it must never create or merge a PR.
+	RepairPR   string
+	RepairHead string
 }
 
 // PushDeferredError is the typed value runPushTyped returns when the
@@ -191,6 +194,13 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 		return 1, nil
 	}
 
+	if opts.RepairPR != "" {
+		idx, err := run.BuildJournalIndex(root)
+		if err != nil || md.Status != run.StatusPushed || idx.PRURL[projectID+"/"+runID] != opts.RepairPR || !*prFlag || *mergeFlag {
+			moePrintln(stderr, "CI repair push: run or recorded PR changed; refusing ship")
+			return 1, nil
+		}
+	}
 	// A failed PR-record commit happens after GitHub accepted the PR and
 	// run.json flipped to pushed. Finish that exact owed commit before
 	// route selection or any sandbox / GitHub work, preserving the consent
@@ -284,6 +294,10 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 	// there is no tree to vet and nothing to rebase. Route selection is
 	// already done and neither route reaches past this, so a no-ship run
 	// closes rather than opening a PR for an empty branch.
+	if opts.RepairPR != "" && testGateShipNone(root, md) {
+		moePrintln(stderr, "CI repair push: test declares no ship; keeping the existing PR")
+		return 1, nil
+	}
 	if code, handled := closeNoShipRun(root, md, pj, clonePath, branch, opts, stdout, stderr); handled {
 		return code, nil
 	}
@@ -344,6 +358,13 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 		// plain push with -u to establish tracking.
 		force := push.OriginHasBranch(clonePath, branch)
 
+		if opts.RepairPR != "" {
+			p := gatherPRChecks(md.Project+"/"+md.ID, opts.RepairPR)
+			if p.Error != "" || p.State != "OPEN" || p.Head != opts.RepairHead {
+				moePrintf(stderr, "CI repair push: PR moved or is unavailable/closed; refusing ship (%s)\n", p.Error)
+				return 1, nil
+			}
+		}
 		if err := push.PushBranch(clonePath, branch, pj.Remote, force, stdout, stderr); err != nil {
 			moePrintf(stderr, "%v\n", err)
 			return 1, nil
@@ -356,7 +377,7 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 			if code := runPushSynthesisSession(md.Project, md.ID, true, stdout, stderr); code != 0 {
 				return code, nil
 			}
-			return openPRPath(root, md, pj, branch, stdout, stderr), nil
+			return openPRPath(root, md, pj, branch, opts.RepairPR, stdout, stderr), nil
 		}
 
 		// Retries harvest as-is (skipEdit=true): the operator reviewed
@@ -529,14 +550,25 @@ func buildRebaseConflictKickoff(workflow string, c *push.RebaseConflictError) st
 // `moe <wf> code` stays a one-liner until the PR merges. Synthesis
 // already ran in runPushTyped, so this path only consumes the push
 // canvas when a new PR needs a body.
-func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch string, stdout, stderr io.Writer) int {
+func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch, requiredPR string, stdout, stderr io.Writer) int {
 	ghRepo, err := push.GHRepoSpec(pj.Remote)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
 
-	url, existing, err := push.FindOpenPR(ghRepo, branch)
+	var url string
+	var existing bool
+	if requiredPR != "" {
+		p := gatherPRChecks(md.Project+"/"+md.ID, requiredPR)
+		if p.Error != "" || p.State != "OPEN" {
+			moePrintln(stderr, "CI repair: existing PR closed or unavailable after push")
+			return 1
+		}
+		url, existing = requiredPR, true
+	} else {
+		url, existing, err = push.FindOpenPR(ghRepo, branch)
+	}
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1

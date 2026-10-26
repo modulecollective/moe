@@ -55,8 +55,10 @@ type Block struct {
 	// A timed-out turn's transcript stops mid-thought and the next
 	// drive of the stage overwrites the on-disk copy, so this trailer
 	// is the only durable marker that the ending was a kill.
-	TimedOut      string
-	PR            string
+	TimedOut string
+	PR       string
+	// CIRepair is the JSON claim for a bounded same-PR CI repair.
+	CIRepair      string
 	Merged        string
 	Closed        string
 	PromotedTo    string
@@ -132,6 +134,7 @@ func (b Block) String() string {
 	write(&sb, "MoE-Session", b.Session)
 	write(&sb, "MoE-Timed-Out", b.TimedOut)
 	write(&sb, "MoE-PR", b.PR)
+	write(&sb, "MoE-CI-Repair", b.CIRepair)
 	write(&sb, "MoE-Merged", b.Merged)
 	write(&sb, "MoE-Closed", b.Closed)
 	write(&sb, "MoE-Promoted-To", b.PromotedTo)

@@ -253,3 +253,30 @@ func TestTerminalRunPageShowsHistoryWithoutForms(t *testing.T) {
 	// And it has dropped out of the queue.
 	mustContain(t, get(t, s, "/input"), "(nothing waiting)")
 }
+
+func TestPushedRunPageAcceptsRepairNotes(t *testing.T) {
+	root := seedInputRoot(t)
+	md, err := run.Load(root, "alpha", "fix-it")
+	if err != nil {
+		t.Fatal(err)
+	}
+	md.Status = run.StatusPushed
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, root, "add", "-A")
+	gittest.Run(t, root, "commit", "-m", "push fixture")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	mustContain(t, get(t, s, "/run/alpha/fix-it"), `action="/run/alpha/fix-it/input"`, `<textarea name="text"`)
+	rr := postInput(t, s, "/run/alpha/fix-it/input", "", url.Values{"text": {"Fix the failing CI on this PR"}})
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	f, err := input.Load(root, "alpha", "fix-it")
+	if err != nil || len(f.Pending()) != 1 {
+		t.Fatalf("note not pending: %+v %v", f, err)
+	}
+	if len(s.children.all) != 0 {
+		t.Fatal("adding a repair note spawned an agent")
+	}
+}

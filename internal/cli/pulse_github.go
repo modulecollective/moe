@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -78,7 +79,10 @@ type ghCIRun struct {
 // on PATH). Stderr is kept separate from stdout — unlike sync.PRStateOf,
 // which shares one buffer — so gh chatter can't corrupt the JSON parse.
 var runGH = func(args ...string) ([]byte, error) {
-	cmd := exec.Command("gh", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "gh", args...)
+	cmd.WaitDelay = time.Second
 	var out, errb bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &errb

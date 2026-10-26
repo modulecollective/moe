@@ -878,3 +878,26 @@ func TestCarryHonoursAnOpenPingLandedOnTheDestinationMidWindow(t *testing.T) {
 		t.Fatalf("carried entry = %+v", dst.Notes[2])
 	}
 }
+
+func TestPushedRunAcceptsAndDeliversOperatorInput(t *testing.T) {
+	root := seedRoot(t)
+	md := seedRun(t, root, "pushed-fix")
+	md.Status = run.StatusPushed
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, root, "add", "-A")
+	gittest.Run(t, root, "commit", "-m", "push run")
+	note := add(t, root, md.ID, "Fix CI on this PR")
+	waiting, errs := Scan(root, "moe")
+	if len(errs) != 0 || len(waiting) != 1 || waiting[0].Entry.ID != note.ID {
+		t.Fatalf("pushed note missing from queue: %+v %v", waiting, errs)
+	}
+	if err := MarkDelivered(root, "moe", md.ID, "code", []int{note.ID}, "dynamic"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := Load(root, "moe", md.ID)
+	if err != nil || len(f.Pending()) != 0 {
+		t.Fatalf("delivery did not consume note: %+v %v", f, err)
+	}
+}

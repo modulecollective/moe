@@ -218,7 +218,7 @@ type runInputVM struct {
 // how the run went, even though nothing more can be written.
 func (s *Server) gatherRunInputs(projectID, slug string, md *run.Metadata) runInputsVM {
 	vm := runInputsVM{
-		Live:    md.Status == run.StatusInProgress,
+		Live:    md.Status == run.StatusInProgress || md.Status == run.StatusPushed,
 		PostURL: "/run/" + projectID + "/" + slug + "/input",
 	}
 	f, err := input.Load(s.opts.Root, projectID, slug)

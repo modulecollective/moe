@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -62,6 +63,9 @@ import (
 // holds where the journal stood when the gate decided to sweep. It is
 // not a cursor — Swept consumes it — and it exists so the exit can tell
 // its own commits from an operator's landing mid-turn. See Swept.
+// PR observations are separate from both journal cursors: prSeen holds
+// acknowledged failures per run; prOffered pins the evidence passed to
+// each child. Neither failed fetches nor a re-read at exit can move it.
 type heartbeatGate struct {
 	root string
 
@@ -69,6 +73,9 @@ type heartbeatGate struct {
 	tips       map[string]string
 	surveyed   map[string]string
 	dispatched map[string]string
+	prSeen     map[string]string
+	prOffered  map[string][]ownedPRChecks
+	log        io.Writer
 }
 
 func newHeartbeatGate(root string) *heartbeatGate {
@@ -77,6 +84,8 @@ func newHeartbeatGate(root string) *heartbeatGate {
 		tips:       map[string]string{},
 		surveyed:   map[string]string{},
 		dispatched: map[string]string{},
+		prSeen:     map[string]string{},
+		prOffered:  map[string][]ownedPRChecks{},
 	}
 }
 
@@ -85,6 +94,8 @@ func newHeartbeatGate(root string) *heartbeatGate {
 //
 // Read-only and cheap by construction — one run scan, one journal index
 // (memoized on HEAD), one ref listing, and one `git log -1` per project.
+// Recorded pushed PRs also pay one bounded `gh pr view` per tick, outside
+// the journal lock; a project without them pays no added network read.
 // A project whose tip is machine-authored and younger than one tick pays
 // one more log, scanning the window for a masked operator act; a quiet
 // board never reaches it. A quiet board therefore costs no agent turn, no
@@ -95,6 +106,7 @@ func newHeartbeatGate(root string) *heartbeatGate {
 // drops the project from this tick rather than failing the tick. The
 // next one is twenty minutes away and re-derives everything.
 func (g *heartbeatGate) Due(tick time.Duration, log io.Writer) []serve.HeartbeatDecision {
+	g.log = log
 	g.reap(log)
 	g.gc(log)
 
@@ -123,6 +135,7 @@ func (g *heartbeatGate) Due(tick time.Duration, log io.Writer) []serve.Heartbeat
 		}
 		decisions = append(decisions, serve.HeartbeatDecision{
 			Project: p.ID, Sweep: sweep, Held: held, Reason: reason,
+			PRChecks: g.offeredPRJSON(p.ID),
 		})
 	}
 	return decisions
@@ -181,6 +194,16 @@ func (g *heartbeatGate) Swept(projectID string, clean bool) {
 
 	g.mu.Lock()
 	base, dispatched := g.dispatched[projectID]
+	if clean {
+		if offered, ok := g.prOffered[projectID]; ok {
+			for _, p := range offered {
+				if p.Error == "" {
+					g.prSeen[p.Run] = prFailureSnapshot([]ownedPRChecks{p})
+				}
+			}
+		}
+	}
+	delete(g.prOffered, projectID)
 	delete(g.dispatched, projectID)
 	g.mu.Unlock()
 
@@ -254,6 +277,30 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 	surveyed := g.surveyed[projectID] == tip
 	g.mu.Unlock()
 
+	// Poll before the journal-tip short circuit. An external check result
+	// does not move the journal. Failed reads do not overwrite observations.
+	log := g.log
+	if log == nil {
+		log = io.Discard
+	}
+	var prs []ownedPRChecks
+	if !occupied[projectID] {
+		prs = gatherOwnedPRChecks(sc, projectID, log)
+	}
+	g.mu.Lock()
+	prChanged := false
+	for _, p := range prs {
+		if p.Error != "" {
+			continue
+		}
+		snapshot := prFailureSnapshot([]ownedPRChecks{p})
+		if snapshot == "" {
+			g.prSeen[p.Run] = ""
+		} else if snapshot != g.prSeen[p.Run] {
+			prChanged = true
+		}
+	}
+	g.mu.Unlock()
 	moved := known && seen != tip
 	unswept := false
 	parked := ""
@@ -271,7 +318,7 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 		// the sweep kicks passes safe on its own terms.
 		choreReason = choreClockReason(sc, projectID, now)
 	}
-	if !moved && choreReason == "" {
+	if !moved && choreReason == "" && !prChanged {
 		// A clean sweep already surveyed this exact board. Whatever is
 		// parked on it, the survey saw and left parked on purpose, so
 		// offering it again is re-asking a question the machine has
@@ -361,9 +408,15 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 	// there would find the triggering operator commit, refuse, re-offer
 	// and re-sweep forever.
 	g.mu.Lock()
-	g.dispatched[projectID] = tip
+	if _, inflight := g.dispatched[projectID]; !inflight {
+		g.dispatched[projectID] = tip
+		g.prOffered[projectID] = prs
+	}
 	g.mu.Unlock()
 
+	if prChanged {
+		return true, false, "new failing checks on an owned PR"
+	}
 	if moved {
 		return true, false, "the journal moved"
 	}
@@ -1026,3 +1079,17 @@ func allProjectsOccupied(root string) map[string]bool {
 
 // heartbeatGate satisfies the serve seam.
 var _ serve.Heartbeat = (*heartbeatGate)(nil)
+
+func (g *heartbeatGate) offeredPRJSON(projectID string) string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	prs, ok := g.prOffered[projectID]
+	if !ok {
+		return ""
+	}
+	if prs == nil {
+		prs = []ownedPRChecks{}
+	}
+	b, _ := json.Marshal(prs)
+	return string(b)
+}

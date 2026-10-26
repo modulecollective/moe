@@ -87,6 +87,9 @@ const pulseKickoff = "Run the pulse for this project: a delta-first, read-only s
 	"an irreversible or outward-facing surface). No park means it runs, and that includes a run you wrote to `loose`, which " +
 	"is a thread of one. `loose` says you have no ordering opinion; it does not say the work waits.\n\n" +
 	"Omitting both lists is the normal outcome; a followup is the default channel for everything that doesn't clear the bar. " +
+	"For failed checks on an owned pushed PR, nominate its existing run with " +
+	"`{\"run\":\"<exact-slug>\",\"repair\":\"ci\"}` alone in a thread group, without onto or head. " +
+	"The harness rechecks evidence and consent, claims a bounded attempt, then runs code, fresh test and review, and updates that PR. " +
 	"See the stage guidance."
 
 // pulseCanvasSkeleton is the fixed structural shape the survey canvas
@@ -407,6 +410,7 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 	// not start until the thread it names has stopped moving.
 	groups := applyPulseGate(root, projectID, md.ID, gate, stdout, stderr)
 	groomed := groomChains(root, projectID, md.ID, groups, survey.chainEdges, stderr)
+	groomed.prChecks = survey.prChecks
 
 	// Clean sweep: auto-close the run so the next sweep starts from a
 	// clean board. Route through the registered close (subject +
@@ -706,6 +710,8 @@ type pulseThreadEntry struct {
 	// are separate acts because a question the work need not wait for is
 	// a question worth asking.
 	Ask string
+	// Repair nominates CI repair on Existing, exclusive with Ask and Spec.
+	Repair string
 }
 
 // specs lists every run the gate asked the harness to open, in document
@@ -727,7 +733,7 @@ func (g pulseGate) specs() []pulseRunSpec {
 func (e *pulseThreadEntry) UnmarshalJSON(b []byte) error {
 	var slug string
 	if err := json.Unmarshal(b, &slug); err == nil {
-		e.Existing, e.Spec, e.Ask = slug, nil, ""
+		e.Existing, e.Spec, e.Ask, e.Repair = slug, nil, "", ""
 		return nil
 	}
 	// Probe for the `run` discriminator before committing to a branch,
@@ -742,25 +748,32 @@ func (e *pulseThreadEntry) UnmarshalJSON(b []byte) error {
 	}
 	if _, isAsk := keys["run"]; isAsk {
 		var ask struct {
-			Run string `json:"run"`
-			Ask string `json:"ask"`
+			Run    string `json:"run"`
+			Ask    string `json:"ask"`
+			Repair string `json:"repair"`
 		}
 		if err := decodeStrict(b, &ask); err != nil {
 			return fmt.Errorf("%s: %w", threadEntryLabel(keys, "run"), err)
+		}
+		if ask.Repair != "" && (ask.Repair != "ci" || len(keys) != 2) {
+			return errors.New(`repair entry requires only "run" and "repair":"ci"`)
+		}
+		if _, present := keys["repair"]; present && ask.Repair == "" {
+			return errors.New(`repair must be "ci"`)
 		}
 		if ask.Run == "" {
 			return errors.New(`thread entry has an empty "run"`)
 		}
 		// `{"run": "x"}` with no ask is the string form written long-hand
 		// and means exactly that: a position, no question.
-		e.Existing, e.Spec, e.Ask = ask.Run, nil, ask.Ask
+		e.Existing, e.Spec, e.Ask, e.Repair = ask.Run, nil, ask.Ask, ask.Repair
 		return nil
 	}
 	var spec pulseRunSpec
 	if err := decodeStrict(b, &spec); err != nil {
 		return fmt.Errorf("%s: %w", threadEntryLabel(keys, "slug"), err)
 	}
-	e.Existing, e.Spec, e.Ask = "", &spec, ""
+	e.Existing, e.Spec, e.Ask, e.Repair = "", &spec, "", ""
 	return nil
 }
 
@@ -854,6 +867,19 @@ func applyPulseGate(root, projectID, pulseSlug string, gate pulseGate, stdout, s
 	groups := make([]groomGroup, 0, len(gate.Threads))
 	for _, th := range gate.Threads {
 		grp := groomGroup{Onto: th.Onto, Head: th.Head, Park: th.Park}
+		repair := false
+		for _, entry := range th.Runs {
+			repair = repair || entry.Repair != ""
+		}
+		if repair {
+			if len(th.Runs) != 1 || th.Onto != "" || th.Head != "" {
+				moePrintf(stderr, "pulse: CI repair must be a singleton group without onto or head — skipping\n")
+				continue
+			}
+			grp.Repair = th.Runs[0].Existing
+			groups = append(groups, grp)
+			continue
+		}
 		for _, entry := range th.Runs {
 			if entry.Spec == nil {
 				// A string entry names "any parked run in the project", and a
@@ -1311,8 +1337,16 @@ func pulseKickoffWithContext(root, projectID, runID string, stderr io.Writer) (s
 		moePrintf(stderr, "pulse: kickoff: could not read runs for %s — context blocks dropped\n", projectID)
 		return strings.Join(blocks, "\n\n"), nil
 	}
+	return pulseKickoffFromScan(sc, projectID, runID, stderr)
+}
+
+func pulseKickoffFromScan(sc *pulseScan, projectID, runID string, stderr io.Writer) (string, map[string]string) {
+	blocks := []string{pulseKickoff}
 	if gh := pulseGitHubContext(sc, projectID, runID, stderr); gh != "" {
 		blocks = append(blocks, gh)
+	}
+	if checks := renderOwnedPRChecks(sc, sc.prChecks(projectID, stderr)); checks != "" {
+		blocks = append(blocks, checks)
 	}
 	if settled := settledRunsBlock(sc, projectID); settled != "" {
 		blocks = append(blocks, settled)
@@ -1428,7 +1462,12 @@ var openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt,
 				if pi.interrupted() {
 					return "", errPulseSkipped
 				}
-				prompt, edges := pulseKickoffWithContext(workRoot, projectID, runID, stderr)
+				sc, ok := newPulseScan(workRoot)
+				if !ok {
+					return "", errors.New("pulse: could not read survey state")
+				}
+				prompt, edges := pulseKickoffFromScan(sc, projectID, runID, stderr)
+				out.prChecks = sc.prChecks(projectID, stderr)
 				out.chainEdges = edges
 				return prompt, nil
 			},
@@ -1450,6 +1489,7 @@ type surveyOutcome struct {
 	// when the kickoff couldn't read it, which reads as "no snapshot" and
 	// skips the drift check rather than refusing to groom.
 	chainEdges map[string]string
+	prChecks   []ownedPRChecks
 }
 
 func runPulseNew(args []string, stdout, stderr io.Writer) int {
@@ -1465,6 +1505,7 @@ func runPulseNew(args []string, stdout, stderr io.Writer) int {
 	// the run the sweep opened out of it, so /serve can link a sweep to
 	// the pulse run it minted. Nothing else passes it.
 	emitRun := fs.String("emit-run", "", "write the run this sweep opens to `path` (one line, bare slug)")
+	prChecks := fs.String("pr-checks", "", "heartbeat PR observation (internal)")
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe pulse new [--dynamic] [--heartbeat] [--emit-run <path>] <project>")
 		moePrintln(stderr, "")
@@ -1513,6 +1554,16 @@ func runPulseNew(args []string, stdout, stderr io.Writer) int {
 	if *heartbeat {
 		defer withClockInvoked()()
 	}
+	if *prChecks != "" {
+		var offered []ownedPRChecks
+		if !*heartbeat || json.Unmarshal([]byte(*prChecks), &offered) != nil {
+			moePrintln(stderr, "pulse: invalid heartbeat PR observation")
+			return 2
+		}
+		prior := heartbeatPRChecks
+		heartbeatPRChecks = offered
+		defer func() { heartbeatPRChecks = prior }()
+	}
 	// The pulse is the verb here, so a skip is the verb's own outcome:
 	// exit 130.
 	code, interrupted := runPulse(root, projectID, *emitRun, stdout, stderr)
@@ -1544,6 +1595,7 @@ type pulseScan struct {
 	// most scans never ask.
 	chores       []chore.State
 	choresLoaded bool
+	ownedPRs     map[string][]ownedPRChecks
 }
 
 // choreStates evaluates every registered chore against this scan's runs
@@ -1588,4 +1640,19 @@ func newPulseScan(root string) (*pulseScan, bool) {
 		byKey[md.Project+"/"+md.ID] = md
 	}
 	return &pulseScan{root: root, mds: mds, idx: idx, byKey: byKey, graph: run.NewChainGraph(idx, byKey)}, true
+}
+
+func (sc *pulseScan) prChecks(projectID string, stderr io.Writer) []ownedPRChecks {
+	if sc.ownedPRs == nil {
+		sc.ownedPRs = make(map[string][]ownedPRChecks)
+	}
+	if prs, ok := sc.ownedPRs[projectID]; ok {
+		return prs
+	}
+	prs := heartbeatPRChecks
+	if prs == nil {
+		prs = gatherOwnedPRChecks(sc, projectID, stderr)
+	}
+	sc.ownedPRs[projectID] = prs
+	return prs
 }

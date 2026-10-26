@@ -56,10 +56,11 @@ import (
 // `threads` list by applyPulseGate once every run in it exists — see
 // pulseThread for what each field means to the agent writing it.
 type groomGroup struct {
-	Onto string
-	Head string
-	Runs []groomMember
-	Park string
+	Repair string
+	Onto   string
+	Head   string
+	Runs   []groomMember
+	Park   string
 }
 
 // groomMember is one position in a groomGroup: either a run this sweep
@@ -93,6 +94,7 @@ func (m groomMember) name() string {
 // the run the root is walked back from: the minted head when the group
 // asked for one, else the group's first member.
 type groomedThread struct {
+	Repair bool
 	Handle string
 	Root   string
 	// Park carries the survey's reason to hold this thread, verbatim from
@@ -130,7 +132,8 @@ type groomResult struct {
 	// advance marker to find. The gate's own spawns and chore
 	// nominations land *before* this is built, which is what lets the
 	// kick's chore leg see a chore run this same sweep opened.
-	idx *run.JournalIndex
+	idx      *run.JournalIndex
+	prChecks []ownedPRChecks
 }
 
 // groomSweep carries the one-sweep state the group walk threads: the
@@ -239,7 +242,9 @@ func groomChains(root, projectID, pulseSlug string, groups []groomGroup, kickoff
 	// mid-mutation names a thread that no longer starts there — the kick
 	// then silently parks.
 	for i := range threads {
-		threads[i].Root = sw.graph.Root(threads[i].Handle)
+		if !threads[i].Repair {
+			threads[i].Root = sw.graph.Root(threads[i].Handle)
+		}
 	}
 
 	result := groomResult{
@@ -281,6 +286,10 @@ func groomChains(root, projectID, pulseSlug string, groups []groomGroup, kickoff
 // skipped.
 func (sw *groomSweep) placeGroup(i int, grp groomGroup, stderr io.Writer) (groomedThread, bool) {
 	label := fmt.Sprintf("chain group %d", i+1)
+	if grp.Repair != "" {
+		key := sw.projectID + "/" + grp.Repair
+		return groomedThread{Handle: key, Root: key, Park: grp.Park, Repair: true}, true
+	}
 	if grp.Onto != "" && grp.Head != "" {
 		moePrintf(stderr, "pulse: groom: %s sets both `onto` and `head` — skipping\n", label)
 		return groomedThread{}, false

@@ -831,6 +831,8 @@ type JournalIndex struct {
 	// the most recent commit scoped to the run. Replaces a per-row
 	// trailerValue fork.
 	PRURL map[string]string
+	// CIRepairAttempts retains every claimed attempt, including workers that died.
+	CIRepairAttempts map[string][]CIRepairAttempt
 	// WorkTurnTime maps (project, run, doc) → committer time of the
 	// most recent `work: update <doc>` commit scoped to that run.
 	// Same contract as LatestWorkTurnSHA's `when` return — zero
@@ -1066,6 +1068,7 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 		LastOperatorActivity: make(map[string]time.Time),
 		PromotedTo:           make(map[string]string),
 		PRURL:                make(map[string]string),
+		CIRepairAttempts:     make(map[string][]CIRepairAttempt),
 		WorkTurnTime:         make(map[WorkTurnKey]time.Time),
 		AdvanceTime:          make(map[WorkTurnKey]time.Time),
 		ReopenedFrom:         make(map[string]string),
@@ -1110,6 +1113,7 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 		slug := ""
 		var promotedTo, prURL, projectID, docID, reopenOf, spawnedBy, chore, choreSkipped, consent, fromRun string
 		var choreTouched []string
+		var ciRepair *CIRepairAttempt
 		// Per-commit chain verdicts. addByParent wins over
 		// removeByParent for the same parent within one commit (an edit
 		// save pairs a remove of the prior edge with an add of the new
@@ -1152,6 +1156,14 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 				if fromRun == "" {
 					fromRun = strings.TrimSpace(v)
 				}
+				continue
+			}
+			if v, ok := strings.CutPrefix(line, "MoE-CI-Repair:"); ok {
+				var a CIRepairAttempt
+				if err := json.Unmarshal([]byte(strings.TrimSpace(v)), &a); err != nil || a.PR == "" || a.Head == "" {
+					return nil, fmt.Errorf("run: malformed MoE-CI-Repair trailer: %s", v)
+				}
+				ciRepair = &a
 				continue
 			}
 			if v, ok := strings.CutPrefix(line, "MoE-PR:"); ok {
@@ -1305,6 +1317,9 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 		// worst case is a slightly stale age on those runs. No bare-slug
 		// fallback — that would reintroduce the cross-project ambiguity.
 		runKey := projectID + "/" + slug
+		if ciRepair != nil {
+			idx.CIRepairAttempts[runKey] = append(idx.CIRepairAttempts[runKey], *ciRepair)
+		}
 		if _, ok := idx.LastActivity[runKey]; !ok {
 			idx.LastActivity[runKey] = time.Unix(epoch, 0).UTC()
 		}
@@ -1608,4 +1623,11 @@ func writeJSON(path string, v any) error {
 	}
 	b = append(b, '\n')
 	return os.WriteFile(path, b, 0o644)
+}
+
+// CIRepairAttempt is the durable journal claim made before a PR repair starts.
+type CIRepairAttempt struct {
+	PR       string `json:"pr"`
+	Head     string `json:"head"`
+	InputIDs []int  `json:"input_ids,omitempty"`
 }

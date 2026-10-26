@@ -44,6 +44,11 @@ Start from the delta, not the whole project:
   CI URL, the diff behind a foreign merge. Optional and bounded: the
   block is enough for the sweep, and a dig that grows past a couple of
   reads is a followup naming the question.
+- **Checks on owned PRs** — your kickoff also carries current checks for
+  pushed sdlc runs with a recorded PR. Treat unavailable data as unknown.
+  A failed check is evidence to nominate repair on that existing run,
+  branch and PR; see "Repairing PR checks". Do not spawn a second fix run
+  for work its owning run can continue.
 - **What is already sequenced** — your kickoff carries a chain-state
   block: the active runs the operator has chained, head first. Chain
   order lives in journal trailers, so neither the journal slice nor the
@@ -177,6 +182,37 @@ it goes.** A run whose position you're sure of is described inline in a
 thread, at that position; a run you have no ordering opinion about goes
 in `loose`. There are no aliases and no cross-references — nothing in
 the gate ever names anything else in the gate.
+
+## Repairing PR checks
+
+For an actionable failure in the owned-PR block, nominate the exact existing
+run slug in a singleton thread group:
+
+    "threads": [{"runs": [{"run": "update-node-and-deps", "repair": "ci"}]}]
+
+This requests code → fresh test → fresh review → update the same PR. It
+rewires no chains, replays no design, rides no other members, and never
+merges the PR. Only `"ci"` is accepted; do not combine `repair` with
+`ask` or spawn fields, or put `onto`, `head` or other runs in its group.
+You supply the slug; the harness supplies and rechecks the PR and head.
+An ordinary run string still means parked work, not PR repair.
+
+Failure/error, timeout and action-required verdicts are candidates even
+while other checks are pending. Pending, cancelled, neutral, skipped,
+successful, missing and unknown results are not repair verdicts. The
+current PR rollup wins over historical workflow runs or logs. Judge the
+failure: a routine fix can proceed, while credentials, an outage or an
+operator decision may warrant a concrete group `park` reason. Report the
+nomination or hold and the check URLs; leave deep investigation to code.
+
+Execution still needs dynamic consent. A heartbeat in safe mode needs an
+operator mark, including an undelivered note such as "Fix the failing CI
+on this PR". Pushing itself grants no permission. A hand-typed dynamic
+pulse keeps its normal consent semantics; paused heartbeats stay paused.
+The harness journals one attempt per PR head before starting code. A fresh
+operator note can authorize another attempt on that head; a note already
+claimed by a failed turn cannot authorize another. Respect prior attempts
+and holds in the block. Do not replace a spent attempt with a new run.
 
 ## Spawning a run — the highest bar on this canvas
 

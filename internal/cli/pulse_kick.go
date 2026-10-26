@@ -163,6 +163,16 @@ func pulseSelfKick(root string, groomed groomResult, stdout, stderr io.Writer) i
 		// snapshot cannot answer — is a session open right now — can have
 		// flipped by the time the loop arrives here. The stamped section
 		// says "queued", not "will start", for exactly this window.
+		if step.Repair {
+			code := kickCIRepair(root, step.Root, groomed, stdout, stderr)
+			if code == exitInterrupted {
+				return code
+			}
+			if code != 0 && firstFailure == 0 {
+				firstFailure = code
+			}
+			continue
+		}
 		if hold := kickFloorHold(root, step.Root, groomed); hold != "" {
 			moePrintf(stderr, "pulse: kick: %s %s\n", step.Root, hold)
 			continue
@@ -193,7 +203,8 @@ type kickStep struct {
 	Root string
 	// Gate is true for a root this sweep's gate groomed, false for one
 	// the board enumeration found sitting parked.
-	Gate bool
+	Gate   bool
+	Repair bool
 	// Park is the survey's own reason to hold this root, verbatim from
 	// the gate. Non-empty means the floor was never consulted — the
 	// survey's veto is upstream of it.
@@ -252,22 +263,32 @@ func planKick(root string, groomed groomResult) kickPlan {
 	// dedupe keeps the first mention of each root.
 	var plan kickPlan
 	seen := make(map[string]bool, len(groomed.threads))
-	add := func(rootKey string, gate bool) {
+	add := func(rootKey string, gate, repair bool) {
 		if seen[rootKey] {
 			return
 		}
 		seen[rootKey] = true
-		plan.Steps = append(plan.Steps, kickStep{Root: rootKey, Gate: gate, Park: parked[rootKey]})
+		plan.Steps = append(plan.Steps, kickStep{Root: rootKey, Gate: gate, Repair: repair, Park: parked[rootKey]})
 	}
 	for _, th := range groomed.threads {
-		add(th.Root, true)
+		add(th.Root, true, th.Repair)
 	}
 	for _, rootKey := range kickableThreadRoots(groomed.mds, groomed.byKey, groomed.graph, groomed.projectID) {
-		add(rootKey, false)
+		add(rootKey, false, false)
 	}
 
 	for i := range plan.Steps {
 		if plan.Steps[i].Park != "" {
+			continue
+		}
+		if plan.Steps[i].Repair {
+			p, ok := repairEvidence(groomed.prChecks, plan.Steps[i].Root)
+			if !ok {
+				plan.Steps[i].Hold = "is held — no actionable PR evidence from this survey"
+			} else {
+				sc := &pulseScan{root: root, mds: groomed.mds, idx: groomed.idx, byKey: groomed.byKey, graph: groomed.graph}
+				_, plan.Steps[i].Hold = ciRepairEligibility(sc, p)
+			}
 			continue
 		}
 		plan.Steps[i].Hold = kickFloorHold(root, plan.Steps[i].Root, groomed)
@@ -367,6 +388,8 @@ func kickStepOutcome(step kickStep) string {
 		return "parked by the survey — " + step.Park
 	case step.Hold != "":
 		return step.Hold
+	case step.Repair:
+		return "queued — repair CI on the existing PR; claim re-checked at start"
 	case step.OneStage:
 		return "queued, design only — one stage, then it parks"
 	default:

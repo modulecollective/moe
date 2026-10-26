@@ -19,12 +19,13 @@ import (
 // the cursor callbacks so a test can assert the ticker closes the loop,
 // and cleans the flag each one carried.
 type fakeHeartbeat struct {
-	mu     sync.Mutex
-	due    []string
-	quiet  []string
-	swept  []string
-	cleans []bool
-	passes int
+	mu       sync.Mutex
+	due      []string
+	quiet    []string
+	swept    []string
+	cleans   []bool
+	passes   int
+	prChecks string
 }
 
 func (f *fakeHeartbeat) Due(tick time.Duration, log io.Writer) []HeartbeatDecision {
@@ -33,7 +34,7 @@ func (f *fakeHeartbeat) Due(tick time.Duration, log io.Writer) []HeartbeatDecisi
 	f.passes++
 	var out []HeartbeatDecision
 	for _, p := range f.due {
-		out = append(out, HeartbeatDecision{Project: p, Sweep: true, Reason: "the journal moved"})
+		out = append(out, HeartbeatDecision{Project: p, Sweep: true, Reason: "the journal moved", PRChecks: f.prChecks})
 	}
 	for _, p := range f.quiet {
 		out = append(out, HeartbeatDecision{Project: p, Reason: "a sweep already surveyed the current tip"})
@@ -918,5 +919,26 @@ func TestSweepExitLogsTheFailureTrace(t *testing.T) {
 	s.children.onExit("run:alpha:some-run:code", now, errors.New("exit status 1"), "boom\n")
 	if got := log.String(); got != "" {
 		t.Errorf("non-heartbeat exit logged %q, want nothing", got)
+	}
+}
+
+func TestHeartbeatPassesExactPRObservation(t *testing.T) {
+	dir := t.TempDir()
+	out := filepath.Join(dir, "argv")
+	bin := filepath.Join(dir, "fake-moe")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nprintf '<%s>\\n' \"$@\" > "+out+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := `[{"Run":"alpha/fix","Head":"original head","Checks":[{"Name":"CI / test","Verdict":"FAILURE"}]}]`
+	gate := &fakeHeartbeat{due: []string{"alpha"}, prChecks: snapshot}
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: bin, Heartbeat: gate})
+	s.heartbeatTick()
+	waitFor(t, "sweep completion", func() bool { return len(gate.sweptList()) == 1 })
+	body, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "<--pr-checks>\n<"+snapshot+">\n<alpha>\n") {
+		t.Fatalf("observation changed or split across arguments: %s", body)
 	}
 }

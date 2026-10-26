@@ -70,8 +70,8 @@ var (
 	// ErrEmpty reports a note or question that is blank after trimming.
 	ErrEmpty = errors.New("input: entry is empty")
 	// ErrNotLive reports an add, ask, or answer against a run that is not
-	// in progress. A terminal run has no next turn, so nothing written on
-	// one could ever be delivered.
+	// in progress or pushed. A terminal run has no next turn, so nothing
+	// written on one could ever be delivered.
 	ErrNotLive = errors.New("input: run is not in progress")
 )
 
@@ -476,14 +476,14 @@ func Carry(root, srcProject, srcRun, dstProject, dstRun, consent string, stderr 
 	return carried, nil
 }
 
-// loadLive resolves a run that may still receive input: in progress, and
+// loadLive resolves a run that may still receive input: in progress or pushed, and
 // with a readable record.
 func loadLive(root, projectID, runID string) (*run.Metadata, File, error) {
 	md, err := run.Load(root, projectID, runID)
 	if err != nil {
 		return nil, File{}, err
 	}
-	if md.Status != run.StatusInProgress {
+	if md.Status != run.StatusInProgress && md.Status != run.StatusPushed {
 		return nil, File{}, fmt.Errorf("%w: %s/%s is %s", ErrNotLive, projectID, runID, md.Status)
 	}
 	f, err := Load(root, projectID, runID)
@@ -584,7 +584,7 @@ func Scan(root, projectFilter string) ([]Waiting, []error) {
 	var out []Waiting
 	var errs []error
 	for _, md := range mds {
-		if md.Status != run.StatusInProgress {
+		if md.Status != run.StatusInProgress && md.Status != run.StatusPushed {
 			continue
 		}
 		if projectFilter != "" && md.Project != projectFilter {
