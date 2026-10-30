@@ -25,6 +25,11 @@ type DashSnapshot struct {
 	// Both surfaces render it through dash.BuildActivityHistogram so they
 	// chart the same slice.
 	Histogram []int
+	// Questions are keyed by project/run, independently of rendered rows:
+	// a run may appear twice, and an open question never holds execution.
+	Questions    map[string]string
+	InputErrors  []error
+	SessionError error
 }
 
 // DashFilter mirrors the `moe dash` flag set so the gatherer can be
@@ -52,14 +57,15 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter) (DashSnap
 		return DashSnapshot{}, err
 	}
 
-	// Open-session liveness is best-effort: a session.List failure
-	// silently yields no markers, same as the CLI dash handler.
+	// Open-session liveness is best-effort: a session.List failure yields
+	// no row markers, but remains observable to status consumers.
 	// Keyed by "<project>/<slug>" like the dash's other run maps —
 	// session records carry the project, and a bare-slug key would paint
 	// a live marker onto a same-slug run in another project.
 	sessionDocsByRun := make(map[string][]string)
 	sessionWhenByRun := make(map[string]time.Time)
-	if ss, err := session.List(root); err == nil {
+	ss, sessionErr := session.List(root)
+	if sessionErr == nil {
 		tips := sessionBranchTips(root)
 		for _, s := range ss {
 			key := s.Project + "/" + s.Run
@@ -129,33 +135,39 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter) (DashSnap
 		}
 	}
 
-	// One os.ReadFile per in-progress run, nearly all of which miss. Over
+	// One os.ReadFile per in-progress or pushed run, nearly all of which miss. Over
 	// the scan already in hand rather than input.Scan: the hints need only
 	// "is something live", and Scan additionally dates each record with a
 	// git log it would fork per hit — an ordering the queue page needs and
 	// a row hint does not.
 	//
-	// A malformed record drops its hints rather than failing the dash.
-	// Nothing refuses work on one any more, so this is a missing hint and
-	// not a hidden floor.
+	// A malformed record drops its row hints rather than failing the dash,
+	// but status consumers must retain the uncertainty.
 	awaitingAnswer := map[string]bool{}
 	pendingInput := map[string]bool{}
+	questions := map[string]string{}
+	var inputErrors []error
 	for _, md := range mds {
-		if md.Status != run.StatusInProgress {
+		if md.Status != run.StatusInProgress && md.Status != run.StatusPushed {
 			continue
 		}
 		if filter.ProjectFilter != "" && md.Project != filter.ProjectFilter {
 			continue
 		}
+		if filter.WorkflowFilter != "" && md.Workflow != filter.WorkflowFilter {
+			continue
+		}
 		f, err := input.Load(root, md.Project, md.ID)
 		if err != nil {
+			inputErrors = append(inputErrors, err)
 			continue
 		}
 		key := md.Project + "/" + md.ID
-		if _, open := f.OpenPing(); open {
-			awaitingAnswer[key] = true
+		if ping, open := f.OpenPing(); open {
+			questions[key] = ping.Question
+			awaitingAnswer[key] = md.Status == run.StatusInProgress
 		}
-		if len(f.Pending()) > 0 {
+		if md.Status == run.StatusInProgress && len(f.Pending()) > 0 {
 			pendingInput[key] = true
 		}
 	}
@@ -195,6 +207,9 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter) (DashSnap
 		ProjectCount:   projectCount,
 		ActiveProjects: len(activeProjects),
 		Histogram:      dailyRunCounts(idx, now, filter.ProjectFilter),
+		Questions:      questions,
+		InputErrors:    inputErrors,
+		SessionError:   sessionErr,
 	}, nil
 }
 

@@ -2,10 +2,13 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"flag"
 	"io"
 	"math/rand"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -105,7 +108,7 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 			moePrintf(stderr, "%v\n", err)
 			return 1
 		}
-		renderDashFrame(stdout, now, root, snap, *all)
+		renderDashFrame(stdout, now, snap, *all, readServeState(root))
 		return 0
 	}
 
@@ -116,6 +119,18 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "dash: --watch needs a terminal on stdout")
 		return 2
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return watchDash(ctx, root, filter, *all, stdout, stderr)
+}
+
+func watchDash(ctx context.Context, root string, filter DashFilter, all bool, stdout, stderr io.Writer) int {
+	status := dashStatus{}
+	if cliout.RexStatusEnabled(stdout) {
+		status.w = stdout
+	}
+	defer status.close()
+	_ = status.update(nil)
 	for first := true; ; first = false {
 		rows, columns, sizeErr := cliout.TerminalSize(stdout)
 		if sizeErr != nil && first {
@@ -143,6 +158,7 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 			moePrintf(stderr, "%v\n", err)
 			return 1
 		}
+		serveState := readServeState(root)
 		// Raw, not through cliout: a control sequence isn't moe's
 		// voice and doesn't want the amber wrap. Straight to stdout,
 		// not through frame — the sequence carries no newline to erase
@@ -159,11 +175,22 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 			// replaces, so no special case is needed.
 			moePrintf(&frame, "%v\n", err)
 		} else if sizeErr == nil {
-			renderDashFrame(&frame, now, root, snap, *all)
+			renderDashFrame(&frame, now, snap, all, serveState)
 		}
 		_ = writeWatchViewport(stdout, frame.Bytes(), rows, columns)
 		_, _ = io.WriteString(stdout, dashFramePost)
-		time.Sleep(dashWatchInterval)
+		observationErr := err
+		if sizeErr != nil {
+			observationErr = sizeErr
+		}
+		// Reporting is best-effort and cannot change the command's outcome.
+		// Failed reports remain unacknowledged and retry on the next tick.
+		_ = status.update(dashStatusReports(snap, observationErr, serveState, filter))
+		select {
+		case <-ctx.Done():
+			return 0
+		case <-time.After(dashWatchInterval):
+		}
 	}
 }
 
@@ -356,9 +383,8 @@ func isWideTerminalRune(r rune) bool {
 // renderDashFrame writes one full dashboard frame — banner, serve lines,
 // factory art, sections — to its destination. Watch mode uses
 // ttyFrameBuffer so cliout's colour gates still reach the real terminal
-// through Unwrap, and re-reads serve's state file per frame, which is one
-// small os.ReadFile.
-func renderDashFrame(stdout io.Writer, now time.Time, root string, snap DashSnapshot, all bool) {
+// through Unwrap. The caller shares one serve read with status reporting.
+func renderDashFrame(stdout io.Writer, now time.Time, snap DashSnapshot, all bool, serveState serveState) {
 	state := dash.FactoryStateFromRows(snap.Rows)
 	// Fresh rand per frame, so the factory's smoke re-rolls each tick
 	// and a watched dash reads as alive.
@@ -368,7 +394,6 @@ func renderDashFrame(stdout io.Writer, now time.Time, root string, snap DashSnap
 	// status in its tail. Serve status is ambient context, not an event —
 	// it belongs with the render metadata rather than on a line of its
 	// own, and this way it costs the frame nothing.
-	serveState := readServeState(root)
 	banner.Dash(stdout, now, serveState.bannerCluster(now))
 	// Directly under the banner, above the art: the projects a sweep is
 	// working, holding back, or has killed. The banner's serve cluster is
