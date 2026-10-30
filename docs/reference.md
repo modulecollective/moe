@@ -20,6 +20,16 @@ source of truth for the exact command surface; this page is a map.
   commits are waiting (read from git, so it shows with or without a serve), or
   `pushed 2m ago` once serve's pusher has landed one. A push origin is refusing
   earns a row of its own with git's reason.
+
+  In a Rex terminal, `--watch` also reports live sweeps, outstanding operator
+  questions and known serve failures through OSC 7501. Activity and questions
+  follow the board filters; health explicitly includes serve-wide failures.
+  An open session does not prove an agent is thinking, and a question does not
+  stop its run. Reports update only when their content changes and clear on
+  orderly exit. They require the watch pane to keep running; restarting it
+  reseeds current state. Nested tmux/screen terminals and serve children do
+  not emit reports. These are current observations, not an event feed or a
+  complete account of stage failures.
 - `moe serve [--addr <host[:port]>] [--port <n>] [--dynamic]` runs the local
   web UI, bound to `127.0.0.1:4242` by default. Beyond runs and canvases, its
   read-only surface browses lore, a projects index with per-project hubs,
