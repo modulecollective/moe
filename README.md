@@ -14,11 +14,13 @@ and every turn is committed to a personal Git journal, so the project keeps
 memory that can be resumed, reverted, audited, and reused.
 
 Work travels as far as you license, and no further. Typed, that's a bang
-grammar: `!` runs one stage and parks at the gate, `!!!` ships the run and rides
-the chain queued behind it. Standing, it's an armed `moe serve --dynamic`,
-whose heartbeat surveys each project's board, opens work that's ready — a due
-chore, a tagged idea, a parked chain — and rides it through test, review, and
-ship while you're away. Stopping that process retracts all of it.
+grammar: `!` runs one stage and parks at the gate, `!!!` ships the run and
+rides the chain queued behind it. Standing, it's an armed
+`moe serve --dynamic`, whose heartbeat surveys each project's board, opens work
+that's ready — a due chore, a tagged idea, a parked chain — and rides it
+through test, review, and ship while you're away. Stopping serve prevents new
+sweeps; already-launched Rex-hosted sweeps and the rides they carry can finish
+independently.
 
 Underneath is a bet that agents have made careful work cheap. When a designed,
 reviewed, tested change costs one conversation and two keystrokes, the
@@ -69,10 +71,13 @@ journaled, and revertible in the morning.
 The standing rung removes even that keystroke. Leave `moe serve --dynamic`
 running and its heartbeat finds ready work across each project's board, opens
 it, and carries it through the same gates and journal, no `!!!` required.
-Stopping the process is the off switch. When a run needs your judgment, push it
-a sentence — `moe input add` from the terminal, or the web's `/input` queue
-from a phone — and the next turn on that run acts on it. A sweep can ask you
-something the same way, and you answer it in prose.
+Stopping serve stops new sweeps; to cancel an existing Rex-hosted sweep and its
+ride, press Ctrl-C in its Rex block. Local sweeps stop with serve; see the
+[heartbeat guide](docs/workflows.md#the-heartbeat) for hosting details. When a
+run needs your judgment, push it a sentence — `moe input add` from the
+terminal, or the web's `/input` queue from a phone — and the next turn on that
+run acts on it. A sweep can ask you something the same way, and you answer it
+in prose.
 
 ## You Might Want MoE If
 

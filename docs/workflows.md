@@ -149,11 +149,11 @@ still gated, journaled, and revertible in the morning.
 
 Every chain roots in operator consent, which is either typed — the bang you
 fire — or standing, an armed `moe serve --dynamic` whose
-[heartbeat](#the-heartbeat) is the one clock MoE carries and whose retraction is
-stopping the process. MoE ships no cron of anyone else's. Typed, the story is
-"you pull the trigger at 6pm and the work outlasts your attention", not "MoE
-runs at night"; standing, it is "the clock you armed keeps asking", under every
-guard a typed ride runs under.
+[heartbeat](#the-heartbeat) is the one clock MoE carries. Stopping serve stops
+that clock from starting new sweeps. MoE ships no cron of anyone else's. Typed,
+the story is "you pull the trigger at 6pm and the work outlasts your
+attention", not "MoE runs at night"; standing, it is "the clock you armed keeps
+asking", under every guard a typed ride runs under.
 
 `moe chain edit` opens every active chainable run across projects in `$EDITOR`
 — every operator-cascade workflow (SDLC today) plus chain heads — grouped into
@@ -664,8 +664,13 @@ thing: a resident heartbeat that looks at each project's board every twenty
 minutes and runs `moe pulse new --dynamic <project>` when it finds something
 worth looking at. That heartbeat is the only automatic pulse there is, and the
 only thing in the process that starts an agent at all — the web writes licences
-and marks, and the clock spends them. Stopping the process retracts it; an
-unarmed `moe serve` is a reader with a capture door.
+and marks, and the clock spends them. Stopping serve stops new sweeps. An
+existing Rex-hosted sweep and the rides it carries survive serve shutdown; an
+armed restart with a usable Rex host adopts them, and Ctrl-C in the sweep's Rex
+block cancels them. Local sweeps stop with serve. See
+[Re-Entry And Supervision](reference.md#re-entry-and-supervision) for finding
+the session, checking the host, and reading failed blocks. An unarmed
+`moe serve` is a reader with a capture door.
 
 Per project, `moe project ship <id> pr|merge` picks how a finished run lands
 there. `pr` is the default: every unflagged ship — bare `moe sdlc push`, `!!`
