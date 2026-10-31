@@ -156,6 +156,31 @@ func (h *rexHost) sessionID() string {
 	return h.session
 }
 
+// sessionPresent requires a valid listing: loss of contact never proves
+// that a session (and the jobs it owns) can safely be replaced.
+func (h *rexHost) sessionPresent(session string) (bool, error) {
+	out, err := h.call(context.Background(), "ls", "--json")
+	if err != nil {
+		return false, err
+	}
+	var ls struct {
+		Sessions []struct {
+			ID string `json:"session_id"`
+		} `json:"sessions"`
+	}
+	if err := json.Unmarshal(out, &ls); err != nil || ls.Sessions == nil {
+		return false, fmt.Errorf("rex ls: unrecognised reply %q", firstLine(string(out)))
+	}
+	present := false
+	for _, row := range ls.Sessions {
+		if row.ID == "" {
+			return false, errors.New("rex ls: session without an ID")
+		}
+		present = present || row.ID == session
+	}
+	return present, nil
+}
+
 // rexBlock is one row of `rex block ls --json`.
 type rexBlock struct {
 	ID    string `json:"block_id"`
@@ -205,55 +230,63 @@ func (h *rexHost) findLabel(label string) (string, error) {
 // running, unlabelled, and is only logged — the cost is that a restart
 // can't adopt it.
 func (h *rexHost) launch(label string, argv []string) (string, error) {
-	h.mu.Lock()
-	session := h.session
-	h.mu.Unlock()
-	if session == "" {
-		args := append([]string{"new", rexSessionLabel, "--json", "--keep-open", "--cwd", h.root,
-			"--window", label, "--"}, argv...)
+	session := h.sessionID()
+	if session != "" {
+		args := append([]string{"run", "--json", "--focus=false", "--keep-open",
+			"-s", session, "--label", label, "--cwd", h.root, "--"}, argv...)
 		out, err := h.call(context.Background(), args...)
-		if err != nil {
+		if err == nil {
+			var ran struct {
+				BlockIDs []string `json:"block_ids"`
+			}
+			if err := json.Unmarshal(out, &ran); err != nil || len(ran.BlockIDs) == 0 {
+				return "", fmt.Errorf("rex run: unrecognised reply %q", firstLine(string(out)))
+			}
+			return ran.BlockIDs[0], nil
+		}
+		present, probeErr := h.sessionPresent(session)
+		if probeErr != nil {
+			return "", fmt.Errorf("%w (check session: %v)", err, probeErr)
+		}
+		if present {
 			return "", err
 		}
-		var created struct {
-			SessionID string `json:"session_id"`
-			Windows   []struct {
-				BlockIDs []string `json:"block_ids"`
-			} `json:"initial_windows"`
-		}
-		if err := json.Unmarshal(out, &created); err != nil || created.SessionID == "" ||
-			len(created.Windows) == 0 || len(created.Windows[0].BlockIDs) == 0 {
-			return "", fmt.Errorf("rex new: unrecognised reply %q", firstLine(string(out)))
-		}
-		block := created.Windows[0].BlockIDs[0]
+		h.logf("rex: session %s is gone — creating a replacement", session)
 		h.mu.Lock()
-		h.session = created.SessionID
+		h.session = ""
 		h.mu.Unlock()
-		err = os.MkdirAll(filepath.Dir(rexSessionPath(h.root)), 0o755)
-		if err == nil {
-			err = os.WriteFile(rexSessionPath(h.root), []byte(created.SessionID+"\n"), 0o644)
-		}
-		if err != nil {
-			h.logf("rex: record session %s: %v", created.SessionID, err)
-		}
-		if _, err := h.call(context.Background(), "block", "rename", "-s", created.SessionID, block, label); err != nil {
-			h.logf("rex: label block %s as %s: %v", block, label, err)
-		}
-		return block, nil
 	}
-	args := append([]string{"run", "--json", "--focus=false", "--keep-open",
-		"-s", session, "--label", label, "--cwd", h.root, "--"}, argv...)
+	args := append([]string{"new", rexSessionLabel, "--json", "--keep-open", "--cwd", h.root,
+		"--window", label, "--"}, argv...)
 	out, err := h.call(context.Background(), args...)
 	if err != nil {
 		return "", err
 	}
-	var ran struct {
-		BlockIDs []string `json:"block_ids"`
+	var created struct {
+		SessionID string `json:"session_id"`
+		Windows   []struct {
+			BlockIDs []string `json:"block_ids"`
+		} `json:"initial_windows"`
 	}
-	if err := json.Unmarshal(out, &ran); err != nil || len(ran.BlockIDs) == 0 {
-		return "", fmt.Errorf("rex run: unrecognised reply %q", firstLine(string(out)))
+	if err := json.Unmarshal(out, &created); err != nil || created.SessionID == "" ||
+		len(created.Windows) == 0 || len(created.Windows[0].BlockIDs) == 0 {
+		return "", fmt.Errorf("rex new: unrecognised reply %q", firstLine(string(out)))
 	}
-	return ran.BlockIDs[0], nil
+	block := created.Windows[0].BlockIDs[0]
+	h.mu.Lock()
+	h.session = created.SessionID
+	h.mu.Unlock()
+	err = os.MkdirAll(filepath.Dir(rexSessionPath(h.root)), 0o755)
+	if err == nil {
+		err = os.WriteFile(rexSessionPath(h.root), []byte(created.SessionID+"\n"), 0o644)
+	}
+	if err != nil {
+		h.logf("rex: record session %s: %v", created.SessionID, err)
+	}
+	if _, err := h.call(context.Background(), "block", "rename", "-s", created.SessionID, block, label); err != nil {
+		h.logf("rex: label block %s as %s: %v", block, label, err)
+	}
+	return block, nil
 }
 
 // waitExit blocks until the block's program exits and returns its exit
@@ -325,6 +358,9 @@ func (h *rexHost) findBlock(block string) (string, error) {
 	}
 	bs, err := h.blocks(session)
 	if err != nil {
+		if present, probeErr := h.sessionPresent(session); probeErr == nil && !present {
+			return "", nil
+		}
 		return "", err
 	}
 	for _, b := range bs {

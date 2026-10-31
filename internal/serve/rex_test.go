@@ -224,6 +224,7 @@ func TestRexUnresolvedLaunch(t *testing.T) {
 	t.Run("label found", func(t *testing.T) {
 		fake := newFakeRex(t)
 		fake.reply("run", "", 1)
+		fake.reply("ls", `{"sessions":[{"session_id":"session:S"}]}`, 0)
 		fake.reply("block-ls", `{"blocks":[{"block_id":"block:B9","label":"heartbeat:alpha"}]}`, 0)
 		fake.reply("wait", `{"exit_code":0}`, 0)
 		moe, argv := argvRecorder(t, 0)
@@ -237,6 +238,9 @@ func TestRexUnresolvedLaunch(t *testing.T) {
 		}
 		if argv() != "" {
 			t.Errorf("moe ran locally: %q", argv())
+		}
+		if fake.called("new") || s.children.rex.sessionID() != "session:S" {
+			t.Errorf("unresolved launch replaced its session: %q", fake.calls())
 		}
 	})
 	t.Run("no match", func(t *testing.T) {
