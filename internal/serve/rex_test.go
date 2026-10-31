@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -345,7 +346,7 @@ func TestRexFirstLaunchCreatesTheSession(t *testing.T) {
 	s.heartbeatTick()
 	waitFor(t, "the sweep to be recorded", func() bool { return len(gate.sweptList()) == 1 })
 
-	if !fake.called("new moe --json --keep-open --cwd " + root + " -- /usr/bin/env ") {
+	if !fake.called("new moe --json --keep-open --cwd " + root + " --window heartbeat:alpha -- /usr/bin/env ") {
 		t.Errorf("rex calls = %q, want the session created around the job", fake.calls())
 	}
 	if !fake.called("block rename -s session:NEW block:B1 heartbeat:alpha") {
@@ -463,7 +464,7 @@ func TestRexAdoptsAtStartup(t *testing.T) {
 		t.Error("a foreign block was adopted")
 	}
 	s.heartbeatTick()
-	if fake.called("run") || fake.called("new") || argv() != "" {
+	if fake.called("run --json --focus=false --keep-open -s session:OLD --label heartbeat:") || fake.called("new") || argv() != "" {
 		t.Errorf("tick launched beside an adopted live job: rex %q, moe %q", fake.calls(), argv())
 	}
 	if _, err := os.Stat(sweepRunPath(root, "alpha")); err != nil {
@@ -481,14 +482,15 @@ func TestRexAdoptsAtStartup(t *testing.T) {
 }
 
 // TestRexStaleSessionStartsFresh: a session file naming a session Rex no
-// longer has is not an error; the first launch creates a new one and
-// rewrites the file.
+// longer has is not an error; startup creates a new one around the
+// dash, rewrites the file, and the sweep runs in it.
 func TestRexStaleSessionStartsFresh(t *testing.T) {
 	fake := newFakeRex(t)
 	fake.reply("whoami", `{"instance_id":"i-1"}`, 0)
 	fake.reply("version", `{"api_revision":8}`, 0)
 	fake.reply("block-ls", "", 1)
 	fake.reply("new", `{"session_id":"session:NEW","initial_windows":[{"block_ids":["block:B1"]}]}`, 0)
+	fake.reply("run", `{"block_ids":["block:B2"]}`, 0)
 	fake.reply("wait", `{"exit_code":0}`, 0)
 	useRexBin(t, fake.bin)
 	root := t.TempDir()
@@ -502,12 +504,130 @@ func TestRexStaleSessionStartsFresh(t *testing.T) {
 
 	s.heartbeatTick()
 	waitFor(t, "the sweep to be recorded", func() bool { return len(gate.sweptList()) == 1 })
-	if !fake.called("new moe ") {
-		t.Errorf("rex calls = %q, want a new session", fake.calls())
+	if !fake.called("new moe ") || !fake.called("run --json --focus=false --keep-open -s session:NEW --label heartbeat:alpha ") {
+		t.Errorf("rex calls = %q, want a new session and the sweep in it", fake.calls())
 	}
 	if body, _ := os.ReadFile(rexSessionPath(root)); strings.TrimSpace(string(body)) != "session:NEW" {
 		t.Errorf(".moe/rex-session = %q, want session:NEW", body)
 	}
+}
+
+// rexStartupFake is a fake Rex that answers discovery.
+func rexStartupFake(t *testing.T) *fakeRex {
+	fake := newFakeRex(t)
+	fake.reply("whoami", `{"instance_id":"i-1"}`, 0)
+	fake.reply("version", `{"api_revision":8}`, 0)
+	useRexBin(t, fake.bin)
+	return fake
+}
+
+// TestRexStartupOpensTheDash: with no session, startup creates it around
+// `moe dash --watch` in a window and block labelled "dash". The env
+// prefix carries MOE_HOME and not MOE_SERVE_AGENT — the dash is the
+// operator's eye, and that variable shuts the status gate it reports
+// to Rex through.
+func TestRexStartupOpensTheDash(t *testing.T) {
+	fake := rexStartupFake(t)
+	fake.reply("new", `{"session_id":"session:NEW","initial_windows":[{"block_ids":["block:D"]}]}`, 0)
+	moe, _ := argvRecorder(t, 0)
+	root := t.TempDir()
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: moe})
+	s.selectHost()
+	t.Cleanup(s.children.rex.cancel)
+
+	want := "new moe --json --keep-open --cwd " + root + " --window dash -- /usr/bin/env MOE_HOME=" + root + " " + moe + " dash --watch"
+	if !slices.Contains(fake.calls(), want) {
+		t.Errorf("rex calls = %q, want %q", fake.calls(), want)
+	}
+	if !fake.called("block rename -s session:NEW block:D dash") {
+		t.Errorf("rex calls = %q, want the first block labelled dash", fake.calls())
+	}
+	if body, _ := os.ReadFile(rexSessionPath(root)); strings.TrimSpace(string(body)) != "session:NEW" {
+		t.Errorf(".moe/rex-session = %q, want session:NEW", body)
+	}
+	if _, ok := s.children.get(rexDashLabel); ok {
+		t.Error("the dash was registered as a child; it is no job of the heartbeat's")
+	}
+}
+
+// TestRexStartupReplacesTheDash: a dash block a previous serve left runs
+// the binary that serve was, so it is closed and a fresh one launched —
+// after adoption, which leaves the heartbeat blocks as they are.
+func TestRexStartupReplacesTheDash(t *testing.T) {
+	fake := rexStartupFake(t)
+	fake.reply("block-ls", `{"blocks":[`+
+		`{"block_id":"block:A","label":"heartbeat:alpha"},`+
+		`{"block_id":"block:OLD","label":"dash"}]}`, 0)
+	fake.reply("run", `{"block_ids":["block:D"]}`, 0)
+	fake.hold("wait")
+	t.Cleanup(func() { fake.release("wait") })
+	root := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(root, ".moe"), 0o755)
+	_ = os.WriteFile(rexSessionPath(root), []byte("session:S\n"), 0o644)
+	moe, _ := argvRecorder(t, 0)
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: moe})
+	s.selectHost()
+	t.Cleanup(s.children.rex.cancel)
+
+	if _, ok := s.children.get(heartbeatChildPrefix + "alpha"); !ok {
+		t.Error("the heartbeat block was not adopted")
+	}
+	calls := fake.calls()
+	closeAt := slices.Index(calls, "block close block:OLD")
+	runAt := slices.Index(calls, "run --json --focus=false --keep-open -s session:S --label dash --cwd "+root+
+		" -- /usr/bin/env MOE_HOME="+root+" "+moe+" dash --watch")
+	if closeAt < 0 || runAt < closeAt {
+		t.Errorf("rex calls = %q, want the old dash closed, then a new one run", calls)
+	}
+	if fake.called("block close block:A") {
+		t.Errorf("rex calls = %q, want the adopted heartbeat block left alone", calls)
+	}
+}
+
+// TestRexDashFailureHoldsNothing: a dash that won't open is a log line.
+// The heartbeat dispatches on the next tick, creating the session the
+// dash couldn't — and its close failing launches no second dash.
+func TestRexDashFailureHoldsNothing(t *testing.T) {
+	t.Run("launch fails", func(t *testing.T) {
+		fake := rexStartupFake(t)
+		fake.reply("new", "", 1)
+		fake.reply("wait", `{"exit_code":0}`, 0)
+		var log syncBuf
+		moe, _ := argvRecorder(t, 0)
+		gate := &fakeHeartbeat{due: []string{"alpha"}}
+		s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: moe, Heartbeat: gate, Logger: &log})
+		s.selectHost()
+		t.Cleanup(s.children.rex.cancel)
+		if !strings.Contains(log.String(), "rex dash not opened") || s.hostErr != nil {
+			t.Fatalf("log = %q, hostErr = %v; want the failure logged and the host usable", log.String(), s.hostErr)
+		}
+
+		fake.reply("new", `{"session_id":"session:NEW","initial_windows":[{"block_ids":["block:B1"]}]}`, 0)
+		s.heartbeatTick()
+		waitFor(t, "the sweep to be recorded", func() bool { return len(gate.sweptList()) == 1 })
+		if !fake.called("block rename -s session:NEW block:B1 heartbeat:alpha") {
+			t.Errorf("rex calls = %q, want the sweep to have created the session", fake.calls())
+		}
+	})
+	t.Run("close fails", func(t *testing.T) {
+		fake := rexStartupFake(t)
+		fake.reply("block-ls", `{"blocks":[{"block_id":"block:OLD","label":"dash"}]}`, 0)
+		fake.reply("block-close", "", 1)
+		var log syncBuf
+		root := t.TempDir()
+		_ = os.MkdirAll(filepath.Join(root, ".moe"), 0o755)
+		_ = os.WriteFile(rexSessionPath(root), []byte("session:S\n"), 0o644)
+		moe, _ := argvRecorder(t, 0)
+		s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: moe, Logger: &log})
+		s.selectHost()
+		t.Cleanup(s.children.rex.cancel)
+		if fake.called("run") {
+			t.Errorf("rex calls = %q, want no second dash beside the one that wouldn't close", fake.calls())
+		}
+		if !strings.Contains(log.String(), "rex dash not opened") {
+			t.Errorf("log = %q, want the failure logged", log.String())
+		}
+	})
 }
 
 // TestShutdownLeavesRexChildrenAlone: the four-phase wind-down is for

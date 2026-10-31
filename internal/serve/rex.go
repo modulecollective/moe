@@ -198,16 +198,19 @@ func (h *rexHost) findLabel(label string) (string, error) {
 }
 
 // launch starts argv in a new block labelled label and returns its id.
-// The first launch with no session creates it: `rex new` takes no
-// label for its block, so the block is renamed afterwards. A failed
-// rename leaves the job running, unlabelled, and is only logged — the
-// cost is that a restart can't adopt it.
+// The first launch with no session creates it — at startup that is the
+// dash (openDash), and a heartbeat only when the dash failed to open.
+// The first window takes the label; `rex new` takes none for its block,
+// so the block is renamed afterwards. A failed rename leaves the job
+// running, unlabelled, and is only logged — the cost is that a restart
+// can't adopt it.
 func (h *rexHost) launch(label string, argv []string) (string, error) {
 	h.mu.Lock()
 	session := h.session
 	h.mu.Unlock()
 	if session == "" {
-		args := append([]string{"new", rexSessionLabel, "--json", "--keep-open", "--cwd", h.root, "--"}, argv...)
+		args := append([]string{"new", rexSessionLabel, "--json", "--keep-open", "--cwd", h.root,
+			"--window", label, "--"}, argv...)
 		out, err := h.call(context.Background(), args...)
 		if err != nil {
 			return "", err
@@ -349,11 +352,11 @@ func firstJSONLine(out []byte) []byte {
 	return line
 }
 
-// rexJobArgv is the argv a Rex block runs for a serve job: absolute
-// binaries, no shell text. The block starts in the account's login
-// environment, which is what serve itself runs in; the two variables
-// serve adds for a local child ride an env prefix. TERM is Rex's own.
-func rexJobArgv(moeBin, root string, args []string) ([]string, error) {
+// rexJobArgv is the argv a Rex block runs for moe: absolute binaries, no
+// shell text. The block starts in the account's login environment, which
+// is what serve itself runs in; the variables serve adds ride an env
+// prefix. TERM is Rex's own.
+func rexJobArgv(moeBin string, env, args []string) ([]string, error) {
 	bin, err := exec.LookPath(moeBin)
 	if err != nil {
 		return nil, err
@@ -361,7 +364,8 @@ func rexJobArgv(moeBin, root string, args []string) ([]string, error) {
 	if bin, err = filepath.Abs(bin); err != nil {
 		return nil, err
 	}
-	argv := []string{"/usr/bin/env", "MOE_HOME=" + root, "MOE_SERVE_AGENT=1", bin}
+	argv := append([]string{"/usr/bin/env"}, env...)
+	argv = append(argv, bin)
 	return append(argv, args...), nil
 }
 
@@ -406,7 +410,8 @@ func (cs *children) spawnRex(id, moeBin string, args []string, root string, logg
 		cs.mu.Unlock()
 	}
 
-	argv, err := rexJobArgv(moeBin, root, args)
+	// The same two variables serve adds for a local child.
+	argv, err := rexJobArgv(moeBin, []string{"MOE_HOME=" + root, "MOE_SERVE_AGENT=1"}, args)
 	if err != nil {
 		return nil, err
 	}
@@ -490,8 +495,51 @@ func (s *Server) selectHost() {
 		s.activity.setHost("rex", "")
 		s.logf("host: rex session %q — sweeps run as Rex blocks and finish even if serve stops", rexSessionLabel)
 		s.adoptRex(h)
+		s.openDash(h)
 	}
 	s.saveActivity()
+}
+
+// rexDashLabel labels the block serve keeps `moe dash --watch` in.
+const rexDashLabel = "dash"
+
+// openDash puts `moe dash --watch` in the session's "dash" block, so the
+// session exists the moment serve starts and the dash reports to the Rex
+// picker (OSC 7501) without the operator starting a watch.
+//
+// A dash block a previous serve left is closed, not adopted: the update
+// watcher restarts serve on every reinstall, and an adopted dash would
+// go on running the old binary. If that close fails nothing is launched,
+// so the session never holds two. Every failure here is only logged —
+// the dash is the operator's eye, and must not hold the heartbeat.
+func (s *Server) openDash(h *rexHost) {
+	argv, err := rexJobArgv(s.opts.MoeBin, []string{"MOE_HOME=" + s.opts.Root}, []string{"dash", "--watch"})
+	if err != nil {
+		s.logf("host: rex dash not opened: %v", err)
+		return
+	}
+	if session := h.sessionID(); session != "" {
+		bs, err := h.blocks(session)
+		if err != nil {
+			s.logf("host: rex dash not opened: %v", err)
+			return
+		}
+		for _, b := range bs {
+			if b.Label != rexDashLabel {
+				continue
+			}
+			if err := h.closeBlock(b.ID); err != nil {
+				s.logf("host: rex dash not opened: close the previous one: %v", err)
+				return
+			}
+		}
+	}
+	block, err := h.launch(rexDashLabel, argv)
+	if err != nil {
+		s.logf("host: rex dash not opened: %v", err)
+		return
+	}
+	s.logf("host: rex dash open in block %s", block)
 }
 
 // adoptRex picks up the jobs a previous serve launched. The session's
