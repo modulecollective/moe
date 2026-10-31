@@ -241,15 +241,15 @@ By default every stage turn runs whatever model the backend CLI defaults to.
 A **model stylesheet** — one checked-in file at the bureaucracy root,
 `model-stylesheet.css` — lets you bind a model (and, optionally, a backend) to
 each `(workflow, stage)` declaratively, so "design and review get the strongest
-model, everything else stays cheap" is a two-line rule instead of a per-command
+model, everything else stays cheap" takes a few rules instead of a per-command
 flag.
 
 ```css
-/* Stages not matched here keep the vendor CLI's own default model.
-   `fable` is claude's floating latest-in-family alias. */
+/* Retain each backend's model when switching with --agent or MOE_FORCE_AGENT. */
+* { agent: codex; model-codex: gpt-6.1-sol; }
 
-sdlc.design { model: fable; }
-sdlc.review { model: fable; }
+sdlc.design { model-codex: gpt-6-astra; model-claude: fable; }
+sdlc.review { model-codex: gpt-6-astra; model-claude: fable; }
 ```
 
 The file is checked into the bureaucracy and rides the same auto-sync as the
@@ -272,18 +272,25 @@ opens, or the `ship: none` close. Until then every turn, the proposing run's
 included, keeps using the root file. A run closed by hand never applies its
 proposal; the run copy stays as the record of what was proposed.
 
-**Grammar.** CSS-ish `selector { property: value; ... }` rules plus `/* ... */`
-comments. Two properties in v1:
+When a proposal uses newly supported properties, deploy a MoE binary that
+understands them before running push. Older binaries reject those properties
+during proposal validation and when loading the root stylesheet.
 
-- `model` — handed verbatim to the backend's `--model` (unless a paired
-  `agent:` scopes it to a backend the turn isn't running — see Precedence
-  below). MoE keeps no model catalog, so unlike selectors, property names, and
-  `agent:` values, a `model:` value is **not** validated at load: a bad id fails
-  at turn start as the backend CLI's own error. Family aliases
-  (`fable`/`opus`/`sonnet` on claude) and un-dated ids (`gpt-5-codex` on codex)
-  float with releases; full ids (`claude-fable-5`) pin.
+**Grammar.** CSS-ish `selector { property: value; ... }` rules plus `/* ... */`
+comments. Properties:
+
 - `agent` — the backend name (`claude` | `codex`), resolved through the same
   registry `--agent` uses.
+- `model-claude`, `model-codex` — a model for the named backend. Valid suffixes
+  come from the registered backend names. These properties never select an
+  agent; only the resolved backend's choice is used.
+- `model` — the legacy fallback, scoped by a paired `agent:` as described below.
+
+All model values are handed verbatim to the backend's `--model`. MoE keeps no
+model catalog, so a bad id fails as the backend CLI's own error. Family aliases
+(`fable`/`opus`/`sonnet` on claude) and un-dated ids (`gpt-5-codex` on codex)
+float with releases; full ids (`claude-fable-5`) pin. Empty values are invalid;
+there is no reset keyword.
 
 **Selectors** have two axes — workflow and stage. Because a bare stage name
 could be ambiguous across workflows (`code` is a stage of `sdlc`, `chat` of
@@ -296,33 +303,39 @@ could be ambiguous across workflows (`code` is a stage of `sdlc`, `chat` of
 | `.review`     | that stage in any workflow  | 1           |
 | `sdlc.review` | exactly one workflow stage  | 2           |
 
-Highest specificity wins per property; equal specificity breaks to the
-last rule in the file. The two properties cascade independently — a
-`sdlc.design { model: … }` does not clear an `agent:` inherited from a
-`sdlc { … }` rule.
+Highest specificity wins per property; equal specificity breaks to the last
+rule in the file. Every property cascades independently: a `model-codex` rule
+does not clear an inherited `model-claude`, `model`, or `agent`.
 
 **Precedence.** The stylesheet sits below your explicit per-run bindings and
 above the background defaults, mirroring "explicit beats the stylesheet":
 
 - Agent: `$MOE_FORCE_AGENT` → `--agent` flag → `run.json` agent → **stylesheet**
   → `claude`.
-- Model: **stylesheet** → backend CLI default. (There is no `--model` flag or
-  `$MOE_MODEL` in v1 — editing the checked-in file is the one knob.)
+- Model, after resolving the agent: internal explicit model →
+  **`model-<resolved-agent>`** → legacy **`model`** with its pairing rule →
+  backend CLI default. There is no public `--model` flag or `$MOE_MODEL`;
+  internal curation callers may supply an explicit model.
 
 Steer a run with `--agent`, the whole process with `$MOE_FORCE_AGENT`, or the
 ambient default with a broad stylesheet `agent:` rule.
 
-A `model:` paired with an `agent:` is scoped to that backend: it rides only when
-the turn's resolved backend matches the stylesheet's own resolved `agent` for
-that (workflow, stage) — the winning `agent` property after the cascade, not
-literally the same rule. If the ladder resolves a different backend — via
-`$MOE_FORCE_AGENT`, `--agent`, or the `run.json` agent — the stylesheet model is
-dropped (the backend's own default applies) and a one-line stderr notice says so
-at turn start. An unpaired `model:` (no `agent` resolves for the stage) is
-handed verbatim to whatever backend runs; a name that backend can't serve fails
-at turn start as **the backend CLI's own error** — MoE keeps no model catalog
-and never validates the value itself. Pair an `agent:` when it matters: pairing
-is what scopes the model to its backend.
+The backend-specific property wins over legacy `model` regardless of their
+relative selector specificity. For example, `* { model-codex: base; }` beats
+`sdlc.design { model: special; }` on a Codex turn. Specificity compares
+declarations of the same property; precedence chooses between properties. With
+the example file above, `MOE_FORCE_AGENT=claude moe sdlc design moe/<run>` uses
+`fable`, and the same command with `MOE_FORCE_AGENT=codex` uses `gpt-6-astra`.
+Missing choices never borrow another backend's model.
+
+When no explicit or backend-specific model applies, a legacy `model:` paired
+with an `agent:` rides only when the turn's backend matches the stylesheet's
+resolved `agent` for that slot. Pairing uses the winning property after the
+cascade, even across separate rules. If an override selects a different
+backend, the legacy model is dropped with a one-line stderr notice and the
+backend default applies. An unpaired legacy model is handed verbatim to
+whichever backend runs. A backend-specific choice emits no drop notice because
+the legacy fallback is unused. Existing files keep their behavior.
 
 ## Shell Completion
 
