@@ -263,8 +263,7 @@ type WorkflowUI struct {
 	Close bool
 }
 
-// Server owns the HTTP listener and the registry of live PTY
-// children.
+// Server owns the HTTP listener and the registry of background jobs.
 type Server struct {
 	opts      Options
 	addr      string
@@ -276,15 +275,6 @@ type Server struct {
 	// heartbeat's last verdicts, and a bounded ring of what it has been
 	// doing. See activity.go.
 	activity *activity
-	// hostErr is set when a Rex server answered at startup but can't be
-	// driven. The heartbeat then withholds every dispatch rather than
-	// launch locally beside jobs Rex may still be running. Written once
-	// by selectHost before the ticker starts.
-	hostErr error
-	// rexAdoptErr holds dispatch while the recorded session's jobs cannot
-	// be reconciled. Startup and then the heartbeat goroutine own it;
-	// unlike hostErr, it is retried on every tick, including idle ticks.
-	rexAdoptErr error
 	// stateMu serialises the state file. Held across snapshot-and-write in
 	// saveActivity, and taken by dropActivity to set stopped. See
 	// saveActivity for why both.
@@ -327,6 +317,29 @@ func New(opts Options) (*Server, error) {
 	if opts.NotifyURL != "" {
 		s.children.notify = makeNotifier(opts.NotifyURL, opts.Logger)
 	}
+	// Prepare only a new dispatch: a recovered Rex launch may already have
+	// written its emit file while its command reply was unavailable.
+	s.children.beforeLaunch = func(id string) {
+		project := heartbeatProject(id)
+		if project == "" {
+			return
+		}
+		if err := clearSweepRun(s.opts.Root, project); err != nil {
+			s.logf("heartbeat: clear sweep run file for %s: %v", project, err)
+		}
+		s.activity.recordSweepRun(project, "")
+	}
+	s.children.onStart = func(c *child) {
+		if project := heartbeatProject(c.id); project != "" {
+			s.activity.recordSweepStart(project, c.started)
+			s.saveActivity()
+		}
+	}
+	s.children.onComplete = func(c *child) {
+		if project := heartbeatProject(c.id); project != "" && s.opts.Heartbeat != nil {
+			s.completeHeartbeat(project, c, c.dispatched)
+		}
+	}
 	s.children.onSpawn = func(id string, at time.Time, detail string) {
 		s.activity.recordChildSpawn(id, at, detail)
 		s.saveActivity()
@@ -364,17 +377,21 @@ func (s *Server) Addr() string { return s.addr }
 func (s *Server) Handler() http.Handler { return s.router }
 
 // ListenAndServe binds, serves, and blocks until ctx is cancelled. On
-// shutdown it drains in-flight requests for up to 5 seconds. Children
-// spawned by handlers die with the server (SIGHUP on PTY close —
-// wired in the per-run slice).
+// shutdown it drains in-flight requests for up to 5 seconds, then invokes
+// the selected host's stop policy.
 func (s *Server) ListenAndServe(ctx context.Context) error {
-	srv := &http.Server{
-		Handler:           s.router,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
 	ln, err := net.Listen("tcp", s.addr)
 	if err != nil {
 		return fmt.Errorf("serve: listen %s: %w", s.addr, err)
+	}
+	return s.serve(ctx, ln)
+}
+
+// serve owns cleanup after a listener has been acquired, on either return path.
+func (s *Server) serve(ctx context.Context, ln net.Listener) error {
+	srv := &http.Server{
+		Handler:           s.router,
+		ReadHeaderTimeout: 5 * time.Second,
 	}
 	s.logf("listening on http://%s/", s.addr)
 	// Printed armed or not: unarmed only means the steering waits for the
@@ -424,41 +441,33 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 		errCh <- nil
 	}()
 
+	var serveErr error
+	serveDone := false
 	select {
 	case <-ctx.Done():
-		// Ahead of children.shutdown, not after: heartbeatTick spawns
-		// into the same registry the wind-down drains, so a tick still
-		// in flight could land a child behind the drain and leak it past
-		// shutdown. A tick is a gate call plus non-blocking spawns, so
-		// the wait is short.
-		hbCancel()
-		heartbeatDone.Wait()
-		httpCtx, httpCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer httpCancel()
-		if err := srv.Shutdown(httpCtx); err != nil {
-			s.logf("shutdown: %v", err)
-		}
-		// Children get their own budget — the four-phase wind-down
-		// in children.shutdown can run up to shutdownSoftGrace +
-		// shutdownHangupGrace + shutdownIntrGap. Add a small buffer
-		// so the inner phases see the deadline as theirs, not the
-		// context's.
-		childCtx, childCancel := context.WithTimeout(context.Background(),
-			shutdownSoftGrace+shutdownHangupGrace+2*time.Second)
-		defer childCancel()
-		s.children.shutdown(childCtx, s.opts.Logger)
-		// A clean exit takes the state file with it. That is what makes a
-		// file left behind mean something: it names a pid, and a pid that
-		// is gone is a serve that crashed rather than one that stopped.
-		if err := s.dropActivity(); err != nil {
-			s.logf("serve: remove state file: %v", err)
-		}
-		return <-errCh
-	case err := <-errCh:
-		hbCancel()
-		heartbeatDone.Wait()
-		return err
+	case serveErr = <-errCh:
+		serveDone = true
 	}
+	s.children.mu.Lock()
+	s.children.stopping = true
+	s.children.mu.Unlock()
+	hbCancel()
+	heartbeatDone.Wait()
+	httpCtx, httpCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer httpCancel()
+	if err := srv.Shutdown(httpCtx); err != nil {
+		s.logf("shutdown: %v", err)
+	}
+	if !serveDone {
+		serveErr = <-errCh
+	}
+	childCtx, childCancel := context.WithTimeout(context.Background(), shutdownSoftGrace+shutdownHangupGrace+2*time.Second)
+	defer childCancel()
+	s.children.shutdown(childCtx, s.opts.Logger)
+	if err := s.dropActivity(); err != nil {
+		s.logf("serve: remove state file: %v", err)
+	}
+	return serveErr
 }
 
 func (s *Server) registerRoutes() {
@@ -716,4 +725,19 @@ func resolveAddr(override string, port int) string {
 		return override
 	}
 	return net.JoinHostPort(override, strconv.Itoa(port))
+}
+
+func (s *Server) reconcileHost() error {
+	err := s.children.host.reconcile()
+	s.activity.mu.Lock()
+	s.activity.hostErr = ""
+	if err != nil {
+		s.activity.hostErr = err.Error()
+	}
+	s.activity.mu.Unlock()
+	if err != nil {
+		s.logf("host: %v — dispatch waits for a heartbeat adoption retry", err)
+	}
+	s.saveActivity()
+	return err
 }

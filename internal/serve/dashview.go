@@ -300,8 +300,8 @@ type servePanelVM struct {
 	// Host is where jobs run ("rex", "local pty", "rex unusable"); empty
 	// on an unarmed serve, which runs none.
 	Host string
-	// HostError is why a Rex server that answered can't be driven; set
-	// only beside Host "rex unusable", when every dispatch is withheld.
+	// HostError is the selected host's readiness error. It includes
+	// retryable discovery, identity and adoption holds.
 	HostError string
 	// NextSweep is how long until the next tick ("12m"), empty for an
 	// unarmed serve, which never ticks.

@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"io"
 	"os"
 	"slices"
 	"sync"
@@ -57,7 +58,7 @@ func TestRexWorkerJoinIncludesFinalClose(t *testing.T) {
 	default:
 		t.Fatal("final close started before exit hooks finished")
 	}
-	h := s.children.rex
+	h := testRex(s.children)
 	h.cancel()
 	joined := rexWorkersDone(h)
 	select {
@@ -108,7 +109,7 @@ func TestRexWorkerJoinIncludesHeartbeatCompletion(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Swept did not start")
 	}
-	h := s.children.rex
+	h := testRex(s.children)
 	h.cancel()
 	joined := rexWorkersDone(h)
 	select {
@@ -144,7 +145,7 @@ func TestRexWorkerCancellationLeavesLiveJob(t *testing.T) {
 			gate := &fakeHeartbeat{due: []string{"alpha"}}
 			s := rexServer(t, fake, Options{Root: t.TempDir(), MoeBin: "/bin/true", Heartbeat: gate})
 			if adopted {
-				if err := s.adoptRex(s.children.rex); err != nil {
+				if err := testRex(s.children).adopt(); err != nil {
 					t.Fatal(err)
 				}
 			} else {
@@ -157,7 +158,7 @@ func TestRexWorkerCancellationLeavesLiveJob(t *testing.T) {
 			}
 			waitFor(t, "live Rex wait", func() bool { return fake.called("wait --json block:A") })
 			before := fake.calls()
-			h := s.children.rex
+			h := testRex(s.children)
 			h.cancel()
 			waitRexWorkers(t, h)
 			c, _ := s.children.get("heartbeat:alpha")
@@ -180,32 +181,40 @@ func TestRexWorkerCancellationLeavesLiveJob(t *testing.T) {
 }
 
 func TestRexHeartbeatPublishedExitWinsCancellation(t *testing.T) {
-	for _, dispatched := range []bool{false, true} {
-		name := "adopted"
-		if dispatched {
-			name = "dispatched"
-		}
-		// Exercise both choices of select when completion and cancellation
-		// are already ready. A missing completion recheck must be detected.
-		for range 32 {
-			t.Run(name, func(t *testing.T) {
-				fake := newFakeRex(t)
-				gate := &fakeHeartbeat{}
-				s := rexServer(t, fake, Options{Root: t.TempDir(), Heartbeat: gate})
-				c := &child{done: make(chan struct{}), exitErr: rexExit(1)}
-				close(c.done)
-				s.children.rex.cancel()
-				// Both channels are already ready before the worker starts.
-				s.startHeartbeatWaiter("alpha", c, dispatched)
-				waitRexWorkers(t, s.children.rex)
-				want := []bool(nil)
-				if dispatched {
-					want = []bool{false}
-				}
-				if !slices.Equal(gate.cleanList(), want) || s.heartbeat.fails["alpha"] != 1 || s.heartbeat.skip["alpha"] != 1 {
-					t.Fatalf("published result lost: clean %v, failures %v, skips %v", gate.cleanList(), s.heartbeat.fails, s.heartbeat.skip)
-				}
-			})
-		}
+	for _, adopted := range []bool{false, true} {
+		t.Run(map[bool]string{false: "dispatched", true: "adopted"}[adopted], func(t *testing.T) {
+			fake := newFakeRex(t)
+			fake.reply("wait", `{"exit_code":1}`, 1)
+			gate := &fakeHeartbeat{}
+			s := rexServer(t, fake, Options{Root: t.TempDir(), Heartbeat: gate})
+			entered, unblock := make(chan struct{}), make(chan struct{})
+			release := sync.OnceFunc(func() { close(unblock) })
+			t.Cleanup(release)
+			original := s.children.onExit
+			s.children.onExit = func(id string, at time.Time, err error, tail string) {
+				close(entered)
+				<-unblock
+				original(id, at, err, tail)
+			}
+			c := testRex(s.children).register("heartbeat:alpha", "block:A", adopted, io.Discard)
+			select {
+			case <-entered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("exit hook never entered")
+			}
+			if exited, _ := c.snapshot(); !exited {
+				t.Fatal("exit not published")
+			}
+			testRex(s.children).cancel()
+			release()
+			waitRexWorkers(t, testRex(s.children))
+			want := []bool(nil)
+			if !adopted {
+				want = []bool{false}
+			}
+			if !slices.Equal(gate.cleanList(), want) || s.heartbeat.fails["alpha"] != 1 || s.heartbeat.skip["alpha"] != 1 || !c.isSettled() {
+				t.Fatal("published exit lost on cancellation")
+			}
+		})
 	}
 }

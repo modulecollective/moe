@@ -147,7 +147,7 @@ func TestSpawnRefusesDuplicateLiveID(t *testing.T) {
 	}
 	defer func() {
 		if c, ok := cs.get("dup/run"); ok {
-			_ = c.pty.Close()
+			_ = cs.host.(*localHost).procs[c].pty.Close()
 		}
 	}()
 
@@ -237,7 +237,7 @@ func TestShutdownPhaseTwoExitsCat(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(shutdownSoftGrace + 2*time.Second):
-		_ = c.pty.Close()
+		_ = cs.host.(*localHost).procs[c].pty.Close()
 		t.Fatal("shutdown didn't return within phase-2 budget")
 	}
 	if !strings.Contains(logger.String(), "exited cleanly") {
@@ -295,8 +295,8 @@ func TestShutdownPhaseThreeHangsUpStubbornChild(t *testing.T) {
 	// production-side a real moe child wouldn't ignore SIGHUP, so
 	// the test just verifies the *shape* of the phase walk.
 	t.Cleanup(func() {
-		if c.cmd != nil && c.cmd.Process != nil {
-			_ = c.cmd.Process.Kill()
+		if cs.host.(*localHost).procs[c].cmd != nil && cs.host.(*localHost).procs[c].cmd.Process != nil {
+			_ = cs.host.(*localHost).procs[c].cmd.Process.Kill()
 		}
 	})
 
@@ -309,7 +309,7 @@ func TestShutdownPhaseThreeHangsUpStubbornChild(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(shutdownSoftGrace + shutdownHangupGrace + 3*time.Second):
-		_ = c.pty.Close()
+		_ = cs.host.(*localHost).procs[c].pty.Close()
 		t.Fatal("shutdown didn't return within total budget")
 	}
 	// The phase-3 advance is the assertion: shutdown survived the
@@ -456,5 +456,28 @@ func TestNaturalExitStillNotifies(t *testing.T) {
 				t.Errorf("notify exitErr = %v, want non-nil: %v", gotErr, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestLocalHostPinsRequestedRoot(t *testing.T) {
+	t.Setenv("MOE_HOME", "/wrong/root")
+	cs := newChildren()
+	root := t.TempDir()
+	c, err := cs.spawn("heartbeat:alpha", "/usr/bin/env", nil, root, io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-c.settled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("environment child did not finish")
+	}
+	for _, want := range []string{"MOE_HOME=" + root, "MOE_SERVE_AGENT=1", "TERM=xterm-256color"} {
+		if !strings.Contains(c.tail(), want+"\r\n") {
+			t.Errorf("missing %q in %q", want, c.tail())
+		}
+	}
+	if strings.Contains(c.tail(), "MOE_HOME=/wrong/root") {
+		t.Fatal("inherited root leaked through")
 	}
 }

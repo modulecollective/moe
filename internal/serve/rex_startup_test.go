@@ -89,8 +89,8 @@ func TestRexStartupWaitsForReconciliation(t *testing.T) {
 			for range 2 {
 				s.heartbeatTick()
 			}
-			if s.rexAdoptErr == nil || s.hostErr != nil || s.children.rex.sessionID() != "session:OLD" {
-				t.Fatalf("adoption = %v, host = %v, ID = %q", s.rexAdoptErr, s.hostErr, s.children.rex.sessionID())
+			if testAdoptionError(s) == nil || testPermanentError(s) != nil || testRex(s.children).sessionID() != "session:OLD" {
+				t.Fatalf("adoption = %v, host = %v, ID = %q", testAdoptionError(s), testPermanentError(s), testRex(s.children).sessionID())
 			}
 			if body, _ := os.ReadFile(rexSessionPath(root)); string(body) != "session:OLD\n" {
 				t.Fatalf("session identity changed: %q", body)
@@ -132,11 +132,11 @@ func TestRexStartupWaitsForReconciliation(t *testing.T) {
 			fake.reply("run@heartbeat:beta", `{"block_ids":["block:B"]}`, 0)
 			s.heartbeatTick()
 			a, ok := s.children.get("heartbeat:alpha")
-			if !ok || a.block != "block:A" || s.rexAdoptErr != nil {
-				t.Fatalf("alpha not reconciled before dispatch: child %v, error %v", a, s.rexAdoptErr)
+			if !ok || testBlock(s.children, a) != "block:A" || testAdoptionError(s) != nil {
+				t.Fatalf("alpha not reconciled before dispatch: child %v, error %v", a, testAdoptionError(s))
 			}
 			b, ok := s.children.get("heartbeat:beta")
-			if !ok || b.block != "block:B" || len(s.children.all) != 3 {
+			if !ok || testBlock(s.children, b) != "block:B" || len(s.children.all) != 3 {
 				t.Fatalf("beta not dispatched or foreign block adopted: %d children", len(s.children.all))
 			}
 			if fake.called("run --json --focus=false --keep-open -s session:OLD --label heartbeat:alpha ") || fake.called("new ") || fake.called("block close block:X") {
@@ -171,7 +171,7 @@ func TestRexStartupWaitsForReconciliation(t *testing.T) {
 				t.Fatalf("want one dash refresh after adoption and before beta: %q", calls)
 			}
 			fake.release("wait")
-			waitRexWorkers(t, s.children.rex)
+			waitRexWorkers(t, testRex(s.children))
 			waitFor(t, "completion backoff", func() bool {
 				s.heartbeat.mu.Lock()
 				defer s.heartbeat.mu.Unlock()
@@ -207,8 +207,8 @@ func TestRexStartupRejectsPartialAdoption(t *testing.T) {
 			fake.reply("wait", `{"exit_code":1}`, 1)
 			s.selectHost()
 			s.heartbeatTick()
-			if s.rexAdoptErr == nil || len(s.children.all) != 0 || fake.called("run ") || fake.called("new ") || fake.called("wait ") {
-				t.Fatalf("invalid listing partially reconciled: error %v, calls %q", s.rexAdoptErr, fake.calls())
+			if testAdoptionError(s) == nil || len(s.children.all) != 0 || fake.called("run ") || fake.called("new ") || fake.called("wait ") {
+				t.Fatalf("invalid listing partially reconciled: error %v, calls %q", testAdoptionError(s), fake.calls())
 			}
 		})
 	}
@@ -236,8 +236,8 @@ func TestRexStartupRecoversOnIdleTick(t *testing.T) {
 				fake.reply("run@dash", "", 1)
 			}
 			s.heartbeatTick()
-			if s.rexAdoptErr != nil || !fake.called("run --json --focus=false --keep-open -s session:OLD --label dash ") || fake.called("new ") || len(s.children.all) != 0 {
-				t.Fatalf("idle recovery failed: error %v, calls %q", s.rexAdoptErr, fake.calls())
+			if testAdoptionError(s) != nil || !fake.called("run --json --focus=false --keep-open -s session:OLD --label dash ") || fake.called("new ") || len(s.children.all) != 0 {
+				t.Fatalf("idle recovery failed: error %v, calls %q", testAdoptionError(s), fake.calls())
 			}
 			before := len(fake.calls())
 			s.heartbeatTick()
@@ -247,9 +247,9 @@ func TestRexStartupRecoversOnIdleTick(t *testing.T) {
 			gate.due, gate.quiet = []string{"alpha"}, nil
 			fake.reply("run@heartbeat:alpha", `{"block_ids":["block:A"]}`, 0)
 			s.heartbeatTick()
-			waitRexWorkers(t, s.children.rex)
+			waitRexWorkers(t, testRex(s.children))
 			waitFor(t, "eligible sweep after dash attempt", func() bool { return len(gate.sweptList()) == 1 })
-			if s.children.rex.sessionID() != "session:OLD" || fake.called("new ") {
+			if testRex(s.children).sessionID() != "session:OLD" || fake.called("new ") {
 				t.Fatalf("empty block array replaced the session: %q", fake.calls())
 			}
 		})
@@ -270,8 +270,8 @@ func TestRexStartupMissingSessionRetainsIdentityOnFailedReplacement(t *testing.T
 			gate := &fakeHeartbeat{due: []string{"alpha"}}
 			s := newTestServer(t, Options{Root: root, MoeBin: "/bin/true", Heartbeat: gate})
 			s.selectHost()
-			if s.rexAdoptErr != nil || s.children.rex.sessionID() != "session:OLD" || len(s.children.all) != 0 {
-				t.Fatalf("failed startup replacement lost identity: adoption %v, ID %q", s.rexAdoptErr, s.children.rex.sessionID())
+			if testAdoptionError(s) != nil || testRex(s.children).sessionID() != "session:OLD" || len(s.children.all) != 0 {
+				t.Fatalf("failed startup replacement lost identity: adoption %v, ID %q", testAdoptionError(s), testRex(s.children).sessionID())
 			}
 			if body, _ := os.ReadFile(rexSessionPath(root)); string(body) != "session:OLD\n" {
 				t.Fatalf("failed startup replacement changed persisted ID: %q", body)
@@ -293,33 +293,34 @@ func TestRexStartupMissingSessionRetainsIdentityOnFailedReplacement(t *testing.T
 			// to create another session while the next probe is unavailable.
 			fake.reply("ls", "", 1)
 			s.heartbeatTick()
-			if newCalls() != 1 || len(s.children.all) != 0 || len(gate.sweptList()) != 0 || s.children.rex.sessionID() != "session:OLD" {
+			if newCalls() != 1 || len(s.children.all) != 0 || len(gate.sweptList()) != 0 || testRex(s.children).sessionID() != "session:OLD" {
 				t.Fatalf("later uncertainty created a replacement/phantom: %q", fake.calls())
 			}
 			fake.reply("ls", listing, 0)
 			fake.reply("new", `{"session_id":"session:NEW","initial_windows":[{"block_ids":["block:A"]}]}`, 0)
 			fake.reply("block-ls@session:NEW", `{"blocks":[]}`, 0)
+			fake.reply("run@session:NEW", `{"block_ids":["block:A"]}`, 0)
 			fake.reply("run@dash", `{"block_ids":["block:D"]}`, 0)
 			s.heartbeatTick()
-			waitRexWorkers(t, s.children.rex)
+			waitRexWorkers(t, testRex(s.children))
 			waitFor(t, "replacement sweep backoff", func() bool {
 				s.heartbeat.mu.Lock()
 				defer s.heartbeat.mu.Unlock()
 				return s.heartbeat.fails["alpha"] == 1
 			})
-			if newCalls() != 2 || s.children.rex.sessionID() != "session:NEW" {
+			if newCalls() != 2 || testRex(s.children).sessionID() != "session:NEW" {
 				t.Fatalf("confirmed absence did not recover: %q", fake.calls())
 			}
 			if body, _ := os.ReadFile(rexSessionPath(root)); string(body) != "session:NEW\n" {
 				t.Fatalf("successful replacement not persisted: %q", body)
 			}
-			if !fake.called("block rename -s session:NEW block:A heartbeat:alpha") || !fake.called("run --json --focus=false --keep-open -s session:NEW --label dash ") {
+			if !fake.called("run --json --focus=false --keep-open -s session:NEW --label heartbeat:alpha ") || !fake.called("run --json --focus=false --keep-open -s session:NEW --label dash ") {
 				t.Fatalf("sweep/dash missing from replacement: %q", fake.calls())
 			}
 			s.heartbeat.record("alpha", false)
-			fake.reply("run", `{"block_ids":["block:B"]}`, 0)
+			fake.reply("run@session:NEW", `{"block_ids":["block:B"]}`, 0)
 			s.heartbeatTick()
-			waitRexWorkers(t, s.children.rex)
+			waitRexWorkers(t, testRex(s.children))
 			waitFor(t, "second sweep", func() bool { return len(gate.sweptList()) == 2 })
 			if newCalls() != 2 || !fake.called("run --json --focus=false --keep-open -s session:NEW --label heartbeat:alpha ") {
 				t.Fatalf("next sweep did not reuse replacement: %q", fake.calls())
@@ -343,12 +344,12 @@ func TestRexStartupAbsenceIsNotCachedForDash(t *testing.T) {
 			fake.reply("block-ls", "", 1)
 			fake.reply("ls", `{"sessions":[]}`, 0)
 			s := rexServer(t, fake, Options{Root: t.TempDir(), MoeBin: "/bin/true"})
-			h := s.children.rex
-			if err := s.adoptRex(h); err != nil {
+			h := testRex(s.children)
+			if err := h.adopt(); err != nil {
 				t.Fatalf("confirmed absence should complete adoption: %v", err)
 			}
 			fake.reply("ls", tc.ls, tc.status)
-			s.openDash(h)
+			h.openDash()
 			if h.sessionID() != "session:S" || fake.called("run ") || fake.called("new ") || fake.called("block close ") {
 				t.Fatalf("dash reused obsolete absence evidence: %q", fake.calls())
 			}

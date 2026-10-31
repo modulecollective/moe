@@ -195,11 +195,8 @@ func (a *activity) recordSkip(projectID, reason string, held bool, fails, coolTi
 	p.fails, p.coolTicks = fails, coolTicks
 }
 
-// recordSweepStart stamps a live sweep's start on the row. It leaves
-// runID alone on purpose: the caller runs this after the spawn, and a
-// fast child can already have named its run through recordSweepRun by
-// then. Dropping the last sweep's run is the caller's job, alongside its
-// emit file, before the spawn — see heartbeatTick.
+// recordSweepStart stamps the row before observation starts. New dispatches
+// clear the old run and emit file before launch; recovery preserves them.
 func (a *activity) recordSweepStart(projectID string, at time.Time) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -334,8 +331,7 @@ type ActivitySnapshot struct {
 	// Host names where jobs run, which is also which lifetime they have:
 	// a Rex job outlives serve, a local one stops with it.
 	Host string `json:"host,omitempty"`
-	// HostError rides beside Host "rex unusable": why the Rex server
-	// that answered can't be driven, and so why nothing dispatches.
+	// HostError carries the host's own readiness error, including retryable holds.
 	HostError string    `json:"host_error,omitempty"`
 	Started   time.Time `json:"started"`
 	// LastTick is zero until the first tick — a serve that just started

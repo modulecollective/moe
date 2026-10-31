@@ -53,7 +53,6 @@ func (f *fakeRex) count(prefix string) int {
 func TestRexAcknowledgedFailureSurvivesRestarts(t *testing.T) {
 	fake := newFakeRex(t)
 	fake.trackBlocks(
-		rexBlock{ID: "block:A", Label: "heartbeat:alpha"},
 		rexBlock{ID: "block:B", Label: "done:heartbeat:beta"},
 		rexBlock{ID: "block:X", Label: "shell"},
 		rexBlock{ID: "block:D", Label: "done:other"},
@@ -70,7 +69,7 @@ func TestRexAcknowledgedFailureSurvivesRestarts(t *testing.T) {
 	onExit := s.children.onExit
 	s.children.onExit = func(id string, at time.Time, err error, tail string) { exits.Add(1); onExit(id, at, err, tail) }
 	s.heartbeatTick()
-	waitRexWorkers(t, s.children.rex)
+	waitRexWorkers(t, testRex(s.children))
 	c, ok := s.children.get("heartbeat:alpha")
 	if !ok || c.tail() != "failure screen\n" || s.heartbeat.fails["alpha"] != 1 || s.heartbeat.skip["alpha"] != 1 || !slices.Equal(gate.cleanList(), []bool{false}) {
 		t.Fatalf("failure was not reported once: child %v, fails %v, skips %v, clean %v", c, s.heartbeat.fails, s.heartbeat.skip, gate.cleanList())
@@ -78,7 +77,7 @@ func TestRexAcknowledgedFailureSurvivesRestarts(t *testing.T) {
 	if fake.blockLabel("block:A") != "done:heartbeat:alpha" || fake.called("block close") {
 		t.Fatal("failed screen was not acknowledged and retained")
 	}
-	s.children.rex.cancel()
+	testRex(s.children).cancel()
 	sentinel := sweepRunPath(root, "alpha")
 	if err := os.WriteFile(sentinel, []byte("sentinel\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -92,10 +91,10 @@ func TestRexAcknowledgedFailureSurvivesRestarts(t *testing.T) {
 		exit := restarted.children.onExit
 		restarted.children.onExit = func(id string, at time.Time, err error, tail string) { exits.Add(1); exit(id, at, err, tail) }
 		before := fake.count("wait ")
-		if err := restarted.adoptRex(restarted.children.rex); err != nil {
+		if err := testRex(restarted.children).adopt(); err != nil {
 			t.Fatal(err)
 		}
-		waitRexWorkers(t, restarted.children.rex)
+		waitRexWorkers(t, testRex(restarted.children))
 		if len(restarted.children.all) != 0 || fake.count("wait ") != before || len(freshGate.sweptList()) != 0 || len(restarted.heartbeat.fails) != 0 || len(restarted.heartbeat.skip) != 0 {
 			t.Fatal("restart adopted or accounted for an acknowledged screen")
 		}
@@ -128,8 +127,8 @@ func TestRexAcknowledgedFailureSurvivesRestarts(t *testing.T) {
 	if closed < 0 || closed >= run || fake.count("block close ") != 1 {
 		t.Fatalf("retained screen not closed before replacement: %q", calls)
 	}
-	restarted.children.rex.cancel()
-	waitRexWorkers(t, restarted.children.rex)
+	testRex(restarted.children).cancel()
+	waitRexWorkers(t, testRex(restarted.children))
 }
 
 func TestRexAcknowledgedSuccessCloseFailure(t *testing.T) {
@@ -140,7 +139,7 @@ func TestRexAcknowledgedSuccessCloseFailure(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			fake := newFakeRex(t)
-			fake.trackBlocks(rexBlock{ID: "block:A", Label: "heartbeat:alpha"})
+			fake.trackBlocks()
 			fake.reply("run", `{"block_ids":["block:A"]}`, 0)
 			fake.reply("wait", `{"exit_code":0}`, 0)
 			fake.reply("block-close", "", 1)
@@ -150,19 +149,19 @@ func TestRexAcknowledgedSuccessCloseFailure(t *testing.T) {
 			var reports atomic.Int32
 			s.children.notify = func(string, error) { reports.Add(1) }
 			s.heartbeatTick()
-			waitRexWorkers(t, s.children.rex)
+			waitRexWorkers(t, testRex(s.children))
 			if fake.blockLabel("block:A") != "done:heartbeat:alpha" || reports.Load() != 1 {
 				t.Fatal("success close failure left an unacknowledged result")
 			}
 			if restart {
-				s.children.rex.cancel()
+				testRex(s.children).cancel()
 				gate = &fakeHeartbeat{due: []string{"alpha"}}
 				s = rexServer(t, fake, Options{Root: root, MoeBin: "/bin/true", Heartbeat: gate})
 				s.children.notify = func(string, error) { reports.Add(1) }
-				if err := s.adoptRex(s.children.rex); err != nil {
+				if err := testRex(s.children).adopt(); err != nil {
 					t.Fatal(err)
 				}
-				waitRexWorkers(t, s.children.rex)
+				waitRexWorkers(t, testRex(s.children))
 				if fake.count("wait ") != 1 || reports.Load() != 1 {
 					t.Fatal("success notification replayed on restart")
 				}
@@ -179,15 +178,15 @@ func TestRexAcknowledgedSuccessCloseFailure(t *testing.T) {
 			if fake.blockLabel("block:A") != "" || fake.count("run ") != 2 {
 				t.Fatal("next launch did not clean up retained success")
 			}
-			s.children.rex.cancel()
-			waitRexWorkers(t, s.children.rex)
+			testRex(s.children).cancel()
+			waitRexWorkers(t, testRex(s.children))
 		})
 	}
 }
 
 func TestRexAcknowledgementFollowsHooksAndHoldsReplacement(t *testing.T) {
 	fake := newFakeRex(t)
-	fake.trackBlocks(rexBlock{ID: "block:A", Label: "heartbeat:alpha"})
+	fake.trackBlocks()
 	fake.reply("run", `{"block_ids":["block:A"]}`, 0)
 	fake.reply("wait", `{"exit_code":1}`, 1)
 	fake.hold("block-rename")
@@ -212,7 +211,7 @@ func TestRexAcknowledgementFollowsHooksAndHoldsReplacement(t *testing.T) {
 	assertHeld := func() {
 		t.Helper()
 		replacement, err := s.children.spawn("heartbeat:alpha", "/bin/true", nil, s.opts.Root, io.Discard)
-		if replacement != nil || err == nil || !strings.Contains(err.Error(), "retirement") {
+		if replacement != nil || err == nil || !strings.Contains(err.Error(), "completing") {
 			t.Fatalf("pending retirement allowed replacement: %v, %v", replacement, err)
 		}
 		if current, _ := s.children.get("heartbeat:alpha"); current != c || fake.count("run ") != 1 || fake.called("block close") {
@@ -234,12 +233,7 @@ func TestRexAcknowledgementFollowsHooksAndHoldsReplacement(t *testing.T) {
 	if err := os.WriteFile(path, []byte("sentinel\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	waitFor(t, "failure backoff", func() bool {
-		s.heartbeat.mu.Lock()
-		defer s.heartbeat.mu.Unlock()
-		return s.heartbeat.fails["alpha"] == 1
-	})
-	s.heartbeatTick() // spend the failure's one skipped tick
+	s.heartbeatTick() // completion is still held in the notifier
 	s.heartbeatTick() // retirement must hold before clearing the emit file
 	if body, err := os.ReadFile(path); err != nil || string(body) != "sentinel\n" {
 		t.Fatalf("pending retirement cleared the old emit file: %q, %v", body, err)
@@ -262,7 +256,7 @@ func TestRexAcknowledgementFollowsHooksAndHoldsReplacement(t *testing.T) {
 	waitFor(t, "held acknowledgement", func() bool { return fake.called("block rename") })
 	assertHeld()
 	fake.release("block-rename")
-	waitRexWorkers(t, s.children.rex)
+	waitRexWorkers(t, testRex(s.children))
 	if notifications.Load() != 1 || exits.Load() != 1 || s.heartbeat.fails["alpha"] != 1 || fake.blockLabel("block:A") != "done:heartbeat:alpha" {
 		t.Fatal("retirement lost or duplicated completion")
 	}
@@ -275,7 +269,7 @@ func TestRexAcknowledgementRecovery(t *testing.T) {
 			rexRetryDelay = 10 * time.Millisecond
 			t.Cleanup(func() { rexRetryDelay = oldDelay })
 			fake := newFakeRex(t)
-			fake.trackBlocks(rexBlock{ID: "block:A", Label: "heartbeat:alpha"})
+			fake.trackBlocks()
 			fake.reply("run", `{"block_ids":["block:A"]}`, 0)
 			fake.reply("wait", `{"exit_code":1}`, 1)
 			if mode != "notify error" {
@@ -319,10 +313,10 @@ func TestRexAcknowledgementRecovery(t *testing.T) {
 				if mode == "retry" {
 					fake.reply("block-rename", "", 0)
 				} else {
-					s.children.rex.cancel()
+					testRex(s.children).cancel()
 				}
 			}
-			waitRexWorkers(t, s.children.rex)
+			waitRexWorkers(t, testRex(s.children))
 			if reports.Load() != 1 || !slices.Equal(gate.cleanList(), []bool{false}) || s.heartbeat.fails["alpha"] != 1 || s.heartbeat.skip["alpha"] != 1 {
 				t.Fatalf("acknowledgement replayed completion: reports %d, clean %v, fails %v, skips %v", reports.Load(), gate.cleanList(), s.heartbeat.fails, s.heartbeat.skip)
 			}
@@ -406,8 +400,8 @@ func TestRexRetainedCleanupScope(t *testing.T) {
 			if lastClose < 0 || run <= lastClose {
 				t.Fatalf("launch overtook cleanup: %q", calls)
 			}
-			s.children.rex.cancel()
-			waitRexWorkers(t, s.children.rex)
+			testRex(s.children).cancel()
+			waitRexWorkers(t, testRex(s.children))
 		})
 	}
 }
@@ -448,19 +442,19 @@ func TestRexLegacyExitAcknowledgement(t *testing.T) {
 	gate := &fakeHeartbeat{}
 	root := t.TempDir()
 	s := rexServer(t, fake, Options{Root: root, Heartbeat: gate})
-	if err := s.adoptRex(s.children.rex); err != nil {
+	if err := testRex(s.children).adopt(); err != nil {
 		t.Fatal(err)
 	}
-	waitRexWorkers(t, s.children.rex)
+	waitRexWorkers(t, testRex(s.children))
 	if fake.blockLabel("block:LEGACY") != "done:heartbeat:alpha" || s.heartbeat.fails["alpha"] != 1 || len(gate.sweptList()) != 0 {
 		t.Fatal("legacy failure was not acknowledged once without advancing cursors")
 	}
-	s.children.rex.cancel()
+	testRex(s.children).cancel()
 	fresh := rexServer(t, fake, Options{Root: root, Heartbeat: gate})
-	if err := fresh.adoptRex(fresh.children.rex); err != nil {
+	if err := testRex(fresh.children).adopt(); err != nil {
 		t.Fatal(err)
 	}
-	waitRexWorkers(t, fresh.children.rex)
+	waitRexWorkers(t, testRex(fresh.children))
 	if fake.count("wait ") != 1 || len(fresh.children.all) != 0 || len(fresh.heartbeat.fails) != 0 {
 		t.Fatal("legacy acknowledgement replayed on next startup")
 	}

@@ -4,190 +4,88 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
 	"sync"
 	"time"
-
-	"github.com/modulecollective/moe/internal/serve/pty"
 )
 
-// shutdownIntrGap is the pause between the two \x03 (Ctrl-C) bytes
-// written to each child's PTY during shutdown. Two Ctrl-Cs is the
-// same byte path a human at the terminal would take: in raw mode
-// claude treats them as two interrupts and exits cleanly; in cooked
-// mode (moe at a chain prompt) the kernel converts each to SIGINT
-// on the foreground process group, which `readLineWithSignal` turns
-// into a clean exit. 100ms is enough for the first byte to be
-// consumed as a discrete event before the second arrives.
-const shutdownIntrGap = 100 * time.Millisecond
-
-// shutdownSoftGrace is how long the four-phase shutdown waits after
-// the two Ctrl-Cs for a child to exit naturally. Moe at the chain
-// prompt is the common end-state once the agent exits — this is the
-// budget for the agent to flush, moe to run session.Close, and moe to
-// print the chain prompt. Session close is local-only now (serve's own
-// pusher takes the commit to origin), but the budget stays: the flush
-// and the rebase are what it was really sized for.
-//
-// Variable rather than const so tests can shorten the wait; not
-// part of the package's surface and not safe to mutate concurrently
-// with a running ListenAndServe.
-var shutdownSoftGrace = 10 * time.Second
-
-// shutdownHangupGrace is the second wait after hanging up the PTY
-// for stragglers that didn't exit on Ctrl-C. Total shutdown budget
-// is roughly shutdownIntrGap + shutdownSoftGrace + shutdownHangupGrace.
-var shutdownHangupGrace = 10 * time.Second
-
-// childTailBytes is how much of a child's PTY output the registry keeps.
-// A sweep that dies to a vendor error used to leave an exit code and
-// nothing else; 8KB is a few screens — the error, whatever framed it, and
-// the moe line around that — which is the difference between a glance
-// and an ssh session.
-//
-// Bounded and in memory only. It never reaches the state file, which
-// stays small enough for `moe dash` to re-read on every watch repaint.
+// Keep only a few screens of output, in memory; tails never enter the state file.
 const childTailBytes = 8 << 10
 
-// child is one moe run the server is parenting, wherever it runs. The
-// registry half — id, start, exit, tail — is the same for every host;
-// what differs is who owns the process.
+// child carries outcomes only; each host owns its process resources.
 type child struct {
-	id      string // "<project>/<slug>" — known at spawn time
-	started time.Time
-
-	// localProc is set when serve owns the process on a PTY of its own,
-	// and nil when a Rex block does (rex.go). Embedded so the PTY code
-	// reads c.cmd and c.pty as it always has.
-	*localProc
-	// block is the Rex block id hosting the process; "" for a local
-	// one, and for a Rex one whose block serve has since closed.
-	block string
-
-	// retired is Rex-only: done publishes the exit before completion hooks
-	// return; retired closes after acknowledgement and immediate cleanup.
-	retired chan struct{}
-
-	done    chan struct{}
-	exitErr error
-
-	// tailMu guards tailBuf, which the reader goroutine appends to while
-	// a request handler may be rendering it.
-	tailMu  sync.Mutex
-	tailBuf []byte
+	id         string
+	started    time.Time
+	dispatched bool
+	done       chan struct{} // a known exit, available to read-only snapshots
+	settled    chan struct{} // callbacks and immediate host retirement have finished
+	exitErr    error
+	tailMu     sync.Mutex
+	tailBuf    []byte
 }
 
-// localProc is the local host: an exec.Cmd on a PTY serve holds the
-// master of, drained by read and wound down by shutdown's four phases.
-type localProc struct {
-	cmd *exec.Cmd
-	pty *pty.Pty
+// jobHost is private to serve: scheduling never inspects process ownership.
+type jobHost interface {
+	reconcile() error
+	spawn(id, moeBin string, args []string, root string, logger io.Writer) (*child, error)
+	shutdown(context.Context, io.Writer)
 }
-
-// children is the live PTY-child registry, keyed by id.
 type children struct {
-	mu  sync.RWMutex
-	all map[string]*child
-	// rex hosts new children in Rex blocks (rex.go); nil hosts them on
-	// local PTYs. Chosen once, before the first spawn.
-	rex *rexHost
-	// notify fires once per child on natural exit. Empty by default;
-	// Server.New wires it when Options.NotifyURL is set. Read through
-	// exitNotifier rather than captured at spawn, so shutdown can
-	// suppress it for children it is killing itself.
-	notify func(id string, exitErr error)
-	// stopping is raised once by shutdown and never cleared — a
-	// registry only shuts down once. It is what makes notify's "on
-	// natural exit" true: a child serve interrupted exits with a
-	// status the operator caused, so posting it as a sweep failure
-	// would be a false alarm.
-	stopping bool
-	// onSpawn and onExit are the activity record's hooks: one call per
-	// child started, one per child reaped, with the output tail attached
-	// to the second. Wired once in Server.New, at the registry level
-	// rather than at the one spawn site there is today (the heartbeat
-	// sweep), so any future spawner lands in the ring without
-	// remembering to say so.
-	// onSpawn's detail says how the child came to be and where it runs.
-	onSpawn func(id string, at time.Time, detail string)
-	onExit  func(id string, at time.Time, exitErr error, tail string)
+	mu           sync.RWMutex
+	spawnMu      sync.Mutex
+	all          map[string]*child
+	host         jobHost
+	stopping     bool
+	notify       func(string, error)
+	beforeLaunch func(string)
+	onStart      func(*child)
+	onComplete   func(*child)
+	onSpawn      func(string, time.Time, string)
+	onExit       func(string, time.Time, error, string)
 }
 
 func newChildren() *children {
-	return &children{all: map[string]*child{}}
+	cs := &children{all: map[string]*child{}}
+	cs.host = newLocalHost(cs)
+	return cs
+}
+func (c *child) isSettled() bool {
+	select {
+	case <-c.settled:
+		return true
+	default:
+		return false
+	}
 }
 
-// spawn starts a moe run as a PTY child and records it under id.
-// The caller has already validated id and constructed args. Returns
-// an error if a live child already holds id.
-//
-// root is the bureaucracy root, used as cmd.Dir. The agent inside
-// the spawned moe handles its own per-document transcript mirror
-// (see internal/agent/claude/executor.go's CopyTranscript call) —
-// serve doesn't snag JSONL on its own.
-func (cs *children) spawn(id, moeBin string, args []string, root string, logger io.Writer) (*child, error) {
-	if cs.rex != nil {
-		return cs.spawnRex(id, moeBin, args, root, logger)
-	}
+// register publishes start state synchronously, before an observer can finish.
+func (cs *children) register(c *child, detail string) {
 	cs.mu.Lock()
-	if existing, dup := cs.all[id]; dup {
-		// If the prior run already exited, replace it. Otherwise refuse.
-		select {
-		case <-existing.done:
-			delete(cs.all, id)
-		default:
-			cs.mu.Unlock()
-			return nil, fmt.Errorf("serve: run %s already live", id)
-		}
-	}
-
-	cmd := exec.Command(moeBin, args...)
-	cmd.Dir = root
-	// Inherit env, then force a recognized TERM so claude/codex
-	// render, and set MOE_SERVE_AGENT=1 — the serve↔CLI handshake
-	// that tells the spawned stage opener to suppress its post-turn
-	// `next: …` chain prompt (SkipNextStage=true).
-	//
-	// Today's only child (the heartbeat sweep) is opened headless, so
-	// the prompt is already suppressed structurally and the env var is
-	// insurance. It stays because the hazard lives here, not in the
-	// caller: this spawner is generic, and a PTY child passes
-	// stdinIsTerminal() — so a future child that isn't headless by its
-	// args would sit on a prompt aimed at a terminal nobody types into,
-	// with no error and no exit. The env var inherits to any `moe`
-	// grandchildren too, which the args-level suppression does not.
-	env := append([]string{}, os.Environ()...)
-	env = append(env, "TERM=xterm-256color", "MOE_SERVE_AGENT=1")
-	cmd.Env = env
-
-	p, err := pty.Start(cmd)
-	if err != nil {
-		cs.mu.Unlock()
-		return nil, err
-	}
-
-	c := &child{
-		id:        id,
-		localProc: &localProc{cmd: cmd, pty: p},
-		started:   time.Now(),
-		done:      make(chan struct{}),
-	}
-	onSpawn, onExit := cs.onSpawn, cs.onExit
-	cs.all[id] = c
+	cs.all[c.id] = c
 	cs.mu.Unlock()
-
-	if onSpawn != nil {
-		onSpawn(id, c.started, "started on a local pty")
+	if cs.onStart != nil {
+		cs.onStart(c)
 	}
-	go c.read(cs, logger, onExit)
-	return c, nil
+	if cs.onSpawn != nil {
+		cs.onSpawn(c.id, c.started, detail)
+	}
+}
+func (cs *children) spawn(id, moeBin string, args []string, root string, logger io.Writer) (*child, error) {
+	cs.spawnMu.Lock()
+	defer cs.spawnMu.Unlock()
+	cs.mu.RLock()
+	stopping := cs.stopping
+	prev := cs.all[id]
+	cs.mu.RUnlock()
+	if stopping {
+		return nil, fmt.Errorf("serve: stopping")
+	}
+	if prev != nil && !prev.isSettled() {
+		return nil, fmt.Errorf("serve: run %s still completing", id)
+	}
+	return cs.host.spawn(id, moeBin, args, root, logger)
 }
 
-// exitNotifier returns the hook to fire for a child that has just
-// exited, or nil once shutdown has started. Looked up at exit time
-// rather than captured at spawn: a child spawned long before the
-// Ctrl-C still has to be silenced by it.
+// exitNotifier suppresses notifications during operator-requested shutdown.
 func (cs *children) exitNotifier() func(id string, exitErr error) {
 	cs.mu.RLock()
 	defer cs.mu.RUnlock()
@@ -214,120 +112,12 @@ func (cs *children) remove(id string) {
 	cs.mu.Unlock()
 }
 
-// shutdown winds children down in four phases so the agent (and
-// moe-the-parent of the agent) gets a real chance to commit, push,
-// and exit cleanly before the kernel reaps anything:
-//
-//  1. Write \x03\x03 (two Ctrl-Cs, ~100ms apart) to every live
-//     child's PTY master. The tty mode does the routing: raw mode
-//     (claude active) sees two interrupts and exits; cooked mode
-//     (moe at a chain prompt) converts each to SIGINT on the fg
-//     pgrp and `readLineWithSignal` returns interrupted → moe
-//     exits 0. In the transition gap the byte sits in the tty input
-//     buffer until something reads it.
-//  2. Wait up to shutdownSoftGrace for natural exit. The common
-//     end-state: agent flushes and exits → moe runs session.Close
-//     → moe prints the chain prompt → the second \x03
-//     (now in cooked mode) interrupts the prompt → moe exits.
-//  3. For stragglers, pty.Close() → kernel SIGHUP via the
-//     controlling terminal. Same blunt instrument as the old
-//     behavior, just gated on the agent having declined to leave
-//     politely.
-//  4. Wait up to shutdownHangupGrace for the hung-up stragglers to
-//     drain. Anything still alive after that is left for the
-//     kernel to reap on os.Exit; logged so the operator knows.
-//
-// logger is the serve logger (the per-server io.Writer); nil means
-// quiet shutdown. ctx caps the whole operation — useful if the
-// operator hits Ctrl-C twice (the second SIGINT collapses through
-// the Go runtime's default handler).
+// shutdown suppresses notifications before invoking the host's stop policy.
 func (cs *children) shutdown(ctx context.Context, logger io.Writer) {
 	cs.mu.Lock()
-	// Raised before the early return below, not alongside the live
-	// children: the narrow case this closes is a child that exited a
-	// moment ago whose reader hasn't reached its notify call yet, and
-	// that child is not in live.
 	cs.stopping = true
-	// Rex children are left alone: the job is Rex's, it outlives serve
-	// by design, and a restarted serve adopts it. Their watchers stop
-	// here; nothing is sent to the blocks.
-	if cs.rex != nil {
-		cs.rex.cancel()
-	}
-	live := make([]*child, 0, len(cs.all))
-	for _, c := range cs.all {
-		if c.localProc == nil {
-			continue
-		}
-		select {
-		case <-c.done:
-			// Already exited; nothing to do.
-		default:
-			live = append(live, c)
-		}
-	}
 	cs.mu.Unlock()
-
-	if len(live) == 0 {
-		return
-	}
-	shutLogf(logger, "shutdown: sending Ctrl-C to %d children", len(live))
-
-	// Phase 1: two Ctrl-Cs to every live child.
-	for _, c := range live {
-		_ = c.writeRaw([]byte{0x03})
-	}
-	select {
-	case <-time.After(shutdownIntrGap):
-	case <-ctx.Done():
-		return
-	}
-	for _, c := range live {
-		_ = c.writeRaw([]byte{0x03})
-	}
-
-	// Phase 2: wait for natural exit.
-	stillLive := waitForExit(live, shutdownSoftGrace, ctx)
-	if len(stillLive) == 0 {
-		shutLogf(logger, "shutdown: %d/%d children exited cleanly", len(live), len(live))
-		return
-	}
-	shutLogf(logger, "shutdown: %d/%d still live after grace, hanging up PTY", len(stillLive), len(live))
-
-	// Phase 3: hang up the master fd for stragglers.
-	for _, c := range stillLive {
-		_ = c.pty.Close()
-	}
-
-	// Phase 4: bounded wait for the hung-up stragglers.
-	final := waitForExit(stillLive, shutdownHangupGrace, ctx)
-	if len(final) > 0 {
-		shutLogf(logger, "shutdown: %d still live after hangup, leaving for kernel reap", len(final))
-	}
-}
-
-// waitForExit waits up to grace (or ctx cancellation) for every
-// child in cs to close c.done. Returns the children that didn't
-// exit in time.
-func waitForExit(cs []*child, grace time.Duration, ctx context.Context) []*child {
-	deadline := time.Now().Add(grace)
-	var stillLive []*child
-	for _, c := range cs {
-		remaining := max(time.Until(deadline), 0)
-		timer := time.NewTimer(remaining)
-		select {
-		case <-c.done:
-			timer.Stop()
-		case <-timer.C:
-			stillLive = append(stillLive, c)
-		case <-ctx.Done():
-			timer.Stop()
-			// Treat remaining children as still-live; caller
-			// decides what to do.
-			stillLive = append(stillLive, c)
-		}
-	}
-	return stillLive
+	cs.host.shutdown(ctx, logger)
 }
 
 func shutLogf(logger io.Writer, format string, a ...any) {
@@ -337,34 +127,11 @@ func shutLogf(logger io.Writer, format string, a ...any) {
 	fmt.Fprintf(logger, format+"\n", a...)
 }
 
-// read drains the master PTY until EIO, then reaps the child and
-// closes done. It then asks the registry for a notify hook — nil once
-// shutdown has raised stopping, so a child serve killed itself sends
-// nothing — and finally calls onExit with the output tail.
-//
-// Only the last childTailBytes are kept, and only so a child that died
-// can say what of. This is still not a remote terminal — nothing streams,
-// nothing is stored past the process's own lifetime, and the agent inside
-// moe handles its own per-document transcript mirror at session close.
-func (c *child) read(cs *children, logger io.Writer, onExit func(string, time.Time, error, string)) {
-	buf := make([]byte, 4096)
-	for {
-		n, err := c.pty.File().Read(buf)
-		if n > 0 {
-			c.appendTail(buf[:n])
-		}
-		if err != nil {
-			break
-		}
-	}
-	c.finish(cs, c.cmd.Wait(), logger, onExit)
-}
-
 // finish is the exit path every host shares: record the status, release
 // anyone waiting on done, then the notify and activity hooks. Rex's
 // watcher reaches it with an exit status read from the block rather than
 // from Wait.
-func (c *child) finish(cs *children, exitErr error, logger io.Writer, onExit func(string, time.Time, error, string)) {
+func (c *child) finish(cs *children, exitErr error, logger io.Writer) {
 	c.exitErr = exitErr
 	close(c.done)
 	if logger != nil {
@@ -373,8 +140,11 @@ func (c *child) finish(cs *children, exitErr error, logger io.Writer, onExit fun
 	if notify := cs.exitNotifier(); notify != nil {
 		notify(c.id, c.exitErr)
 	}
-	if onExit != nil {
-		onExit(c.id, time.Now(), c.exitErr, c.tail())
+	if cs.onExit != nil {
+		cs.onExit(c.id, time.Now(), c.exitErr, c.tail())
+	}
+	if cs.onComplete != nil {
+		cs.onComplete(c)
 	}
 }
 
@@ -395,17 +165,6 @@ func (c *child) tail() string {
 	c.tailMu.Lock()
 	defer c.tailMu.Unlock()
 	return string(c.tailBuf)
-}
-
-// writeRaw writes b verbatim to the child's PTY — no newline, no
-// other framing. Used for control characters (Ctrl-C / 0x03) sent
-// during shutdown.
-func (c *child) writeRaw(b []byte) error {
-	if len(b) == 0 {
-		return nil
-	}
-	_, err := c.pty.File().Write(b)
-	return err
 }
 
 // snapshot reports the child's exit state. Safe to call from request

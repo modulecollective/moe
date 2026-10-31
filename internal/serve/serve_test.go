@@ -2109,7 +2109,7 @@ func newTestServer(t *testing.T, opts Options) *Server {
 	// RPCs and callbacks before their fixtures disappear. dropActivity
 	// also waits out a local save in flight and prevents any later one.
 	t.Cleanup(func() {
-		if h := s.children.rex; h != nil {
+		if h := testRex(s.children); h != nil {
 			h.cancel()
 			waitRexWorkers(t, h)
 		}

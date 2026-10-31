@@ -435,8 +435,8 @@ func TestServePanelNamesAnUnusableHost(t *testing.T) {
 	if body := getBody(t, s, "/serve"); strings.Contains(body, "rex host unusable") {
 		t.Error("/serve names an unusable host on a serve whose host is fine")
 	}
-	s.activity.setHost("rex unusable", "rex API revision 7 is older than 8")
-	if body := getBody(t, s, "/serve"); !strings.Contains(body, "rex host unusable — rex API revision 7 is older than 8") {
+	s.activity.setHost("rex unusable", "rex host unusable: rex API revision 7 is older than 8")
+	if body := getBody(t, s, "/serve"); !strings.Contains(body, "rex host unusable: rex API revision 7 is older than 8") {
 		t.Errorf("/serve body lacks the host error:\n%s", body)
 	}
 }

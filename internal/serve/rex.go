@@ -52,12 +52,21 @@ const rexSessionLabel = "moe"
 // can shorten it.
 var rexRetryDelay = 5 * time.Second
 
-// rexHost is the Rex half of the child registry: the CLI it drives and
-// the session its blocks live in.
+// rexHost owns Rex resources and retryable initialization. The ticker alone
+// mutates readiness and candidates; observers read the published session under mu.
 type rexHost struct {
-	bin    string
-	root   string
-	logger io.Writer
+	children         *children
+	moeBin           string
+	jobs             map[*child]string // resource handles, guarded by children.mu
+	ready            bool
+	discoveryPending bool
+	identityPending  bool
+	permanentErr     error
+	candidate        string
+	bootstrap        string
+	bin              string
+	root             string
+	logger           io.Writer
 
 	// ctx is cancelled by shutdown. It stops local observation, including
 	// the watchers' `rex wait` processes: the blocks keep running.
@@ -75,7 +84,7 @@ type rexHost struct {
 
 func newRexHost(bin, root string, logger io.Writer) *rexHost {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &rexHost{bin: bin, root: root, logger: logger, ctx: ctx, cancel: cancel}
+	return &rexHost{bin: bin, root: root, logger: logger, ctx: ctx, cancel: cancel, jobs: map[*child]string{}}
 }
 
 // rexExit is a Rex-hosted program's non-zero exit, spelled the way
@@ -86,6 +95,8 @@ func (e rexExit) Error() string { return fmt.Sprintf("exit status %d", int(e)) }
 
 // errRexBlockGone is a block that vanished before reporting an exit —
 // closed by hand, or lost with its server.
+var errRexReply = errors.New("invalid Rex reply")
+
 var errRexBlockGone = errors.New("rex block closed before its program reported an exit")
 
 // discoverRex picks the host for this process lifetime. (nil, nil) means
@@ -227,80 +238,122 @@ func (h *rexHost) findLabel(label string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if err := validateOwnedBlocks(bs); err != nil {
+		return "", err
+	}
 	id := ""
 	for _, b := range bs {
 		if b.Label == label {
+			if id != "" {
+				return "", fmt.Errorf("rex duplicate active label %q", label)
+			}
 			id = b.ID
 		}
 	}
 	return id, nil
 }
 
-// launch starts argv in a new block labelled label and returns its id.
-// The first launch with no session creates it — at startup that is the
-// dash (openDash), and a heartbeat only when the dash failed to open.
-// The first window takes the label; `rex new` takes none for its block,
-// so the block is renamed afterwards. A failed rename leaves the job
-// running, unlabelled, and is only logged — the cost is that a restart
-// can't adopt it.
+// launch only starts work in a durably recorded session. Session establishment
+// runs a harmless bootstrap, so a lost creation reply can never orphan an agent.
 func (h *rexHost) launch(label string, argv []string) (string, error) {
-	session := h.sessionID()
-	if session != "" {
-		args := append([]string{"run", "--json", "--focus=false", "--keep-open",
-			"-s", session, "--label", label, "--cwd", h.root, "--"}, argv...)
-		out, err := h.call(context.Background(), args...)
-		if err == nil {
-			var ran struct {
-				BlockIDs []string `json:"block_ids"`
-			}
-			if err := json.Unmarshal(out, &ran); err != nil || len(ran.BlockIDs) == 0 {
-				return "", fmt.Errorf("rex run: unrecognised reply %q", firstLine(string(out)))
-			}
-			return ran.BlockIDs[0], nil
-		}
-		present, probeErr := h.sessionPresent(session)
-		if probeErr != nil {
-			return "", fmt.Errorf("%w (check session: %v)", err, probeErr)
-		}
-		if present {
+	if h.candidate != "" {
+		if err := h.establish(); err != nil {
 			return "", err
 		}
-		h.logf("rex: session %s is gone — creating a replacement", session)
-		// Keep the old identity until creation succeeds. If new fails,
-		// other retained blocks and watchers still need it to confirm
-		// absence, so any eligible project can reach the next launch.
 	}
-	args := append([]string{"new", rexSessionLabel, "--json", "--keep-open", "--cwd", h.root,
-		"--window", label, "--"}, argv...)
-	out, err := h.call(context.Background(), args...)
-	if err != nil {
+	session := h.sessionID()
+	if session == "" {
+		if err := h.establish(); err != nil {
+			return "", err
+		}
+		session = h.sessionID()
+	}
+	run := func() (string, error) {
+		args := append([]string{"run", "--json", "--focus=false", "--keep-open", "-s", session, "--label", label, "--cwd", h.root, "--"}, argv...)
+		out, err := h.call(context.Background(), args...)
+		if err != nil {
+			return "", err
+		}
+		var ran struct {
+			BlockIDs []string `json:"block_ids"`
+		}
+		if err := json.Unmarshal(out, &ran); err != nil || len(ran.BlockIDs) != 1 || ran.BlockIDs[0] == "" {
+			return "", fmt.Errorf("rex run: %w %q", errRexReply, firstLine(string(out)))
+		}
+		return ran.BlockIDs[0], nil
+	}
+	block, err := run()
+	if err == nil {
+		return block, nil
+	}
+	// A malformed successful reply is uncertainty too. Only a command failure
+	// followed by valid absence permits replacement; don't reuse stale evidence.
+	// Readback by label is handled by the caller for lost run replies.
+	if errors.Is(err, errRexReply) {
 		return "", err
 	}
-	var created struct {
-		SessionID string `json:"session_id"`
-		Windows   []struct {
-			BlockIDs []string `json:"block_ids"`
-		} `json:"initial_windows"`
+	present, probeErr := h.sessionPresent(session)
+	if probeErr != nil {
+		return "", fmt.Errorf("%w (check session: %v)", err, probeErr)
 	}
-	if err := json.Unmarshal(out, &created); err != nil || created.SessionID == "" ||
-		len(created.Windows) == 0 || len(created.Windows[0].BlockIDs) == 0 {
-		return "", fmt.Errorf("rex new: unrecognised reply %q", firstLine(string(out)))
+	if present {
+		return "", err
 	}
-	block := created.Windows[0].BlockIDs[0]
-	h.mu.Lock()
-	h.session = created.SessionID
-	h.mu.Unlock()
-	err = os.MkdirAll(filepath.Dir(rexSessionPath(h.root)), 0o755)
-	if err == nil {
-		err = os.WriteFile(rexSessionPath(h.root), []byte(created.SessionID+"\n"), 0o644)
+	h.logf("rex: session %s is gone — creating a replacement", session)
+	if err := h.establish(); err != nil {
+		return "", err
 	}
+	session = h.sessionID()
+	return run()
+}
+
+func (h *rexHost) establish() error {
+	if h.candidate == "" {
+		out, err := h.call(context.Background(), "new", rexSessionLabel, "--json", "--keep-open", "--cwd", h.root, "--window", "bootstrap", "--", "/usr/bin/true")
+		if err != nil {
+			return err
+		}
+		var created struct {
+			SessionID string `json:"session_id"`
+			Windows   []struct {
+				BlockIDs []string `json:"block_ids"`
+			} `json:"initial_windows"`
+		}
+		if err := json.Unmarshal(out, &created); err != nil || created.SessionID == "" || len(created.Windows) != 1 || len(created.Windows[0].BlockIDs) != 1 || created.Windows[0].BlockIDs[0] == "" {
+			return fmt.Errorf("rex new: unrecognised reply %q", firstLine(string(out)))
+		}
+		h.candidate = created.SessionID
+		h.bootstrap = created.Windows[0].BlockIDs[0]
+	}
+	path := rexSessionPath(h.root)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("rex record session: %w", err)
+	}
+	f, err := os.CreateTemp(filepath.Dir(path), "rex-session-*")
 	if err != nil {
-		h.logf("rex: record session %s: %v", created.SessionID, err)
+		return fmt.Errorf("rex record session: %w", err)
 	}
-	if _, err := h.call(context.Background(), "block", "rename", "-s", created.SessionID, block, label); err != nil {
-		h.logf("rex: label block %s as %s: %v", block, label, err)
+	defer os.Remove(f.Name())
+	_, writeErr := f.WriteString(h.candidate + "\n")
+	closeErr := f.Close()
+	if writeErr != nil {
+		return fmt.Errorf("rex record session: %w", writeErr)
 	}
-	return block, nil
+	if closeErr != nil {
+		return fmt.Errorf("rex record session: %w", closeErr)
+	}
+	if err := os.Rename(f.Name(), path); err != nil {
+		return fmt.Errorf("rex record session: %w", err)
+	}
+	h.mu.Lock()
+	h.session = h.candidate
+	h.mu.Unlock()
+	h.candidate = ""
+	if err := h.closeBlock(h.bootstrap); err != nil {
+		h.logf("rex: close bootstrap %s: %v", h.bootstrap, err)
+	}
+	h.bootstrap = ""
+	return nil
 }
 
 // waitExit blocks until the block's program exits and returns its exit
@@ -350,17 +403,21 @@ func (h *rexHost) lastExit(block string) (code int, exited bool, err error) {
 		return 0, false, err
 	}
 	var proc struct {
-		LastExit *struct {
-			ExitCode int `json:"exit_code"`
-		} `json:"last_exit"`
+		LastExit json.RawMessage `json:"last_exit"`
 	}
-	if err := json.Unmarshal(out, &proc); err != nil {
-		return 0, false, fmt.Errorf("rex block call process: %w", err)
+	if err := json.Unmarshal(out, &proc); err != nil || len(proc.LastExit) == 0 {
+		return 0, false, fmt.Errorf("rex block call process: invalid reply %q", firstLine(string(out)))
 	}
-	if proc.LastExit == nil {
+	if bytes.Equal(bytes.TrimSpace(proc.LastExit), []byte("null")) {
 		return 0, false, nil
 	}
-	return proc.LastExit.ExitCode, true, nil
+	var exit struct {
+		Code *int `json:"exit_code"`
+	}
+	if err := json.Unmarshal(proc.LastExit, &exit); err != nil || exit.Code == nil {
+		return 0, false, fmt.Errorf("rex block call process: invalid exit %q", firstLine(string(out)))
+	}
+	return *exit.Code, true, nil
 }
 
 // lookupBlock returns the block's current metadata, or a zero value once
@@ -457,280 +514,4 @@ func rexJobArgv(moeBin string, env, args []string) ([]string, error) {
 	argv := append([]string{"/usr/bin/env"}, env...)
 	argv = append(argv, bin)
 	return append(argv, args...), nil
-}
-
-// spawnRex launches a job as a Rex block and registers it under id.
-//
-// Retention ends here: close the previous child's block and every done
-// block for this id, including screens retained across serve restarts.
-// Uncertain listing or cleanup holds this launch for the next tick.
-//
-// A launch that errors is unresolved, not failed: Rex may have created
-// the block before the reply was lost. The session is searched for the
-// label, and a match is this launch. No match means nothing is launched
-// this tick, and never locally.
-//
-// Not safe for concurrent calls on one id. The heartbeat ticker is the
-// only spawner and runs one goroutine.
-func (cs *children) spawnRex(id, moeBin string, args []string, root string, logger io.Writer) (*child, error) {
-	if err := cs.rex.ctx.Err(); err != nil {
-		return nil, err
-	}
-	cs.mu.Lock()
-	prev, had := cs.all[id]
-	if had {
-		select {
-		case <-prev.done:
-		default:
-			cs.mu.Unlock()
-			return nil, fmt.Errorf("serve: run %s already live", id)
-		}
-		select {
-		case <-prev.retired:
-		default:
-			cs.mu.Unlock()
-			return nil, fmt.Errorf("serve: run %s awaiting rex retirement", id)
-		}
-	}
-	cs.mu.Unlock()
-
-	var blocks []string
-	seen := map[string]bool{}
-	if had && prev.block != "" {
-		blocks = append(blocks, prev.block)
-		seen[prev.block] = true
-	}
-	if session := cs.rex.sessionID(); session != "" {
-		bs, err := cs.rex.blocks(session)
-		if err != nil {
-			if present, probeErr := cs.rex.sessionPresent(session); probeErr != nil || present {
-				return nil, fmt.Errorf("list kept rex blocks: %w (session present: %t, check: %v)", err, present, probeErr)
-			}
-		}
-		for _, b := range bs {
-			if b.Label == "done:"+id && !seen[b.ID] {
-				blocks = append(blocks, b.ID)
-				seen[b.ID] = true
-			}
-		}
-	}
-	for _, block := range blocks {
-		// A kept block the operator closed by hand, or that went with
-		// its server, fails the close with nothing left to close. Only a
-		// block still in the session holds the launch back.
-		if err := cs.rex.closeBlock(block); err != nil {
-			if found, ferr := cs.rex.findBlock(block); ferr != nil || found != "" {
-				return nil, fmt.Errorf("close kept rex block %s: %w", block, err)
-			}
-		}
-	}
-	if had {
-		cs.mu.Lock()
-		prev.block = ""
-		cs.mu.Unlock()
-	}
-
-	// The same two variables serve adds for a local child.
-	argv, err := rexJobArgv(moeBin, []string{"MOE_HOME=" + root, "MOE_SERVE_AGENT=1"}, args)
-	if err != nil {
-		return nil, err
-	}
-	block, err := cs.rex.launch(id, argv)
-	if err != nil {
-		found, ferr := cs.rex.findLabel(id)
-		if ferr != nil || found == "" {
-			return nil, fmt.Errorf("rex launch unresolved, nothing launched: %w", err)
-		}
-		cs.rex.logf("rex: launch of %s reported %v, but block %s carries its label — taking it", id, err, found)
-		block = found
-	}
-	return cs.registerRex(id, block, "started", logger), nil
-}
-
-// registerRex records a Rex-hosted child and starts its watcher. how is
-// the activity ring's word for it: "started" or "adopted".
-func (cs *children) registerRex(id, block, how string, logger io.Writer) *child {
-	c := &child{id: id, block: block, started: time.Now(), done: make(chan struct{}), retired: make(chan struct{})}
-	cs.mu.Lock()
-	onSpawn, onExit := cs.onSpawn, cs.onExit
-	cs.all[id] = c
-	cs.mu.Unlock()
-	if onSpawn != nil {
-		onSpawn(id, c.started, how+" in rex block "+block)
-	}
-	cs.rex.workers.Go(func() { cs.watchRex(c, logger, onExit) })
-	return c
-}
-
-// watchRex is the Rex host's reader: wait for the exit, keep the same
-// bounded tail the local host keeps, then the shared exit path. Mark
-// the reported result before closing a clean block or retaining a failed
-// screen until the next launch of the same id.
-//
-// A shutdown returns without finishing: the job is Rex's, and a
-// restarted serve adopts it.
-func (cs *children) watchRex(c *child, logger io.Writer, onExit func(string, time.Time, error, string)) {
-	defer close(c.retired)
-	code, err := cs.rex.waitExit(c.block)
-	if errors.Is(err, context.Canceled) {
-		return
-	}
-	var exitErr error
-	switch {
-	case err != nil:
-		exitErr = err
-	case code != 0:
-		exitErr = rexExit(code)
-	}
-	if err == nil {
-		// A failed capture costs the tail, never the exit.
-		if screen, cerr := cs.rex.capture(c.block); cerr != nil {
-			cs.rex.logf("rex: capture block %s: %v", c.block, cerr)
-		} else {
-			c.appendTail([]byte(screen))
-		}
-	}
-	c.finish(cs, exitErr, logger, onExit)
-	if errors.Is(err, errRexBlockGone) {
-		return
-	}
-	present, ackErr := cs.rex.acknowledge(c.block, c.id)
-	if ackErr != nil || !present {
-		return
-	}
-	if exitErr == nil {
-		if err := cs.rex.closeBlock(c.block); err != nil {
-			cs.rex.logf("rex: close block %s: %v", c.block, err)
-		}
-	}
-}
-
-// selectHost picks where this armed serve runs jobs, and adopts what a
-// previous serve left running in Rex. Called once, before the first
-// tick; no flag and no config key — a Rex server that answers is used.
-func (s *Server) selectHost() {
-	h, err := discoverRex(s.opts.Root, s.opts.Logger)
-	switch {
-	case err != nil:
-		s.hostErr = err
-		s.activity.setHost("rex unusable", err.Error())
-		s.logf("host: a Rex server answered but can't be driven (%v) — the heartbeat will dispatch nothing until this is fixed and serve restarts", err)
-	case h == nil:
-		s.activity.setHost("local pty", "")
-		s.logf("host: local pty — sweeps stop when serve stops")
-	default:
-		s.children.rex = h
-		s.activity.setHost("rex", "")
-		s.logf("host: rex session %q — sweeps run as Rex blocks and finish even if serve stops", rexSessionLabel)
-		// Load identity once. Adoption retries use the host's current ID,
-		// which launch may replace only after proving the old session gone.
-		if body, err := os.ReadFile(rexSessionPath(s.opts.Root)); err == nil {
-			h.mu.Lock()
-			h.session = strings.TrimSpace(string(body))
-			h.mu.Unlock()
-		}
-		s.rexAdoptErr = s.adoptRex(h)
-		if s.rexAdoptErr != nil {
-			s.logf("host: %v — dispatch waits for a heartbeat adoption retry", s.rexAdoptErr)
-		} else {
-			s.openDash(h)
-		}
-	}
-	s.saveActivity()
-}
-
-// rexDashLabel labels the block serve keeps `moe dash --watch` in.
-const rexDashLabel = "dash"
-
-// openDash puts `moe dash --watch` in the session's "dash" block, so the
-// session exists the moment serve starts and the dash reports to the Rex
-// picker (OSC 7501) without the operator starting a watch.
-//
-// A dash block a previous serve left is closed, not adopted: the update
-// watcher restarts serve on every reinstall, and an adopted dash would
-// go on running the old binary. If that close fails nothing is launched,
-// so the session never holds two. Every failure here is only logged —
-// the dash is the operator's eye, and must not hold the heartbeat.
-func (s *Server) openDash(h *rexHost) {
-	argv, err := rexJobArgv(s.opts.MoeBin, []string{"MOE_HOME=" + s.opts.Root}, []string{"dash", "--watch"})
-	if err != nil {
-		s.logf("host: rex dash not opened: %v", err)
-		return
-	}
-	if session := h.sessionID(); session != "" {
-		bs, err := h.blocks(session)
-		if err != nil {
-			present, probeErr := h.sessionPresent(session)
-			if probeErr != nil || present {
-				s.logf("host: rex dash not opened: %v (session present: %t, check: %v)", err, present, probeErr)
-				return
-			}
-		}
-		for _, b := range bs {
-			if b.Label != rexDashLabel {
-				continue
-			}
-			if err := h.closeBlock(b.ID); err != nil {
-				s.logf("host: rex dash not opened: close the previous one: %v", err)
-				return
-			}
-		}
-	}
-	block, err := h.launch(rexDashLabel, argv)
-	if err != nil {
-		s.logf("host: rex dash not opened: %v", err)
-		return
-	}
-	s.logf("host: rex dash open in block %s", block)
-}
-
-// adoptRex picks up the jobs a previous serve launched. The session's
-// blocks labelled "heartbeat:<project>" are registered under that id and
-// watched: a live one holds its project's single-flight until it exits,
-// and an exited one is consumed at once. Either way the exit runs the
-// ordinary hooks — emit file, activity, log line, webhook — and the
-// backoff ledger, but not the gate's Swept, because this serve never saw
-// the dispatch. Done labels are retained screens, never adopted or reported
-// again. The emit file is left for an active job's exit to read, since
-// that job may still write it.
-//
-// An unreadable listing holds dispatch until a retry reconciles the jobs
-// or a valid session listing proves absence. Even then the old identity
-// remains installed until launch successfully creates its replacement.
-func (s *Server) adoptRex(h *rexHost) error {
-	session := h.sessionID()
-	if session == "" {
-		return nil
-	}
-	bs, err := h.blocks(session)
-	if err != nil {
-		present, probeErr := h.sessionPresent(session)
-		if probeErr != nil {
-			return fmt.Errorf("rex session %s unreadable: %w (check session: %v)", session, err, probeErr)
-		}
-		if present {
-			return fmt.Errorf("rex session %s unreadable: %w", session, err)
-		}
-		return nil
-	}
-	seen := map[string]bool{}
-	for _, b := range bs {
-		if strings.HasPrefix(b.Label, "done:"+heartbeatChildPrefix) {
-			continue
-		}
-		project := heartbeatProject(b.Label)
-		if project == "" {
-			continue
-		}
-		if seen[b.Label] {
-			s.logf("host: rex block %s also carries %s — leaving it alone", b.ID, b.Label)
-			continue
-		}
-		seen[b.Label] = true
-		c := s.children.registerRex(b.Label, b.ID, "adopted", s.opts.Logger)
-		s.logf("heartbeat: adopted %s from rex block %s", project, b.ID)
-		s.activity.recordSweepStart(project, c.started)
-		s.startHeartbeatWaiter(project, c, false)
-	}
-	return nil
 }

@@ -187,15 +187,7 @@ func (s *Server) runHeartbeat(ctx context.Context) {
 // state, spawn what's left, and record the whole verdict set — swept and
 // skipped alike — into the activity record both dashes read.
 func (s *Server) heartbeatTick() {
-	if s.rexAdoptErr != nil {
-		h := s.children.rex
-		s.rexAdoptErr = s.adoptRex(h)
-		if s.rexAdoptErr != nil {
-			s.logf("host: %v — dispatch waits for a heartbeat adoption retry", s.rexAdoptErr)
-		} else {
-			s.openDash(h)
-		}
-	}
+	hostErr := s.reconcileHost()
 	now := time.Now()
 	decisions := s.opts.Heartbeat.Due(heartbeatInterval, s.syncWriter())
 	s.activity.recordTick(now, decisions)
@@ -206,14 +198,8 @@ func (s *Server) heartbeatTick() {
 			continue
 		}
 		projectID := d.Project
-		if s.hostErr != nil {
-			s.logf("heartbeat: %s held — rex host unusable: %v", projectID, s.hostErr)
-			s.activity.recordSkip(projectID, "rex host unusable: "+s.hostErr.Error(), true, 0, 0)
-			s.saveActivity()
-			continue
-		}
-		if s.rexAdoptErr != nil {
-			reason := "rex adoption pending: " + s.rexAdoptErr.Error()
+		if hostErr != nil {
+			reason := hostErr.Error()
 			s.logf("heartbeat: %s held — %s", projectID, reason)
 			s.activity.recordSkip(projectID, reason, true, 0, 0)
 			s.saveActivity()
@@ -235,32 +221,9 @@ func (s *Server) heartbeatTick() {
 		// ticks, and the sweep child itself walks the board while it
 		// lives.
 		id := heartbeatChildPrefix + projectID
-		if c, ok := s.children.get(id); ok {
-			if exited, _ := c.snapshot(); !exited {
-				continue
-			}
-			if s.children.rex != nil {
-				// done precedes the exit hooks. Leave their emit file and
-				// activity row intact until Rex retirement finishes too.
-				select {
-				case <-c.retired:
-				default:
-					continue
-				}
-			}
+		if c, ok := s.children.get(id); ok && !c.isSettled() {
+			continue
 		}
-		// The emit file and the row's run id both still name the last
-		// sweep's run, and neither is this one's. Both clears belong here,
-		// before the spawn: a child can write its emit file, exit, and have
-		// its reader goroutine land recordSweepRun before this goroutine
-		// reaches the next statement. takeSweepRun consumed the file on the
-		// way through, so a clear after the spawn erases the new sweep's
-		// link with nothing left to read it back — the row stays Failed
-		// with no run for good.
-		if err := clearSweepRun(s.opts.Root, projectID); err != nil {
-			s.logf("heartbeat: clear sweep run file for %s: %v", projectID, err)
-		}
-		s.activity.recordSweepRun(projectID, "")
 		// --heartbeat is the child saying who invoked it. The command is
 		// otherwise spelled exactly like the one an operator types, and the
 		// per-project mode caps the clock rather than the operator — so
@@ -271,39 +234,17 @@ func (s *Server) heartbeatTick() {
 			args = append(args, "--pr-checks", d.PRChecks)
 		}
 		args = append(args, projectID)
-		h := s.children.rex
-		session := ""
-		if h != nil {
-			session = h.sessionID()
-		}
-		child, err := s.children.spawn(id, s.opts.MoeBin, args,
+		_, err := s.children.spawn(id, s.opts.MoeBin, args,
 			s.opts.Root, s.opts.Logger)
 		if err != nil {
 			s.logf("heartbeat: spawn %s: %v", projectID, err)
 			continue
 		}
 		s.logf("heartbeat: sweeping %s", projectID)
-		s.activity.recordSweepStart(projectID, child.started)
-		s.saveActivity()
-		s.startHeartbeatWaiter(projectID, child, true)
-		// Restore the lost dash only after the replacement sweep is tracked.
-		if h != nil && h.sessionID() != "" && h.sessionID() != session {
-			s.openDash(h)
-		}
 	}
 }
 
-// startHeartbeatWaiter gives Rex teardown a completion boundary for the
-// bookkeeping that follows a remote exit, independently of its watcher.
-func (s *Server) startHeartbeatWaiter(projectID string, c *child, dispatched bool) {
-	if h := s.children.rex; h != nil {
-		h.workers.Go(func() { s.awaitHeartbeat(projectID, c, dispatched) })
-	} else {
-		go s.awaitHeartbeat(projectID, c, dispatched)
-	}
-}
-
-// awaitHeartbeat records a sweep's outcome once its child exits: the
+// completeHeartbeat records a sweep's outcome once its child exits: the
 // gate's cursors, and the backoff ledger.
 //
 // The tip cursor moves on failure too, not only on a clean sweep. A
@@ -330,23 +271,7 @@ func (s *Server) startHeartbeatWaiter(projectID string, c *child, dispatched boo
 // dispatch, and the gate's restart path is already conservative — the
 // cost is at most one extra look at the board, never a false
 // acknowledgement.
-func (s *Server) awaitHeartbeat(projectID string, c *child, dispatched bool) {
-	if h := s.children.rex; h != nil {
-		select {
-		case <-c.done:
-		case <-h.ctx.Done():
-			// Prefer a published exit even when cancellation is ready too.
-			// Otherwise leave the remote job for restart recovery; cancelling
-			// observation says nothing about whether that job has finished.
-			select {
-			case <-c.done:
-			default:
-				return
-			}
-		}
-	} else {
-		<-c.done
-	}
+func (s *Server) completeHeartbeat(projectID string, c *child, dispatched bool) {
 	failed := c.exitErr != nil
 	if dispatched {
 		s.opts.Heartbeat.Swept(projectID, !failed)
@@ -434,7 +359,7 @@ func takeSweepRun(root, projectID string) string {
 // sweep minted, the dashboard to link an event's project row.
 func heartbeatProject(childID string) string {
 	p, ok := strings.CutPrefix(childID, heartbeatChildPrefix)
-	if !ok {
+	if !ok || !slugPattern.MatchString(p) {
 		return ""
 	}
 	return p

@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -24,6 +25,7 @@ func init() { rexBin = "moe-test-no-rex" }
 // enough to shape every reply the Rex host reads, and every argv it
 // sends is on the record.
 // A <key>@<arg>.status overrides the key for a call containing arg.
+// The last matching argument wins, allowing a label to override its session.
 type fakeRex struct {
 	t   *testing.T
 	dir string
@@ -40,14 +42,24 @@ printf '%s\n' "$*" >> "$D/calls"
 shift 3
 k=$1
 [ "$1" = block ] && k="block-$2"
+basek=$k
 for arg do
-  if [ -e "$D/$k@$arg.status" ]; then k="$k@$arg"; break; fi
+  if [ -e "$D/$basek@$arg.status" ]; then k="$basek@$arg"; fi
 done
 while [ -e "$D/$k.hold" ]; do sleep 0.02; done
 s=0
 [ -e "$D/$k.status" ] && s=$(cat "$D/$k.status")
 if [ -d "$D/blocks" ]; then
   case "$k" in
+    run)
+      if [ "$s" = 0 ] || [ -e "$D/run-lost" ]; then
+        block=$(sed -n 's/.*"block_ids":\["\([^"]*\)".*/\1/p' "$D/$k.out")
+        previous=''
+        for arg do
+          if [ "$previous" = --label ] && [ -n "$block" ]; then printf '%s' "$arg" > "$D/blocks/$block"; break; fi
+          previous=$arg
+        done
+      fi;;
     block-ls)
       [ "$s" = 0 ] || exit "$s"
       printf '{"blocks":['
@@ -144,7 +156,7 @@ func rexServer(t *testing.T, fake *fakeRex, opts Options) *Server {
 	s := newTestServer(t, opts)
 	h := newRexHost(fake.bin, opts.Root, opts.Logger)
 	h.session = "session:S"
-	s.children.rex = h
+	installTestRex(s.children, h, s.opts.MoeBin)
 	return s
 }
 
@@ -154,6 +166,7 @@ func rexServer(t *testing.T, fake *fakeRex, opts Options) *Server {
 // focused, started in the root, and the sweep's own argv reaches moe
 // whole behind an env prefix carrying the two variables serve adds.
 func TestRexLaunchArgvIsExact(t *testing.T) {
+	t.Setenv("MOE_HOME", "/wrong/root")
 	fake := newFakeRex(t)
 	fake.reply("run", `{"window_id":"window:W","block_ids":["block:B1"],"revision":2}`, 0)
 	fake.reply("wait", `{"exit_code":0}`, 0)
@@ -269,7 +282,7 @@ func TestRexUnresolvedLaunch(t *testing.T) {
 		if argv() != "" {
 			t.Errorf("moe ran locally: %q", argv())
 		}
-		if fake.called("new") || s.children.rex.sessionID() != "session:S" {
+		if fake.called("new") || testRex(s.children).sessionID() != "session:S" {
 			t.Errorf("unresolved launch replaced its session: %q", fake.calls())
 		}
 	})
@@ -308,7 +321,7 @@ func TestRexRetention(t *testing.T) {
 
 	s.heartbeatTick()
 	waitFor(t, "the first sweep", func() bool { return len(gate.sweptList()) == 1 })
-	waitRexWorkers(t, s.children.rex)
+	waitRexWorkers(t, testRex(s.children))
 	if fake.called("block close") {
 		t.Fatal("failed block closed on exit")
 	}
@@ -331,9 +344,6 @@ func TestRexRetention(t *testing.T) {
 	}
 }
 
-// TestRexFirstLaunchCreatesTheSession: with no session yet, the first
-// job creates it, its block takes the label by rename, and the session
-// is remembered for the next start.
 // TestRexKeptBlockGoneDoesNotWedge covers a kept failed block that is no
 // longer there when the next launch comes to close it: the operator read
 // the screen and closed it, or it went with its server. The close fails
@@ -350,11 +360,11 @@ func TestRexKeptBlockGoneDoesNotWedge(t *testing.T) {
 
 	s.heartbeatTick()
 	waitFor(t, "the first sweep", func() bool { return len(gate.sweptList()) == 1 })
-	waitRexWorkers(t, s.children.rex)
+	waitRexWorkers(t, testRex(s.children))
 
 	// A close that fails with B1 still in the session holds the launch.
 	fake.reply("block-close", "", 1)
-	fake.reply("block-ls", `{"blocks":[{"block_id":"block:B1","label":"heartbeat:alpha"}]}`, 0)
+	fake.reply("block-ls", `{"blocks":[{"block_id":"block:B1","label":"done:heartbeat:alpha"}]}`, 0)
 	fake.reply("run", `{"block_ids":["block:B2"]}`, 0)
 	fake.reply("wait", `{"exit_code":0}`, 0)
 	s.heartbeat.record("alpha", false) // spend the cool-off the failure earned
@@ -371,21 +381,22 @@ func TestRexKeptBlockGoneDoesNotWedge(t *testing.T) {
 
 func TestRexFirstLaunchCreatesTheSession(t *testing.T) {
 	fake := newFakeRex(t)
-	fake.reply("new", `{"session_id":"session:NEW","initial_windows":[{"window_id":"window:W","block_ids":["block:B1"]}]}`, 0)
+	fake.reply("new", `{"session_id":"session:NEW","initial_windows":[{"window_id":"window:W","block_ids":["block:BOOT"]}]}`, 0)
+	fake.reply("run@heartbeat:alpha", `{"block_ids":["block:B1"]}`, 0)
 	fake.reply("wait", `{"exit_code":0}`, 0)
 	moe, _ := argvRecorder(t, 0)
 	root := t.TempDir()
 	gate := &fakeHeartbeat{due: []string{"alpha"}}
 	s := rexServer(t, fake, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: moe, Heartbeat: gate})
-	s.children.rex.session = ""
+	testRex(s.children).session = ""
 
 	s.heartbeatTick()
 	waitFor(t, "the sweep to be recorded", func() bool { return len(gate.sweptList()) == 1 })
 
-	if !fake.called("new moe --json --keep-open --cwd " + root + " --window heartbeat:alpha -- /usr/bin/env ") {
-		t.Errorf("rex calls = %q, want the session created around the job", fake.calls())
+	if !fake.called("new moe --json --keep-open --cwd " + root + " --window bootstrap -- /usr/bin/true") {
+		t.Errorf("rex calls = %q, want harmless session establishment", fake.calls())
 	}
-	if !fake.called("block rename -s session:NEW block:B1 heartbeat:alpha") {
+	if !fake.called("run --json --focus=false --keep-open -s session:NEW --label heartbeat:alpha ") {
 		t.Errorf("rex calls = %q, want the first block labelled", fake.calls())
 	}
 	body, err := os.ReadFile(rexSessionPath(root))
@@ -409,8 +420,8 @@ func TestRexDiscovery(t *testing.T) {
 	t.Run("not on PATH", func(t *testing.T) {
 		s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: "/bin/true"})
 		s.selectHost()
-		if s.children.rex != nil || s.hostErr != nil {
-			t.Errorf("rex = %v, hostErr = %v; want the local host", s.children.rex, s.hostErr)
+		if testRex(s.children) != nil || testPermanentError(s) != nil {
+			t.Errorf("rex = %v, hostErr = %v; want the local host", testRex(s.children), testPermanentError(s))
 		}
 		if got := s.activity.snapshot(time.Now()).Host; got != "local pty" {
 			t.Errorf("host = %q, want local pty", got)
@@ -422,8 +433,8 @@ func TestRexDiscovery(t *testing.T) {
 		useRexBin(t, fake.bin)
 		s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: "/bin/true"})
 		s.selectHost()
-		if s.children.rex != nil || s.hostErr != nil {
-			t.Errorf("rex = %v, hostErr = %v; want the local host", s.children.rex, s.hostErr)
+		if testRex(s.children) != nil || testPermanentError(s) != nil {
+			t.Errorf("rex = %v, hostErr = %v; want the local host", testRex(s.children), testPermanentError(s))
 		}
 	})
 	t.Run("answers", func(t *testing.T) {
@@ -433,8 +444,8 @@ func TestRexDiscovery(t *testing.T) {
 		useRexBin(t, fake.bin)
 		s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: "/bin/true"})
 		s.selectHost()
-		if s.children.rex == nil || s.hostErr != nil {
-			t.Fatalf("rex = %v, hostErr = %v; want the rex host", s.children.rex, s.hostErr)
+		if testRex(s.children) == nil || testPermanentError(s) != nil {
+			t.Fatalf("rex = %v, hostErr = %v; want the rex host", testRex(s.children), testPermanentError(s))
 		}
 
 		if got := s.activity.snapshot(time.Now()).Host; got != "rex" {
@@ -451,7 +462,7 @@ func TestRexDiscovery(t *testing.T) {
 		gate := &fakeHeartbeat{due: []string{"alpha"}}
 		s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: moe, Heartbeat: gate, Logger: &log})
 		s.selectHost()
-		if s.hostErr == nil {
+		if testPermanentError(s) == nil {
 			t.Fatal("hostErr = nil, want revision 7 refused")
 		}
 		s.heartbeatTick()
@@ -509,7 +520,7 @@ func TestRexAdoptsAtStartup(t *testing.T) {
 	fake.release("wait")
 	c, _ := s.children.get(heartbeatChildPrefix + "alpha")
 	waitFor(t, "the adopted job to finish", func() bool { exited, _ := c.snapshot(); return exited })
-	waitRexWorkers(t, s.children.rex)
+	waitRexWorkers(t, testRex(s.children))
 	if got := gate.sweptList(); len(got) != 0 {
 		t.Errorf("Swept = %v, want none for a job this serve never dispatched", got)
 	}
@@ -526,7 +537,8 @@ func TestRexStaleSessionStartsFresh(t *testing.T) {
 	fake.reply("ls", `{"sessions":[]}`, 0)
 	fake.reply("run@session:GONE", "", 1)
 	fake.reply("block-ls@session:NEW", `{"blocks":[]}`, 0)
-	fake.reply("new", `{"session_id":"session:NEW","initial_windows":[{"block_ids":["block:B1"]}]}`, 0)
+	fake.reply("new", `{"session_id":"session:NEW","initial_windows":[{"block_ids":["block:BOOT"]}]}`, 0)
+	fake.reply("run@heartbeat:alpha", `{"block_ids":["block:B1"]}`, 0)
 	fake.reply("run", `{"block_ids":["block:B2"]}`, 0)
 	fake.reply("wait", `{"exit_code":0}`, 0)
 	useRexBin(t, fake.bin)
@@ -557,25 +569,26 @@ func rexStartupFake(t *testing.T) *fakeRex {
 	return fake
 }
 
-// TestRexStartupOpensTheDash: with no session, startup creates it around
-// `moe dash --watch` in a window and block labelled "dash". The env
+// TestRexStartupOpensTheDash: startup establishes the session with a harmless
+// bootstrap, then starts `moe dash --watch` with its label at creation. The env
 // prefix carries MOE_HOME and not MOE_SERVE_AGENT — the dash is the
 // operator's eye, and that variable shuts the status gate it reports
 // to Rex through.
 func TestRexStartupOpensTheDash(t *testing.T) {
 	fake := rexStartupFake(t)
-	fake.reply("new", `{"session_id":"session:NEW","initial_windows":[{"block_ids":["block:D"]}]}`, 0)
+	fake.reply("new", `{"session_id":"session:NEW","initial_windows":[{"block_ids":["block:BOOT"]}]}`, 0)
+	fake.reply("run@dash", `{"block_ids":["block:D"]}`, 0)
 	moe, _ := argvRecorder(t, 0)
 	root := t.TempDir()
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: moe})
 	s.selectHost()
 
-	want := "new moe --json --keep-open --cwd " + root + " --window dash -- /usr/bin/env MOE_HOME=" + root + " " + moe + " dash --watch"
+	want := "run --json --focus=false --keep-open -s session:NEW --label dash --cwd " + root + " -- /usr/bin/env MOE_HOME=" + root + " " + moe + " dash --watch"
 	if !slices.Contains(fake.calls(), want) {
 		t.Errorf("rex calls = %q, want %q", fake.calls(), want)
 	}
-	if !fake.called("block rename -s session:NEW block:D dash") {
-		t.Errorf("rex calls = %q, want the first block labelled dash", fake.calls())
+	if !fake.called("block close block:BOOT") {
+		t.Errorf("rex calls = %q, want bootstrap closed before the labelled dash", fake.calls())
 	}
 	if body, _ := os.ReadFile(rexSessionPath(root)); strings.TrimSpace(string(body)) != "session:NEW" {
 		t.Errorf(".moe/rex-session = %q, want session:NEW", body)
@@ -631,14 +644,15 @@ func TestRexDashFailureHoldsNothing(t *testing.T) {
 		gate := &fakeHeartbeat{due: []string{"alpha"}}
 		s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: moe, Heartbeat: gate, Logger: &log})
 		s.selectHost()
-		if !strings.Contains(log.String(), "rex dash not opened") || s.hostErr != nil {
-			t.Fatalf("log = %q, hostErr = %v; want the failure logged and the host usable", log.String(), s.hostErr)
+		if !strings.Contains(log.String(), "rex dash not opened") || testPermanentError(s) != nil {
+			t.Fatalf("log = %q, hostErr = %v; want the failure logged and the host usable", log.String(), testPermanentError(s))
 		}
 
-		fake.reply("new", `{"session_id":"session:NEW","initial_windows":[{"block_ids":["block:B1"]}]}`, 0)
+		fake.reply("new", `{"session_id":"session:NEW","initial_windows":[{"block_ids":["block:BOOT"]}]}`, 0)
+		fake.reply("run@heartbeat:alpha", `{"block_ids":["block:B1"]}`, 0)
 		s.heartbeatTick()
 		waitFor(t, "the sweep to be recorded", func() bool { return len(gate.sweptList()) == 1 })
-		if !fake.called("block rename -s session:NEW block:B1 heartbeat:alpha") {
+		if !fake.called("run --json --focus=false --keep-open -s session:NEW --label heartbeat:alpha ") {
 			t.Errorf("rex calls = %q, want the sweep to have created the session", fake.calls())
 		}
 	})
@@ -669,24 +683,26 @@ func TestShutdownLeavesRexChildrenAlone(t *testing.T) {
 	fake := newFakeRex(t)
 	fake.hold("wait")
 	t.Cleanup(func() { fake.release("wait") })
-	cs := newChildren()
-	if _, err := cs.spawn("p/local", "/bin/sh", []string{"-c", "sleep 30"}, t.TempDir(), io.Discard); err != nil {
+	localCS := newChildren()
+	if _, err := localCS.spawn("p/local", "/bin/sh", []string{"-c", "sleep 30"}, t.TempDir(), io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	cs.rex = newRexHost(fake.bin, t.TempDir(), io.Discard)
-	t.Cleanup(func() { cs.rex.cancel(); waitRexWorkers(t, cs.rex) })
-	cs.rex.session = "session:S"
-	cs.registerRex("heartbeat:alpha", "block:A", "adopted", io.Discard)
+	cs := newChildren()
+	installTestRex(cs, newRexHost(fake.bin, t.TempDir(), io.Discard), "/bin/true")
+	t.Cleanup(func() { testRex(cs).cancel(); waitRexWorkers(t, testRex(cs)) })
+	testRex(cs).session = "session:S"
+	testRex(cs).register("heartbeat:alpha", "block:A", true, io.Discard)
 	waitFor(t, "the rex watcher to start", func() bool { return fake.called("wait") })
 	before := len(fake.calls())
 
 	cs.shutdown(context.Background(), io.Discard)
 
-	local, _ := cs.get("p/local")
+	localCS.shutdown(context.Background(), io.Discard)
+	local, _ := localCS.get("p/local")
 	if exited, _ := local.snapshot(); !exited {
 		t.Error("local child survived shutdown")
 	}
-	waitRexWorkers(t, cs.rex)
+	waitRexWorkers(t, testRex(cs))
 	if after := fake.calls(); len(after) != before {
 		t.Errorf("shutdown made rex calls: %q", after[before:])
 	}
@@ -694,4 +710,29 @@ func TestShutdownLeavesRexChildrenAlone(t *testing.T) {
 	if exited, _ := rex.snapshot(); exited {
 		t.Error("rex child recorded an exit serve never saw")
 	}
+}
+
+func testRex(cs *children) *rexHost { h, _ := cs.host.(*rexHost); return h }
+func installTestRex(cs *children, h *rexHost, moeBin string) {
+	h.children = cs
+	h.moeBin = moeBin
+	h.ready = true
+	cs.host = h
+}
+func testBlock(cs *children, c *child) string {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	return testRex(cs).jobs[c]
+}
+func testAdoptionError(s *Server) error {
+	if message := s.activity.snapshot(time.Now()).HostError; message != "" {
+		return errors.New(message)
+	}
+	return nil
+}
+func testPermanentError(s *Server) error {
+	if h := testRex(s.children); h != nil {
+		return h.permanentErr
+	}
+	return nil
 }
