@@ -106,7 +106,7 @@ func (f *fakeAgent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 
 func (f *fakeAgent) TranscriptSessionID(path string) (string, error) { return "", nil }
 
-func (f *fakeAgent) CopyTranscript(sessionID, dest string) (bool, error) {
+func (f *fakeAgent) CopyTranscript(sessionID, cwd, dest string) (bool, error) {
 	return false, nil
 }
 

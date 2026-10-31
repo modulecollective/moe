@@ -5,6 +5,7 @@ package claude
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/agent"
+	"github.com/modulecollective/moe/internal/run"
 )
 
 // fakeClaudeOnPath writes an executable `claude` shell script into a
@@ -147,5 +149,60 @@ func processGoneWithin(pid int, within time.Duration) bool {
 			return false
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func TestExecutorsMirrorActiveCwd(t *testing.T) {
+	for _, headless := range []bool{false, true} {
+		for _, explicitCwd := range []bool{false, true} {
+			t.Run(fmt.Sprintf("headless=%v/explicitCwd=%v", headless, explicitCwd), func(t *testing.T) {
+				cfg, root := t.TempDir(), t.TempDir()
+				t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+				const sid = "returned-session"
+				const body = "old turn\n"
+				const appended = "new active turn\n"
+				cwd, requestCwd := root, ""
+				if explicitCwd {
+					cwd = t.TempDir()
+					requestCwd = cwd
+					writeFakeTranscript(t, cfg, encodeCwd(root), sid, "wrong root\n")
+				}
+				old := writeFakeTranscript(t, cfg, "!old", sid, "stale\n")
+				active := writeFakeTranscript(t, cfg, encodeCwd(cwd), sid, body)
+				if old >= active {
+					t.Fatal("fixture must sort stale bucket before active bucket")
+				}
+				t.Setenv("MOE_TEST_SESSION_ID", sid)
+				fakeClaudeOnPath(t, `#!/bin/sh
+set -eu
+bucket=$(printf '%s' "$PWD" | sed 's|[/.]|-|g')
+printf '%s\n' 'new active turn' >> "$CLAUDE_CONFIG_DIR/projects/$bucket/$MOE_TEST_SESSION_ID.jsonl"
+printf '{"type":"system","subtype":"init","session_id":"%s"}\n' "$MOE_TEST_SESSION_ID"
+`)
+				md := &run.Metadata{Project: "test", ID: "mirror"}
+				mirror := filepath.Join(root, run.ThreadPathFor("claude", md.Project, md.ID, "code"))
+				var stderr bytes.Buffer
+				var gotSid string
+				var err error
+				if headless {
+					gotSid, err = (Agent{}).ExecuteOneShot(agent.OneShotRequest{
+						Root: root, SessionCwd: requestCwd, ThreadPath: mirror,
+						UserPrompt: "go", Timeout: 10 * time.Second,
+						Stdout: io.Discard, Stderr: &stderr,
+					})
+				} else {
+					gotSid, err = (Agent{}).Execute(agent.Request{
+						Root: root, SessionCwd: requestCwd, SessionID: sid,
+						Metadata: md, DocID: "code", Stdin: strings.NewReader(""),
+						Stdout: io.Discard, Stderr: &stderr,
+					})
+				}
+				if err != nil || gotSid != sid || stderr.Len() != 0 {
+					t.Fatalf("execute: sid=%q, err=%v, stderr=%s", gotSid, err, &stderr)
+				}
+				assertTranscriptBytes(t, mirror, body+appended)
+				assertTranscriptBytes(t, old, "stale\n")
+			})
+		}
 	}
 }

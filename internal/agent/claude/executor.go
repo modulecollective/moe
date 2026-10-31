@@ -244,7 +244,7 @@ func (Agent) Execute(r agent.Request) (string, error) {
 	// is no per-document thread file to mirror into.
 	if r.Metadata != nil {
 		threadPath := filepath.Join(r.Root, run.ThreadPathFor("claude", r.Metadata.Project, r.Metadata.ID, r.DocID))
-		if _, err := CopyTranscript(r.SessionID, threadPath); err != nil && r.Stderr != nil {
+		if _, err := CopyTranscript(r.SessionID, cmd.Dir, threadPath); err != nil && r.Stderr != nil {
 			fmt.Fprintf(r.Stderr, "save transcript: %v\n", err)
 		}
 	}
@@ -335,14 +335,16 @@ func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 	// the exit to a timeout or the raw waitErr. Routed through the agent
 	// package so claude and codex can't diverge on the timeout path.
 	timedOut := waitErr != nil && r.Timeout > 0 && ctx.Err() == context.DeadlineExceeded
-	return agent.FinishOneShot(sidCh, r, timedOut, waitErr, "claude: -p", CopyTranscript)
+	return agent.FinishOneShot(sidCh, r, timedOut, waitErr, "claude: -p", func(sid, dest string) (bool, error) {
+		return CopyTranscript(sid, cmd.Dir, dest)
+	})
 }
 
 // CopyTranscript is the Agent method form of the package-level
 // CopyTranscript func. Defined as a method so the registry returns
 // something that satisfies agent.Agent.CopyTranscript.
-func (Agent) CopyTranscript(sessionID, dest string) (bool, error) {
-	return CopyTranscript(sessionID, dest)
+func (Agent) CopyTranscript(sessionID, cwd, dest string) (bool, error) {
+	return CopyTranscript(sessionID, cwd, dest)
 }
 
 // TranscriptExists reports whether claude's per-session JSONL is at

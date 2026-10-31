@@ -88,7 +88,7 @@ func saveStageFailure(root string, in stageTurnInputs, spec stageTurnSpec, a age
 		}
 		defer os.RemoveAll(tmp)
 		thread := filepath.Join(tmp, "thread-"+agentName+".jsonl")
-		found, err := a.CopyTranscript(sid, thread)
+		found, err := a.CopyTranscript(sid, spec.SessionCwd, thread)
 		if err != nil {
 			failure.TranscriptError = err.Error()
 		} else if found {

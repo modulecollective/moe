@@ -50,10 +50,11 @@ type Agent interface {
 	// does.
 	ExecuteOneShot(OneShotRequest) (string, error)
 	// CopyTranscript copies the agent's per-session JSONL into dest.
-	// Returns (found, err): found=false means the agent has no
+	// cwd is the active backend execution directory; empty requests legacy
+	// lookup. Returns (found, err): found=false means the agent has no
 	// transcript for sessionID yet (a legitimate no-op state, e.g.
 	// the operator aborted before the first turn wrote anything).
-	CopyTranscript(sessionID, dest string) (bool, error)
+	CopyTranscript(sessionID, cwd, dest string) (bool, error)
 	// TranscriptExists is the pre-flight probe stage.go uses before
 	// passing --resume to a returning session: returns whether the
 	// agent's per-session transcript for sessionID is present at the

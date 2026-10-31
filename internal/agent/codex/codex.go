@@ -283,7 +283,7 @@ func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 // and copies the first match (UUIDs are unique, so there's at most
 // one) to dest. Returns (found, err): false found means "no rollout
 // yet" — the legitimate no-op state.
-func (Agent) CopyTranscript(sessionID, dest string) (bool, error) {
+func (Agent) CopyTranscript(sessionID, _ string, dest string) (bool, error) {
 	return CopyTranscript(sessionID, dest)
 }
 

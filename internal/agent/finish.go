@@ -43,7 +43,7 @@ func (e *TimeoutError) Error() string {
 //
 // timedOut is computed by the caller from its own ctx —
 // waitErr != nil && r.Timeout > 0 && ctx.Err() == context.DeadlineExceeded.
-// copyTranscript is the backend's package-level CopyTranscript. label
+// copyTranscript mirrors the backend transcript for the execution cwd. label
 // names the backend in the timeout error ("claude: -p", "codex: exec").
 func FinishOneShot(sidCh <-chan string, r OneShotRequest, timedOut bool, waitErr error, label string, copyTranscript func(sid, dest string) (bool, error)) (string, error) {
 	var sid string

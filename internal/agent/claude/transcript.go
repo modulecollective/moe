@@ -62,9 +62,9 @@ func canonicalTranscriptPath(cwd, sessionID string) string {
 // transcriptPath returns the filesystem path of Claude Code's session log
 // for sessionID, or "" if no log has been written yet. The lookup globs
 // <config>/projects/*/<sessionID>.jsonl rather than reconstructing the
-// encoded-cwd path: sessionID is a UUID so collisions across project
-// dirs are impossible, and the glob keeps the per-turn save into
-// thread-<agent>.jsonl resilient to any drift in claude's cwd-encoding scheme.
+// encoded-cwd path. Recovery retains same-ID copies in old buckets, so
+// this fallback can be ambiguous; prefer the active cwd when mirroring.
+// The glob also tolerates drift in Claude's cwd-encoding scheme.
 func transcriptPath(sessionID string) (string, error) {
 	root := ConfigDir()
 	if root == "" {
@@ -81,14 +81,32 @@ func transcriptPath(sessionID string) (string, error) {
 }
 
 // CopyTranscript copies Claude Code's session transcript for sessionID to
-// dest, creating dest's parent dir if needed. Returns (found, err): found is
+// dest, preferring the canonical file for the active execution cwd. An empty
+// cwd or absent canonical file falls back to the cross-bucket lookup. Creates
+// dest's parent dir if needed. Returns (found, err): found is
 // false when no transcript exists yet — a legitimate state (operator aborted
 // before claude wrote anything, or ran on a different machine) that callers
 // should treat as a no-op rather than an error.
-func CopyTranscript(sessionID, dest string) (bool, error) {
-	src, err := transcriptPath(sessionID)
-	if err != nil {
-		return false, err
+func CopyTranscript(sessionID, cwd, dest string) (bool, error) {
+	var src string
+	if cwd != "" {
+		if canonical := canonicalTranscriptPath(cwd, sessionID); canonical != "" {
+			switch _, err := os.Stat(canonical); {
+			case err == nil:
+				src = canonical
+			case errors.Is(err, fs.ErrNotExist):
+				// Encoding drift or a moved session can leave only an old bucket.
+			default:
+				return false, fmt.Errorf("claude: stat canonical transcript: %w", err)
+			}
+		}
+	}
+	if src == "" {
+		var err error
+		src, err = transcriptPath(sessionID)
+		if err != nil {
+			return false, err
+		}
 	}
 	if src == "" {
 		return false, nil

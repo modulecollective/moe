@@ -28,6 +28,7 @@ type emptyCanvasAgent struct {
 	succeed      bool
 	noTranscript bool
 	transcript   []byte
+	copyCalls    []fakeProbe
 }
 
 func (f *emptyCanvasAgent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
@@ -53,7 +54,8 @@ func (f *emptyCanvasAgent) ExecuteOneShot(r agent.OneShotRequest) (string, error
 	return "11111111-1111-4111-8111-111111111111", f.oneShotErr
 }
 
-func (f *emptyCanvasAgent) CopyTranscript(_ string, dest string) (bool, error) {
+func (f *emptyCanvasAgent) CopyTranscript(sid, cwd, dest string) (bool, error) {
+	f.copyCalls = append(f.copyCalls, fakeProbe{sessionID: sid, cwd: cwd})
 	if f.noTranscript {
 		return false, nil
 	}
@@ -108,6 +110,13 @@ func TestMissingCanvasRetainsDiagnostic(t *testing.T) {
 			}, &out, &errb)
 			if code == 0 {
 				t.Fatal("missing canvas advanced")
+			}
+			wantCopy := fakeProbe{
+				sessionID: "11111111-1111-4111-8111-111111111111",
+				cwd:       sessionDocCwd(root, "tele", "fix-it", "design"),
+			}
+			if len(fake.copyCalls) != 1 || fake.copyCalls[0] != wantCopy {
+				t.Fatalf("diagnostic copy calls = %+v, want %+v", fake.copyCalls, wantCopy)
 			}
 			attempts, err := filepath.Glob(filepath.Join(root, run.Dir("tele", "fix-it"), "diagnostics/design/*/failure.json"))
 			if err != nil || len(attempts) != 1 {
@@ -412,5 +421,36 @@ func TestDiagnosticCommitIsolationAndRollback(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDiagnosticCopiesReturnedSessionAtExecutionCwd(t *testing.T) {
+	root, fake := diagnosticFixture(t)
+	md := loadRun(t, root, "tele", "fix-it")
+	cwd := filepath.Join(t.TempDir(), "stable-session")
+	const sid = "returned-id-distinct-from-metadata"
+	fake.transcript = []byte("fresh failed attempt\n")
+	// An older ordinary mirror must not substitute for this attempt's read.
+	ordinary := filepath.Join(root, run.ThreadPathFor("codex", "tele", "fix-it", "design"))
+	if err := os.MkdirAll(filepath.Dir(ordinary), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ordinary, []byte("previous attempt\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rel, err := saveStageFailure(root,
+		stageTurnInputs{Project: "tele", RunSlug: "fix-it", DocID: "design"},
+		stageTurnSpec{Metadata: md, DocID: "design", SessionCwd: cwd},
+		fake, "codex", sid, "prompt", nil, &canvasRefusalError{Reason: "missing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := fakeProbe{sessionID: sid, cwd: cwd}
+	if len(fake.copyCalls) != 1 || fake.copyCalls[0] != want {
+		t.Fatalf("copy calls = %+v, want %+v", fake.copyCalls, want)
+	}
+	got, err := os.ReadFile(filepath.Join(root, rel, "thread-codex.jsonl"))
+	if err != nil || !bytes.Equal(got, fake.transcript) {
+		t.Fatalf("archived transcript = %q, err=%v", got, err)
 	}
 }

@@ -1,9 +1,14 @@
 package claude
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
+
+	"github.com/modulecollective/moe/internal/agent"
 )
 
 // writeFakeTranscript plants a session JSONL under a fake CLAUDE_CONFIG_DIR,
@@ -30,7 +35,7 @@ func TestCopyTranscriptCopiesClaudeSessionLog(t *testing.T) {
 	writeFakeTranscript(t, cfg, "-home-user-moe", sid, body)
 
 	dest := filepath.Join(t.TempDir(), "docs", "spec", "thread.jsonl")
-	found, err := CopyTranscript(sid, dest)
+	found, err := CopyTranscript(sid, "", dest)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -47,28 +52,28 @@ func TestCopyTranscriptCopiesClaudeSessionLog(t *testing.T) {
 }
 
 func TestCopyTranscriptGlobsAcrossProjectDirs(t *testing.T) {
-	// Same session id can only appear once in Claude Code's store (UUIDs),
-	// but the project dir encoding is Claude Code's business. Put the file
-	// under an arbitrary dir name to prove we're not reconstructing paths.
+	// An absent canonical file still permits lookup in an arbitrary bucket,
+	// including after Claude changes its cwd encoding.
 	cfg := t.TempDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
 	sid := "1c8e2b9f-3441-4d5a-8e23-9d0f7c2b3a14"
 	writeFakeTranscript(t, cfg, "some-weird-encoding-we-dont-control", sid, "x\n")
 
 	dest := filepath.Join(t.TempDir(), "thread.jsonl")
-	found, err := CopyTranscript(sid, dest)
+	found, err := CopyTranscript(sid, "/active", dest)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !found {
 		t.Fatal("expected found=true regardless of project dir encoding")
 	}
+	assertTranscriptBytes(t, dest, "x\n")
 }
 
 func TestCopyTranscriptAbsentIsNotAnError(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 	dest := filepath.Join(t.TempDir(), "thread.jsonl")
-	found, err := CopyTranscript("7d2a5e1c-90b3-4c11-a4d2-2e5b1c0a9f33", dest)
+	found, err := CopyTranscript("7d2a5e1c-90b3-4c11-a4d2-2e5b1c0a9f33", "/active", dest)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -91,7 +96,7 @@ func TestCopyTranscriptOverwritesExisting(t *testing.T) {
 	if err := os.WriteFile(dest, []byte("stale-previous\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := CopyTranscript(sid, dest); err != nil {
+	if _, err := CopyTranscript(sid, "", dest); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := os.ReadFile(dest)
@@ -148,5 +153,96 @@ func TestConfigDirRespectsEnv(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "/custom/claude")
 	if got := ConfigDir(); got != "/custom/claude" {
 		t.Fatalf("ConfigDir = %q, want /custom/claude", got)
+	}
+}
+
+func TestCopyTranscriptPreservesRecoveredTurns(t *testing.T) {
+	cfg := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	const sid = "recovered-session"
+	const cwd = "/active/session"
+	const oldBody = "{\"type\":\"user\",\"content\":\"old turn\"}\n"
+	const newTurn = "{\"type\":\"assistant\",\"content\":\"new turn\"}\n"
+	old := writeFakeTranscript(t, cfg, "!old-bucket", sid, oldBody)
+	canonical := canonicalTranscriptPath(cwd, sid)
+	if old >= canonical {
+		t.Fatalf("fixture must sort stale copy first: %q >= %q", old, canonical)
+	}
+	a := Agent{}
+	outcome, err := a.RestoreTranscript(sid, cwd, "")
+	if err != nil || outcome.Result != agent.RestoreFromCache {
+		t.Fatalf("recover cache: %+v, %v", outcome, err)
+	}
+	f, err := os.OpenFile(canonical, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, writeErr := f.WriteString(newTurn)
+	closeErr := f.Close()
+	if writeErr != nil || closeErr != nil {
+		t.Fatalf("append: %v; close: %v", writeErr, closeErr)
+	}
+	mirror := filepath.Join(t.TempDir(), "thread.jsonl")
+	if found, err := a.CopyTranscript(sid, "", mirror); err != nil || !found {
+		t.Fatalf("legacy lookup: found=%v, %v", found, err)
+	}
+	assertTranscriptBytes(t, mirror, oldBody)
+	if found, err := a.CopyTranscript(sid, cwd, mirror); err != nil || !found {
+		t.Fatalf("mirror: found=%v, %v", found, err)
+	}
+	assertTranscriptBytes(t, mirror, oldBody+newTurn)
+	assertTranscriptBytes(t, old, oldBody)
+	if err := os.RemoveAll(filepath.Join(cfg, "projects")); err != nil {
+		t.Fatal(err)
+	}
+	outcome, err = a.RestoreTranscript(sid, cwd, mirror)
+	if err != nil || outcome.Result != agent.RestoreFromMirror {
+		t.Fatalf("recover mirror: %+v, %v", outcome, err)
+	}
+	assertTranscriptBytes(t, canonical, oldBody+newTurn)
+}
+
+func TestCopyTranscriptCanonicalLookupErrorPreservesDestination(t *testing.T) {
+	cfg := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	const sid = "lookup-error"
+	const cwd = "/active"
+	writeFakeTranscript(t, cfg, "!old", sid, "stale\n")
+	// A regular file in place of the bucket makes Stat return ENOTDIR,
+	// regardless of the test process's filesystem permissions.
+	if err := os.WriteFile(filepath.Dir(canonicalTranscriptPath(cwd, sid)), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(t.TempDir(), "thread.jsonl")
+	if err := os.WriteFile(dest, []byte("previous mirror\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	found, err := CopyTranscript(sid, cwd, dest)
+	if found || !errors.Is(err, syscall.ENOTDIR) || !strings.Contains(err.Error(), "stat canonical transcript") {
+		t.Fatalf("found=%v, err=%v; want contextual ENOTDIR", found, err)
+	}
+	assertTranscriptBytes(t, dest, "previous mirror\n")
+}
+
+func TestCopyTranscriptWithoutConfigIsNotFound(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("HOME", "")
+	dest := filepath.Join(t.TempDir(), "thread.jsonl")
+	if found, err := CopyTranscript("sid", "/active", dest); found || err != nil {
+		t.Fatalf("found=%v, err=%v", found, err)
+	}
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Fatalf("destination created: %v", err)
+	}
+}
+
+func assertTranscriptBytes(t *testing.T, path, want string) {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Fatalf("%s = %q, want %q", path, got, want)
 	}
 }
