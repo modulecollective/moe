@@ -246,6 +246,8 @@ func TestRexUnresolvedLaunch(t *testing.T) {
 		if fake.called("new") || s.children.rex.sessionID() != "session:S" {
 			t.Errorf("unresolved launch replaced its session: %q", fake.calls())
 		}
+		// Swept precedes the watcher's final write to the fake's call log.
+		waitFor(t, "the recovered block to close", func() bool { return fake.called("block close block:B9") })
 	})
 	t.Run("no match", func(t *testing.T) {
 		fake := newFakeRex(t)
