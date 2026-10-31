@@ -281,6 +281,10 @@ type Server struct {
 	// launch locally beside jobs Rex may still be running. Written once
 	// by selectHost before the ticker starts.
 	hostErr error
+	// rexAdoptErr holds dispatch while the recorded session's jobs cannot
+	// be reconciled. Startup and then the heartbeat goroutine own it;
+	// unlike hostErr, it is retried on every tick, including idle ticks.
+	rexAdoptErr error
 	// stateMu serialises the state file. Held across snapshot-and-write in
 	// saveActivity, and taken by dropActivity to set stopped. See
 	// saveActivity for why both.

@@ -199,6 +199,14 @@ func (h *rexHost) blocks(session string) ([]rexBlock, error) {
 	if err := json.Unmarshal(out, &ls); err != nil {
 		return nil, fmt.Errorf("rex block ls: %w", err)
 	}
+	if ls.Blocks == nil {
+		return nil, errors.New("rex block ls: missing or null blocks array")
+	}
+	for _, b := range ls.Blocks {
+		if b.ID == "" {
+			return nil, errors.New("rex block ls: block without an ID")
+		}
+	}
 	return ls.Blocks, nil
 }
 
@@ -530,8 +538,19 @@ func (s *Server) selectHost() {
 		s.children.rex = h
 		s.activity.setHost("rex", "")
 		s.logf("host: rex session %q — sweeps run as Rex blocks and finish even if serve stops", rexSessionLabel)
-		s.adoptRex(h)
-		s.openDash(h)
+		// Load identity once. Adoption retries use the host's current ID,
+		// which launch may replace only after proving the old session gone.
+		if body, err := os.ReadFile(rexSessionPath(s.opts.Root)); err == nil {
+			h.mu.Lock()
+			h.session = strings.TrimSpace(string(body))
+			h.mu.Unlock()
+		}
+		s.rexAdoptErr = s.adoptRex(h)
+		if s.rexAdoptErr != nil {
+			s.logf("host: %v — dispatch waits for a heartbeat adoption retry", s.rexAdoptErr)
+		} else {
+			s.openDash(h)
+		}
 	}
 	s.saveActivity()
 }
@@ -557,8 +576,11 @@ func (s *Server) openDash(h *rexHost) {
 	if session := h.sessionID(); session != "" {
 		bs, err := h.blocks(session)
 		if err != nil {
-			s.logf("host: rex dash not opened: %v", err)
-			return
+			present, probeErr := h.sessionPresent(session)
+			if probeErr != nil || present {
+				s.logf("host: rex dash not opened: %v (session present: %t, check: %v)", err, present, probeErr)
+				return
+			}
 		}
 		for _, b := range bs {
 			if b.Label != rexDashLabel {
@@ -587,22 +609,25 @@ func (s *Server) openDash(h *rexHost) {
 // the dispatch. The emit file is left for the exit to read, since a live
 // job may still write it.
 //
-// A missing or unreadable session leaves nothing to adopt; the first
-// launch creates a fresh one.
-func (s *Server) adoptRex(h *rexHost) {
-	body, err := os.ReadFile(rexSessionPath(s.opts.Root))
-	session := strings.TrimSpace(string(body))
-	if err != nil || session == "" {
-		return
+// An unreadable listing holds dispatch until a retry reconciles the jobs
+// or a valid session listing proves absence. Even then the old identity
+// remains installed until launch successfully creates its replacement.
+func (s *Server) adoptRex(h *rexHost) error {
+	session := h.sessionID()
+	if session == "" {
+		return nil
 	}
 	bs, err := h.blocks(session)
 	if err != nil {
-		s.logf("host: rex session %s unreadable (%v) — the first sweep will create a new one", session, err)
-		return
+		present, probeErr := h.sessionPresent(session)
+		if probeErr != nil {
+			return fmt.Errorf("rex session %s unreadable: %w (check session: %v)", session, err, probeErr)
+		}
+		if present {
+			return fmt.Errorf("rex session %s unreadable: %w", session, err)
+		}
+		return nil
 	}
-	h.mu.Lock()
-	h.session = session
-	h.mu.Unlock()
 	seen := map[string]bool{}
 	for _, b := range bs {
 		project := heartbeatProject(b.Label)
@@ -619,4 +644,5 @@ func (s *Server) adoptRex(h *rexHost) {
 		s.activity.recordSweepStart(project, c.started)
 		go s.awaitHeartbeat(project, c, false)
 	}
+	return nil
 }

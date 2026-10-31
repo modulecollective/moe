@@ -187,6 +187,15 @@ func (s *Server) runHeartbeat(ctx context.Context) {
 // state, spawn what's left, and record the whole verdict set — swept and
 // skipped alike — into the activity record both dashes read.
 func (s *Server) heartbeatTick() {
+	if s.rexAdoptErr != nil {
+		h := s.children.rex
+		s.rexAdoptErr = s.adoptRex(h)
+		if s.rexAdoptErr != nil {
+			s.logf("host: %v — dispatch waits for a heartbeat adoption retry", s.rexAdoptErr)
+		} else {
+			s.openDash(h)
+		}
+	}
 	now := time.Now()
 	decisions := s.opts.Heartbeat.Due(heartbeatInterval, s.syncWriter())
 	s.activity.recordTick(now, decisions)
@@ -200,6 +209,13 @@ func (s *Server) heartbeatTick() {
 		if s.hostErr != nil {
 			s.logf("heartbeat: %s held — rex host unusable: %v", projectID, s.hostErr)
 			s.activity.recordSkip(projectID, "rex host unusable: "+s.hostErr.Error(), true, 0, 0)
+			s.saveActivity()
+			continue
+		}
+		if s.rexAdoptErr != nil {
+			reason := "rex adoption pending: " + s.rexAdoptErr.Error()
+			s.logf("heartbeat: %s held — %s", projectID, reason)
+			s.activity.recordSkip(projectID, reason, true, 0, 0)
 			s.saveActivity()
 			continue
 		}

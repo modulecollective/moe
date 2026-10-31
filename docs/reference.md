@@ -63,18 +63,21 @@ source of truth for the exact command surface; this page is a map.
   stops or crashes; an armed restart with a usable Rex host picks it up rather
   than starting another, and Ctrl-C in its block is how to stop it. A failed
   sweep's block stays open for reading until that project's next sweep. With no
-  Rex server, sweeps run on serve's own terminals and stop with it. If a Rex
-  server answers but cannot be used, serve withholds dispatch until the host is
-  fixed and serve is restarted. The startup log, `moe dash` and `/serve` name
-  which host is in use. A `/serve` page owns that ticker's status and trace —
-  what each recent tick decided, and the output tail of any sweep that failed —
-  reachable from the menu and from the one-line status cluster every board
-  header carries. `MOE_SERVE_NOTIFY_URL` is the other env var: set it and serve
-  POSTs a small JSON body to that URL each time a heartbeat sweep exits on its
-  own, naming which project's sweep it was and whether it succeeded. A sweep
-  serve interrupted on its way down sends nothing: an `ok:false` there would
-  report a failure the operator caused. A failed POST is logged and blocks
-  nothing.
+  Rex server, sweeps run on serve's own terminals and stop with it. If startup
+  cannot read a recorded session's jobs, serve keeps its identity and holds all
+  new sweeps, retrying adoption on each heartbeat tick, even when no project is
+  due. Only a valid session listing proving absence permits replacement. The
+  dash opens after reconciliation; a dash failure alone does not hold sweeps.
+  An incompatible Rex discovery reply instead requires fixing the host and
+  restarting serve. The startup log, `moe dash` and `/serve` name which host is
+  in use. A `/serve` page owns that ticker's status and trace — what each recent
+  tick decided, and the output tail of any sweep that failed — reachable from
+  the menu and from the one-line status cluster every board header carries.
+  `MOE_SERVE_NOTIFY_URL` is the other env var: set it and serve POSTs a small
+  JSON body to that URL each time a heartbeat sweep exits on its own, naming
+  which project's sweep it was and whether it succeeded. A sweep serve
+  interrupted on its way down sends nothing: an `ok:false` there would report a
+  failure the operator caused. A failed POST is logged and blocks nothing.
 - `moe project mode <id> [paused|safe|auto]` caps what the heartbeat may start
   in one project, without stopping the process. See below.
 - `moe chore list|check|open|skip` lists due project chores, dry-runs a chore
