@@ -480,14 +480,14 @@ func (s *Server) selectHost() {
 	switch {
 	case err != nil:
 		s.hostErr = err
-		s.activity.setHost("rex unusable — dispatch withheld")
+		s.activity.setHost("rex unusable", err.Error())
 		s.logf("host: a Rex server answered but can't be driven (%v) — the heartbeat will dispatch nothing until this is fixed and serve restarts", err)
 	case h == nil:
-		s.activity.setHost("local pty")
+		s.activity.setHost("local pty", "")
 		s.logf("host: local pty — sweeps stop when serve stops")
 	default:
 		s.children.rex = h
-		s.activity.setHost("rex session " + rexSessionLabel)
+		s.activity.setHost("rex", "")
 		s.logf("host: rex session %q — sweeps run as Rex blocks and finish even if serve stops", rexSessionLabel)
 		s.adoptRex(h)
 	}

@@ -101,9 +101,11 @@ type activity struct {
 	pid   int
 	addr  string
 	armed bool
-	// host is where this serve runs its jobs ("rex session moe", "local
-	// pty"), empty until an armed serve picks one at startup.
+	// host is where this serve runs its jobs ("rex", "local pty", "rex
+	// unusable"), empty until an armed serve picks one at startup.
+	// hostErr is why an unusable Rex can't be driven.
 	host    string
+	hostErr string
 	started time.Time
 	// interval is the tick cadence, captured once at construction rather
 	// than read on each snapshot. Snapshots run on the child-reader and
@@ -227,11 +229,12 @@ func (a *activity) recordSweepEnd(projectID string, at time.Time, clean bool, fa
 // hooks off the registry rather than the caller keeps it one call per
 // child whoever spawns it. The child id is the subject:
 // "heartbeat:<project>".
-// setHost records where jobs run. Called once, before the first tick.
-func (a *activity) setHost(host string) {
+// setHost records where jobs run, and why not when the host is
+// unusable. Called once, before the first tick.
+func (a *activity) setHost(host, hostErr string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.host = host
+	a.host, a.hostErr = host, hostErr
 }
 
 func (a *activity) recordChildSpawn(id string, at time.Time, detail string) {
@@ -330,8 +333,11 @@ type ActivitySnapshot struct {
 	Armed bool   `json:"armed"`
 	// Host names where jobs run, which is also which lifetime they have:
 	// a Rex job outlives serve, a local one stops with it.
-	Host    string    `json:"host,omitempty"`
-	Started time.Time `json:"started"`
+	Host string `json:"host,omitempty"`
+	// HostError rides beside Host "rex unusable": why the Rex server
+	// that answered can't be driven, and so why nothing dispatches.
+	HostError string    `json:"host_error,omitempty"`
+	Started   time.Time `json:"started"`
 	// LastTick is zero until the first tick — a serve that just started
 	// has honestly not looked yet.
 	LastTick time.Time         `json:"last_tick,omitzero"`
@@ -394,6 +400,7 @@ func (a *activity) snapshot(now time.Time) ActivitySnapshot {
 		Addr:      a.addr,
 		Armed:     a.armed,
 		Host:      a.host,
+		HostError: a.hostErr,
 		Started:   a.started,
 		LastTick:  a.lastTick,
 		NextTick:  a.nextTick(),

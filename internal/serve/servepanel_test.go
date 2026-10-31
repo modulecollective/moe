@@ -426,3 +426,17 @@ func TestServePanelSpendsARowOnARefusedPush(t *testing.T) {
 		t.Error("/serve rendered the refused push without the failed styling")
 	}
 }
+
+// TestServePanelNamesAnUnusableHost: the withheld state reads "held" on
+// every project, so /serve says why under its heading — and says nothing
+// when the host is fine.
+func TestServePanelNamesAnUnusableHost(t *testing.T) {
+	s := panelServer(t)
+	if body := getBody(t, s, "/serve"); strings.Contains(body, "rex host unusable") {
+		t.Error("/serve names an unusable host on a serve whose host is fine")
+	}
+	s.activity.setHost("rex unusable", "rex API revision 7 is older than 8")
+	if body := getBody(t, s, "/serve"); !strings.Contains(body, "rex host unusable — rex API revision 7 is older than 8") {
+		t.Errorf("/serve body lacks the host error:\n%s", body)
+	}
+}

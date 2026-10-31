@@ -692,6 +692,7 @@ func TestServeCluster(t *testing.T) {
 		name    string
 		armed   bool
 		up      string
+		host    string
 		next    string
 		modes   ModeCounts
 		failing int
@@ -707,6 +708,14 @@ func TestServeCluster(t *testing.T) {
 		{
 			name: "unarmed with failures", up: "4m", failing: 3,
 			want: "serve browse-only · up 4m · 3 failing",
+		},
+		// The host rides after uptime, armed only: an unarmed serve runs
+		// no jobs and picks no host.
+		{name: "rex", armed: true, up: "4m", host: "rex", next: "15m", want: "serve armed · up 4m · rex · next 15m"},
+		{name: "local", armed: true, up: "4m", host: "local pty", next: "15m", want: "serve armed · up 4m · local pty · next 15m"},
+		{
+			name: "rex unusable", armed: true, up: "4m", host: "rex unusable", next: "15m", failing: 1,
+			want: "serve armed · up 4m · rex unusable · next 15m · 1 failing",
 		},
 		// Modes add slots rather than taking one: unlike a hold on the whole
 		// clock, they say how much of the board is capped while the rest of
@@ -737,7 +746,7 @@ func TestServeCluster(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := ServeCluster(tc.armed, tc.up, tc.next, tc.modes, tc.failing); got != tc.want {
+			if got := ServeCluster(tc.armed, tc.up, tc.host, tc.next, tc.modes, tc.failing); got != tc.want {
 				t.Errorf("ServeCluster = %q, want %q", got, tc.want)
 			}
 		})

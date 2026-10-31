@@ -544,3 +544,31 @@ func TestSnapshotStampsThePidNamespace(t *testing.T) {
 		t.Errorf("snapshot PidNS = %q, want this process's namespace %q", got, self)
 	}
 }
+
+// TestActivityHostRidesTheCluster: the host token sits after uptime on
+// the web header, the same slot the CLI banner gives it, and the reason
+// an unusable Rex can't be driven survives the trip through the state
+// file. A file written before the field reads back with none.
+func TestActivityHostRidesTheCluster(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now()
+	a := testActivity(t, now.Add(-4*time.Minute), true)
+	a.setHost("rex unusable", "rex API revision 7 is older than 8")
+	if got := a.panel(now).Cluster; !strings.HasPrefix(got, "serve armed · up 4m · rex unusable · next ") {
+		t.Errorf("panel cluster = %q, want the host after uptime", got)
+	}
+	if err := writeSnapshot(root, a.snapshot(now)); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := ReadActivitySnapshot(root)
+	if err != nil || got.Host != "rex unusable" || got.HostError != "rex API revision 7 is older than 8" {
+		t.Errorf("snapshot = %+v, %v; want the host and its error back", got, err)
+	}
+
+	if err := os.WriteFile(ActivityPath(root), []byte(`{"pid":1,"armed":true,"host":"rex"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, _, err := ReadActivitySnapshot(root); err != nil || got.Host != "rex" || got.HostError != "" {
+		t.Errorf("older snapshot = %+v, %v; want host rex and no error", got, err)
+	}
+}

@@ -400,8 +400,8 @@ func TestRexDiscovery(t *testing.T) {
 			t.Fatalf("rex = %v, hostErr = %v; want the rex host", s.children.rex, s.hostErr)
 		}
 		t.Cleanup(s.children.rex.cancel)
-		if got := s.activity.snapshot(time.Now()).Host; got != "rex session moe" {
-			t.Errorf("host = %q, want rex session moe", got)
+		if got := s.activity.snapshot(time.Now()).Host; got != "rex" {
+			t.Errorf("host = %q, want rex", got)
 		}
 	})
 	t.Run("too old", func(t *testing.T) {

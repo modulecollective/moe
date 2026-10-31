@@ -62,6 +62,7 @@ func TestDashStatusHealthAndFilters(t *testing.T) {
 		{"dead", serveState{ok: true, live: serveDead}, "serve process is dead", ""},
 		{"unknown", serveState{ok: true, live: serveUnknown}, "liveness unknown", ""},
 		{"unreadable", serveState{err: errors.New("bad snapshot")}, "observation failed: bad snapshot", ""},
+		{"host unusable", serveState{ok: true, live: serveAlive, snap: serve.ActivitySnapshot{Host: "rex unusable", HostError: "rex API revision 7 is older than 8"}}, "Serve-wide: rex host unusable: rex API revision 7 is older than 8", "idle"},
 		{"failed", serveState{ok: true, live: serveAlive, snap: serve.ActivitySnapshot{Projects: []serve.ActivityProject{{Project: "other", SweptAt: time.Now(), SweepClean: false}}}}, "last sweep failed for other", "idle"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

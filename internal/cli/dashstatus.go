@@ -101,6 +101,9 @@ func dashStatusReports(snap DashSnapshot, gatherErr error, st serveState, filter
 	}
 	var sweeping []string
 	if st.ok && st.live == serveAlive && st.err == nil {
+		if st.snap.HostError != "" {
+			health = append(health, "Serve-wide: rex host unusable: "+st.snap.HostError)
+		}
 		for _, p := range st.snap.Projects {
 			if p.Sweeping() {
 				if (filter.ProjectFilter == "" || p.Project == filter.ProjectFilter) &&

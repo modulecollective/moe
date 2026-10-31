@@ -1155,15 +1155,16 @@ type ModeCounts struct {
 // the CLI banner's tail and the web header's link — as one dotted
 // cluster:
 //
-//	serve armed · up 4m · next 15m · 1 failing
-//	serve armed · up 4m · next 15m · 1 paused · 2 safe
+//	serve armed · up 4m · rex · next 15m · 1 failing
+//	serve armed · up 4m · local pty · next 15m · 1 paused · 2 safe
 //	serve browse-only · up 4m
 //
 // The two surfaces are contractually the same line, so the text is
 // built once here rather than twice in a printf and a template. next
 // is empty for a serve with no tick scheduled (an unarmed one never
 // has); failing is dropped at zero, so a healthy board spends nothing
-// on it. The CLI's dead-serve state has no web counterpart (a dead
+// on it. host is where jobs run ("rex", "local pty", "rex unusable"),
+// empty on an unarmed serve, which runs none. The CLI's dead-serve state has no web counterpart (a dead
 // serve serves no pages) and stays in the CLI.
 //
 // The mode counts are compact by exception for the same reason: they say
@@ -1171,10 +1172,13 @@ type ModeCounts struct {
 // all-auto board they say nothing at all. They ride here rather than on
 // the run rows because the mode is a property of the clock, and the
 // clock is what this cluster is about.
-func ServeCluster(armed bool, up, next string, modes ModeCounts, failing int) string {
+func ServeCluster(armed bool, up, host, next string, modes ModeCounts, failing int) string {
 	cluster := "serve browse-only · up " + up
 	if armed {
 		cluster = "serve armed · up " + up
+		if host != "" {
+			cluster += " · " + host
+		}
 		if next != "" {
 			cluster += " · next " + next
 		}

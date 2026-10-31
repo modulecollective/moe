@@ -181,7 +181,7 @@ func (s serveState) serveCluster(now time.Time) string {
 		next = dash.HumanDuration(max(s.snap.NextTick.Sub(now), 0))
 	}
 	return dash.ServeCluster(s.snap.Armed, dash.HumanDuration(now.Sub(s.snap.Started)),
-		next, s.modes, s.failing(now))
+		s.snap.Host, next, s.modes, s.failing(now))
 }
 
 // pushItem is the origin half: has the journal reached GitHub.
@@ -236,6 +236,11 @@ func (s serveState) renderLines(w io.Writer, now time.Time) {
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	// Same rule as the projects below: trouble earns a row, health
 	// doesn't. A healthy drain is already in the banner's tail.
+	// A host serve can't drive withholds every dispatch, so the projects
+	// below would only ever read "held"; this row says why, first.
+	if s.snap.HostError != "" {
+		fmt.Fprintf(tw, "  host\t%s\t— %s\n", s.snap.Host, s.snap.HostError)
+	}
 	if state, detail := s.pushLine(now); state != "" {
 		fmt.Fprintf(tw, "  origin\t%s\t%s\n", state, detail)
 	}

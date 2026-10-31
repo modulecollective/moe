@@ -95,6 +95,7 @@
       {{if .Armed}}<span class="count">(armed · up {{.Up}}{{with .Host}} · {{.}}{{end}}{{if .NextSweep}} · next sweep in {{.NextSweep}}{{end}}{{if .LastTick}} · last tick {{.LastTick}}{{end}}{{if .Paused}} · {{.Paused}} paused{{end}}{{if .Safe}} · {{.Safe}} safe{{end}}{{with .Push.Item}} · {{.}}{{end}})</span>
       {{else}}<span class="count">(browse-only · up {{.Up}}{{if .Paused}} · {{.Paused}} paused{{end}}{{if .Safe}} · {{.Safe}} safe{{end}}{{with .Push.Item}} · {{.}}{{end}})</span>{{end}}
     </span></h2>
+    {{with .HostError}}<p class="serve-state failed">rex host unusable — {{.}}</p>{{end}}
     {{if or .Projects .QuietCount .Push.State}}
     <ul class="rows">
       {{/* The drain to origin, above the projects: it is board-wide, and

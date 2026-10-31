@@ -461,3 +461,45 @@ func TestDashDropsAFailureOnceTheQueueIsEmpty(t *testing.T) {
 		t.Errorf("dash printed %q for a failure with an empty queue, want nothing", got)
 	}
 }
+
+// TestDashBannerNamesTheHost: where serve runs its jobs rides the banner
+// after uptime, so an operator can tell serve found Rex before any sweep
+// fires. An unusable one also earns the first row, with the reason —
+// every project below it would otherwise only read "held".
+func TestDashBannerNamesTheHost(t *testing.T) {
+	root := t.TempDir()
+	now := time.Now()
+	writeServeState(t, root, serve.ActivitySnapshot{
+		Pid: os.Getpid(), Armed: true, Host: "rex",
+		Started:  now.Add(-4 * time.Minute),
+		NextTick: now.Add(15 * time.Minute),
+	})
+	if got, want := serveCluster(t, root, now), "serve armed · up 4m · rex · next 15m"; got != want {
+		t.Errorf("banner tail = %q, want %q", got, want)
+	}
+	if got := serveLines(t, root, now); got != "" {
+		t.Errorf("a usable host spent %q below the banner, want nothing", got)
+	}
+
+	writeServeState(t, root, serve.ActivitySnapshot{
+		Pid: os.Getpid(), Armed: true, Host: "rex unusable",
+		HostError: "rex API revision 7 is older than 8",
+		Started:   now.Add(-4 * time.Minute),
+		NextTick:  now.Add(15 * time.Minute),
+		Projects:  []serve.ActivityProject{{Project: "alpha", SweptAt: now, SweepClean: false}},
+	})
+	if got, want := serveCluster(t, root, now), "serve armed · up 4m · rex unusable · next 15m · 1 failing"; got != want {
+		t.Errorf("banner tail = %q, want %q", got, want)
+	}
+	lines := strings.Split(strings.TrimRight(serveLines(t, root, now), "\n"), "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "  host") ||
+		!strings.HasSuffix(lines[0], "rex unusable  — rex API revision 7 is older than 8") {
+		t.Errorf("rows = %q, want the host row first, then the project", lines)
+	}
+
+	// A dead serve's line is its own sentence; the host is not on it.
+	writeServeState(t, root, serve.ActivitySnapshot{Pid: deadPid(t), Armed: true, Host: "rex", WrittenAt: now})
+	if got := serveCluster(t, root, now); strings.Contains(got, "rex") {
+		t.Errorf("dead banner = %q, want no host on it", got)
+	}
+}
