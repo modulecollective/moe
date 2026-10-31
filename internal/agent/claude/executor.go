@@ -111,7 +111,7 @@ const sandboxSettingsJSON = `{"sandbox":{"enabled":true}}`
 // and the session launches with nothing to send.
 func executeArgs(r agent.Request) []string {
 	// Claude Code uses --session-id to create and --resume to continue.
-	// NewSession was set upstream by EnsureDocument exactly when the
+	// NewSession was set upstream by backend selection exactly when the
 	// UUID was minted this turn.
 	sessionFlag := "--resume"
 	if r.NewSession {

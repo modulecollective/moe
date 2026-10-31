@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -30,6 +31,16 @@ func newTestBureaucracy(t *testing.T) string {
 	gittest.InitAt(t, root)
 	gittest.Commit(t, root, "seed")
 	return root
+}
+
+// ensureClaudeDocument seeds commit fixtures with a selected Claude slot.
+func ensureClaudeDocument(root string, md *run.Metadata, docID string) (*run.Document, bool, error) {
+	doc, changed, err := run.EnsureDocument(root, md, docID)
+	if err != nil {
+		return nil, false, err
+	}
+	_, _, selected, err := selectBackendSession(&fakeAgent{transcriptFound: true}, doc, "claude", root, "", root, io.Discard)
+	return doc, changed || selected, err
 }
 
 // dirtyTracked makes root dirty in the only sense the clean-tree guards
@@ -466,7 +477,7 @@ func TestRunStageSessionBannerShowsResolvedAgent(t *testing.T) {
 
 // TestCommitSessionStartWritesTrailersAndKeepsTreeClean is the core
 // property commitSessionStart was introduced to guarantee: after
-// EnsureDocument mints a fresh session and the metadata is saved, the
+// backend selection mints a fresh session and the metadata is saved, the
 // eager commit lands on HEAD with the standard MoE trailer block and
 // the working tree reaches a clean state (no dirty run.json sitting
 // around for the duration of the Claude run).
@@ -475,7 +486,7 @@ func TestCommitSessionStartWritesTrailersAndKeepsTreeClean(t *testing.T) {
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc",
 		Documents: map[string]*run.Document{}}
-	doc, mutated, err := run.EnsureDocument(root, md, "design")
+	doc, mutated, err := ensureClaudeDocument(root, md, "design")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -486,7 +497,7 @@ func TestCommitSessionStartWritesTrailersAndKeepsTreeClean(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := commitSessionStart(root, md, "design"); err != nil {
+	if err := commitSessionStart(root, md, "design", md.Documents["design"].Sessions["claude"]); err != nil {
 		t.Fatalf("commitSessionStart: %v", err)
 	}
 
@@ -499,7 +510,7 @@ func TestCommitSessionStartWritesTrailersAndKeepsTreeClean(t *testing.T) {
 		"MoE-Run: fix-it",
 		"MoE-Project: tele",
 		"MoE-Document: design",
-		"MoE-Session: " + doc.Session,
+		"MoE-Session: " + doc.Sessions["claude"],
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("commit body missing %q:\n%s", want, body)
@@ -527,13 +538,13 @@ func TestCommitSessionStartLeavesUnrelatedDirtyFilesAlone(t *testing.T) {
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc",
 		Documents: map[string]*run.Document{}}
-	if _, _, err := run.EnsureDocument(root, md, "design"); err != nil {
+	if _, _, err := ensureClaudeDocument(root, md, "design"); err != nil {
 		t.Fatal(err)
 	}
 	if err := run.Save(root, md); err != nil {
 		t.Fatal(err)
 	}
-	if err := commitSessionStart(root, md, "design"); err != nil {
+	if err := commitSessionStart(root, md, "design", md.Documents["design"].Sessions["claude"]); err != nil {
 		t.Fatalf("commitSessionStart: %v", err)
 	}
 
@@ -554,10 +565,8 @@ func TestCommitSessionStartLeavesUnrelatedDirtyFilesAlone(t *testing.T) {
 	}
 }
 
-// TestCommitSessionStartRegeneratesUUIDForLegacyDocument covers the
-// "invalid session id" branch of EnsureDocument: a legacy Document
-// entry with an empty / malformed Session gets a new UUID, mutated=true,
-// and the eager commit carries the freshly minted UUID in its trailer.
+// TestCommitSessionStartRegeneratesUUIDForLegacyDocument checks that selection
+// mints a valid keyed ID while preserving invalid legacy input for adoption.
 func TestCommitSessionStartRegeneratesUUIDForLegacyDocument(t *testing.T) {
 	root := newTestBureaucracy(t)
 
@@ -566,26 +575,29 @@ func TestCommitSessionStartRegeneratesUUIDForLegacyDocument(t *testing.T) {
 			"design": {Session: "not-a-uuid"},
 		},
 	}
-	doc, mutated, err := run.EnsureDocument(root, md, "design")
+	doc, mutated, err := ensureClaudeDocument(root, md, "design")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !mutated {
-		t.Fatalf("expected EnsureDocument to re-mint legacy session id")
+		t.Fatalf("expected backend selection to mint a keyed session id")
 	}
-	if doc.Session == "not-a-uuid" || doc.Session == "" {
-		t.Fatalf("Session not refreshed: %q", doc.Session)
+	if doc.Session != "not-a-uuid" {
+		t.Fatal("legacy input was overwritten")
+	}
+	if !run.ValidSessionID(doc.Sessions["claude"]) {
+		t.Fatalf("Session not refreshed: %q", doc.Sessions["claude"])
 	}
 	if err := run.Save(root, md); err != nil {
 		t.Fatal(err)
 	}
-	if err := commitSessionStart(root, md, "design"); err != nil {
+	if err := commitSessionStart(root, md, "design", md.Documents["design"].Sessions["claude"]); err != nil {
 		t.Fatalf("commitSessionStart: %v", err)
 	}
 
 	body := gitLogFormat(t, root, 1, "HEAD", "%B")
-	if !strings.Contains(body, "MoE-Session: "+doc.Session) {
-		t.Errorf("trailer missing freshly minted session %q:\n%s", doc.Session, body)
+	if !strings.Contains(body, "MoE-Session: "+doc.Sessions["claude"]) {
+		t.Errorf("trailer missing freshly minted session %q:\n%s", doc.Sessions["claude"], body)
 	}
 }
 
@@ -599,13 +611,13 @@ func TestCommitSessionStartFollowedByCommitTurnYieldsTwoDistinctCommits(t *testi
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc",
 		Documents: map[string]*run.Document{}}
-	if _, _, err := run.EnsureDocument(root, md, "design"); err != nil {
+	if _, _, err := ensureClaudeDocument(root, md, "design"); err != nil {
 		t.Fatal(err)
 	}
 	if err := run.Save(root, md); err != nil {
 		t.Fatal(err)
 	}
-	if err := commitSessionStart(root, md, "design"); err != nil {
+	if err := commitSessionStart(root, md, "design", md.Documents["design"].Sessions["claude"]); err != nil {
 		t.Fatalf("commitSessionStart: %v", err)
 	}
 
@@ -614,7 +626,7 @@ func TestCommitSessionStartFollowedByCommitTurnYieldsTwoDistinctCommits(t *testi
 	if err := os.WriteFile(filepath.Join(root, contentRel), []byte("# hello\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := commitTurn(root, md, "design", 0); err != nil {
+	if err := commitTurn(root, md, "design", "claude", 0); err != nil {
 		t.Fatalf("commitTurn: %v", err)
 	}
 
@@ -629,7 +641,7 @@ func TestCommitSessionStartFollowedByCommitTurnYieldsTwoDistinctCommits(t *testi
 
 // TestSecondTurnOnExistingDocumentSkipsEagerCommit guards the other
 // side of the `if mutated` gate in runStageSession: once a document
-// has a valid session UUID committed, EnsureDocument no longer
+// has a valid session UUID committed, backend selection no longer
 // mutates, so a subsequent turn produces only the closing
 // `work: update` commit — no duplicate `work: start session` commit
 // per turn.
@@ -638,13 +650,13 @@ func TestSecondTurnOnExistingDocumentSkipsEagerCommit(t *testing.T) {
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc",
 		Documents: map[string]*run.Document{}}
-	if _, _, err := run.EnsureDocument(root, md, "design"); err != nil {
+	if _, _, err := ensureClaudeDocument(root, md, "design"); err != nil {
 		t.Fatal(err)
 	}
 	if err := run.Save(root, md); err != nil {
 		t.Fatal(err)
 	}
-	if err := commitSessionStart(root, md, "design"); err != nil {
+	if err := commitSessionStart(root, md, "design", md.Documents["design"].Sessions["claude"]); err != nil {
 		t.Fatalf("commitSessionStart: %v", err)
 	}
 	// First turn lands a bit of content via commitTurn.
@@ -652,15 +664,15 @@ func TestSecondTurnOnExistingDocumentSkipsEagerCommit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, contentRel), []byte("# v1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := commitTurn(root, md, "design", 0); err != nil {
+	if err := commitTurn(root, md, "design", "claude", 0); err != nil {
 		t.Fatalf("commitTurn: %v", err)
 	}
 
-	// Second turn: EnsureDocument should NOT mutate; mirror the
+	// Second turn: backend selection should NOT mutate; mirror the
 	// `if mutated { commitSessionStart }` gate by simply not calling
 	// commitSessionStart on this path. Then the agent writes, and
 	// commitTurn is the only new commit.
-	_, mutated, err := run.EnsureDocument(root, md, "design")
+	_, mutated, err := ensureClaudeDocument(root, md, "design")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -671,7 +683,7 @@ func TestSecondTurnOnExistingDocumentSkipsEagerCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	headBefore := gitLogFormat(t, root, 1, "HEAD", "%H")
-	if err := commitTurn(root, md, "design", 0); err != nil {
+	if err := commitTurn(root, md, "design", "claude", 0); err != nil {
 		t.Fatalf("commitTurn: %v", err)
 	}
 	headAfter := gitLogFormat(t, root, 1, "HEAD", "%H")
@@ -699,13 +711,13 @@ func TestCommitTurnRequiresCanvas(t *testing.T) {
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc",
 		Documents: map[string]*run.Document{}}
-	if _, _, err := run.EnsureDocument(root, md, "design"); err != nil {
+	if _, _, err := ensureClaudeDocument(root, md, "design"); err != nil {
 		t.Fatal(err)
 	}
 	if err := run.Save(root, md); err != nil {
 		t.Fatal(err)
 	}
-	if err := commitSessionStart(root, md, "design"); err != nil {
+	if err := commitSessionStart(root, md, "design", md.Documents["design"].Sessions["claude"]); err != nil {
 		t.Fatalf("commitSessionStart: %v", err)
 	}
 
@@ -717,7 +729,7 @@ func TestCommitTurnRequiresCanvas(t *testing.T) {
 	}
 
 	headBefore := gitLogFormat(t, root, 1, "HEAD", "%H")
-	err := commitTurn(root, md, "design", 0)
+	err := commitTurn(root, md, "design", "claude", 0)
 	if err == nil {
 		t.Fatal("commitTurn returned nil, want error about missing canvas")
 	}
@@ -738,13 +750,13 @@ func TestCommitTurnRejectsEmptyCanvas(t *testing.T) {
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc",
 		Documents: map[string]*run.Document{}}
-	if _, _, err := run.EnsureDocument(root, md, "design"); err != nil {
+	if _, _, err := ensureClaudeDocument(root, md, "design"); err != nil {
 		t.Fatal(err)
 	}
 	if err := run.Save(root, md); err != nil {
 		t.Fatal(err)
 	}
-	if err := commitSessionStart(root, md, "design"); err != nil {
+	if err := commitSessionStart(root, md, "design", md.Documents["design"].Sessions["claude"]); err != nil {
 		t.Fatalf("commitSessionStart: %v", err)
 	}
 
@@ -754,7 +766,7 @@ func TestCommitTurnRejectsEmptyCanvas(t *testing.T) {
 	}
 
 	headBefore := gitLogFormat(t, root, 1, "HEAD", "%H")
-	err := commitTurn(root, md, "design", 0)
+	err := commitTurn(root, md, "design", "claude", 0)
 	if err == nil {
 		t.Fatal("commitTurn returned nil, want error about empty canvas")
 	}
@@ -778,25 +790,25 @@ func TestCommitTurnNoOpTurnReturnsErrNothingToCommit(t *testing.T) {
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc",
 		Documents: map[string]*run.Document{}}
-	if _, _, err := run.EnsureDocument(root, md, "design"); err != nil {
+	if _, _, err := ensureClaudeDocument(root, md, "design"); err != nil {
 		t.Fatal(err)
 	}
 	if err := run.Save(root, md); err != nil {
 		t.Fatal(err)
 	}
-	if err := commitSessionStart(root, md, "design"); err != nil {
+	if err := commitSessionStart(root, md, "design", md.Documents["design"].Sessions["claude"]); err != nil {
 		t.Fatalf("commitSessionStart: %v", err)
 	}
 	contentRel := run.ContentPath("tele", "fix-it", "design")
 	if err := os.WriteFile(filepath.Join(root, contentRel), []byte("# v1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := commitTurn(root, md, "design", 0); err != nil {
+	if err := commitTurn(root, md, "design", "claude", 0); err != nil {
 		t.Fatalf("first commitTurn: %v", err)
 	}
 
 	headBefore := gitLogFormat(t, root, 1, "HEAD", "%H")
-	err := commitTurn(root, md, "design", 0)
+	err := commitTurn(root, md, "design", "claude", 0)
 	if !errors.Is(err, run.ErrNothingToCommit) {
 		t.Fatalf("commitTurn err = %v, want ErrNothingToCommit", err)
 	}
@@ -1123,13 +1135,13 @@ func TestCommitTurnStagesFeedbackFile(t *testing.T) {
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc",
 		Documents: map[string]*run.Document{}}
-	if _, _, err := run.EnsureDocument(root, md, "design"); err != nil {
+	if _, _, err := ensureClaudeDocument(root, md, "design"); err != nil {
 		t.Fatal(err)
 	}
 	if err := run.Save(root, md); err != nil {
 		t.Fatal(err)
 	}
-	if err := commitSessionStart(root, md, "design"); err != nil {
+	if err := commitSessionStart(root, md, "design", md.Documents["design"].Sessions["claude"]); err != nil {
 		t.Fatalf("commitSessionStart: %v", err)
 	}
 
@@ -1147,7 +1159,7 @@ func TestCommitTurnStagesFeedbackFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := commitTurn(root, md, "design", 0); err != nil {
+	if err := commitTurn(root, md, "design", "claude", 0); err != nil {
 		t.Fatalf("commitTurn: %v", err)
 	}
 

@@ -258,13 +258,13 @@ func TestWorkflowNextIgnoresSessionStartCommit(t *testing.T) {
 	wf.RegisterStage("code")
 	md := &run.Metadata{ID: "r", Project: "p", Workflow: "session-start-test", Status: run.StatusInProgress,
 		Documents: map[string]*run.Document{}}
-	if _, _, err := run.EnsureDocument(root, md, "code"); err != nil {
+	if _, _, err := ensureClaudeDocument(root, md, "code"); err != nil {
 		t.Fatal(err)
 	}
 	if err := run.Save(root, md); err != nil {
 		t.Fatal(err)
 	}
-	if err := commitSessionStart(root, md, "code"); err != nil {
+	if err := commitSessionStart(root, md, "code", md.Documents["code"].Sessions["claude"]); err != nil {
 		t.Fatalf("commitSessionStart: %v", err)
 	}
 

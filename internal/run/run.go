@@ -37,10 +37,11 @@ var ErrRunNotFound = errors.New("run not found")
 
 // Document is the machine-readable slice of a single document's state.
 // Documents themselves are just files on disk (content.md); this struct
-// carries only the data that can't be derived from them — the Claude
-// Code session id so stage sessions can resume the same conversation.
+// carries the latest conversation identity for each agent backend.
 type Document struct {
-	Session string `json:"session"`
+	// Session is legacy input, retained unchanged for evidence-based adoption.
+	Session  string            `json:"session,omitempty"`
+	Sessions map[string]string `json:"sessions,omitempty"`
 }
 
 // Run status values written to Metadata.Status. A run opens in
@@ -505,13 +506,12 @@ func FeedbackPath(projectID, id, recipient string) string {
 }
 
 // uuidV4Pattern matches the canonical 8-4-4-4-12 hex form Claude Code
-// requires for --session-id. Kept here so EnsureDocument can detect and
-// heal entries that predate the UUID requirement.
+// requires for --session-id.
 var uuidV4Pattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 // NewSessionID returns a fresh random UUIDv4 for use as a Claude Code
 // --session-id. Claude Code rejects non-UUID session ids, so we mint
-// one per document and store it in run.json. Exported so run-less
+// one per document/backend and store it in run.json. Exported so run-less
 // sessions (e.g. wiki lint) can mint their own without duplicating
 // the generator.
 func NewSessionID() (string, error) {
@@ -530,10 +530,33 @@ func NewSessionID() (string, error) {
 	), nil
 }
 
+// ValidSessionID reports whether id has the UUID form accepted by the backends.
+func ValidSessionID(id string) bool { return uuidV4Pattern.MatchString(id) }
+
+// SetSession updates only the selected backend's conversation.
+func (d *Document) SetSession(backend, id string) {
+	if d.Sessions == nil {
+		d.Sessions = make(map[string]string)
+	}
+	d.Sessions[backend] = id
+}
+
+// HasSession recognizes started documents in both current and legacy metadata.
+func (d *Document) HasSession() bool {
+	if d.Session != "" {
+		return true
+	}
+	for _, id := range d.Sessions {
+		if id != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // EnsureDocument adds a pending entry for docID to md if one doesn't
 // already exist, and makes sure the document's directory exists on disk.
-// If the existing entry has no session id (or an invalid one — e.g. from
-// before Claude Code required UUIDs), a fresh one is generated.
+// Backend session selection is separate from document creation.
 //
 // Returns the entry and whether md was mutated; the caller decides
 // whether to persist (Save + commit).
@@ -549,14 +572,6 @@ func EnsureDocument(root string, md *Metadata, docID string) (*Document, bool, e
 	if !existed {
 		doc = &Document{}
 		md.Documents[docID] = doc
-		mutated = true
-	}
-	if !uuidV4Pattern.MatchString(doc.Session) {
-		sid, err := NewSessionID()
-		if err != nil {
-			return nil, false, err
-		}
-		doc.Session = sid
 		mutated = true
 	}
 	if err := os.MkdirAll(filepath.Join(root, DocDir(md.Project, md.ID, docID)), 0o755); err != nil {

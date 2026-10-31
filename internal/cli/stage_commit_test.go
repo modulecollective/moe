@@ -111,7 +111,7 @@ func TestCommitTurnStagesProposedStylesheet(t *testing.T) {
 				}
 			}
 			md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: sdlcWorkflow, Documents: map[string]*run.Document{}}
-			if _, _, err := run.EnsureDocument(root, md, "code"); err != nil {
+			if _, _, err := ensureClaudeDocument(root, md, "code"); err != nil {
 				t.Fatal(err)
 			}
 			canvas := run.ContentPath("tele", "fix-it", "code")
@@ -127,7 +127,7 @@ func TestCommitTurnStagesProposedStylesheet(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := commitTurn(root, md, "code", 0, extras...); err != nil {
+			if err := commitTurn(root, md, "code", "claude", 0, extras...); err != nil {
 				t.Fatal(err)
 			}
 			changes := gittest.Output(t, root, "diff-tree", "--no-commit-id", "--name-status", "-r", "HEAD")
@@ -192,7 +192,7 @@ func TestCommitTurnCarriesSdlcChoreEdit(t *testing.T) {
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: sdlcWorkflow,
 		Documents: map[string]*run.Document{}}
-	if _, _, err := run.EnsureDocument(root, md, "code"); err != nil {
+	if _, _, err := ensureClaudeDocument(root, md, "code"); err != nil {
 		t.Fatal(err)
 	}
 	contentRel := run.ContentPath("tele", "fix-it", "code")
@@ -212,7 +212,7 @@ func TestCommitTurnCarriesSdlcChoreEdit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := commitTurn(root, md, "code", 0, extras...); err != nil {
+	if err := commitTurn(root, md, "code", "claude", 0, extras...); err != nil {
 		t.Fatalf("commitTurn: %v", err)
 	}
 
@@ -236,7 +236,7 @@ func TestCommitTurnStampsTimedOut(t *testing.T) {
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: sdlcWorkflow,
 		Documents: map[string]*run.Document{}}
-	if _, _, err := run.EnsureDocument(root, md, "code"); err != nil {
+	if _, _, err := ensureClaudeDocument(root, md, "code"); err != nil {
 		t.Fatal(err)
 	}
 	contentRel := run.ContentPath("tele", "fix-it", "code")
@@ -244,7 +244,7 @@ func TestCommitTurnStampsTimedOut(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := commitTurn(root, md, "code", 3*time.Hour); err != nil {
+	if err := commitTurn(root, md, "code", "claude", 3*time.Hour); err != nil {
 		t.Fatalf("commitTurn: %v", err)
 	}
 
@@ -255,7 +255,7 @@ func TestCommitTurnStampsTimedOut(t *testing.T) {
 	if !strings.Contains(body, "MoE-Timed-Out: 3h0m0s") {
 		t.Errorf("trailer should name the cap that fired:\n%s", body)
 	}
-	sessionLine := "MoE-Session: " + md.Documents["code"].Session + "\n"
+	sessionLine := "MoE-Session: " + md.Documents["code"].Sessions["claude"] + "\n"
 	if !strings.Contains(body, sessionLine+"MoE-Timed-Out: 3h0m0s") {
 		t.Errorf("MoE-Timed-Out should render directly after MoE-Session:\n%s", body)
 	}
@@ -276,7 +276,7 @@ func TestCommitTurnWithoutTimeoutIsUnchanged(t *testing.T) {
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: sdlcWorkflow,
 		Documents: map[string]*run.Document{}}
-	if _, _, err := run.EnsureDocument(root, md, "code"); err != nil {
+	if _, _, err := ensureClaudeDocument(root, md, "code"); err != nil {
 		t.Fatal(err)
 	}
 	contentRel := run.ContentPath("tele", "fix-it", "code")
@@ -284,7 +284,7 @@ func TestCommitTurnWithoutTimeoutIsUnchanged(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := commitTurn(root, md, "code", 0); err != nil {
+	if err := commitTurn(root, md, "code", "claude", 0); err != nil {
 		t.Fatalf("commitTurn: %v", err)
 	}
 
@@ -294,7 +294,7 @@ func TestCommitTurnWithoutTimeoutIsUnchanged(t *testing.T) {
 		"MoE-Project: tele\n" +
 		"MoE-Workflow: " + sdlcWorkflow + "\n" +
 		"MoE-Document: code\n" +
-		"MoE-Session: " + md.Documents["code"].Session + "\n"
+		"MoE-Session: " + md.Documents["code"].Sessions["claude"] + "\n"
 	if strings.TrimRight(body, "\n") != strings.TrimRight(want, "\n") {
 		t.Fatalf("ordinary turn message drifted:\n got: %q\nwant: %q", body, want)
 	}

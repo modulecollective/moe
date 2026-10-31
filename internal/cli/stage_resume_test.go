@@ -104,6 +104,8 @@ func (f *fakeAgent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 	return "", f.oneShotErr
 }
 
+func (f *fakeAgent) TranscriptSessionID(path string) (string, error) { return "", nil }
+
 func (f *fakeAgent) CopyTranscript(sessionID, dest string) (bool, error) {
 	return false, nil
 }
@@ -348,7 +350,7 @@ func TestHeadlessThenInteractiveResumesSameCwd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reload run after headless turn: %v", err)
 	}
-	committed := md.Documents["design"].Session
+	committed := md.Documents["design"].Sessions["fake-headless-to-interactive"]
 	if t2.sessionID != committed {
 		t.Errorf("turn 2 resumed %q, want the session committed after turn 1 %q", t2.sessionID, committed)
 	}

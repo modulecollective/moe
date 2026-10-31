@@ -481,5 +481,17 @@ present.
   dir, argv, duration, error — to stderr. First tool to reach for when a
   stage open or sync stalls inside git.
 
-Stage logic can recover orphaned Claude sessions from the Claude cache or from
-mirrored transcript files when the normal close path was interrupted.
+Each document keeps its latest conversation per backend. Switching backends and
+returning resumes that backend's conversation; changing its model keeps the
+same conversation. The canvas carries shared work between backends. Headless
+turns still start fresh and replace only their backend's latest session ID.
+
+Stage logic can recover orphaned Claude sessions from the Claude cache or an
+identity-matching mirror. Codex requires its native rollout to resume. Missing
+history starts a fresh conversation with a notice. Malformed or conflicting
+mirror identity stops the turn before launch when recovery needs that mirror.
+
+Older runs' scalar session IDs are adopted lazily using the selected backend's
+native cache or mirror identity. The legacy value stays intact while new turns
+write backend-keyed IDs in run.json. Running an older MoE binary after this
+metadata migration is unsupported: it cannot preserve the new session map.

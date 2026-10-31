@@ -19,7 +19,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	moe "github.com/modulecollective/moe"
@@ -467,32 +466,6 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			if err := materializeMoeBureaucracySkill(workRoot, sessionCwd, md); err != nil {
 				return stageTurnSpec{}, err
 			}
-			if mutated {
-				if err := run.Save(workRoot, md); err != nil {
-					return stageTurnSpec{}, err
-				}
-				// Seed the canvas skeleton on first open if requested —
-				// stages with a fixed structural shape (test stage) want
-				// the agent's first read to land on the headings it has
-				// to fill, not a blank file. Only writes if the canvas
-				// doesn't already exist on disk: a pre-existing canvas
-				// from a stale stub or test fixture stays untouched.
-				if opts.CanvasSkeleton != "" {
-					canvasRel := run.ContentPath(md.Project, md.ID, docID)
-					canvasAbs := filepath.Join(workRoot, canvasRel)
-					if _, statErr := os.Stat(canvasAbs); errors.Is(statErr, fs.ErrNotExist) {
-						if err := os.WriteFile(canvasAbs, []byte(opts.CanvasSkeleton), 0o644); err != nil {
-							return stageTurnSpec{}, fmt.Errorf("session: seed canvas skeleton: %w", err)
-						}
-					}
-				}
-				// Commit on the session branch — no repo lock needed
-				// because the branch has a single writer (this session).
-				if err := commitSessionStart(workRoot, md, docID); err != nil {
-					return stageTurnSpec{}, err
-				}
-				moePrintf(stderr, "opened %s canvas (session %s)\n  %s\n", docID, doc.Session, filepath.Join(workRoot, run.ContentPath(md.Project, md.ID, docID)))
-			}
 
 			// Code workspace — still keyed off the canonical bureaucracy
 			// root so per-run sandbox persistence works across turns.
@@ -588,76 +561,41 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				}
 			}
 
-			// mutated means EnsureDocument just minted the session
-			// UUID this turn — fresh session, nothing to validate.
-			// Otherwise stat the exact path claude will read for
-			// `--resume <sid>` from the cwd it'll run in (sessionCwd,
-			// the same value the executor's cmd.Dir uses) and decide
-			// between two outcomes:
-			//   - JSONL at the canonical path → resume normally.
-			//   - JSONL absent (cross-machine fresh checkout, wiped
-			//     cache, dirty exit before claude wrote turn 1, or
-			//     a prior headless turn which doesn't honor moe's
-			//     --session-id) → re-mint the session id, persist +
-			//     commit run.json, and pass --session-id instead of
-			//     --resume. Chat history is gone but the canvas on
-			//     disk is intact; we warn on stderr.
-			// Pre-flighting beats letting claude error mid-run: the
-			// operator gets a clear stderr line, not a stuck run.
-			newSession := mutated
-			if !newSession {
-				if sessionCwd != "" {
-					a, agentErr := agent.Get(agentName)
-					if agentErr != nil {
-						return stageTurnSpec{}, agentErr
-					}
-					switch found, err := a.TranscriptExists(doc.Session, sessionCwd); {
-					case err != nil:
-						return stageTurnSpec{}, fmt.Errorf("session: stat transcript: %w", err)
-					case found:
-						// Transcript present — normal --resume path.
-					default:
-						// TranscriptExists miss. Before re-minting, ask the
-						// agent to look anywhere else the transcript might
-						// still live (claude: a stale encoded-cwd bucket
-						// from a pre-stable-cwd run, or the bureaucracy
-						// mirror). Codex returns RestoreMissing as a no-op
-						// — its own glob already settled the question.
-						mirrorPath := filepath.Join(workRoot, run.ThreadPathFor(agentName, md.Project, md.ID, docID))
-						outcome, err := a.RestoreTranscript(doc.Session, sessionCwd, mirrorPath)
-						if err != nil {
-							return stageTurnSpec{}, fmt.Errorf("session: restore transcript: %w", err)
-						}
-						switch outcome.Result {
-						case agent.RestoreFromCache:
-							moePrintf(stderr, "session %s recovered from cache (%s)\n", doc.Session, outcome.Source)
-						case agent.RestoreFromMirror:
-							src := outcome.Source
-							if rel, relErr := filepath.Rel(workRoot, src); relErr == nil && !strings.HasPrefix(rel, "..") {
-								src = rel
-							}
-							moePrintf(stderr, "session %s restored from %s\n", doc.Session, src)
-						case agent.RestoreNotNeeded:
-							// Race between probe and restore — the
-							// canonical path showed up after the miss. No
-							// stderr line; resume normally.
-						case agent.RestoreMissing:
-							sid, err := run.NewSessionID()
-							if err != nil {
-								return stageTurnSpec{}, err
-							}
-							moePrintf(stderr, "session %s not found anywhere; starting fresh as %s (prior chat history not recoverable)\n", doc.Session, sid)
-							doc.Session = sid
-							if err := run.Save(workRoot, md); err != nil {
-								return stageTurnSpec{}, err
-							}
-							if err := commitSessionStart(workRoot, md, docID); err != nil {
-								return stageTurnSpec{}, err
-							}
-							newSession = true
+			a, err := agent.Get(agentName)
+			if err != nil {
+				return stageTurnSpec{}, err
+			}
+			mirrorPath := filepath.Join(workRoot, run.ThreadPathFor(agentName, md.Project, md.ID, docID))
+			sessionID, newSession, sessionChanged, err := selectBackendSession(a, doc, agentName, sessionCwd, mirrorPath, workRoot, stderr)
+			if err != nil {
+				return stageTurnSpec{}, err
+			}
+			mutated = mutated || sessionChanged
+			if mutated {
+				if err := run.Save(workRoot, md); err != nil {
+					return stageTurnSpec{}, err
+				}
+				// Seed the canvas skeleton on first open if requested —
+				// stages with a fixed structural shape (test stage) want
+				// the agent's first read to land on the headings it has
+				// to fill, not a blank file. Only writes if the canvas
+				// doesn't already exist on disk: a pre-existing canvas
+				// from a stale stub or test fixture stays untouched.
+				if opts.CanvasSkeleton != "" {
+					canvasRel := run.ContentPath(md.Project, md.ID, docID)
+					canvasAbs := filepath.Join(workRoot, canvasRel)
+					if _, statErr := os.Stat(canvasAbs); errors.Is(statErr, fs.ErrNotExist) {
+						if err := os.WriteFile(canvasAbs, []byte(opts.CanvasSkeleton), 0o644); err != nil {
+							return stageTurnSpec{}, fmt.Errorf("session: seed canvas skeleton: %w", err)
 						}
 					}
 				}
+				// Commit on the session branch — no repo lock needed
+				// because the branch has a single writer (this session).
+				if err := commitSessionStart(workRoot, md, docID, sessionID); err != nil {
+					return stageTurnSpec{}, err
+				}
+				moePrintf(stderr, "opened %s canvas (session %s)\n  %s\n", docID, sessionID, filepath.Join(workRoot, run.ContentPath(md.Project, md.ID, docID)))
 			}
 
 			// CanvasOnOpen runs last in BuildSpec — after every step that
@@ -684,7 +622,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				DocID:                docID,
 				ClonePath:            clonePath,
 				SessionCwd:           sessionCwd,
-				SessionUUID:          doc.Session,
+				SessionUUID:          sessionID,
 				NewSession:           newSession,
 				InitialPrompt:        initialPrompt,
 				InitialPromptBuilder: opts.InitialPromptBuilder,
@@ -749,7 +687,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 					if errors.As(runErr, &toErr) {
 						timedOut = toErr.Timeout
 					}
-					if err := commitTurn(workRoot, md, docID, timedOut, extras...); err != nil {
+					if err := commitTurn(workRoot, md, docID, agentName, timedOut, extras...); err != nil {
 						return err
 					}
 					// HEAD is this turn's commit and the worktree is still
@@ -922,7 +860,7 @@ type stageTurnSpec struct {
 	// run-less sessions, which don't `--resume` and can keep
 	// using the worktree root.
 	SessionCwd string
-	// SessionUUID is the Claude Code session id — the per-document
+	// SessionUUID is the selected backend session id — the per-document/backend
 	// UUID stored in run.json.
 	SessionUUID string
 	// NewSession picks --session-id (true) over --resume (false).
@@ -1163,7 +1101,7 @@ func runStageTurn(root string, in stageTurnInputs, stdout, stderr io.Writer) int
 	// Run-less callers (lint) carry no document to mutate.
 	if spec.Metadata != nil && returnedSid != "" && returnedSid != spec.SessionUUID {
 		if doc, ok := spec.Metadata.Documents[spec.DocID]; ok {
-			doc.Session = returnedSid
+			doc.SetSession(agentName, returnedSid)
 			if err := run.Save(workRoot, spec.Metadata); err != nil {
 				moePrintf(stderr, "session: persist returned id: %v\n", err)
 			}

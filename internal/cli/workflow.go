@@ -315,7 +315,7 @@ func (w *Workflow) AdvancedTo(root string, md *run.Metadata, idx *run.JournalInd
 	if err != nil || kind != NextKindStage {
 		return "", zero, err
 	}
-	if doc := md.Documents[stage]; doc != nil && doc.Session != "" {
+	if doc := md.Documents[stage]; doc != nil && doc.HasSession() {
 		return "", zero, nil
 	}
 	// The freshest qualifying marker across the awaited stage's prereqs.

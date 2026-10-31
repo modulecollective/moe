@@ -65,6 +65,10 @@ type Agent interface {
 	// files live under ~/.codex/sessions/<date>/, keyed only by
 	// session id).
 	TranscriptExists(sessionID, cwd string) (bool, error)
+	// TranscriptSessionID reads identity from this backend's native transcript
+	// format. Missing files or records without identity return an empty ID.
+	// Malformed, invalid or conflicting identity evidence returns an error.
+	TranscriptSessionID(path string) (string, error)
 	// RestoreTranscript is the recovery hook stage.go calls after a
 	// TranscriptExists miss but before re-minting the session id. The
 	// agent looks for the transcript anywhere it might still live
@@ -135,12 +139,12 @@ type Request struct {
 	// DocID is which document on the run this turn is for. Ignored
 	// when Metadata is nil.
 	DocID string
-	// SessionID is the canonical UUID that identifies this document's
+	// SessionID is the canonical UUID that identifies this document/backend's
 	// conversation. Claude uses it directly (--session-id /
 	// --resume); codex generates its own and the agent reads it back.
 	SessionID string
 	// NewSession is true when SessionID was just minted this turn
-	// (first ever call for this document) and false when it already
+	// (first call for this document/backend) and false when it already
 	// has a server-side session that should be resumed.
 	NewSession bool
 	// Prompt is the assembled system prompt from buildSystemPrompt.

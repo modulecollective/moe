@@ -18,8 +18,7 @@ import (
 	"github.com/modulecollective/moe/internal/twin"
 )
 
-// commitSessionStart commits run.json immediately after EnsureDocument
-// mints a fresh Claude session UUID, so the long Claude run that follows
+// commitSessionStart commits session metadata before launch, so the agent turn
 // doesn't leave the bureaucracy tree dirty for hours. Only run.json is
 // staged — any unrelated edits the operator had in the tree stay put.
 //
@@ -27,7 +26,7 @@ import (
 // path when mutated=true, so run.json is expected to differ from HEAD,
 // but if some concurrent action already committed the identical state
 // there's no work to do and no reason to fail the turn.
-func commitSessionStart(root string, md *run.Metadata, docID string) error {
+func commitSessionStart(root string, md *run.Metadata, docID, sessionID string) error {
 	runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
 	msg := fmt.Sprintf("work: start session for %s\n\n", docID) +
 		trailers.Block{
@@ -35,7 +34,7 @@ func commitSessionStart(root string, md *run.Metadata, docID string) error {
 			Project:  md.Project,
 			Workflow: md.Workflow,
 			Document: docID,
-			Session:  md.Documents[docID].Session,
+			Session:  sessionID,
 			Consent:  walkConsent(),
 		}.String()
 	err := run.StageAndCommit(root, msg, runJSON)
@@ -89,7 +88,7 @@ func (e *canvasRefusalError) Error() string {
 // the turn's own commit is where a kill becomes durable, since the
 // transcript it interrupted gets overwritten by the next drive. Zero
 // leaves the message byte-identical to what every ordinary turn writes.
-func commitTurn(root string, md *run.Metadata, docID string, timedOut time.Duration, extraPaths ...string) error {
+func commitTurn(root string, md *run.Metadata, docID, backend string, timedOut time.Duration, extraPaths ...string) error {
 	docDir := run.DocDir(md.Project, md.ID, docID)
 	runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
 
@@ -118,7 +117,7 @@ func commitTurn(root string, md *run.Metadata, docID string, timedOut time.Durat
 		Project:  md.Project,
 		Workflow: md.Workflow,
 		Document: docID,
-		Session:  md.Documents[docID].Session,
+		Session:  md.Documents[docID].Sessions[backend],
 		Consent:  walkConsent(),
 	}
 	if timedOut > 0 {

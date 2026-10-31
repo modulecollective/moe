@@ -263,7 +263,7 @@ func TestStageCommitsStampConsentOnlyInsideAWalk(t *testing.T) {
 			root := newTestBureaucracy(t)
 			md := &run.Metadata{ID: "stamp-me", Project: "tele", Workflow: "sdlc",
 				Documents: map[string]*run.Document{}}
-			if _, _, err := run.EnsureDocument(root, md, "code"); err != nil {
+			if _, _, err := ensureClaudeDocument(root, md, "code"); err != nil {
 				t.Fatal(err)
 			}
 			if err := run.Save(root, md); err != nil {
@@ -284,7 +284,7 @@ func TestStageCommitsStampConsentOnlyInsideAWalk(t *testing.T) {
 				}
 			}
 
-			if err := commitSessionStart(root, md, "code"); err != nil {
+			if err := commitSessionStart(root, md, "code", md.Documents["code"].Sessions["claude"]); err != nil {
 				t.Fatal(err)
 			}
 			check("work: start session for code")
@@ -293,7 +293,7 @@ func TestStageCommitsStampConsentOnlyInsideAWalk(t *testing.T) {
 			if err := os.WriteFile(canvas, []byte("# hello\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			if err := commitTurn(root, md, "code", 0); err != nil {
+			if err := commitTurn(root, md, "code", "claude", 0); err != nil {
 				t.Fatal(err)
 			}
 			check("work: update code")

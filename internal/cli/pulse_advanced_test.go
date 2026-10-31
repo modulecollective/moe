@@ -78,13 +78,13 @@ func TestAdvancedRunsBlockSkipsStartedSuccessor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := run.EnsureDocument(root, md, "code"); err != nil {
+	if _, _, err := ensureClaudeDocument(root, md, "code"); err != nil {
 		t.Fatal(err)
 	}
 	if err := run.Save(root, md); err != nil {
 		t.Fatal(err)
 	}
-	if err := commitSessionStart(root, md, "code"); err != nil {
+	if err := commitSessionStart(root, md, "code", md.Documents["code"].Sessions["claude"]); err != nil {
 		t.Fatal(err)
 	}
 
