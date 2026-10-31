@@ -1164,8 +1164,9 @@ type ModeCounts struct {
 // is empty for a serve with no tick scheduled (an unarmed one never
 // has); failing is dropped at zero, so a healthy board spends nothing
 // on it. host is where jobs run ("rex", "local pty", "rex unusable"),
-// empty on an unarmed serve, which runs none. The CLI's dead-serve state has no web counterpart (a dead
-// serve serves no pages) and stays in the CLI.
+// empty on an unarmed serve, which runs none. The CLI's dead-serve
+// state has no web counterpart (a dead serve serves no pages) and stays
+// in the CLI.
 //
 // The mode counts are compact by exception for the same reason: they say
 // how much of the board the clock is holding back, and on the ordinary
