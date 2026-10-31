@@ -825,6 +825,39 @@ func TestRunNewAgentHelpNamesPersistenceBoundary(t *testing.T) {
 	if !strings.Contains(got, "model stylesheet, then claude") {
 		t.Fatalf("help missing fallback step:\n%s", got)
 	}
+	if !strings.Contains(got, "$MOE_FORCE_AGENT overrides backend selection") {
+		t.Fatalf("help missing process override:\n%s", got)
+	}
+}
+
+func TestRunNewHelpMatchesWorkflowOptions(t *testing.T) {
+	for _, workflow := range []string{"sdlc", "chat"} {
+		t.Run(workflow, func(t *testing.T) {
+			var out, errb bytes.Buffer
+			if code := Run([]string{workflow, "new", "--help"}, &out, &errb); code != 2 || out.Len() != 0 {
+				t.Fatalf("help: exit=%d stdout=%q stderr=%q", code, out.String(), errb.String())
+			}
+			got := errb.String()
+			for _, name := range []string{"agent", "seed", "park", "from-idea"} {
+				for _, spelling := range []string{"--" + name, "\n  -" + name} {
+					if !strings.Contains(got, spelling) {
+						t.Errorf("help missing %s:\n%s", spelling, got)
+					}
+				}
+			}
+			for _, name := range []string{"workspace", "ship", "chain"} {
+				description := "\n  -" + name
+				if name != "workspace" {
+					description += "\n"
+				}
+				for _, spelling := range []string{"--" + name, description} {
+					if strings.Contains(got, spelling) != (workflow == "sdlc") {
+						t.Errorf("%s help has incorrect %s visibility:\n%s", workflow, spelling, got)
+					}
+				}
+			}
+		})
+	}
 }
 
 // TestRunNewFromIdeaDoesNotCarryDesignOnly: the design-only tag is a

@@ -148,9 +148,10 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 		moePrintln(stderr, "The route defaults to the project's ship setting (`moe project ship`),")
 		moePrintln(stderr, "which is `pr` unless the project says otherwise.")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "--pr:    push moe/<run> and open (or re-use) a PR; leave the sandbox in place.")
+		moePrintln(stderr, "--pr:    push moe/<run> and open (or re-use) a PR; keep the working tree.")
 		moePrintln(stderr, "--merge: push moe/<run>, fast-forward-merge it into the target repo's default")
-		moePrintln(stderr, "         branch, delete the remote branch, and remove the sandbox clone.")
+		moePrintln(stderr, "         branch, delete the remote branch, and remove the private clone")
+		moePrintln(stderr, "         or release the bound named workspace, retaining its directory.")
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2, nil

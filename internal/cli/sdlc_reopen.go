@@ -52,14 +52,14 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 	workspaceName := fs.String("workspace", "", "bind the new run to the named workspace at .moe/named/<project>/<name>/ (claim taken at first stage attach — sdlc design). When omitted, the prior run's workspace is inherited.")
 	noWorkspace := fs.Bool("no-workspace", false, "give the new run a fresh per-run sandbox instead of inheriting the prior's named workspace. Mutually exclusive with --workspace.")
 	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). When omitted, the prior run's agent is inherited.")
-	noAgent := fs.Bool("no-agent", false, "clear the inherited agent so the usual stylesheet → claude precedence runs at first stage turn. Mutually exclusive with --agent.")
+	noAgent := fs.Bool("no-agent", false, "clear the inherited agent so stage-time selection uses $MOE_FORCE_AGENT, then the stylesheet, then claude. Mutually exclusive with --agent.")
 	park := fs.Bool("park", false, "open the run and stop: print the next-stage hint instead of prompting to run it")
 	// The consent ladder, same pair the stage verbs and `new` carry
 	// (`!!` / `!!!`). A reopened run mints seeded at design; the
 	// rungs ride it from there, exactly as `new --from-idea --chain`
 	// does for a promoted idea. Mutually exclusive with each other and --park.
-	ship := fs.Bool("ship", false, "open the run and cascade every stage headless to the ship (the flag twin of `!!` at the chain prompt; mutually exclusive with --park/--chain)")
-	chain := fs.Bool("chain", false, "open the run, ship it, and ride the chain it heads (the flag twin of `!!!`; mutually exclusive with --park/--ship)")
+	ship := fs.Bool("ship", false, "open the run and cascade every stage headless to the ship (the flag twin of !! at the chain prompt; mutually exclusive with --park/--chain)")
+	chain := fs.Bool("chain", false, "open the run, ship it, and ride the chain it heads (the flag twin of !!!; mutually exclusive with --park/--ship)")
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe sdlc reopen [--workspace <name> | --no-workspace] [--agent <name> | --no-agent] [--park|--ship|--chain] <project>/<slug>")
 		moePrintln(stderr, "")

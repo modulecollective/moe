@@ -15,7 +15,7 @@ import (
 func init() {
 	Register(&Command{
 		Name:    "init",
-		Summary: "scaffold a new bureaucracy repo in the current directory",
+		Summary: "scaffold a new bureaucracy repo",
 		Run:     runInit,
 	})
 }
@@ -26,6 +26,9 @@ func runInit(args []string, stdout, stderr io.Writer) int {
 	remote := fs.String("remote", "", "git URL to set as origin (optional)")
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe init [--remote <url>] [dir]")
+		moePrintln(stderr, "")
+		moePrintln(stderr, "Creates a bureaucracy in [dir], otherwise $MOE_HOME if set, otherwise")
+		moePrintln(stderr, "the current directory.")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {

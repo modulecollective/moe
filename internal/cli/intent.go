@@ -199,7 +199,7 @@ func runIntentEdit(args []string, stdout, stderr io.Writer) int {
 	chat := fs.Bool("chat", false, "sharpen in an interactive agent session instead of $EDITOR")
 	agentOverride := fs.String("agent", "", "with --chat, override the agent for this turn (claude/codex); does not persist")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe intent edit [--chat] [--agent <name>] <project>/<slug>\n")
+		moePrintf(stderr, "usage: moe intent edit [--chat [--agent <name>]] <project>/<slug>\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {

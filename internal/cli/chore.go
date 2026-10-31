@@ -145,10 +145,11 @@ func runChoreOpen(args []string, stdout, stderr io.Writer) int {
 	park := fs.Bool("park", false, "open the run and stop: print the next-stage hint instead of prompting to run it")
 	// The consent ladder, same pair the stage verbs and `new` carry
 	// (`!!` / `!!!`). Mutually exclusive with each other and --park.
-	ship := fs.Bool("ship", false, "open the run and cascade every stage headless to the ship (the flag twin of `!!` at the chain prompt; mutually exclusive with --park/--chain)")
-	chain := fs.Bool("chain", false, "open the run, ship it, and ride the chain it heads (the flag twin of `!!!`; mutually exclusive with --park/--ship)")
+	ship := fs.Bool("ship", false, "open the run and cascade every stage headless to the ship (the flag twin of !! at the chain prompt; mutually exclusive with --park/--chain)")
+	chain := fs.Bool("chain", false, "open the run, ship it, and ride the chain it heads (the flag twin of !!!; mutually exclusive with --park/--ship)")
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe chore open [--now] [--park|--ship|--chain] <project>/<chore>")
+		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2

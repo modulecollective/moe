@@ -90,7 +90,7 @@ func init() {
 	})
 	g.Register(&Command{
 		Name:    "reopen",
-		Summary: "flip a promoted idea back to in_progress after its destination run was abandoned",
+		Summary: "reopen a closed idea, or a promoted idea whose destination was closed",
 		Run:     runIdeaReopen,
 		argKind: argIdea,
 	})
@@ -283,7 +283,7 @@ func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
 	chat := fs.Bool("chat", false, "refine in an interactive agent session instead of $EDITOR")
 	agentOverride := fs.String("agent", "", "with --chat, override the agent for this turn (claude/codex); does not persist")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe idea edit [--chat] [--agent <name>] <project>/<slug>\n")
+		moePrintf(stderr, "usage: moe idea edit [--chat [--agent <name>]] <project>/<slug>\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
@@ -507,6 +507,7 @@ func runIdeaTag(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
 		moePrintf(stderr, "usage: moe idea tag <project>/<slug> [workflow] [--design-only]\n")
+		fs.PrintDefaults()
 	}
 	designOnly := fs.Bool("design-only", false, "promote to one design turn, then hold for the operator")
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
@@ -715,6 +716,9 @@ func runIdeaReopen(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
 		moePrintf(stderr, "usage: moe idea reopen <project>/<slug>\n")
+		moePrintln(stderr, "")
+		moePrintln(stderr, "Reopens a closed idea, or a promoted idea whose destination run was")
+		moePrintln(stderr, "closed. A merged destination cannot be reopened this way.")
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2

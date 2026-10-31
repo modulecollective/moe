@@ -40,7 +40,7 @@ func init() {
 	})
 	g.Register(&Command{
 		Name:    "code",
-		Summary: "open an agent session on the run's code document (in a sandbox clone)",
+		Summary: "open an agent session on the code document in the run's working tree",
 		Run:     runCode,
 		argKind: argProjectRun,
 	})
@@ -61,7 +61,7 @@ func init() {
 	g.Register(pushCommand("sdlc"))
 	g.Register(&Command{
 		Name:    "shell",
-		Summary: "drop into a shell rooted at a run's workspace, or at a named workspace directly",
+		Summary: "open a shell in the run's working tree",
 		Run:     runShell,
 		argKind: argProjectRun,
 	})
@@ -140,8 +140,9 @@ func runDesign(args []string, stdout, stderr io.Writer) int {
 func runCode(args []string, stdout, stderr io.Writer) int {
 	return runStageVerb(sdlcStageVerbCfg("code", []string{
 		"Opens an interactive agent session on the code canvas. The agent",
-		"works inside a private sandbox clone of the project's submodule, isolated",
-		"from other activity until `moe sdlc push` opens a PR.",
+		"works in the run's working tree: a private clone or a bound named",
+		"workspace. `moe sdlc push` ships via the project's route, unless",
+		"overridden with --pr or --merge.",
 	}, openSdlcCode), args, stdout, stderr)
 }
 

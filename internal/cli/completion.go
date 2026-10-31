@@ -7,7 +7,7 @@ package cli
 //     a handful of value sources (runs, ideas, workspaces) and prints
 //     newline-separated candidates. All the intelligence lives here in
 //     Go where it's testable in-process — the shell stays dumb.
-//   - `moe completion [bash|zsh|fish]` prints the static shim the
+//   - `moe completion <bash|zsh|fish>` prints the static shim the
 //     operator evals from their rc file. The shims never change as
 //     commands are added; only the registry and the value sources do.
 //
@@ -77,7 +77,7 @@ func init() {
 	})
 	Register(&Command{
 		Name:    "completion",
-		Summary: "print a shell completion script: moe completion [bash|zsh|fish]",
+		Summary: "print a shell completion script: moe completion <bash|zsh|fish>",
 		Run:     runCompletionSnippet,
 	})
 }
@@ -392,7 +392,7 @@ func runCompletionSnippet(args []string, stdout, stderr io.Writer) int {
 }
 
 func completionUsage(w io.Writer) {
-	moePrintln(w, "usage: moe completion [bash|zsh|fish]")
+	moePrintln(w, "usage: moe completion <bash|zsh|fish>")
 	moePrintln(w, "")
 	moePrintln(w, "Print a shell completion script. Install it by evaluating the")
 	moePrintln(w, "output from your shell's startup file, e.g.:")

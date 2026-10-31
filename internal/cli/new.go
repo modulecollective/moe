@@ -64,7 +64,7 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	// parses on every workflow's shared `new` facade and we reject it for
 	// the other workflows below before doing any work.
 	workspaceName := fs.String("workspace", "", "(sdlc) bind the run to the named workspace at .moe/named/<project>/<name>/ and use it as the run's working tree; the claim is taken at first stage attach")
-	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). Explicit values persist to run.json; omitted values resolve at stage time via the model stylesheet, then claude")
+	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). Explicit values persist to run.json; omitted values resolve at stage time via the model stylesheet, then claude. $MOE_FORCE_AGENT overrides backend selection")
 	// --park, --seed, and the cascade ladder are workflow-generic (they
 	// live on the shared new facade, so every workflow gets them).
 	// --park opens the run and prints the next-stage hint instead of
@@ -84,12 +84,26 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	// mutually exclusive (both claim the first-stage seed).
 	park := fs.Bool("park", false, "open the run and stop: print the next-stage hint instead of prompting to run it")
 	seed := fs.Bool("seed", false, "pop $EDITOR on a stub and open the run with the edited body as its first-stage seed (mutually exclusive with --from-idea)")
-	ship := fs.Bool("ship", false, "open the run and cascade every stage headless to the ship (the flag twin of `!!` at the chain prompt; mutually exclusive with --park/--chain)")
-	chain := fs.Bool("chain", false, "open the run, ship it, and ride the chain it heads (the flag twin of `!!!`; mutually exclusive with --park/--ship)")
+	ship := fs.Bool("ship", false, "open the run and cascade every stage headless to the ship (the flag twin of !! at the chain prompt; mutually exclusive with --park/--chain)")
+	chain := fs.Bool("chain", false, "open the run, ship it, and ride the chain it heads (the flag twin of !!!; mutually exclusive with --park/--ship)")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe %s new [--workspace <name>] [--agent <name>] [--seed] [--park|--ship|--chain] <project>/<slug>\n", workflowName)
-		moePrintf(stderr, "       moe %s new [--workspace <name>] [--agent <name>] [--park|--ship|--chain] --from-idea <project>/<slug>\n", workflowName)
-		fs.PrintDefaults()
+		if workflowName == sdlcWorkflow {
+			moePrintf(stderr, "usage: moe %s new [--workspace <name>] [--agent <name>] [--seed] [--park|--ship|--chain] <project>/<slug>\n", workflowName)
+			moePrintf(stderr, "       moe %s new [--workspace <name>] [--agent <name>] [--park|--ship|--chain] --from-idea <project>/<slug>\n", workflowName)
+			fs.PrintDefaults()
+		} else {
+			moePrintf(stderr, "usage: moe %s new [--agent <name>] [--seed] [--park] <project>/<slug>\n", workflowName)
+			moePrintf(stderr, "       moe %s new [--agent <name>] [--park] --from-idea <project>/<slug>\n", workflowName)
+			public := flag.NewFlagSet(fs.Name(), flag.ContinueOnError)
+			public.SetOutput(stderr)
+			fs.VisitAll(func(f *flag.Flag) {
+				if f.Name != "workspace" && f.Name != "ship" && f.Name != "chain" {
+					public.Var(f.Value, f.Name, f.Usage)
+					public.Lookup(f.Name).DefValue = f.DefValue
+				}
+			})
+			public.PrintDefaults()
+		}
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2

@@ -72,6 +72,7 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 	watch := fs.Bool("watch", false, "redraw the dashboard every 3s until Ctrl-C (terminal only)")
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe dash [--all] [--project <id>] [--workflow <name>] [--watch]")
+		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2

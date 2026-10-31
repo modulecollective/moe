@@ -85,20 +85,17 @@ func closeCommand(workflow, subject string, cleanup closeCleanup) *Command {
 func runClose(workflow, subject string, cleanup closeCleanup, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(workflow+" close", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	// --no-edit skips the followups.md editor step (idiom from `git
-	// commit --no-edit`). The harvester still runs against whatever is
-	// already on disk, so operators driving close from scripts/CI can
-	// trim the file ahead of time and keep close non-interactive.
-	noEdit := fs.Bool("no-edit", false, "skip the followups.md editor step (harvest the file as-is)")
+	// --no-edit skips the followups and feedback editors (idiom from
+	// `git commit --no-edit`). Harvest still reads the files on disk.
+	noEdit := fs.Bool("no-edit", false, "skip the followups and feedback editor steps (harvest the files as-is)")
 	fs.Usage = func() {
 		if isCaptureWorkflow(workflow) {
-			// Capture closes take no --no-edit: there's no followups
-			// harvest to skip, so the flag would be dead.
+			// Capture closes skip harvesting, so --no-edit is inert.
 			moePrintf(stderr, "usage: moe %s close <project>/<run>\n", workflow)
 		} else {
 			moePrintf(stderr, "usage: moe %s close [--no-edit] <project>/<run>\n", workflow)
+			fs.PrintDefaults()
 		}
-		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2

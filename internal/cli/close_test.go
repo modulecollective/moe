@@ -286,6 +286,24 @@ func TestChatCloseRefusesTerminal(t *testing.T) {
 	}
 }
 
+func TestCloseHelpMatchesHarvesting(t *testing.T) {
+	for _, workflow := range []string{"sdlc", "chat", "pulse", "chain", "idea", "intent"} {
+		t.Run(workflow, func(t *testing.T) {
+			var out, errb bytes.Buffer
+			if code := Run([]string{workflow, "close", "--help"}, &out, &errb); code != 2 || out.Len() != 0 {
+				t.Fatalf("help: exit=%d stdout=%q stderr=%q", code, out.String(), errb.String())
+			}
+			got := errb.String()
+			wantHarvest := workflow != "idea" && workflow != "intent"
+			for _, text := range []string{"--no-edit", "\n  -no-edit", "followups and feedback"} {
+				if strings.Contains(got, text) != wantHarvest {
+					t.Errorf("%s help has incorrect harvesting description %q:\n%s", workflow, text, got)
+				}
+			}
+		})
+	}
+}
+
 // TestSDLCCloseRegisteredInUsage: the dispatcher's usage listing is
 // what an operator discovers via `moe sdlc`; a wiring regression
 // should show up here even if the command itself still works.

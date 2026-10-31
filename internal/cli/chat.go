@@ -113,9 +113,10 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "Opens (or resumes) an interactive thinking-partner session on the")
 		moePrintln(stderr, "project: ask questions, reason about decisions, groom the backlog.")
 		moePrintln(stderr, "The agent reads source through a per-run sandbox clone but never")
-		moePrintln(stderr, "edits it and never drives coding. The run stays open across")
-		moePrintln(stderr, "sessions — re-run to continue the same thread, or `moe chat close`")
-		moePrintln(stderr, "when the thread is done.")
+		moePrintln(stderr, "edits it and never drives coding. After a session, the terminal asks")
+		moePrintln(stderr, "whether to close the run; declining leaves it open. Re-entering a")
+		moePrintln(stderr, "closed chat reopens the same thread.")
+		fs.PrintDefaults()
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2

@@ -120,7 +120,7 @@ const pulseCanvasSkeleton = `# Pulse
 `
 
 func init() {
-	g := NewCommandGroup(pulseWorkflow, "pulse workflow — read-only project sweep that feeds the backlog")
+	g := NewCommandGroup(pulseWorkflow, "pulse workflow — project sweeps and optional work dispatch")
 	// `moe pulse new <project>` is the manual whole-pulse kick (and the
 	// external-cron entry point): chore auto-open plus the survey, both
 	// headless.
@@ -1495,7 +1495,7 @@ type surveyOutcome struct {
 func runPulseNew(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("pulse new", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	dynamic := fs.Bool("dynamic", false, "start the parked threads on the board when the sweep finishes")
+	dynamic := fs.Bool("dynamic", false, "start eligible parked threads and nominated CI repairs when the sweep finishes")
 	// The clock's signature. Serve's heartbeat spawns a command otherwise
 	// spelled exactly like the operator's, and the per-project mode caps
 	// the clock rather than the operator — so the child has to say which
@@ -1507,16 +1507,16 @@ func runPulseNew(args []string, stdout, stderr io.Writer) int {
 	emitRun := fs.String("emit-run", "", "write the run this sweep opens to `path` (one line, bare slug)")
 	prChecks := fs.String("pr-checks", "", "heartbeat PR observation (internal)")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe pulse new [--dynamic] [--heartbeat] [--emit-run <path>] <project>")
+		moePrintln(stderr, "usage: moe pulse new [--dynamic] <project>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Runs the whole pulse for a project: opens every due chore's run")
-		moePrintln(stderr, "(never executes one), then a headless read-only survey that files")
-		moePrintln(stderr, "followups, writes a report, and may spawn and groom parked fix runs.")
+		moePrintln(stderr, "without executing stages, then runs a headless read-only survey that")
+		moePrintln(stderr, "files followups, writes a report, and may spawn and groom parked runs.")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Without --dynamic the sweep is pure curation: everything it grooms")
-		moePrintln(stderr, "parks. With it, the sweep starts every kickable parked thread on")
-		moePrintln(stderr, "the board when it finishes — the consent `moe serve --dynamic`")
-		moePrintln(stderr, "stands behind, said at the door a clock can knock on.")
+		moePrintln(stderr, "parks. With it, the sweep starts eligible parked threads and nominated")
+		moePrintln(stderr, "CI repairs on existing pushed PRs when it finishes — the consent")
+		moePrintln(stderr, "`moe serve --dynamic` stands behind.")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "--heartbeat is serve's own marker on the sweeps its clock spawns:")
 		moePrintln(stderr, "those obey the project's mode (`moe project mode`). A sweep you")

@@ -20,7 +20,7 @@ import (
 func init() {
 	Register(&Command{
 		Name:    "sync",
-		Summary: "sync the bureaucracy repo with origin (git pull --rebase, bump project pointers, then push)",
+		Summary: "sync bureaucracy history, reconcile pushed runs, update project pointers, then push",
 		Run:     runSync,
 	})
 }

@@ -59,9 +59,10 @@ func runInputAdd(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "read from stdin, so a paragraph can be piped or heredoc'd. The run's")
 		moePrintln(stderr, "next successful agent turn receives it verbatim in its prompt, once.")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Starts nothing: the commit moves the journal, so an armed serve's next")
-		moePrintln(stderr, "sweep picks the work back up. `moe pulse new --dynamic <project>` is")
-		moePrintln(stderr, "the expedite path.")
+		moePrintln(stderr, "Starts nothing: the note is available to the next agent turn and can")
+		moePrintln(stderr, "make eligible work actionable for an armed serve's sweep. Project")
+		moePrintln(stderr, "mode, readiness, and occupancy still apply. A hand-typed")
+		moePrintln(stderr, "`moe pulse new --dynamic <project>` is the expedite path.")
 	}
 	return inputWrite(fs, args, stdout, stderr, "input add",
 		func(root, projectID, runID, text string) (input.Entry, error) {

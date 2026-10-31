@@ -20,7 +20,7 @@ import (
 func init() {
 	Register(&Command{
 		Name:    "serve",
-		Summary: "run the moe web UI",
+		Summary: "run the moe server",
 		Run:     runServe,
 	})
 }
@@ -34,10 +34,15 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe serve [--addr <host[:port]>] [--port <n>] [--dynamic]")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Runs the moe web UI as an HTTP server. Binds 127.0.0.1:4242 by")
-		moePrintln(stderr, "default; put a `tailscale serve` proxy (or similar) in front to expose")
-		moePrintln(stderr, "it to peers. Pass --addr 0.0.0.0 or --addr <tailnet-ip> to bind wider.")
-		moePrintln(stderr, "Ctrl-C to stop.")
+		moePrintln(stderr, "Runs the moe server: serves the web UI, pushes pending bureaucracy")
+		moePrintln(stderr, "journal commits to origin, and optionally runs the heartbeat with")
+		moePrintln(stderr, "--dynamic. Journal pushing runs armed or unarmed; it does not ship")
+		moePrintln(stderr, "a project code branch.")
+		moePrintln(stderr, "")
+		moePrintln(stderr, "Binds 127.0.0.1:4242 by default; put a `tailscale serve` proxy (or")
+		moePrintln(stderr, "similar) in front to expose it to peers. Pass --addr 0.0.0.0 or")
+		moePrintln(stderr, "--addr <tailnet-ip> to bind wider. --port is ignored when --addr")
+		moePrintln(stderr, "already includes a port. Ctrl-C to stop.")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "The web starts nothing. Every action it offers writes a journal")
 		moePrintln(stderr, "commit and stops there: capture or edit an idea or intent, tag an")
@@ -51,8 +56,10 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "--dynamic, or a non-empty MOE_SERVE_DYNAMIC, is the standing consent")
 		moePrintln(stderr, "rung: it starts the resident heartbeat, the only thing in this")
 		moePrintln(stderr, "process that starts an agent. Unarmed the ticker never fires and")
-		moePrintln(stderr, "what the web wrote simply waits. Stopping the process is the whole")
-		moePrintln(stderr, "retraction.")
+		moePrintln(stderr, "what the web wrote simply waits. Stopping serve prevents new sweeps.")
+		moePrintln(stderr, "Rex-hosted sweeps can finish independently; Ctrl-C in their Rex block")
+		moePrintln(stderr, "cancels them. Locally hosted sweeps stop with serve.")
+		moePrintln(stderr, "MOE_SERVE_NOTIFY_URL optionally sets the sweep-exit webhook.")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "`moe project mode <id> paused|safe|auto` sets one project's clock cap")
 		moePrintln(stderr, "without stopping anything: paused is never swept, safe is swept and groomed")

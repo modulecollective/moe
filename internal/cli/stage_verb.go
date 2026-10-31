@@ -202,6 +202,8 @@ func runStageVerb(cfg stageVerbCfg, args []string, stdout, stderr io.Writer) int
 			moePrintln(stderr, line)
 		}
 		moePrintln(stderr, "")
+		moePrintf(stderr, "  --agent <name> %s; $MOE_FORCE_AGENT overrides backend selection\n", agentFlagUsage(cfg.persistAgent))
+		moePrintln(stderr, "")
 		moePrintln(stderr, "Cascade mode flags (mutually exclusive):")
 		moePrintln(stderr, "  --once         dispatch one stage headless, park at the next gate (= !)")
 		moePrintln(stderr, "  --to=<stage>   walk headless up to (but not including) <stage> (= !<stage>)")

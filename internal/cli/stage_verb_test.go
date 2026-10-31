@@ -8,6 +8,26 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 )
 
+func TestStageAgentHelpNamesPersistenceBoundary(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"sdlc", "code", "--help"}, "persists to run.json"},
+		{[]string{"chat", "chat", "--help"}, "does not persist"},
+	} {
+		t.Run(tc.args[0], func(t *testing.T) {
+			var out, errb bytes.Buffer
+			if code := Run(tc.args, &out, &errb); code != 2 || out.Len() != 0 {
+				t.Fatalf("help: exit=%d stdout=%q stderr=%q", code, out.String(), errb.String())
+			}
+			if bytes.Count(errb.Bytes(), []byte(tc.want)) != 1 {
+				t.Errorf("help must describe agent persistence once (%s):\n%s", tc.want, errb.String())
+			}
+		})
+	}
+}
+
 // TestOperatorCascadesPredicate pins the rows the whole design keys on:
 // a workflow participates in the operator cascade vocabulary iff it
 // registers a cascade dispatcher and is neither perpetual nor

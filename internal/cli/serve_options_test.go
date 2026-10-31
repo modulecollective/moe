@@ -68,6 +68,11 @@ func TestServeUsageDisclosesSteering(t *testing.T) {
 	}
 	usage := errb.String()
 	for _, want := range []string{
+		"pushes pending bureaucracy",
+		"Journal pushing runs armed or unarmed",
+		"Stopping serve prevents new sweeps",
+		"Rex-hosted sweeps can finish independently",
+		"Locally hosted sweeps stop with serve",
 		"idea or intent",
 		"paused|safe|auto",
 		"No request executes code",
