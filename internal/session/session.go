@@ -281,7 +281,42 @@ func reconcileWithMain(s *Session) error {
 // rather than hitting a mid-rebase conflict; different kickoff shape,
 // so we surface it as Dirty.
 func rebaseOntoMain(s *Session, op string) error {
-	out, err := git.Combined(s.WorktreePath, "rebase", "main")
+	args := []string{"rebase", "main"}
+	if op == opOpen {
+		// A failed canvas turn leaves the returned backend id dirty in
+		// run.json. Its diagnostic advances main, so retry needs to carry
+		// those edits across the new evidence without making a work turn.
+		// Only diagnostic additions qualify: ordinary stale/dirty sessions
+		// must keep refusing, and the incoming tree cannot overlap edits.
+		names, err := git.Output(s.WorktreePath, "diff", "--name-status", s.Branch+"...main")
+		if err != nil {
+			return err
+		}
+		prefix := filepath.ToSlash(filepath.Join(run.Dir(s.Project, s.Run), "diagnostics")) + "/"
+		onlyDiagnostics := strings.TrimSpace(names) != ""
+		for name := range strings.SplitSeq(strings.TrimSpace(names), "\n") {
+			if !strings.HasPrefix(name, "A\t"+prefix) {
+				onlyDiagnostics = false
+			}
+		}
+		if onlyDiagnostics {
+			status, err := git.Status(s.WorktreePath)
+			if err != nil {
+				return err
+			}
+			for _, entry := range status {
+				// Autostash restores file contents but not staged intent.
+				// Keep refusing staged edits and any local diagnostic edit.
+				if (!entry.Untracked() && entry.XY[0] != ' ') || strings.HasPrefix(entry.Path, prefix) {
+					onlyDiagnostics = false
+				}
+			}
+			if onlyDiagnostics {
+				args = []string{"rebase", "--autostash", "main"}
+			}
+		}
+	}
+	out, err := git.Combined(s.WorktreePath, args...)
 	if err == nil {
 		return nil
 	}

@@ -1185,6 +1185,15 @@ func runStageTurn(root string, in stageTurnInputs, stdout, stderr io.Writer) int
 	if spec.CommitStager != nil {
 		commitErr = spec.CommitStager(workRoot, runErr)
 	}
+	var refusal *canvasRefusalError
+	if errors.As(commitErr, &refusal) && spec.Metadata != nil {
+		rel, err := saveStageFailure(root, in, spec, a, agentName, returnedSid, prompt, runErr, refusal)
+		if err != nil {
+			moePrintf(stderr, "agent returned without the required canvas; diagnostics could not be saved: %v\n  evidence remains in %s\n", err, workRoot)
+		} else {
+			moePrintf(stderr, "agent returned without the required canvas; diagnostics saved: %s\n", filepath.Join(root, rel))
+		}
+	}
 
 	// Close the session: land it on local main and tear the
 	// worktree down. The lock window and its budget are

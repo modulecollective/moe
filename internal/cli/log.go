@@ -128,7 +128,30 @@ func runLog(workflow, defaultStage string) func(args []string, stdout, stderr io
 			return 1
 		}
 
-		threadPath, agentName, err := pickLogThread(root, projectID, runID, stage, *agentF)
+		diagnosticDir, failure, err := latestStageFailure(root, projectID, runID, stage, *agentF)
+		if err != nil {
+			moePrintf(stderr, "moe %s log: %v\n", workflow, err)
+			return 1
+		}
+		var threadPath, agentName string
+		if failure != nil {
+			moePrintf(stdout, "Agent returned without the required canvas (%s).\nDiagnostics: %s\nExecution: %s", failure.CanvasRefusal, diagnosticDir, failure.Execution.Outcome)
+			if failure.Execution.ExitCode != nil {
+				moePrintf(stdout, " (exit %d)", *failure.Execution.ExitCode)
+			}
+			moePrintln(stdout, "")
+			if failure.Execution.Error != "" {
+				moePrintln(stdout, failure.Execution.Error)
+			}
+			if !failure.TranscriptAvailable {
+				moePrintln(stdout, "Transcript unavailable for this attempt.")
+				return 0
+			}
+			agentName = failure.Agent
+			threadPath = filepath.Join(root, diagnosticDir, "thread-"+agentName+".jsonl")
+		} else {
+			threadPath, agentName, err = pickLogThread(root, projectID, runID, stage, *agentF)
+		}
 		if err != nil {
 			moePrintf(stderr, "moe %s log: %v\n", workflow, err)
 			return 1

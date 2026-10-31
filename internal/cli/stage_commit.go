@@ -61,6 +61,20 @@ func commitAdvance(root string, md *run.Metadata, docID string) error {
 	return runopen.AdvanceMarker(root, md, docID, walkConsent())
 }
 
+// canvasRefusalError identifies the two refusals whose failure evidence is
+// archived independently of the ordinary stage commit.
+type canvasRefusalError struct {
+	Path   string
+	Reason string
+}
+
+func (e *canvasRefusalError) Error() string {
+	if e.Reason == "missing" {
+		return fmt.Sprintf("commit: canvas %s does not exist — agent did not write to its canvas this turn", e.Path)
+	}
+	return fmt.Sprintf("commit: canvas %s is empty", e.Path)
+}
+
 // commitTurn stages the document dir and run.json, then commits with
 // a trailer block keyed to the document/session. See docs/concepts.md
 // §"Runs, Stages, And Canvases" for the trailer convention.
@@ -88,11 +102,11 @@ func commitTurn(root string, md *run.Metadata, docID string, timedOut time.Durat
 	canvas := filepath.Join(root, run.ContentPath(md.Project, md.ID, docID))
 	switch info, err := os.Stat(canvas); {
 	case errors.Is(err, fs.ErrNotExist):
-		return fmt.Errorf("commit: canvas %s does not exist — agent did not write to its canvas this turn", canvas)
+		return &canvasRefusalError{Path: canvas, Reason: "missing"}
 	case err != nil:
 		return fmt.Errorf("commit: stat canvas %s: %w", canvas, err)
 	case info.Size() == 0:
-		return fmt.Errorf("commit: canvas %s is empty", canvas)
+		return &canvasRefusalError{Path: canvas, Reason: "empty"}
 	}
 
 	if err := run.Save(root, md); err != nil {

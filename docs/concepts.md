@@ -26,7 +26,14 @@ real history better than the journal.
 `moe <workflow> cat <project>/<run> <stage>` prints a canvas. For one-stage
 workflows, the stage can usually be omitted. `moe <workflow> log` renders the
 transcript; `--agent claude|codex` disambiguates if both transcript files
-exist.
+exist. When a turn returns with a missing or empty canvas, it still fails:
+MoE saves its prompt, available transcript, and execution result in an
+immutable `diagnostics/<stage>/<attempt-id>/` directory under the run on
+main. These diagnostic commits never satisfy a stage. The log command shows
+the latest saved failure until a later normal turn supersedes it, using
+journal order rather than timestamps. Older attempts remain in Git after
+retries and session cleanup. If archival fails, stderr names the surviving
+worktree holding the evidence.
 
 ## Bureaucracy Repo And Target Repos
 
