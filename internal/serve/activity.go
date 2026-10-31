@@ -223,12 +223,6 @@ func (a *activity) recordSweepEnd(projectID string, at time.Time, clean bool, fa
 	p.fails, p.coolTicks = fails, coolTicks
 }
 
-// recordChildSpawn and recordChildExit are the registry's two hooks, so
-// every PTY child serve parents lands in the ring on the same terms.
-// Today that's one spawn site — the heartbeat sweep — but hanging the
-// hooks off the registry rather than the caller keeps it one call per
-// child whoever spawns it. The child id is the subject:
-// "heartbeat:<project>".
 // setHost records where jobs run, and why not when the host is
 // unusable. Called once, before the first tick.
 func (a *activity) setHost(host, hostErr string) {
@@ -237,6 +231,12 @@ func (a *activity) setHost(host, hostErr string) {
 	a.host, a.hostErr = host, hostErr
 }
 
+// recordChildSpawn and recordChildExit are the registry's two hooks, so
+// every PTY child serve parents lands in the ring on the same terms.
+// Today that's one spawn site — the heartbeat sweep — but hanging the
+// hooks off the registry rather than the caller keeps it one call per
+// child whoever spawns it. The child id is the subject:
+// "heartbeat:<project>".
 func (a *activity) recordChildSpawn(id string, at time.Time, detail string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
