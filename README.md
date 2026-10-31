@@ -130,15 +130,15 @@ moe init
 moe project add <repo-url>
 ```
 
-The default backend is `claude`. To use Codex, pass `--agent codex` when
-opening a run or a stage, set `MOE_FORCE_AGENT=codex` for every turn in one
-process, or select it with a model-stylesheet `agent:` rule. Codex needs no
-permissions-profile setup because MoE supplies it.
-See [docs/reference.md](docs/reference.md#codex-setup) for the sandbox details.
-`moe dash` is the terminal
-home screen for re-entry, and `moe serve` is the same dashboard as a local web
-UI. `moe help` and per-command usage are the source of truth for the exact
-command surface.
+The default backend is `claude`. To use Codex, pass `--agent codex` when opening
+a run or a stage, set `MOE_FORCE_AGENT=codex` for every turn in one process, or
+select it with a model-stylesheet `agent:` rule. Codex needs no
+permissions-profile setup because MoE supplies it. See
+[docs/reference.md](docs/reference.md#codex-setup) for the sandbox details.
+`moe dash` is the terminal home screen for re-entry. `moe serve` serves the web
+UI, pushes pending bureaucracy journal commits to origin armed or unarmed, and
+optionally runs the heartbeat with `--dynamic`. `moe help` and per-command usage
+are the source of truth for the exact command surface.
 
 ## The Workflows
 

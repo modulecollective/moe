@@ -30,47 +30,46 @@ source of truth for the exact command surface; this page is a map.
   reseeds current state. Nested tmux/screen terminals and serve children do
   not emit reports. These are current observations, not an event feed or a
   complete account of stage failures.
-- `moe serve [--addr <host[:port]>] [--port <n>] [--dynamic]` runs the local
-  web UI, bound to `127.0.0.1:4242` by default. Beyond runs and canvases, its
-  read-only surface browses lore, a projects index with per-project hubs,
-  project knowledge topics, twin documents, the token-spend report at
-  `/usage`, and a dashboard with the same daily-activity chart (and a
-  project-scoped one on each project page).
-  **The web starts nothing.** Every action it offers writes a journal commit and
-  stops there: capture or edit an idea or intent, tag an idea for a workflow,
-  close or reopen a run, mark the current stage advanced, answer a run's open
-  question. Starting agents is the heartbeat's job alone. No request executes
-  code — but agents read those writes in their prompts, and an armed serve's
-  heartbeat starts agents because of them: whoever can reach the listener
-  steers the machine. Reach is the only auth, so whatever sits in front of the
-  listener is the security boundary. Interactive stage-driving happens in a
-  terminal.
-  Separately from all that, and armed or not, serve drains the bureaucracy's
-  local main to origin every couple of seconds. Journal verbs commit and
-  return; the push is serve's. With no serve running, commits sit on local main
-  until `moe sync` or the next serve start takes them — `git status` in the
-  bureaucracy says how many are waiting, and serve's log carries any push
-  failure.
-  `--dynamic` (or a non-empty `MOE_SERVE_DYNAMIC`) is the standing consent rung:
-  it starts the resident heartbeat, a per-project ticker that runs `moe pulse
-  new --dynamic` when the board warrants it. Unarmed, the ticker never fires and
-  what the web wrote simply waits. Stopping the process retracts it: no new
-  sweep starts. Where a local Rex server answers when serve starts, each sweep
-  runs as a block labelled `heartbeat:<project>` in a Rex session named `moe`,
-  opened from the Rex client like any other session. Such a sweep finishes even
-  if serve stops or crashes, a restarted serve picks it up rather than starting
-  another, and Ctrl-C in its block is how to stop it. A failed sweep's block
-  stays open for reading until that project's next sweep. With no Rex server,
-  sweeps run on serve's own terminals and stop with it. The startup log and
-  `/serve` name which host is in use. A `/serve` page owns that ticker's status
-  and trace — what each recent tick decided, and the output tail of any sweep
-  that failed — reachable from the menu and from the one-line status cluster
-  every board header carries. `MOE_SERVE_NOTIFY_URL` is the other env var: set
-  it and serve POSTs a small JSON body to that URL each time a heartbeat sweep
-  exits on its own, naming which project's sweep it was and whether it
-  succeeded. A sweep serve interrupted on its way down sends nothing: an
-  `ok:false` there would report a failure the operator caused. A failed POST is
-  logged and blocks nothing.
+- `moe serve [--addr <host[:port]>] [--port <n>] [--dynamic]` runs the moe
+  server: the web UI, journal pushing, and an optional heartbeat. It binds to
+  `127.0.0.1:4242` by default; `--port` is ignored when `--addr` includes a
+  port. Beyond runs and canvases, its read-only surface browses lore, a projects
+  index with per-project hubs, project knowledge topics, twin documents, the
+  token-spend report at `/usage`, and a dashboard with the same daily-activity
+  chart (and a project-scoped one on each project page). **The web starts
+  nothing.** Every action it offers writes a journal commit and stops there:
+  capture or edit an idea or intent, tag an idea for a workflow, close or reopen
+  a run, mark the current stage advanced, answer a run's open question. Starting
+  agents is the heartbeat's job alone. No request executes code — but agents
+  read those writes in their prompts, and an armed serve's heartbeat starts
+  agents because of them: whoever can reach the listener steers the machine.
+  Reach is the only auth, so whatever sits in front of the listener is the
+  security boundary. Interactive stage-driving happens in a terminal. Separately
+  from all that, and armed or not, serve drains the bureaucracy's local main to
+  origin every couple of seconds; this does not ship a project's code branch.
+  Journal verbs commit and return; the push is serve's. With no serve running,
+  commits sit on local main until `moe sync` or the next serve start takes them
+  — `git status` in the bureaucracy says how many are waiting, and serve's log
+  carries any push failure. `--dynamic` (or a non-empty `MOE_SERVE_DYNAMIC`) is
+  the standing consent rung: it starts the resident heartbeat, a per-project
+  ticker that runs `moe pulse new --dynamic` when the board warrants it.
+  Unarmed, the ticker never fires and what the web wrote simply waits. Stopping
+  the process retracts it: no new sweep starts. Where a local Rex server answers
+  when serve starts, each sweep runs as a block labelled `heartbeat:<project>`
+  in a Rex session named `moe`, opened from the Rex client like any other
+  session. Such a sweep finishes even if serve stops or crashes, a restarted
+  serve picks it up rather than starting another, and Ctrl-C in its block is how
+  to stop it. A failed sweep's block stays open for reading until that project's
+  next sweep. With no Rex server, sweeps run on serve's own terminals and stop
+  with it. The startup log and `/serve` name which host is in use. A `/serve`
+  page owns that ticker's status and trace — what each recent tick decided, and
+  the output tail of any sweep that failed — reachable from the menu and from
+  the one-line status cluster every board header carries. `MOE_SERVE_NOTIFY_URL`
+  is the other env var: set it and serve POSTs a small JSON body to that URL
+  each time a heartbeat sweep exits on its own, naming which project's sweep it
+  was and whether it succeeded. A sweep serve interrupted on its way down sends
+  nothing: an `ok:false` there would report a failure the operator caused. A
+  failed POST is logged and blocks nothing.
 - `moe project mode <id> [paused|safe|auto]` caps what the heartbeat may start
   in one project, without stopping the process. See below.
 - `moe chore list|check|open|skip` lists due project chores, dry-runs a chore
@@ -89,10 +88,11 @@ source of truth for the exact command surface; this page is a map.
   Nothing here holds anything. An unanswered question does not stop the run —
   its turns are told it was asked and no reply came, and they proceed on their
   best judgment. Stillness stays a pulse's `park`. Writing an entry starts
-  nothing either: it lands one journal commit, which is what an armed serve's
-  next heartbeat sweeps; `moe pulse new --dynamic <project>` is the expedite
-  path. A pending entry counts as an operator mark under `safe` mode, consumed
-  once it is delivered.
+  nothing either: it makes the prose available to the next agent turn and can
+  make eligible work actionable for an armed serve's sweep. Project mode,
+  readiness, and occupancy still apply; a hand-typed
+  `moe pulse new --dynamic <project>` is the expedite path. A pending note or
+  answer counts as an operator mark under `safe` mode, consumed on delivery.
 - `moe usage [--project <id>] [--since <dur>]` sums the token usage recorded in
   every mirrored stage transcript, grouped by workflow, stage and model, with a
   selected rolling-window total plus per-run and by-day breakdowns. It reads
@@ -117,7 +117,8 @@ source of truth for the exact command surface; this page is a map.
 
 ### Project And Run Management
 
-- `moe init [--remote <url>] [dir]` creates a bureaucracy.
+- `moe init [--remote <url>] [dir]` creates a bureaucracy in the explicit
+  directory, otherwise `$MOE_HOME` if set, otherwise the current directory.
 - `moe project add <repo-url>` registers a target project.
 - `moe project list` lists registered projects with their mode and ship route.
 - `moe project mode <id> [paused|safe|auto]` reads or sets a project's mode —
@@ -165,21 +166,25 @@ source of truth for the exact command surface; this page is a map.
 - `moe sync` explicitly reconciles bureaucracy history, pushed runs, and
   project submodule pointers.
 - `moe chain new [--seed] <project>/<slug>` mints a chain run: a stageless
-  placeholder head to collect a batch under. `--seed` pops `$EDITOR` on its
+  placeholder head that collects a batch while parked, then closes when kicked
+  before the ride continues through its members. `--seed` pops `$EDITOR` on its
   purpose note first.
 - `moe chain edit` opens an editor over active operator-cascade runs (SDLC)
   plus chain heads; reorder lines to record a run chain in the bureaucracy
   journal.
 - `moe chain note <project>/<run>` edits a head's purpose note: why the batch
   exists. Membership isn't written there — it renders live from the edges.
-- `moe chain kick <project>/<run>` rides a chain headlessly from
-  the named head. What is chained now is what runs: a kick sweeps nothing, so
-  nothing can grow the batch under it.
+- `moe chain kick <project>/<run>` rides a chain headlessly from the named head,
+  resuming each run from its first pending stage through shipping. What is
+  chained now is what runs: a kick sweeps nothing, so nothing can grow the batch
+  under it.
 - `moe chain close [--no-edit] <project>/<run>` drops a head without riding it.
 - `moe chain clear [--yes]` drops every currently live run-chain edge.
-- `moe <workflow> close [--no-edit] <project>/<run>` closes a run in any
-  workflow; for `sdlc` it abandons the run instead of shipping it through
-  `sdlc push`.
+- `moe <workflow> close [--no-edit] <project>/<run>` closes a run; for `sdlc` it
+  abandons the run instead of shipping it through `sdlc push`. `--no-edit` skips
+  the followups and feedback editors, harvesting the files as-is. Capture
+  workflows (`idea` and `intent`) skip harvesting and show no `--no-edit`
+  option.
 
 ### Workflows
 
@@ -192,21 +197,22 @@ source of truth for the exact command surface; this page is a map.
   one design turn before the run holds; untagged ideas are operator-only.
 - `moe intent new|edit|close|list|cat|log|harvest` manages operator-authored
   standing direction.
-- `moe pulse new|close|cat|log` runs and inspects a project's read-only backlog
-  sweep. `moe pulse new --dynamic <project>` runs it at the dynamic consent
-  rung — the sweep starts every kickable parked thread on the board instead of
-  parking them, which is what makes the verb callable by a clock. The heartbeat
-  inside `moe serve --dynamic` calls exactly this, and reads the exit status —
-  which describes the whole invocation, including the rides the sweep started.
-  `moe pulse new` exits non-zero when the sweep died, concluded nothing, or a
-  kicked ride stalled, which drives the failure backoff. A skip exits 130, not
-  a failure. It also passes `--emit-run <path>`: the sweep writes the run it
-  opens there, so /serve can link a sweep to the pulse run it minted rather
-  than leaving the operator to hunt the dash for a matching `pulse-*` slug. It
-  also passes its exact owned-PR observation through the internal `--pr-checks`
-  argument, so a successful sweep acknowledges what its survey saw. New
-  actionable failures on recorded pushed PRs can wake a sweep without a journal
-  change. A survey may nominate same-run CI repair with
+- `moe pulse new|close|cat|log` runs and inspects project sweeps and optional
+  work dispatch. The survey is read-only; opening due chore runs does not
+  execute their stages. `moe pulse new --dynamic <project>` starts eligible
+  parked threads and nominated CI repairs on existing pushed PRs after the
+  survey. Without `--dynamic`, curated work stays parked. The heartbeat inside
+  `moe serve --dynamic` calls this with its own marker, and reads the exit
+  status — which describes the whole invocation, including the rides the sweep
+  started. `moe pulse new` exits non-zero when the sweep died, concluded
+  nothing, or a kicked ride stalled, which drives the failure backoff. A skip
+  exits 130, not a failure. It also passes `--emit-run <path>`: the sweep writes
+  the run it opens there, so /serve can link a sweep to the pulse run it minted
+  rather than leaving the operator to hunt the dash for a matching `pulse-*`
+  slug. It also passes its exact owned-PR observation through the internal
+  `--pr-checks` argument, so a successful sweep acknowledges what its survey
+  saw. New actionable failures on recorded pushed PRs can wake a sweep without a
+  journal change. A survey may nominate same-run CI repair with
   `{"run":"<slug>","repair":"ci"}` in a singleton thread group. Dynamic consent
   and safe-mode operator marks still apply; a fresh run note licenses retry
   after the one-attempt-per-head journal claim is spent.
