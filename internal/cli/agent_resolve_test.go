@@ -87,16 +87,27 @@ func TestResolveAgentNameIgnoresRetiredMOEAgent(t *testing.T) {
 // runStageSession.
 func TestStageModel(t *testing.T) {
 	cases := []struct {
-		name       string
-		explicit   string // opts.Model from a bounded curation caller
-		force      string // $MOE_FORCE_AGENT
-		agentFlag  string // opts.Agent (--agent)
-		runDefault string // run.json.Agent
-		sheetAgent string
-		sheetModel string
-		wantModel  string
-		wantNotice bool
+		name         string
+		explicit     string // opts.Model from a bounded curation caller
+		force        string // $MOE_FORCE_AGENT
+		agentFlag    string // opts.Agent (--agent)
+		runDefault   string // run.json.Agent
+		sheetAgent   string
+		sheetModel   string
+		backendModel string
+		wantModel    string
+		wantNotice   bool
 	}{
+		{
+			name:  "backend choice wins without a legacy drop notice",
+			force: "codex", sheetAgent: "claude", sheetModel: "fable",
+			backendModel: "gpt-choice", wantModel: "gpt-choice",
+		},
+		{
+			name:     "explicit wins over backend choice",
+			explicit: "explicit", backendModel: "backend", sheetModel: "legacy",
+			wantModel: "explicit",
+		},
 		{
 			name:       "paired match keeps model",
 			sheetAgent: "claude",
@@ -156,7 +167,7 @@ func TestStageModel(t *testing.T) {
 			}
 			agentName := stageAgentName(stageSessionOpts{Agent: c.agentFlag}, md, c.sheetAgent)
 			var stderr strings.Builder
-			got := stageModel(c.explicit, c.sheetAgent, c.sheetModel, agentName, &stderr)
+			got := stageModel(c.explicit, c.backendModel, c.sheetAgent, c.sheetModel, agentName, &stderr)
 			if got != c.wantModel {
 				t.Fatalf("stageModel = %q, want %q", got, c.wantModel)
 			}

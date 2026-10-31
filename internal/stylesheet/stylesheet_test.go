@@ -311,3 +311,78 @@ func TestValidateModelUnchecked(t *testing.T) {
 		t.Errorf("model value should not be validated: %v", err)
 	}
 }
+
+func TestModelForAgentCascade(t *testing.T) {
+	s, err := Parse([]byte(`
+* { model-codex: base; model-claude: claude-base; }
+sdlc { model-codex: workflow; model-claude: claude-workflow; }
+.review { model-codex: stage; }
+sdlc.design { model-codex: exact; model-codex: duplicate; }
+sdlc.design { model-claude: claude-exact; }
+sdlc.design { model-codex: last; }
+* { model-codex: late-base; }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ workflow, stage, codex, claude string }{
+		{"sdlc", "design", "last", "claude-exact"},
+		{"sdlc", "review", "stage", "claude-workflow"},
+		{"sdlc", "code", "workflow", "claude-workflow"},
+		{"pulse", "pulse", "late-base", "claude-base"},
+		{"pulse", "review", "stage", "claude-base"},
+	} {
+		for backend, want := range map[string]string{"codex": tc.codex, "claude": tc.claude} {
+			if got := s.ModelForAgent(tc.workflow, tc.stage, backend); got != want {
+				t.Errorf("ModelForAgent(%q, %q, %q) = %q, want %q", tc.workflow, tc.stage, backend, got, want)
+			}
+		}
+		if a, m := s.Resolve(tc.workflow, tc.stage); a != "" || m != "" {
+			t.Errorf("model choices selected agent/legacy model: (%q, %q)", a, m)
+		}
+	}
+	if got := s.ModelForAgent("sdlc", "design", "other"); got != "" {
+		t.Errorf("borrowed another backend's model: %q", got)
+	}
+	for _, sheet := range []*Sheet{nil, {}, s} {
+		if got := sheet.ModelForAgent("sdlc", "design", "missing"); got != "" {
+			t.Errorf("missing model = %q", got)
+		}
+	}
+	duplicate, err := Parse([]byte("* { model-codex: first; model-codex: last; }"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := duplicate.ModelForAgent("sdlc", "design", "codex"); got != "last" {
+		t.Errorf("duplicate declaration = %q, want last", got)
+	}
+}
+
+func TestValidateBackendModelProperties(t *testing.T) {
+	for _, prop := range []string{"model-codxe", "model-other", "model-", "models"} {
+		s, err := Parse([]byte("* { model-codex: arbitrary-model; }\n\npulse.pulse { " + prop + ": value; }"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = s.Validate(testVocab())
+		for _, want := range []string{"line 3", prop, "known: agent, model, model-claude, model-codex"} {
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("Validate error = %v, want %q", err, want)
+			}
+		}
+	}
+	for _, backend := range []string{"claude", "codex"} {
+		if _, err := Parse([]byte("* { model-" + backend + ": ; }")); err == nil || !strings.Contains(err.Error(), "empty value") {
+			t.Errorf("empty model-%s value: %v", backend, err)
+		}
+	}
+	s, err := Parse([]byte("* { model-claude: arbitrary; model-codex: arbitrary-too; model-future: vendor-model; }"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := testVocab()
+	v.Agents = append(v.Agents, "future")
+	if err := s.Validate(v); err != nil {
+		t.Errorf("registered backend model property rejected: %v", err)
+	}
+}

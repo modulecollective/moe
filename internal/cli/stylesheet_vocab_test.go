@@ -66,3 +66,34 @@ func TestStylesheetVocabRejectsTypos(t *testing.T) {
 		t.Errorf("operator bindings rejected by live vocab: %v", err)
 	}
 }
+
+// The run's full replacement stylesheet is also the dispatch acceptance fixture.
+const backendModelsSheet = `* { agent: codex; model-codex: gpt-6.1-sol; }
+
+pulse.pulse { model-codex: gpt-5.6-terra; model-claude: sonnet; }
+sdlc.design { model-codex: gpt-6-astra; model-claude: fable; }
+sdlc.review { model-codex: gpt-6-astra; model-claude: fable; }
+`
+
+func TestBackendModelsStylesheet(t *testing.T) {
+	s, err := stylesheet.Parse([]byte(backendModelsSheet))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Validate(stylesheetVocab()); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ workflow, stage, codex, claude string }{
+		{"sdlc", "design", "gpt-6-astra", "fable"},
+		{"sdlc", "review", "gpt-6-astra", "fable"},
+		{"pulse", "pulse", "gpt-5.6-terra", "sonnet"},
+		{"sdlc", "code", "gpt-6.1-sol", ""},
+		{"chat", "chat", "gpt-6.1-sol", ""},
+	} {
+		for backend, want := range map[string]string{"codex": tc.codex, "claude": tc.claude} {
+			if got := s.ModelForAgent(tc.workflow, tc.stage, backend); got != want {
+				t.Errorf("%s.%s / %s = %q, want %q", tc.workflow, tc.stage, backend, got, want)
+			}
+		}
+	}
+}

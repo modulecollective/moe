@@ -146,11 +146,9 @@ type stageSessionOpts struct {
 	// Model, if non-empty, is the `--model` value for this turn's agent
 	// invocation — both the interactive and headless paths. Empty defers
 	// to the vendor CLI's configured default. runStageSession populates it
-	// via stageModel when a caller leaves it empty — the stylesheet value,
-	// unless a paired `agent:` scopes it to a backend the turn isn't
-	// running (then it's dropped with a notice); a bounded curation caller
-	// (push synthesis) that sets it explicitly keeps its value
-	// (explicit-beats-stylesheet).
+	// via stageModel when a caller leaves it empty — the backend-specific
+	// choice, then the legacy model with its pairing rule. A bounded
+	// curation caller (push synthesis) that sets it explicitly keeps it.
 	Model string
 	// CanvasSkeleton, when non-empty, is written to the canvas file the
 	// first time the document is opened (the EnsureDocument-mutated
@@ -241,23 +239,16 @@ func stylesheetVocab() stylesheet.Vocab {
 	return stylesheet.Vocab{Workflows: wf, Agents: agent.Names()}
 }
 
-// stageModel decides the `--model` value for a stage turn. An explicit
-// value from a bounded curation caller (opts.Model) always wins — same
-// shape as the agent ladder's explicit-beats-stylesheet rule. Otherwise
-// the stylesheet's model rides only when the turn's resolved backend
-// matches the stylesheet's own resolved `agent:` for this (workflow,
-// stage) — the winning `agent` property after the cascade, not
-// literally same-rule pairing. A paired model is scoped to its backend:
-// when a rung above the stylesheet ($MOE_FORCE_AGENT, --agent,
-// run.json.Agent) forces the turn onto a different backend, the model
-// was never meant for it, so it is dropped — with a one-line stderr
-// notice, never silently — and the backend's own default applies. An
-// unpaired model (no resolved `agent:`) keeps the verbatim behaviour:
-// handed to whatever backend runs, where a foreign name fails as the
-// backend CLI's own error (moe keeps no model catalog by design).
-func stageModel(explicit, sheetAgent, sheetModel, agentName string, stderr io.Writer) string {
+// stageModel chooses an explicit model, then the resolved backend's model,
+// then the legacy model. Legacy pairing uses the sheet's winning agent
+// property: forcing a different backend drops that fallback with a notice.
+// An unpaired legacy model is handed verbatim to whichever backend runs.
+func stageModel(explicit, backendModel, sheetAgent, sheetModel, agentName string, stderr io.Writer) string {
 	if explicit != "" {
 		return explicit
+	}
+	if backendModel != "" {
+		return backendModel
 	}
 	if sheetModel == "" {
 		return ""
@@ -394,7 +385,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	}
 	sheetAgent, sheetModel := sheet.Resolve(md.Workflow, docID)
 	agentName := stageAgentName(opts, md, sheetAgent)
-	opts.Model = stageModel(opts.Model, sheetAgent, sheetModel, agentName, stderr)
+	opts.Model = stageModel(opts.Model, sheet.ModelForAgent(md.Workflow, docID, agentName), sheetAgent, sheetModel, agentName, stderr)
 	// A project-doc fix turn runs *inside* an outer stage's banner pair, so
 	// framing it as a stage of its own reads as two stages having run.
 	// The gate already announces it on one line; that line is the whole

@@ -22,6 +22,7 @@ type fakeExecCall struct {
 	sessionID  string
 	newSession bool
 	cwd        string
+	model      string
 }
 
 // fakeProbe records one TranscriptExists / RestoreTranscript pre-flight.
@@ -75,6 +76,7 @@ func (f *fakeAgent) Execute(r agent.Request) (string, error) {
 		sessionID:  r.SessionID,
 		newSession: r.NewSession,
 		cwd:        r.SessionCwd,
+		model:      r.Model,
 	})
 	if err := f.writeCanvas(r.Root); err != nil {
 		return "", err
@@ -87,6 +89,7 @@ func (f *fakeAgent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 	f.execCalls = append(f.execCalls, fakeExecCall{
 		method: "ExecuteOneShot",
 		cwd:    r.SessionCwd,
+		model:  r.Model,
 	})
 	if err := f.writeCanvas(r.Root); err != nil {
 		return "", err

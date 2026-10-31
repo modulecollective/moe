@@ -242,3 +242,28 @@ func TestPushResumedPRRecordCarriesStylesheet(t *testing.T) {
 	}
 	f.requireCleanRoot()
 }
+
+func TestProposedBackendModelValidation(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, wantError string
+	}{
+		{"backend choices", backendModelsSheet, ""},
+		{"unknown backend property", backendModelsSheet + "sdlc.code { model-codxe: value; }\n", "model-codxe"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPushFixture(t)
+			f.proposeStylesheet(tc.body)
+			err := checkProposedStylesheet(f.root, f.reloadRun())
+			if tc.wantError == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), tc.wantError) || !strings.Contains(err.Error(), "proposed stylesheet") {
+				t.Fatalf("error=%v, want proposed stylesheet error naming %s", err, tc.wantError)
+			}
+			if got := f.rootSheet(); got != liveSheet {
+				t.Fatalf("validation applied proposal early: %q", got)
+			}
+		})
+	}
+}

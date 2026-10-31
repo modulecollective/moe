@@ -1,6 +1,6 @@
 // Package stylesheet is the CSS-ish model stylesheet: a checked-in file
 // at the bureaucracy root (`model-stylesheet.css`) that declaratively
-// binds a `model` and/or `agent` to each (workflow, stage) turn.
+// binds an `agent` and model choices to each (workflow, stage) turn.
 //
 // The grammar is a deliberate subset of CSS — `selector { prop: val; }`
 // rules plus `/* ... */` comments — parsed by this hand-rolled stdlib
@@ -20,8 +20,7 @@
 //     specificity is broken by last-rule-in-file (CSS's own tie-break).
 //     Real CSS ranks a class above a type selector; here `sdlc` and
 //     `.review` tie. Properties cascade independently — the winning
-//     `model` rule and the winning `agent` rule need not be the same
-//     rule.
+//     model choices and the winning `agent` need not share a rule.
 //
 // Values are bare tokens: a `model` is handed verbatim to the vendor
 // CLI's `--model`, an `agent` is resolved through the agent registry.
@@ -117,6 +116,13 @@ func (s *Sheet) Resolve(workflow, stage string) (agent, model string) {
 	return s.property(workflow, stage, "agent"), s.property(workflow, stage, "model")
 }
 
+// ModelForAgent returns the backend-specific model for a turn. This
+// property cascades independently of agent and the legacy model property;
+// it never selects a backend. Empty means no model was set for this agent.
+func (s *Sheet) ModelForAgent(workflow, stage, agent string) string {
+	return s.property(workflow, stage, "model-"+agent)
+}
+
 // property returns the winning value for one property across all
 // matching rules: highest specificity wins, and equal specificity is
 // broken by last-rule-in-file. Rules are stored in file order, so
@@ -170,8 +176,13 @@ func (s *Sheet) Validate(v Vocab) error {
 	if s == nil {
 		return nil
 	}
+	properties := []string{"agent", "model"}
+	for _, name := range v.Agents {
+		properties = append(properties, "model-"+name)
+	}
+	sort.Strings(properties)
 	for _, r := range s.rules {
-		if err := r.validate(v); err != nil {
+		if err := r.validate(v, properties); err != nil {
 			return err
 		}
 	}
@@ -179,7 +190,7 @@ func (s *Sheet) Validate(v Vocab) error {
 }
 
 // validate checks one rule's selector and declarations against v.
-func (r rule) validate(v Vocab) error {
+func (r rule) validate(v Vocab, properties []string) error {
 	if err := r.sel.validate(v, r.line); err != nil {
 		return err
 	}
@@ -191,8 +202,8 @@ func (r rule) validate(v Vocab) error {
 	}
 	sort.Strings(props)
 	for _, prop := range props {
-		if prop != "agent" && prop != "model" {
-			return fmt.Errorf("line %d: unknown property %q (known: agent, model)", r.line, prop)
+		if !slices.Contains(properties, prop) {
+			return fmt.Errorf("line %d: unknown property %q (known: %s)", r.line, prop, strings.Join(properties, ", "))
 		}
 	}
 	if a, ok := r.decls["agent"]; ok && !slices.Contains(v.Agents, a) {
