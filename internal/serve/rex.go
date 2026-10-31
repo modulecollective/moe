@@ -226,7 +226,8 @@ func (h *rexHost) launch(label string, argv []string) (string, error) {
 		h.mu.Lock()
 		h.session = created.SessionID
 		h.mu.Unlock()
-		if err := os.MkdirAll(filepath.Dir(rexSessionPath(h.root)), 0o755); err == nil {
+		err = os.MkdirAll(filepath.Dir(rexSessionPath(h.root)), 0o755)
+		if err == nil {
 			err = os.WriteFile(rexSessionPath(h.root), []byte(created.SessionID+"\n"), 0o644)
 		}
 		if err != nil {
@@ -392,8 +393,13 @@ func (cs *children) spawnRex(id, moeBin string, args []string, root string, logg
 	cs.mu.Unlock()
 
 	if had && prev.block != "" && prev.exitErr != nil {
+		// A kept block the operator closed by hand, or that went with
+		// its server, fails the close with nothing left to close. Only a
+		// block still in the session holds the launch back.
 		if err := cs.rex.closeBlock(prev.block); err != nil {
-			return nil, fmt.Errorf("close kept rex block %s: %w", prev.block, err)
+			if id, ferr := cs.rex.findBlock(prev.block); ferr != nil || id != "" {
+				return nil, fmt.Errorf("close kept rex block %s: %w", prev.block, err)
+			}
 		}
 		cs.mu.Lock()
 		prev.block = ""

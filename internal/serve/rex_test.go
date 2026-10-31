@@ -298,6 +298,40 @@ func TestRexRetention(t *testing.T) {
 // TestRexFirstLaunchCreatesTheSession: with no session yet, the first
 // job creates it, its block takes the label by rename, and the session
 // is remembered for the next start.
+// TestRexKeptBlockGoneDoesNotWedge covers a kept failed block that is no
+// longer there when the next launch comes to close it: the operator read
+// the screen and closed it, or it went with its server. The close fails
+// because there is nothing to close, and that must not hold the project
+// back, or every later tick retries the same close and the project is
+// never swept again until serve restarts.
+func TestRexKeptBlockGoneDoesNotWedge(t *testing.T) {
+	fake := newFakeRex(t)
+	fake.reply("run", `{"block_ids":["block:B1"]}`, 0)
+	fake.reply("wait", `{"exit_code":1}`, 1)
+	moe, _ := argvRecorder(t, 0)
+	gate := &fakeHeartbeat{due: []string{"alpha"}}
+	s := rexServer(t, fake, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: moe, Heartbeat: gate})
+
+	s.heartbeatTick()
+	waitFor(t, "the first sweep", func() bool { return len(gate.sweptList()) == 1 })
+
+	// A close that fails with B1 still in the session holds the launch.
+	fake.reply("block-close", "", 1)
+	fake.reply("block-ls", `{"blocks":[{"block_id":"block:B1","label":"heartbeat:alpha"}]}`, 0)
+	fake.reply("run", `{"block_ids":["block:B2"]}`, 0)
+	fake.reply("wait", `{"exit_code":0}`, 0)
+	s.heartbeat.record("alpha", false) // spend the cool-off the failure earned
+	s.heartbeatTick()
+	if n := strings.Count(strings.Join(fake.calls(), "\n"), "\nrun "); n != 0 {
+		t.Fatalf("launched beside a kept block that would not close (%d runs after the first)", n)
+	}
+
+	// The operator closes B1 by hand.
+	fake.reply("block-ls", `{"blocks":[]}`, 0)
+	s.heartbeatTick()
+	waitFor(t, "the second sweep", func() bool { return len(gate.sweptList()) == 2 })
+}
+
 func TestRexFirstLaunchCreatesTheSession(t *testing.T) {
 	fake := newFakeRex(t)
 	fake.reply("new", `{"session_id":"session:NEW","initial_windows":[{"window_id":"window:W","block_ids":["block:B1"]}]}`, 0)
