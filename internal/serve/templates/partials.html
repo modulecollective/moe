@@ -92,7 +92,7 @@
          and "why has nothing happened in alpha" has to be answerable
          here. Compact by exception — an all-auto board says nothing. */}}
     <h2><span>serve
-      {{if .Armed}}<span class="count">(armed · up {{.Up}}{{if .NextSweep}} · next sweep in {{.NextSweep}}{{end}}{{if .LastTick}} · last tick {{.LastTick}}{{end}}{{if .Paused}} · {{.Paused}} paused{{end}}{{if .Safe}} · {{.Safe}} safe{{end}}{{with .Push.Item}} · {{.}}{{end}})</span>
+      {{if .Armed}}<span class="count">(armed · up {{.Up}}{{with .Host}} · {{.}}{{end}}{{if .NextSweep}} · next sweep in {{.NextSweep}}{{end}}{{if .LastTick}} · last tick {{.LastTick}}{{end}}{{if .Paused}} · {{.Paused}} paused{{end}}{{if .Safe}} · {{.Safe}} safe{{end}}{{with .Push.Item}} · {{.}}{{end}})</span>
       {{else}}<span class="count">(browse-only · up {{.Up}}{{if .Paused}} · {{.Paused}} paused{{end}}{{if .Safe}} · {{.Safe}} safe{{end}}{{with .Push.Item}} · {{.}}{{end}})</span>{{end}}
     </span></h2>
     {{if or .Projects .QuietCount .Push.State}}

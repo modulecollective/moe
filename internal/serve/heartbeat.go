@@ -61,8 +61,9 @@ const heartbeatBackoffCap = 6
 // registry. The colon is what keeps them from colliding with a run id:
 // ids there are "<project>/<slug>" and both halves are slugs, so no run
 // can ever be spelled this way. Riding the same registry is what gets
-// the heartbeat serve's shutdown wind-down (two Ctrl-Cs, then hangup)
-// and its notify hook for free.
+// the heartbeat serve's notify hook for free, and on the local host its
+// shutdown wind-down (two Ctrl-Cs, then hangup). The id is also the Rex
+// block label, which is how a restarted serve finds its jobs.
 const heartbeatChildPrefix = "heartbeat:"
 
 // HeartbeatDecision is one project's verdict for one tick: whether to
@@ -196,6 +197,12 @@ func (s *Server) heartbeatTick() {
 			continue
 		}
 		projectID := d.Project
+		if s.hostErr != nil {
+			s.logf("heartbeat: %s held — rex host unusable: %v", projectID, s.hostErr)
+			s.activity.recordSkip(projectID, "rex host unusable: "+s.hostErr.Error(), true, 0, 0)
+			s.saveActivity()
+			continue
+		}
 		if cooling, left, fails := s.heartbeat.cooling(projectID); cooling {
 			s.logf("heartbeat: %s cooling off after %d failure(s) — %d tick(s) left", projectID, fails, left)
 			// The gate wanted this project swept and the backoff held it,
@@ -248,7 +255,7 @@ func (s *Server) heartbeatTick() {
 		s.logf("heartbeat: sweeping %s", projectID)
 		s.activity.recordSweepStart(projectID, child.started)
 		s.saveActivity()
-		go s.awaitHeartbeat(projectID, child)
+		go s.awaitHeartbeat(projectID, child, true)
 	}
 }
 
@@ -273,10 +280,18 @@ func (s *Server) heartbeatTick() {
 // cursor re-offers the board at cool-off pace rather than immediately;
 // and the next dispatching tick records its base at the tip as it
 // stands then, so the refused range is never re-walked.
-func (s *Server) awaitHeartbeat(projectID string, c *child) {
+//
+// dispatched is false for a job adopted from a previous serve's Rex
+// session. Swept is skipped then: this serve never recorded the
+// dispatch, and the gate's restart path is already conservative — the
+// cost is at most one extra look at the board, never a false
+// acknowledgement.
+func (s *Server) awaitHeartbeat(projectID string, c *child, dispatched bool) {
 	<-c.done
 	failed := c.exitErr != nil
-	s.opts.Heartbeat.Swept(projectID, !failed)
+	if dispatched {
+		s.opts.Heartbeat.Swept(projectID, !failed)
+	}
 	fails, skip := s.heartbeat.record(projectID, failed)
 	if skip > 0 {
 		s.logf("heartbeat: %s failed (%v) — skipping %d tick(s)", projectID, c.exitErr, skip)

@@ -244,8 +244,17 @@ func (cs *children) shutdown(ctx context.Context, logger io.Writer) {
 	// moment ago whose reader hasn't reached its notify call yet, and
 	// that child is not in live.
 	cs.stopping = true
+	// Rex children are left alone: the job is Rex's, it outlives serve
+	// by design, and a restarted serve adopts it. Their watchers stop
+	// here; nothing is sent to the blocks.
+	if cs.rex != nil {
+		cs.rex.cancel()
+	}
 	live := make([]*child, 0, len(cs.all))
 	for _, c := range cs.all {
+		if c.localProc == nil {
+			continue
+		}
 		select {
 		case <-c.done:
 			// Already exited; nothing to do.

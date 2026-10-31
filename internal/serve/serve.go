@@ -276,6 +276,11 @@ type Server struct {
 	// heartbeat's last verdicts, and a bounded ring of what it has been
 	// doing. See activity.go.
 	activity *activity
+	// hostErr is set when a Rex server answered at startup but can't be
+	// driven. The heartbeat then withholds every dispatch rather than
+	// launch locally beside jobs Rex may still be running. Written once
+	// by selectHost before the ticker starts.
+	hostErr error
 	// stateMu serialises the state file. Held across snapshot-and-write in
 	// saveActivity, and taken by dropActivity to set stopped. See
 	// saveActivity for why both.
@@ -382,8 +387,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	// The heartbeat lives inside the listener's lifetime, not beside it:
 	// running the armed process *is* the standing consent, so the clock
 	// starts when the process starts serving and stops when ctx cancels.
-	// Its children ride the same registry, so shutdown winds them down
-	// with everything else.
+	// Its children ride the same registry, so shutdown winds down the
+	// local ones with everything else; Rex-hosted ones finish on their
+	// own (rex.go).
 	// It runs off a derived context so both return paths below can stop
 	// it and join it. The srv.Serve-error path is why the context is
 	// derived rather than the caller's: there the caller's ctx is not
@@ -392,6 +398,10 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	defer hbCancel()
 	var heartbeatDone sync.WaitGroup
 	if s.opts.Dynamic && s.opts.Heartbeat != nil {
+		// Before the ticker: adoption has to hold each project a previous
+		// serve left running in Rex before the first tick can launch it
+		// again.
+		s.selectHost()
 		heartbeatDone.Go(func() { s.runHeartbeat(hbCtx) })
 	}
 	// The pusher shares the heartbeat's context but not its arming gate:

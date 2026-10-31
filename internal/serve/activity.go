@@ -97,10 +97,13 @@ type activity struct {
 	// root is the bureaucracy the record belongs to. Held because a live
 	// sweep's run is on disk, not in the record: panel() reads the emit
 	// file for a project whose sweep is still running (see sweepRunPath).
-	root    string
-	pid     int
-	addr    string
-	armed   bool
+	root  string
+	pid   int
+	addr  string
+	armed bool
+	// host is where this serve runs its jobs ("rex session moe", "local
+	// pty"), empty until an armed serve picks one at startup.
+	host    string
 	started time.Time
 	// interval is the tick cadence, captured once at construction rather
 	// than read on each snapshot. Snapshots run on the child-reader and
@@ -224,6 +227,13 @@ func (a *activity) recordSweepEnd(projectID string, at time.Time, clean bool, fa
 // hooks off the registry rather than the caller keeps it one call per
 // child whoever spawns it. The child id is the subject:
 // "heartbeat:<project>".
+// setHost records where jobs run. Called once, before the first tick.
+func (a *activity) setHost(host string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.host = host
+}
+
 func (a *activity) recordChildSpawn(id string, at time.Time, detail string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -315,9 +325,12 @@ type ActivitySnapshot struct {
 	// gets its own — cannot see this pid at all, so its liveness probe
 	// would report a healthy serve as crashed. This is what lets that
 	// reader tell "gone" from "not visible from here".
-	PidNS   string    `json:"pid_ns,omitempty"`
-	Addr    string    `json:"addr"`
-	Armed   bool      `json:"armed"`
+	PidNS string `json:"pid_ns,omitempty"`
+	Addr  string `json:"addr"`
+	Armed bool   `json:"armed"`
+	// Host names where jobs run, which is also which lifetime they have:
+	// a Rex job outlives serve, a local one stops with it.
+	Host    string    `json:"host,omitempty"`
 	Started time.Time `json:"started"`
 	// LastTick is zero until the first tick — a serve that just started
 	// has honestly not looked yet.
@@ -380,6 +393,7 @@ func (a *activity) snapshot(now time.Time) ActivitySnapshot {
 		PidNS:     repolock.PidNamespace(),
 		Addr:      a.addr,
 		Armed:     a.armed,
+		Host:      a.host,
 		Started:   a.started,
 		LastTick:  a.lastTick,
 		NextTick:  a.nextTick(),

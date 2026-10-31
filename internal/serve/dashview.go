@@ -297,6 +297,9 @@ type servePanelVM struct {
 	// will never pulse" is exactly the confusion this is fixing.
 	Armed bool
 	Up    string // "3d 2h"
+	// Host is where jobs run ("rex session moe", "local pty"); empty on
+	// an unarmed serve, which runs none.
+	Host string
 	// NextSweep is how long until the next tick ("12m"), empty for an
 	// unarmed serve, which never ticks.
 	NextSweep string
@@ -406,7 +409,7 @@ func (a *activity) panel(now time.Time) servePanelVM {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	vm := servePanelVM{Armed: a.armed, Up: dash.HumanDuration(now.Sub(a.started))}
+	vm := servePanelVM{Armed: a.armed, Host: a.host, Up: dash.HumanDuration(now.Sub(a.started))}
 	if next := a.nextTick(); !next.IsZero() {
 		vm.NextSweep = dash.HumanDuration(max(next.Sub(now), 0))
 	}

@@ -93,8 +93,8 @@ func discoverRex(root string, logger io.Writer) (*rexHost, error) {
 	if err != nil {
 		return nil, nil
 	}
-	h := newRexHost(bin, root, logger)
-	out, err := h.call(context.Background(), "whoami", "--json")
+	probe := &rexHost{bin: bin}
+	out, err := probe.call(context.Background(), "whoami", "--json")
 	if err != nil {
 		return nil, nil
 	}
@@ -106,7 +106,7 @@ func discoverRex(root string, logger io.Writer) (*rexHost, error) {
 	}
 	// The server's whoami carries no API revision; the CLI's version
 	// does, and the CLI's JSON is the contract this file reads.
-	out, err = h.call(context.Background(), "version", "--json")
+	out, err = probe.call(context.Background(), "version", "--json")
 	if err != nil {
 		return nil, fmt.Errorf("rex version: %w", err)
 	}
@@ -119,7 +119,7 @@ func discoverRex(root string, logger io.Writer) (*rexHost, error) {
 	if *ver.APIRevision < rexMinAPIRevision {
 		return nil, fmt.Errorf("rex API revision %d is older than %d", *ver.APIRevision, rexMinAPIRevision)
 	}
-	return h, nil
+	return newRexHost(bin, root, logger), nil
 }
 
 // call runs one rex command and returns its stdout. Every call passes
@@ -463,5 +463,70 @@ func (cs *children) watchRex(c *child, logger io.Writer, onExit func(string, tim
 		if err := cs.rex.closeBlock(c.block); err != nil {
 			cs.rex.logf("rex: close block %s: %v", c.block, err)
 		}
+	}
+}
+
+// selectHost picks where this armed serve runs jobs, and adopts what a
+// previous serve left running in Rex. Called once, before the first
+// tick; no flag and no config key — a Rex server that answers is used.
+func (s *Server) selectHost() {
+	h, err := discoverRex(s.opts.Root, s.opts.Logger)
+	switch {
+	case err != nil:
+		s.hostErr = err
+		s.activity.setHost("rex unusable — dispatch withheld")
+		s.logf("host: a Rex server answered but can't be driven (%v) — the heartbeat will dispatch nothing until this is fixed and serve restarts", err)
+	case h == nil:
+		s.activity.setHost("local pty")
+		s.logf("host: local pty — sweeps stop when serve stops")
+	default:
+		s.children.rex = h
+		s.activity.setHost("rex session " + rexSessionLabel)
+		s.logf("host: rex session %q — sweeps run as Rex blocks and finish even if serve stops", rexSessionLabel)
+		s.adoptRex(h)
+	}
+	s.saveActivity()
+}
+
+// adoptRex picks up the jobs a previous serve launched. The session's
+// blocks labelled "heartbeat:<project>" are registered under that id and
+// watched: a live one holds its project's single-flight until it exits,
+// and an exited one is consumed at once. Either way the exit runs the
+// ordinary hooks — emit file, activity, log line, webhook — and the
+// backoff ledger, but not the gate's Swept, because this serve never saw
+// the dispatch. The emit file is left for the exit to read, since a live
+// job may still write it.
+//
+// A missing or unreadable session leaves nothing to adopt; the first
+// launch creates a fresh one.
+func (s *Server) adoptRex(h *rexHost) {
+	body, err := os.ReadFile(rexSessionPath(s.opts.Root))
+	session := strings.TrimSpace(string(body))
+	if err != nil || session == "" {
+		return
+	}
+	bs, err := h.blocks(session)
+	if err != nil {
+		s.logf("host: rex session %s unreadable (%v) — the first sweep will create a new one", session, err)
+		return
+	}
+	h.mu.Lock()
+	h.session = session
+	h.mu.Unlock()
+	seen := map[string]bool{}
+	for _, b := range bs {
+		project := heartbeatProject(b.Label)
+		if project == "" {
+			continue
+		}
+		if seen[b.Label] {
+			s.logf("host: rex block %s also carries %s — leaving it alone", b.ID, b.Label)
+			continue
+		}
+		seen[b.Label] = true
+		c := s.children.registerRex(b.Label, b.ID, "adopted", s.opts.Logger)
+		s.logf("heartbeat: adopted %s from rex block %s", project, b.ID)
+		s.activity.recordSweepStart(project, c.started)
+		go s.awaitHeartbeat(project, c, false)
 	}
 }
