@@ -197,6 +197,7 @@ func TestStageAgentNameNilMetadata(t *testing.T) {
 // TestStageAgentNameRunDefault pins that md.Agent feeds the
 // run-default rung.
 func TestStageAgentNameRunDefault(t *testing.T) {
+	t.Setenv("MOE_FORCE_AGENT", "")
 	md := &run.Metadata{Agent: "codex"}
 	if got := stageAgentName(stageSessionOpts{}, md, ""); got != "codex" {
 		t.Fatalf("run default: got %q, want codex", got)

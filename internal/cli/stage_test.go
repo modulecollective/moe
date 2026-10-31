@@ -418,6 +418,7 @@ func TestBannerSilentAtDesignStage(t *testing.T) {
 }
 
 func TestRunStageSessionBannerShowsResolvedAgent(t *testing.T) {
+	t.Setenv("MOE_FORCE_AGENT", "")
 	cases := []struct {
 		name      string
 		explicit  string
