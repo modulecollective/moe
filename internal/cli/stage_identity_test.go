@@ -134,6 +134,7 @@ func TestLegacyBackendAdoption(t *testing.T) {
 		{name: "other backend owns scalar", mirror: identityB, legacy: identityA, want: identityB},
 		{name: "mirror only", mirror: identityB, want: identityB},
 		{name: "unrecoverable", legacy: identityA, wantFresh: true},
+		{name: "first use", wantFresh: true},
 		{name: "invalid legacy", legacy: "old-id", wantFresh: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -147,12 +148,24 @@ func TestLegacyBackendAdoption(t *testing.T) {
 				writeIdentityMirror(t, mirror, tc.mirror)
 			}
 			doc := &run.Document{Session: tc.legacy, Sessions: map[string]string{"codex": identityC}}
-			id, fresh, changed, err := selectBackendSession(claude.Agent{}, doc, "claude", filepath.Join(root, "cwd"), mirror, root, io.Discard)
+			var diagnostics bytes.Buffer
+			id, fresh, changed, err := selectBackendSession(claude.Agent{}, doc, "claude", filepath.Join(root, "cwd"), mirror, root, &diagnostics)
 			if err != nil {
 				t.Fatal(err)
 			}
 			if fresh != tc.wantFresh || !changed || !run.ValidSessionID(id) || (tc.want != "" && id != tc.want) {
 				t.Fatalf("selection %q fresh=%v changed=%v", id, fresh, changed)
+			}
+			if tc.wantFresh {
+				if tc.legacy == "" && diagnostics.Len() != 0 {
+					t.Fatalf("first use warned of history loss: %s", &diagnostics)
+				}
+				if tc.legacy != "" && !strings.Contains(diagnostics.String(), "has no recoverable claude identity") {
+					t.Fatalf("missing identity-evidence diagnostic: %s", &diagnostics)
+				}
+				if strings.Contains(diagnostics.String(), "prior chat history not recoverable") {
+					t.Fatalf("unowned legacy identity claimed history loss: %s", &diagnostics)
+				}
 			}
 			if doc.Session != tc.legacy || doc.Sessions["codex"] != identityC {
 				t.Fatalf("other identity changed: %+v", doc)
@@ -314,5 +327,28 @@ func TestBackendEmptyReturnPreservesSelectedSlot(t *testing.T) {
 				t.Fatalf("empty return changed identities: %+v", doc)
 			}
 		})
+	}
+}
+
+func TestBackendNativeCacheRecoveryIgnoresCorruptMirror(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(root, "config"))
+	native := filepath.Join(root, "config", "projects", "old-cwd", identityA+".jsonl")
+	writeIdentityMirror(t, native, identityA)
+	mirror := filepath.Join(root, "thread-claude.jsonl")
+	if err := os.WriteFile(mirror, []byte("{broken\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	doc := &run.Document{Sessions: map[string]string{"claude": identityA, "codex": identityB}}
+	var diagnostics bytes.Buffer
+	id, fresh, changed, err := selectBackendSession(claude.Agent{}, doc, "claude", root, mirror, root, &diagnostics)
+	if err != nil || id != identityA || fresh || changed {
+		t.Fatalf("native recovery %q %v %v: %v", id, fresh, changed, err)
+	}
+	if !strings.Contains(diagnostics.String(), "recovered from cache") {
+		t.Fatalf("missing native recovery notice: %s", &diagnostics)
+	}
+	if doc.Sessions["codex"] != identityB {
+		t.Fatal("native recovery changed another backend")
 	}
 }

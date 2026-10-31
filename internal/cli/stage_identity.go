@@ -56,7 +56,7 @@ func selectBackendSession(a agent.Agent, doc *run.Document, backend, cwd, mirror
 			return "", false, false, err
 		}
 		if doc.Session != "" && !keyed {
-			moePrintf(stderr, "legacy session %s has no recoverable %s identity; starting fresh as %s (prior chat history not recoverable)\n", doc.Session, backend, id)
+			moePrintf(stderr, "legacy session %s has no recoverable %s identity; starting fresh as %s\n", doc.Session, backend, id)
 		}
 		doc.SetSession(backend, id)
 		return id, true, true, nil
@@ -69,22 +69,30 @@ func selectBackendSession(a agent.Agent, doc *run.Document, backend, cwd, mirror
 		return id, false, changed, nil
 	}
 
-	// A mirror is eligible only for its own identity. Native cache recovery
-	// can still succeed when the mirror is absent or stale.
-	mirrorID, err := a.TranscriptSessionID(mirrorPath)
-	if err != nil {
-		return "", false, false, fmt.Errorf("session: read mirror identity: %w", err)
-	}
-	if mirrorID != id {
-		mirrorPath = ""
-	}
-	outcome, err := a.RestoreTranscript(id, cwd, mirrorPath)
+	// Recover native cache copies before reading a potentially stale mirror.
+	outcome, err := a.RestoreTranscript(id, cwd, "")
 	if err != nil {
 		return "", false, false, fmt.Errorf("session: restore transcript: %w", err)
 	}
 	if outcome.Result != agent.RestoreMissing {
 		reportSessionRestore(stderr, workRoot, id, outcome)
 		return id, false, changed, nil
+	}
+
+	// A mirror is eligible only for its own identity.
+	mirrorID, err := a.TranscriptSessionID(mirrorPath)
+	if err != nil {
+		return "", false, false, fmt.Errorf("session: read mirror identity: %w", err)
+	}
+	if mirrorID == id {
+		outcome, err = a.RestoreTranscript(id, cwd, mirrorPath)
+		if err != nil {
+			return "", false, false, fmt.Errorf("session: restore transcript: %w", err)
+		}
+		if outcome.Result != agent.RestoreMissing {
+			reportSessionRestore(stderr, workRoot, id, outcome)
+			return id, false, changed, nil
+		}
 	}
 	next, err := run.NewSessionID()
 	if err != nil {
