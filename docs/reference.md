@@ -62,8 +62,8 @@ source of truth for the exact command surface; this page is a map.
   if serve stops or crashes, a restarted serve picks it up rather than starting
   another, and Ctrl-C in its block is how to stop it. A failed sweep's block
   stays open for reading until that project's next sweep. With no Rex server,
-  sweeps run on serve's own terminals and stop with it. The startup log, `moe
-  dash` and `/serve` name which host is in use. A `/serve` page owns that
+  sweeps run on serve's own terminals and stop with it. The startup log,
+  `moe dash` and `/serve` name which host is in use. A `/serve` page owns that
   ticker's status and trace — what each recent tick decided, and the output tail
   of any sweep that failed — reachable from the menu and from the one-line
   status cluster every board header carries. `MOE_SERVE_NOTIFY_URL` is the other
