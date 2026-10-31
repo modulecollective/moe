@@ -276,11 +276,21 @@ func (s *Server) heartbeatTick() {
 		s.logf("heartbeat: sweeping %s", projectID)
 		s.activity.recordSweepStart(projectID, child.started)
 		s.saveActivity()
-		go s.awaitHeartbeat(projectID, child, true)
+		s.startHeartbeatWaiter(projectID, child, true)
 		// Restore the lost dash only after the replacement sweep is tracked.
 		if h != nil && h.sessionID() != "" && h.sessionID() != session {
 			s.openDash(h)
 		}
+	}
+}
+
+// startHeartbeatWaiter gives Rex teardown a completion boundary for the
+// bookkeeping that follows a remote exit, independently of its watcher.
+func (s *Server) startHeartbeatWaiter(projectID string, c *child, dispatched bool) {
+	if h := s.children.rex; h != nil {
+		h.workers.Go(func() { s.awaitHeartbeat(projectID, c, dispatched) })
+	} else {
+		go s.awaitHeartbeat(projectID, c, dispatched)
 	}
 }
 
@@ -312,7 +322,22 @@ func (s *Server) heartbeatTick() {
 // cost is at most one extra look at the board, never a false
 // acknowledgement.
 func (s *Server) awaitHeartbeat(projectID string, c *child, dispatched bool) {
-	<-c.done
+	if h := s.children.rex; h != nil {
+		select {
+		case <-c.done:
+		case <-h.ctx.Done():
+			// Prefer a published exit even when cancellation is ready too.
+			// Otherwise leave the remote job for restart recovery; cancelling
+			// observation says nothing about whether that job has finished.
+			select {
+			case <-c.done:
+			default:
+				return
+			}
+		}
+	} else {
+		<-c.done
+	}
 	failed := c.exitErr != nil
 	if dispatched {
 		s.opts.Heartbeat.Swept(projectID, !failed)

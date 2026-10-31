@@ -58,10 +58,15 @@ type rexHost struct {
 	root   string
 	logger io.Writer
 
-	// ctx is cancelled by shutdown. It stops the watchers' `rex wait`
-	// processes and nothing else: the blocks keep running.
+	// ctx is cancelled by shutdown. It stops local observation, including
+	// the watchers' `rex wait` processes: the blocks keep running.
 	ctx    context.Context
 	cancel context.CancelFunc
+
+	// workers covers watchers through their final RPC and heartbeat completion.
+	// Wait only after all launch/adoption calls have returned. Production
+	// shutdown cancels without joining: post-exit RPCs can outlast its budget.
+	workers sync.WaitGroup
 
 	mu      sync.Mutex
 	session string // Rex session id; "" until the first launch creates one
@@ -482,7 +487,7 @@ func (cs *children) registerRex(id, block, how string, logger io.Writer) *child 
 	if onSpawn != nil {
 		onSpawn(id, c.started, how+" in rex block "+block)
 	}
-	go cs.watchRex(c, logger, onExit)
+	cs.rex.workers.Go(func() { cs.watchRex(c, logger, onExit) })
 	return c
 }
 
@@ -642,7 +647,7 @@ func (s *Server) adoptRex(h *rexHost) error {
 		c := s.children.registerRex(b.Label, b.ID, "adopted", s.opts.Logger)
 		s.logf("heartbeat: adopted %s from rex block %s", project, b.ID)
 		s.activity.recordSweepStart(project, c.started)
-		go s.awaitHeartbeat(project, c, false)
+		s.startHeartbeatWaiter(project, c, false)
 	}
 	return nil
 }

@@ -6,9 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 )
 
 func TestRexBlocksValidateWholeListing(t *testing.T) {
@@ -58,33 +56,6 @@ func seedStartupRexSession(t *testing.T, root string) {
 	}
 }
 
-// Startup tests use failed exits, so joining onExit also leaves no
-// asynchronous successful-block close touching the fake's fixtures.
-func joinStartupRexExits(t *testing.T, s *Server, fake *fakeRex) func() {
-	t.Helper()
-	var exits sync.WaitGroup
-	onSpawn, onExit := s.children.onSpawn, s.children.onExit
-	s.children.onSpawn = func(id string, at time.Time, detail string) {
-		exits.Add(1)
-		onSpawn(id, at, detail)
-	}
-	s.children.onExit = func(id string, at time.Time, err error, tail string) {
-		defer exits.Done()
-		onExit(id, at, err, tail)
-	}
-	t.Cleanup(func() {
-		fake.release("wait")
-		exits.Wait()
-		// awaitHeartbeat may still be saving its separate backoff result.
-		// Serialize that write and prevent any later fixture writes.
-		_ = s.dropActivity()
-		if s.children.rex != nil {
-			s.children.rex.cancel()
-		}
-	})
-	return exits.Wait
-}
-
 func TestRexStartupWaitsForReconciliation(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -112,7 +83,6 @@ func TestRexStartupWaitsForReconciliation(t *testing.T) {
 			gate := &fakeHeartbeat{due: []string{"alpha", "beta"}}
 			var log syncBuf
 			s := newTestServer(t, Options{Root: root, MoeBin: moe, Heartbeat: gate, Logger: &log})
-			joinExits := joinStartupRexExits(t, s, fake)
 			s.activity.recordSweepRun("alpha", "prior-run")
 			s.heartbeat.record("alpha", true)
 			s.selectHost()
@@ -201,7 +171,7 @@ func TestRexStartupWaitsForReconciliation(t *testing.T) {
 				t.Fatalf("want one dash refresh after adoption and before beta: %q", calls)
 			}
 			fake.release("wait")
-			joinExits()
+			waitRexWorkers(t, s.children.rex)
 			waitFor(t, "completion backoff", func() bool {
 				s.heartbeat.mu.Lock()
 				defer s.heartbeat.mu.Unlock()
@@ -235,7 +205,6 @@ func TestRexStartupRejectsPartialAdoption(t *testing.T) {
 			seedStartupRexSession(t, root)
 			s := newTestServer(t, Options{Root: root, MoeBin: "/bin/true", Heartbeat: &fakeHeartbeat{due: []string{"alpha"}}})
 			fake.reply("wait", `{"exit_code":1}`, 1)
-			joinStartupRexExits(t, s, fake)
 			s.selectHost()
 			s.heartbeatTick()
 			if s.rexAdoptErr == nil || len(s.children.all) != 0 || fake.called("run ") || fake.called("new ") || fake.called("wait ") {
@@ -260,7 +229,6 @@ func TestRexStartupRecoversOnIdleTick(t *testing.T) {
 			seedStartupRexSession(t, root)
 			gate := &fakeHeartbeat{quiet: []string{"alpha"}}
 			s := newTestServer(t, Options{Root: root, MoeBin: "/bin/true", Heartbeat: gate})
-			joinExits := joinStartupRexExits(t, s, fake)
 			s.selectHost()
 			fake.reply("block-ls", `{"blocks":[]}`, 0)
 			fake.reply("run@dash", `{"block_ids":["block:D"]}`, 0)
@@ -279,7 +247,7 @@ func TestRexStartupRecoversOnIdleTick(t *testing.T) {
 			gate.due, gate.quiet = []string{"alpha"}, nil
 			fake.reply("run@heartbeat:alpha", `{"block_ids":["block:A"]}`, 0)
 			s.heartbeatTick()
-			joinExits()
+			waitRexWorkers(t, s.children.rex)
 			waitFor(t, "eligible sweep after dash attempt", func() bool { return len(gate.sweptList()) == 1 })
 			if s.children.rex.sessionID() != "session:OLD" || fake.called("new ") {
 				t.Fatalf("empty block array replaced the session: %q", fake.calls())
@@ -301,7 +269,6 @@ func TestRexStartupMissingSessionRetainsIdentityOnFailedReplacement(t *testing.T
 			seedStartupRexSession(t, root)
 			gate := &fakeHeartbeat{due: []string{"alpha"}}
 			s := newTestServer(t, Options{Root: root, MoeBin: "/bin/true", Heartbeat: gate})
-			joinExits := joinStartupRexExits(t, s, fake)
 			s.selectHost()
 			if s.rexAdoptErr != nil || s.children.rex.sessionID() != "session:OLD" || len(s.children.all) != 0 {
 				t.Fatalf("failed startup replacement lost identity: adoption %v, ID %q", s.rexAdoptErr, s.children.rex.sessionID())
@@ -334,7 +301,7 @@ func TestRexStartupMissingSessionRetainsIdentityOnFailedReplacement(t *testing.T
 			fake.reply("block-ls@session:NEW", `{"blocks":[]}`, 0)
 			fake.reply("run@dash", `{"block_ids":["block:D"]}`, 0)
 			s.heartbeatTick()
-			joinExits()
+			waitRexWorkers(t, s.children.rex)
 			waitFor(t, "replacement sweep backoff", func() bool {
 				s.heartbeat.mu.Lock()
 				defer s.heartbeat.mu.Unlock()
@@ -352,7 +319,7 @@ func TestRexStartupMissingSessionRetainsIdentityOnFailedReplacement(t *testing.T
 			s.heartbeat.record("alpha", false)
 			fake.reply("run", `{"block_ids":["block:B"]}`, 0)
 			s.heartbeatTick()
-			joinExits()
+			waitRexWorkers(t, s.children.rex)
 			waitFor(t, "second sweep", func() bool { return len(gate.sweptList()) == 2 })
 			if newCalls() != 2 || !fake.called("run --json --focus=false --keep-open -s session:NEW --label heartbeat:alpha ") {
 				t.Fatalf("next sweep did not reuse replacement: %q", fake.calls())

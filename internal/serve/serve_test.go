@@ -2104,11 +2104,17 @@ func newTestServer(t *testing.T, opts Options) *Server {
 	// and a child's exit hook both save after the condition a test waits
 	// on, and t.TempDir's cleanup would race that write ("RemoveAll
 	// cleanup: directory not empty"). Cleanups run last-registered-first,
-	// and Root was already a TempDir before this call, so closing the
-	// writer here happens first. dropActivity is the production seam for
-	// exactly this: it waits out a save in flight and makes every later
-	// one a no-op.
-	t.Cleanup(func() { _ = s.dropActivity() })
+	// and Root was already a TempDir before this call, so stopping the
+	// writers here happens first. Join Rex workers through their final
+	// RPCs and callbacks before their fixtures disappear. dropActivity
+	// also waits out a local save in flight and prevents any later one.
+	t.Cleanup(func() {
+		if h := s.children.rex; h != nil {
+			h.cancel()
+			waitRexWorkers(t, h)
+		}
+		_ = s.dropActivity()
+	})
 	return s
 }
 

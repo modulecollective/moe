@@ -8,9 +8,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"testing"
-	"time"
 )
 
 func TestRexSessionPresent(t *testing.T) {
@@ -72,31 +70,6 @@ func TestRexHeartbeatRecoversKilledSession(t *testing.T) {
 			var log syncBuf
 			s := rexServer(t, fake, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: moe, Heartbeat: gate, Logger: &log})
 
-			// Join every watcher after its exit hooks. All test sweeps
-			// fail, so no asynchronous successful-block close follows.
-			var watchers sync.WaitGroup
-			onSpawn, onExit := s.children.onSpawn, s.children.onExit
-			s.children.onSpawn = func(id string, at time.Time, detail string) {
-				watchers.Add(1)
-				if onSpawn != nil {
-					onSpawn(id, at, detail)
-				}
-			}
-			s.children.onExit = func(id string, at time.Time, err error, tail string) {
-				defer watchers.Done()
-				if onExit != nil {
-					onExit(id, at, err, tail)
-				}
-			}
-			t.Cleanup(func() {
-				// Let a watcher finish even if an assertion failed
-				// while it was retrying an unreadable session.
-				fake.reply("wait", `{"exit_code":1}`, 1)
-				fake.reply("block-call", `{"last_exit":{"exit_code":1}}`, 0)
-				fake.release("wait")
-				watchers.Wait()
-			})
-
 			s.heartbeatTick()
 			first, ok := s.children.get("heartbeat:alpha")
 			if !ok {
@@ -117,7 +90,7 @@ func TestRexHeartbeatRecoversKilledSession(t *testing.T) {
 			}
 			fake.release("wait")
 			waitFor(t, "first sweep completion", func() bool { return len(gate.sweptList()) == 1 })
-			watchers.Wait()
+			waitRexWorkers(t, s.children.rex)
 			if tc.live && !errors.Is(first.exitErr, errRexBlockGone) {
 				t.Fatalf("killed sweep exit = %v", first.exitErr)
 			}
@@ -169,7 +142,7 @@ func TestRexHeartbeatRecoversKilledSession(t *testing.T) {
 				t.Fatalf("replacement sweep = %#v", recovered)
 			}
 			waitFor(t, "recovered sweep completion", func() bool { return len(gate.sweptList()) == 2 })
-			watchers.Wait()
+			waitRexWorkers(t, s.children.rex)
 			wantDash := "run --json --focus=false --keep-open -s session:NEW --label dash --cwd " + s.opts.Root +
 				" -- /usr/bin/env MOE_HOME=" + s.opts.Root + " " + moe + " dash --watch"
 			if !slices.Contains(fake.calls(), wantDash) {
@@ -193,7 +166,7 @@ func TestRexHeartbeatRecoversKilledSession(t *testing.T) {
 			fake.reply("run", `{"block_ids":["block:B3"]}`, 0)
 			s.heartbeatTick()
 			waitFor(t, "third sweep completion", func() bool { return len(gate.sweptList()) == 3 })
-			watchers.Wait()
+			waitRexWorkers(t, s.children.rex)
 			news, dashes := 0, 0
 			for _, call := range fake.calls() {
 				if strings.HasPrefix(call, "new ") {
@@ -296,7 +269,7 @@ func TestRexRecoveryCreationFailureIsBounded(t *testing.T) {
 	fake.reply("block-ls", "", 1)
 	cs := newChildren()
 	cs.rex = newRexHost(fake.bin, t.TempDir(), io.Discard)
-	t.Cleanup(cs.rex.cancel)
+	t.Cleanup(func() { cs.rex.cancel(); waitRexWorkers(t, cs.rex) })
 	cs.rex.session = "session:S"
 	c, err := cs.spawnRex("heartbeat:alpha", "/bin/true", nil, cs.rex.root, io.Discard)
 	if c != nil || err == nil || cs.rex.sessionID() != "session:S" {
@@ -337,17 +310,6 @@ func TestRexHeartbeatRetriesReplacementThroughAnotherProject(t *testing.T) {
 	}
 	alpha, _ := s.children.get("heartbeat:alpha")
 	beta, _ := s.children.get("heartbeat:beta")
-	var watchers sync.WaitGroup
-	onSpawn, onExit := s.children.onSpawn, s.children.onExit
-	s.children.onSpawn = func(id string, at time.Time, detail string) {
-		watchers.Add(1)
-		onSpawn(id, at, detail)
-	}
-	s.children.onExit = func(id string, at time.Time, err error, tail string) {
-		defer watchers.Done()
-		onExit(id, at, err, tail)
-	}
-	t.Cleanup(watchers.Wait)
 
 	// Both old children have completed and exhausted their backoff.
 	// Alpha clears its retained block, but replacement creation fails.
@@ -378,7 +340,7 @@ func TestRexHeartbeatRetriesReplacementThroughAnotherProject(t *testing.T) {
 	fake.reply("run@dash", `{"block_ids":["block:dash"]}`, 0)
 	fake.reply("wait", `{"exit_code":1}`, 1)
 	s.heartbeatTick()
-	watchers.Wait()
+	waitRexWorkers(t, s.children.rex)
 	recovered, _ := s.children.get("heartbeat:beta")
 	if recovered == beta || recovered.block != "block:new" || s.children.rex.sessionID() != "session:NEW" {
 		t.Fatalf("beta did not recover the host: child = %#v, session = %q; calls = %q",

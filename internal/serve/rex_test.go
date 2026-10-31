@@ -117,7 +117,6 @@ func rexServer(t *testing.T, fake *fakeRex, opts Options) *Server {
 	s := newTestServer(t, opts)
 	h := newRexHost(fake.bin, opts.Root, opts.Logger)
 	h.session = "session:S"
-	t.Cleanup(h.cancel)
 	s.children.rex = h
 	return s
 }
@@ -246,8 +245,6 @@ func TestRexUnresolvedLaunch(t *testing.T) {
 		if fake.called("new") || s.children.rex.sessionID() != "session:S" {
 			t.Errorf("unresolved launch replaced its session: %q", fake.calls())
 		}
-		// Swept precedes the watcher's final write to the fake's call log.
-		waitFor(t, "the recovered block to close", func() bool { return fake.called("block close block:B9") })
 	})
 	t.Run("no match", func(t *testing.T) {
 		fake := newFakeRex(t)
@@ -410,7 +407,7 @@ func TestRexDiscovery(t *testing.T) {
 		if s.children.rex == nil || s.hostErr != nil {
 			t.Fatalf("rex = %v, hostErr = %v; want the rex host", s.children.rex, s.hostErr)
 		}
-		t.Cleanup(s.children.rex.cancel)
+
 		if got := s.activity.snapshot(time.Now()).Host; got != "rex" {
 			t.Errorf("host = %q, want rex", got)
 		}
@@ -468,7 +465,6 @@ func TestRexAdoptsAtStartup(t *testing.T) {
 	gate := &fakeHeartbeat{due: []string{"alpha"}}
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: moe, Heartbeat: gate})
 	s.selectHost()
-	t.Cleanup(s.children.rex.cancel)
 
 	if _, ok := s.children.get("shell"); ok {
 		t.Error("a foreign block was adopted")
@@ -484,8 +480,7 @@ func TestRexAdoptsAtStartup(t *testing.T) {
 	fake.release("wait")
 	c, _ := s.children.get(heartbeatChildPrefix + "alpha")
 	waitFor(t, "the adopted job to finish", func() bool { exited, _ := c.snapshot(); return exited })
-	waitFor(t, "the clean block to close", func() bool { return fake.called("block close block:A") })
-	time.Sleep(50 * time.Millisecond)
+	waitRexWorkers(t, s.children.rex)
 	if got := gate.sweptList(); len(got) != 0 {
 		t.Errorf("Swept = %v, want none for a job this serve never dispatched", got)
 	}
@@ -513,7 +508,6 @@ func TestRexStaleSessionStartsFresh(t *testing.T) {
 	gate := &fakeHeartbeat{due: []string{"alpha"}}
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: moe, Heartbeat: gate})
 	s.selectHost()
-	t.Cleanup(s.children.rex.cancel)
 
 	s.heartbeatTick()
 	waitFor(t, "the sweep to be recorded", func() bool { return len(gate.sweptList()) == 1 })
@@ -546,7 +540,6 @@ func TestRexStartupOpensTheDash(t *testing.T) {
 	root := t.TempDir()
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: moe})
 	s.selectHost()
-	t.Cleanup(s.children.rex.cancel)
 
 	want := "new moe --json --keep-open --cwd " + root + " --window dash -- /usr/bin/env MOE_HOME=" + root + " " + moe + " dash --watch"
 	if !slices.Contains(fake.calls(), want) {
@@ -580,7 +573,6 @@ func TestRexStartupReplacesTheDash(t *testing.T) {
 	moe, _ := argvRecorder(t, 0)
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: moe})
 	s.selectHost()
-	t.Cleanup(s.children.rex.cancel)
 
 	if _, ok := s.children.get(heartbeatChildPrefix + "alpha"); !ok {
 		t.Error("the heartbeat block was not adopted")
@@ -610,7 +602,6 @@ func TestRexDashFailureHoldsNothing(t *testing.T) {
 		gate := &fakeHeartbeat{due: []string{"alpha"}}
 		s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: moe, Heartbeat: gate, Logger: &log})
 		s.selectHost()
-		t.Cleanup(s.children.rex.cancel)
 		if !strings.Contains(log.String(), "rex dash not opened") || s.hostErr != nil {
 			t.Fatalf("log = %q, hostErr = %v; want the failure logged and the host usable", log.String(), s.hostErr)
 		}
@@ -633,7 +624,6 @@ func TestRexDashFailureHoldsNothing(t *testing.T) {
 		moe, _ := argvRecorder(t, 0)
 		s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: moe, Logger: &log})
 		s.selectHost()
-		t.Cleanup(s.children.rex.cancel)
 		if fake.called("run") {
 			t.Errorf("rex calls = %q, want no second dash beside the one that wouldn't close", fake.calls())
 		}
@@ -655,6 +645,7 @@ func TestShutdownLeavesRexChildrenAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	cs.rex = newRexHost(fake.bin, t.TempDir(), io.Discard)
+	t.Cleanup(func() { cs.rex.cancel(); waitRexWorkers(t, cs.rex) })
 	cs.rex.session = "session:S"
 	cs.registerRex("heartbeat:alpha", "block:A", "adopted", io.Discard)
 	waitFor(t, "the rex watcher to start", func() bool { return fake.called("wait") })
@@ -666,7 +657,7 @@ func TestShutdownLeavesRexChildrenAlone(t *testing.T) {
 	if exited, _ := local.snapshot(); !exited {
 		t.Error("local child survived shutdown")
 	}
-	time.Sleep(50 * time.Millisecond)
+	waitRexWorkers(t, cs.rex)
 	if after := fake.calls(); len(after) != before {
 		t.Errorf("shutdown made rex calls: %q", after[before:])
 	}
