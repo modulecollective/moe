@@ -252,9 +252,9 @@ func (h *rexHost) launch(label string, argv []string) (string, error) {
 			return "", err
 		}
 		h.logf("rex: session %s is gone — creating a replacement", session)
-		h.mu.Lock()
-		h.session = ""
-		h.mu.Unlock()
+		// Keep the old identity until creation succeeds. If new fails,
+		// other retained blocks and watchers still need it to confirm
+		// absence, so any eligible project can reach the next launch.
 	}
 	args := append([]string{"new", rexSessionLabel, "--json", "--keep-open", "--cwd", h.root,
 		"--window", label, "--"}, argv...)

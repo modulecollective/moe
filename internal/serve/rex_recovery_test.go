@@ -293,19 +293,114 @@ func TestRexRecoveryCreationFailureIsBounded(t *testing.T) {
 	fake.reply("run", "", 1)
 	fake.reply("ls", `{"sessions":[]}`, 0)
 	fake.reply("new", "", 1)
+	fake.reply("block-ls", "", 1)
 	cs := newChildren()
 	cs.rex = newRexHost(fake.bin, t.TempDir(), io.Discard)
 	t.Cleanup(cs.rex.cancel)
 	cs.rex.session = "session:S"
 	c, err := cs.spawnRex("heartbeat:alpha", "/bin/true", nil, cs.rex.root, io.Discard)
-	if c != nil || err == nil || cs.rex.sessionID() != "" {
+	if c != nil || err == nil || cs.rex.sessionID() != "session:S" {
 		t.Fatalf("spawn = %v, %v, session = %q", c, err, cs.rex.sessionID())
 	}
 	if _, ok := cs.get("heartbeat:alpha"); ok {
 		t.Fatal("registered a phantom child")
 	}
-	if got := fake.calls(); len(got) != 3 || !strings.HasPrefix(got[2], "new moe ") {
-		t.Fatalf("calls = %q; want run, ls, one new", got)
+	if got := fake.calls(); len(got) != 4 || !strings.HasPrefix(got[2], "new moe ") || got[3] != "block ls --json -s session:S" {
+		t.Fatalf("calls = %q; want run, ls, one new, label reconciliation", got)
+	}
+	// A watcher that had not observed the disappearance can still
+	// finish after the failed replacement rather than retry forever.
+	fake.reply("wait", "", 1)
+	fake.reply("block-call", "", 1)
+	if _, err := cs.rex.waitExit("block:old-live"); !errors.Is(err, errRexBlockGone) {
+		t.Fatalf("old watcher after failed replacement = %v", err)
+	}
+}
+
+func TestRexHeartbeatRetriesReplacementThroughAnotherProject(t *testing.T) {
+	fake := newFakeRex(t)
+	fake.reply("block-close", "", 1)
+	fake.reply("block-ls", "", 1)
+	fake.reply("block-call", "", 1)
+	fake.reply("wait", "", 1)
+	fake.reply("run", "", 1)
+	fake.reply("ls", `{"sessions":[]}`, 0)
+	fake.reply("new", "", 1)
+	moe, localArgv := argvRecorder(t, 0)
+	gate := &fakeHeartbeat{due: []string{"alpha"}}
+	s := rexServer(t, fake, Options{Root: t.TempDir(), MoeBin: moe, Heartbeat: gate})
+	for _, project := range []string{"alpha", "beta"} {
+		id := heartbeatChildPrefix + project
+		c := &child{id: id, block: "block:" + project, done: make(chan struct{}), exitErr: errRexBlockGone}
+		close(c.done)
+		s.children.all[id] = c
+	}
+	alpha, _ := s.children.get("heartbeat:alpha")
+	beta, _ := s.children.get("heartbeat:beta")
+	var watchers sync.WaitGroup
+	onSpawn, onExit := s.children.onSpawn, s.children.onExit
+	s.children.onSpawn = func(id string, at time.Time, detail string) {
+		watchers.Add(1)
+		onSpawn(id, at, detail)
+	}
+	s.children.onExit = func(id string, at time.Time, err error, tail string) {
+		defer watchers.Done()
+		onExit(id, at, err, tail)
+	}
+	t.Cleanup(watchers.Wait)
+
+	// Both old children have completed and exhausted their backoff.
+	// Alpha clears its retained block, but replacement creation fails.
+	s.heartbeatTick()
+	if got, _ := s.children.get("heartbeat:alpha"); got != alpha || alpha.block != "" {
+		t.Fatalf("failed creation replaced alpha or kept its vanished block: %#v", got)
+	}
+	// Alpha is now paused/not due. An outage must still hold beta's
+	// retained block, even though the preceding launch proved absence.
+	gate.due = []string{"beta"}
+	fake.reply("new", `{"session_id":"session:NEW","initial_windows":[{"block_ids":["block:new"]}]}`, 0)
+	fake.reply("ls", "", 1)
+	before := len(fake.calls())
+	s.heartbeatTick()
+	if beta.block != "block:beta" {
+		t.Fatal("uncertain cleanup discarded beta's handle")
+	}
+	for _, call := range fake.calls()[before:] {
+		if strings.HasPrefix(call, "new ") || strings.HasPrefix(call, "run ") {
+			t.Fatalf("uncertain cleanup reached launch: %q", fake.calls()[before:])
+		}
+	}
+
+	// Once absence can be confirmed again, beta's next eligible tick
+	// must recover the host without alpha ever being offered again.
+	fake.reply("ls", `{"sessions":[]}`, 0)
+	fake.reply("block-ls@session:NEW", `{"blocks":[]}`, 0)
+	fake.reply("run@dash", `{"block_ids":["block:dash"]}`, 0)
+	fake.reply("wait", `{"exit_code":1}`, 1)
+	s.heartbeatTick()
+	watchers.Wait()
+	recovered, _ := s.children.get("heartbeat:beta")
+	if recovered == beta || recovered.block != "block:new" || s.children.rex.sessionID() != "session:NEW" {
+		t.Fatalf("beta did not recover the host: child = %#v, session = %q; calls = %q",
+			recovered, s.children.rex.sessionID(), fake.calls())
+	}
+	if got, _ := s.children.get("heartbeat:alpha"); got != alpha {
+		t.Fatal("recovery depended on redispatching alpha")
+	}
+	if body, err := os.ReadFile(rexSessionPath(s.opts.Root)); err != nil || string(body) != "session:NEW\n" {
+		t.Fatalf("replacement session file = %q, %v", body, err)
+	}
+	news, dashes := 0, 0
+	for _, call := range fake.calls() {
+		if strings.HasPrefix(call, "new ") {
+			news++
+		}
+		if strings.Contains(call, "--label dash ") {
+			dashes++
+		}
+	}
+	if news != 2 || dashes != 1 || localArgv() != "" {
+		t.Fatalf("new = %d, dash = %d, local argv = %q; calls = %q", news, dashes, localArgv(), fake.calls())
 	}
 }
 
