@@ -246,6 +246,11 @@ func (s *Server) heartbeatTick() {
 			args = append(args, "--pr-checks", d.PRChecks)
 		}
 		args = append(args, projectID)
+		h := s.children.rex
+		session := ""
+		if h != nil {
+			session = h.sessionID()
+		}
 		child, err := s.children.spawn(id, s.opts.MoeBin, args,
 			s.opts.Root, s.opts.Logger)
 		if err != nil {
@@ -256,6 +261,10 @@ func (s *Server) heartbeatTick() {
 		s.activity.recordSweepStart(projectID, child.started)
 		s.saveActivity()
 		go s.awaitHeartbeat(projectID, child, true)
+		// Restore the lost dash only after the replacement sweep is tracked.
+		if h != nil && h.sessionID() != "" && h.sessionID() != session {
+			s.openDash(h)
+		}
 	}
 }
 

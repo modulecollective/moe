@@ -23,6 +23,7 @@ func init() { rexBin = "moe-test-no-rex" }
 // <key>.out if present and exits with <key>.status (default 0). That is
 // enough to shape every reply the Rex host reads, and every argv it
 // sends is on the record.
+// A <key>@<arg>.status overrides the key for a call containing arg.
 type fakeRex struct {
 	t   *testing.T
 	dir string
@@ -39,6 +40,9 @@ printf '%s\n' "$*" >> "$D/calls"
 shift 3
 k=$1
 [ "$1" = block ] && k="block-$2"
+for arg do
+  if [ -e "$D/$k@$arg.status" ]; then k="$k@$arg"; break; fi
+done
 while [ -e "$D/$k.hold" ]; do sleep 0.02; done
 [ -e "$D/$k.out" ] && cat "$D/$k.out"
 s=0

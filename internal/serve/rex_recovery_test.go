@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestRexSessionPresent(t *testing.T) {
@@ -45,6 +47,164 @@ func TestRexSessionPresent(t *testing.T) {
 			}
 			if !slices.Equal(fake.calls(), []string{"ls --json"}) {
 				t.Errorf("calls = %q", fake.calls())
+			}
+		})
+	}
+}
+
+func TestRexHeartbeatRecoversKilledSession(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		live     bool
+		dashFail bool
+	}{
+		{"killed while live", true, false},
+		{"killed with retained failure", false, false},
+		{"dash failure preserves sweep", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := newFakeRex(t)
+			fake.reply("run", `{"block_ids":["block:B1"]}`, 0)
+			fake.reply("wait", `{"exit_code":1}`, 1)
+			fake.hold("wait")
+			moe, localArgv := argvRecorder(t, 0)
+			gate := &fakeHeartbeat{due: []string{"alpha"}}
+			var log syncBuf
+			s := rexServer(t, fake, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: moe, Heartbeat: gate, Logger: &log})
+
+			// Join every watcher after its exit hooks. All test sweeps
+			// fail, so no asynchronous successful-block close follows.
+			var watchers sync.WaitGroup
+			onSpawn, onExit := s.children.onSpawn, s.children.onExit
+			s.children.onSpawn = func(id string, at time.Time, detail string) {
+				watchers.Add(1)
+				if onSpawn != nil {
+					onSpawn(id, at, detail)
+				}
+			}
+			s.children.onExit = func(id string, at time.Time, err error, tail string) {
+				defer watchers.Done()
+				if onExit != nil {
+					onExit(id, at, err, tail)
+				}
+			}
+			t.Cleanup(func() {
+				// Let a watcher finish even if an assertion failed
+				// while it was retrying an unreadable session.
+				fake.reply("wait", `{"exit_code":1}`, 1)
+				fake.reply("block-call", `{"last_exit":{"exit_code":1}}`, 0)
+				fake.release("wait")
+				watchers.Wait()
+			})
+
+			s.heartbeatTick()
+			first, ok := s.children.get("heartbeat:alpha")
+			if !ok {
+				t.Fatal("initial sweep was not registered")
+			}
+			waitFor(t, "live watcher", func() bool { return fake.called("wait --json block:B1") })
+			before := len(fake.calls())
+			s.heartbeatTick()
+			if len(fake.calls()) != before {
+				t.Fatalf("single-flight dispatched beside live sweep: %q", fake.calls())
+			}
+
+			if tc.live {
+				fake.reply("wait", "", 1)
+				fake.reply("block-call", "", 1)
+				fake.reply("block-ls", "", 1)
+				fake.reply("ls", `{"sessions":[]}`, 0)
+			}
+			fake.release("wait")
+			waitFor(t, "first sweep completion", func() bool { return len(gate.sweptList()) == 1 })
+			watchers.Wait()
+			if tc.live && !errors.Is(first.exitErr, errRexBlockGone) {
+				t.Fatalf("killed sweep exit = %v", first.exitErr)
+			}
+			if gate.cleanList()[0] {
+				t.Fatal("killed/failed sweep was acknowledged as clean")
+			}
+			waitFor(t, "failure backoff", func() bool {
+				s.heartbeat.mu.Lock()
+				defer s.heartbeat.mu.Unlock()
+				return s.heartbeat.skip["alpha"] == 1
+			})
+			before = len(fake.calls())
+			s.heartbeatTick()
+			if len(fake.calls()) != before {
+				t.Fatalf("recovery bypassed cool-off: %q", fake.calls())
+			}
+
+			fake.reply("block-close", "", 1)
+			fake.reply("block-ls", "", 1)
+			fake.reply("run", "", 1)
+			// During an outage the retained handle must still hold
+			// dispatch. Only a later valid listing licenses recovery.
+			fake.reply("ls", "", 1)
+			before = len(fake.calls())
+			s.heartbeatTick()
+			if fake.called("new") || len(gate.sweptList()) != 1 {
+				t.Fatalf("outage dispatched replacement: %q", fake.calls())
+			}
+			for _, call := range fake.calls()[before:] {
+				if strings.HasPrefix(call, "run ") {
+					t.Fatalf("outage escaped retained-block cleanup: %q", fake.calls())
+				}
+			}
+
+			fake.reply("ls", `{"sessions":[]}`, 0)
+			fake.reply("new", `{"session_id":"session:NEW","initial_windows":[{"block_ids":["block:B2"]}]}`, 0)
+			fake.reply("block-ls@session:NEW", `{"blocks":[]}`, 0)
+			fake.reply("run@dash", `{"block_ids":["block:D"]}`, 0)
+			if tc.dashFail {
+				fake.reply("run@dash", "", 1)
+				// Even a failed dash launch must preserve the newly
+				// registered sweep, never create a second session.
+				fake.reply("ls", `{"sessions":[{"session_id":"session:NEW"}]}`, 0)
+			}
+			fake.reply("wait", `{"exit_code":1}`, 1)
+			s.heartbeatTick()
+			recovered, ok := s.children.get("heartbeat:alpha")
+			if !ok || recovered == first || recovered.block != "block:B2" {
+				t.Fatalf("replacement sweep = %#v", recovered)
+			}
+			waitFor(t, "recovered sweep completion", func() bool { return len(gate.sweptList()) == 2 })
+			watchers.Wait()
+			wantDash := "run --json --focus=false --keep-open -s session:NEW --label dash --cwd " + s.opts.Root +
+				" -- /usr/bin/env MOE_HOME=" + s.opts.Root + " " + moe + " dash --watch"
+			if !slices.Contains(fake.calls(), wantDash) {
+				t.Fatalf("dash argv missing: %q; want %q", fake.calls(), wantDash)
+			}
+			if tc.dashFail && !strings.Contains(log.String(), "rex dash not opened") {
+				t.Fatalf("dash failure not logged: %q", log.String())
+			}
+			if body, err := os.ReadFile(rexSessionPath(s.opts.Root)); err != nil || string(body) != "session:NEW\n" {
+				t.Fatalf("replacement session file = %q, %v", body, err)
+			}
+
+			// Another ordinary sweep uses the replacement session
+			// without reopening or replacing the dash.
+			waitFor(t, "second failure backoff", func() bool {
+				s.heartbeat.mu.Lock()
+				defer s.heartbeat.mu.Unlock()
+				return s.heartbeat.fails["alpha"] == 2
+			})
+			s.heartbeat.record("alpha", false)
+			fake.reply("run", `{"block_ids":["block:B3"]}`, 0)
+			s.heartbeatTick()
+			waitFor(t, "third sweep completion", func() bool { return len(gate.sweptList()) == 3 })
+			watchers.Wait()
+			news, dashes := 0, 0
+			for _, call := range fake.calls() {
+				if strings.HasPrefix(call, "new ") {
+					news++
+				}
+				if call == wantDash {
+					dashes++
+				}
+			}
+			if news != 1 || dashes != 1 || localArgv() != "" {
+				t.Fatalf("new = %d, dash = %d, local argv = %q; calls = %q", news, dashes, localArgv(), fake.calls())
 			}
 		})
 	}
