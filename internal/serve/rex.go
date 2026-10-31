@@ -25,10 +25,10 @@ import (
 // id, start, exit, tail — and drives the installed `rex` CLI with --json
 // to fill it in. No wire protocol, no SDK.
 //
-// The block label is the child id ("heartbeat:<project>"), and that is
-// the whole of the persistence: a restarted serve lists the session's
-// blocks and adopts the labelled ones (adoptRex). The only file is
-// .moe/rex-session, which names the session.
+// An active block carries the child id ("heartbeat:<project>"). Once
+// reported, it is renamed "done:heartbeat:<project>" so restart can
+// distinguish a retained screen from an unprocessed exit. The only file
+// is .moe/rex-session, which names the session.
 
 // rexBin is the Rex CLI serve looks for on PATH. A var so the package's
 // tests can point discovery at a name that never resolves — an armed
@@ -48,7 +48,8 @@ const rexMinAPIRevision = 8
 const rexSessionLabel = "moe"
 
 // rexRetryDelay paces the watcher when Rex can't say whether a block's
-// program has exited. Variable so tests can shorten it.
+// program has exited or acknowledge its completion. Variable so tests
+// can shorten it.
 var rexRetryDelay = 5 * time.Second
 
 // rexHost is the Rex half of the child registry: the CLI it drives and
@@ -164,7 +165,7 @@ func (h *rexHost) sessionID() string {
 // sessionPresent requires a valid listing: loss of contact never proves
 // that a session (and the jobs it owns) can safely be replaced.
 func (h *rexHost) sessionPresent(session string) (bool, error) {
-	out, err := h.call(context.Background(), "ls", "--json")
+	out, err := h.call(h.ctx, "ls", "--json")
 	if err != nil {
 		return false, err
 	}
@@ -194,7 +195,7 @@ type rexBlock struct {
 
 // blocks lists the session's blocks.
 func (h *rexHost) blocks(session string) ([]rexBlock, error) {
-	out, err := h.call(context.Background(), "block", "ls", "--json", "-s", session)
+	out, err := h.call(h.ctx, "block", "ls", "--json", "-s", session)
 	if err != nil {
 		return nil, err
 	}
@@ -362,26 +363,66 @@ func (h *rexHost) lastExit(block string) (code int, exited bool, err error) {
 	return proc.LastExit.ExitCode, true, nil
 }
 
-// findBlock reports whether block is still in the session: its id, or
-// "" when it is gone.
-func (h *rexHost) findBlock(block string) (string, error) {
+// lookupBlock returns the block's current metadata, or a zero value once
+// a valid listing proves the block (or its session) absent.
+func (h *rexHost) lookupBlock(block string) (rexBlock, error) {
 	session := h.sessionID()
 	if session == "" {
-		return "", errors.New("no rex session")
+		return rexBlock{}, errors.New("no rex session")
 	}
 	bs, err := h.blocks(session)
 	if err != nil {
 		if present, probeErr := h.sessionPresent(session); probeErr == nil && !present {
-			return "", nil
+			return rexBlock{}, nil
 		}
-		return "", err
+		return rexBlock{}, err
 	}
 	for _, b := range bs {
 		if b.ID == block {
-			return b.ID, nil
+			return b, nil
 		}
 	}
-	return "", nil
+	return rexBlock{}, nil
+}
+
+// findBlock reports whether block is still in the session: its id, or
+// "" when it is gone.
+func (h *rexHost) findBlock(block string) (string, error) {
+	b, err := h.lookupBlock(block)
+	return b.ID, err
+}
+
+// acknowledge marks an already reported exit without discarding its
+// screen. Readback resolves a lost rename reply; uncertainty retries
+// without replaying the completion hooks. False means confirmed absence.
+func (h *rexHost) acknowledge(block, id string) (bool, error) {
+	label := "done:" + id
+	for {
+		if h.ctx.Err() != nil {
+			return false, h.ctx.Err()
+		}
+		_, err := h.call(h.ctx, "block", "rename", "-s", h.sessionID(), block, label)
+		if err == nil {
+			return true, nil
+		}
+		if h.ctx.Err() != nil {
+			return false, h.ctx.Err()
+		}
+		h.logf("rex: acknowledge block %s: %v — checking label", block, err)
+		if b, readErr := h.lookupBlock(block); readErr == nil {
+			if b.ID == "" {
+				return false, nil
+			}
+			if b.Label == label {
+				return true, nil
+			}
+		}
+		select {
+		case <-h.ctx.Done():
+			return false, h.ctx.Err()
+		case <-time.After(rexRetryDelay):
+		}
+	}
 }
 
 func (h *rexHost) capture(block string) (string, error) {
@@ -420,10 +461,9 @@ func rexJobArgv(moeBin string, env, args []string) ([]string, error) {
 
 // spawnRex launches a job as a Rex block and registers it under id.
 //
-// Retention happens here: a previous run of this id that failed kept its
-// block so the operator could read the screen, and this launch is when
-// it goes. If that close fails the launch is skipped — the next tick
-// tries again — so a stale block never shares a label with a live one.
+// Retention ends here: close the previous child's block and every done
+// block for this id, including screens retained across serve restarts.
+// Uncertain listing or cleanup holds this launch for the next tick.
 //
 // A launch that errors is unresolved, not failed: Rex may have created
 // the block before the reply was lost. The session is searched for the
@@ -433,6 +473,9 @@ func rexJobArgv(moeBin string, env, args []string) ([]string, error) {
 // Not safe for concurrent calls on one id. The heartbeat ticker is the
 // only spawner and runs one goroutine.
 func (cs *children) spawnRex(id, moeBin string, args []string, root string, logger io.Writer) (*child, error) {
+	if err := cs.rex.ctx.Err(); err != nil {
+		return nil, err
+	}
 	cs.mu.Lock()
 	prev, had := cs.all[id]
 	if had {
@@ -442,18 +485,46 @@ func (cs *children) spawnRex(id, moeBin string, args []string, root string, logg
 			cs.mu.Unlock()
 			return nil, fmt.Errorf("serve: run %s already live", id)
 		}
+		select {
+		case <-prev.retired:
+		default:
+			cs.mu.Unlock()
+			return nil, fmt.Errorf("serve: run %s awaiting rex retirement", id)
+		}
 	}
 	cs.mu.Unlock()
 
-	if had && prev.block != "" && prev.exitErr != nil {
+	var blocks []string
+	seen := map[string]bool{}
+	if had && prev.block != "" {
+		blocks = append(blocks, prev.block)
+		seen[prev.block] = true
+	}
+	if session := cs.rex.sessionID(); session != "" {
+		bs, err := cs.rex.blocks(session)
+		if err != nil {
+			if present, probeErr := cs.rex.sessionPresent(session); probeErr != nil || present {
+				return nil, fmt.Errorf("list kept rex blocks: %w (session present: %t, check: %v)", err, present, probeErr)
+			}
+		}
+		for _, b := range bs {
+			if b.Label == "done:"+id && !seen[b.ID] {
+				blocks = append(blocks, b.ID)
+				seen[b.ID] = true
+			}
+		}
+	}
+	for _, block := range blocks {
 		// A kept block the operator closed by hand, or that went with
 		// its server, fails the close with nothing left to close. Only a
 		// block still in the session holds the launch back.
-		if err := cs.rex.closeBlock(prev.block); err != nil {
-			if id, ferr := cs.rex.findBlock(prev.block); ferr != nil || id != "" {
-				return nil, fmt.Errorf("close kept rex block %s: %w", prev.block, err)
+		if err := cs.rex.closeBlock(block); err != nil {
+			if found, ferr := cs.rex.findBlock(block); ferr != nil || found != "" {
+				return nil, fmt.Errorf("close kept rex block %s: %w", block, err)
 			}
 		}
+	}
+	if had {
 		cs.mu.Lock()
 		prev.block = ""
 		cs.mu.Unlock()
@@ -479,7 +550,7 @@ func (cs *children) spawnRex(id, moeBin string, args []string, root string, logg
 // registerRex records a Rex-hosted child and starts its watcher. how is
 // the activity ring's word for it: "started" or "adopted".
 func (cs *children) registerRex(id, block, how string, logger io.Writer) *child {
-	c := &child{id: id, block: block, started: time.Now(), done: make(chan struct{})}
+	c := &child{id: id, block: block, started: time.Now(), done: make(chan struct{}), retired: make(chan struct{})}
 	cs.mu.Lock()
 	onSpawn, onExit := cs.onSpawn, cs.onExit
 	cs.all[id] = c
@@ -492,13 +563,14 @@ func (cs *children) registerRex(id, block, how string, logger io.Writer) *child 
 }
 
 // watchRex is the Rex host's reader: wait for the exit, keep the same
-// bounded tail the local host keeps, then the shared exit path. A clean
-// result is consumed by closing its block; a failed one keeps it for
-// the operator until the next launch of the same id.
+// bounded tail the local host keeps, then the shared exit path. Mark
+// the reported result before closing a clean block or retaining a failed
+// screen until the next launch of the same id.
 //
 // A shutdown returns without finishing: the job is Rex's, and a
 // restarted serve adopts it.
 func (cs *children) watchRex(c *child, logger io.Writer, onExit func(string, time.Time, error, string)) {
+	defer close(c.retired)
 	code, err := cs.rex.waitExit(c.block)
 	if errors.Is(err, context.Canceled) {
 		return
@@ -519,6 +591,13 @@ func (cs *children) watchRex(c *child, logger io.Writer, onExit func(string, tim
 		}
 	}
 	c.finish(cs, exitErr, logger, onExit)
+	if errors.Is(err, errRexBlockGone) {
+		return
+	}
+	present, ackErr := cs.rex.acknowledge(c.block, c.id)
+	if ackErr != nil || !present {
+		return
+	}
 	if exitErr == nil {
 		if err := cs.rex.closeBlock(c.block); err != nil {
 			cs.rex.logf("rex: close block %s: %v", c.block, err)
@@ -611,8 +690,9 @@ func (s *Server) openDash(h *rexHost) {
 // and an exited one is consumed at once. Either way the exit runs the
 // ordinary hooks — emit file, activity, log line, webhook — and the
 // backoff ledger, but not the gate's Swept, because this serve never saw
-// the dispatch. The emit file is left for the exit to read, since a live
-// job may still write it.
+// the dispatch. Done labels are retained screens, never adopted or reported
+// again. The emit file is left for an active job's exit to read, since
+// that job may still write it.
 //
 // An unreadable listing holds dispatch until a retry reconciles the jobs
 // or a valid session listing proves absence. Even then the old identity
@@ -635,6 +715,9 @@ func (s *Server) adoptRex(h *rexHost) error {
 	}
 	seen := map[string]bool{}
 	for _, b := range bs {
+		if strings.HasPrefix(b.Label, "done:"+heartbeatChildPrefix) {
+			continue
+		}
 		project := heartbeatProject(b.Label)
 		if project == "" {
 			continue

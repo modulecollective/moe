@@ -65,6 +65,10 @@ type child struct {
 	// one, and for a Rex one whose block serve has since closed.
 	block string
 
+	// retired is Rex-only: done publishes the exit before completion hooks
+	// return; retired closes after acknowledgement and immediate cleanup.
+	retired chan struct{}
+
 	done    chan struct{}
 	exitErr error
 

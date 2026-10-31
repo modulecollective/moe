@@ -278,8 +278,8 @@ func TestRexRecoveryCreationFailureIsBounded(t *testing.T) {
 	if _, ok := cs.get("heartbeat:alpha"); ok {
 		t.Fatal("registered a phantom child")
 	}
-	if got := fake.calls(); len(got) != 4 || !strings.HasPrefix(got[2], "new moe ") || got[3] != "block ls --json -s session:S" {
-		t.Fatalf("calls = %q; want run, ls, one new, label reconciliation", got)
+	if got := fake.calls(); len(got) != 6 || got[0] != "block ls --json -s session:S" || got[1] != "ls --json" || !strings.HasPrefix(got[4], "new moe ") || got[5] != "block ls --json -s session:S" {
+		t.Fatalf("calls = %q; want cleanup listing/probe, run, ls, one new, label reconciliation", got)
 	}
 	// A watcher that had not observed the disappearance can still
 	// finish after the failed replacement rather than retry forever.
@@ -306,6 +306,7 @@ func TestRexHeartbeatRetriesReplacementThroughAnotherProject(t *testing.T) {
 		id := heartbeatChildPrefix + project
 		c := &child{id: id, block: "block:" + project, done: make(chan struct{}), exitErr: errRexBlockGone}
 		close(c.done)
+		c.retired = c.done
 		s.children.all[id] = c
 	}
 	alpha, _ := s.children.get("heartbeat:alpha")

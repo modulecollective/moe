@@ -74,7 +74,7 @@ func TestRexWorkerJoinIncludesFinalClose(t *testing.T) {
 	if c.tail() != "final screen\n" || !slices.Equal(gate.cleanList(), []bool{true}) {
 		t.Fatalf("completion lost: tail %q, clean %v", c.tail(), gate.cleanList())
 	}
-	if calls := fake.calls(); len(calls) != 4 || calls[2] != "capture -b block:A --trim" || calls[3] != "block close block:A" {
+	if calls := fake.calls(); len(calls) != 6 || calls[3] != "capture -b block:A --trim" || calls[4] != "block rename -s session:S block:A done:heartbeat:alpha" || calls[5] != "block close block:A" {
 		t.Fatalf("unexpected completed calls: %q", calls)
 	}
 }

@@ -239,6 +239,15 @@ func (s *Server) heartbeatTick() {
 			if exited, _ := c.snapshot(); !exited {
 				continue
 			}
+			if s.children.rex != nil {
+				// done precedes the exit hooks. Leave their emit file and
+				// activity row intact until Rex retirement finishes too.
+				select {
+				case <-c.retired:
+				default:
+					continue
+				}
+			}
 		}
 		// The emit file and the row's run id both still name the last
 		// sweep's run, and neither is this one's. Both clears belong here,

@@ -33,51 +33,57 @@ source of truth for the exact command surface; this page is a map.
 - `moe serve [--addr <host[:port]>] [--port <n>] [--dynamic]` runs the moe
   server: the web UI, journal pushing, and an optional heartbeat. It binds to
   `127.0.0.1:4242` by default; `--port` is ignored when `--addr` includes a
-  port. Beyond runs and canvases, its read-only surface browses lore, a
-  projects index with per-project hubs, project knowledge topics, twin
-  documents, the token-spend report at `/usage`, and a dashboard with the same
-  daily-activity chart (and a project-scoped one on each project page). **The
-  web starts nothing.** Every action it offers writes a journal commit and
-  stops there: capture or edit an idea or intent, tag an idea for a workflow,
-  close or reopen a run, mark the current stage advanced, answer a run's open
-  question. Starting agents is the heartbeat's job alone. No request executes
-  code — but agents read those writes in their prompts, and an armed serve's
-  heartbeat starts agents because of them: whoever can reach the listener
-  steers the machine. Reach is the only auth, so whatever sits in front of the
-  listener is the security boundary. Interactive stage-driving happens in a
-  terminal. Separately from all that, and armed or not, serve drains the
-  bureaucracy's local main to origin every couple of seconds; this does not
-  ship a project's code branch. Journal verbs commit and return; the push is
-  serve's. With no serve running, commits sit on local main until `moe sync` or
-  the next serve start takes them — `git status` in the bureaucracy says how
-  many are waiting, and serve's log carries any push failure. `--dynamic` (or a
-  non-empty `MOE_SERVE_DYNAMIC`) is the standing consent rung: it starts the
-  resident heartbeat, a per-project ticker that runs `moe pulse new --dynamic`
-  when the board warrants it. Unarmed, the ticker never fires and what the web
-  wrote simply waits. Stopping the process retracts it: no new sweep starts. At
-  armed startup, serve looks for a local Rex server. With a usable server,
-  serve opens a Rex session named `moe`, reached from the Rex client like any
-  other session, whose `dash` block runs `moe dash --watch`; each armed start
-  replaces that block with a fresh one. Each sweep runs in that session as a
-  block labelled `heartbeat:<project>`. Such a sweep finishes even if serve
-  stops or crashes; an armed restart with a usable Rex host picks it up rather
-  than starting another, and Ctrl-C in its block is how to stop it. A failed
-  sweep's block stays open for reading until that project's next sweep. With no
-  Rex server, sweeps run on serve's own terminals and stop with it. If startup
-  cannot read a recorded session's jobs, serve keeps its identity and holds all
-  new sweeps, retrying adoption on each heartbeat tick, even when no project is
-  due. Only a valid session listing proving absence permits replacement. The
-  dash opens after reconciliation; a dash failure alone does not hold sweeps.
-  An incompatible Rex discovery reply instead requires fixing the host and
-  restarting serve. The startup log, `moe dash` and `/serve` name which host is
-  in use. A `/serve` page owns that ticker's status and trace — what each recent
-  tick decided, and the output tail of any sweep that failed — reachable from
-  the menu and from the one-line status cluster every board header carries.
-  `MOE_SERVE_NOTIFY_URL` is the other env var: set it and serve POSTs a small
-  JSON body to that URL each time a heartbeat sweep exits on its own, naming
-  which project's sweep it was and whether it succeeded. A sweep serve
-  interrupted on its way down sends nothing: an `ok:false` there would report a
-  failure the operator caused. A failed POST is logged and blocks nothing.
+  port. Beyond runs and canvases, its read-only surface browses lore, a projects
+  index with per-project hubs, project knowledge topics, twin documents, the
+  token-spend report at `/usage`, and a dashboard with the same daily-activity
+  chart (and a project-scoped one on each project page). **The web starts
+  nothing.** Every action it offers writes a journal commit and stops there:
+  capture or edit an idea or intent, tag an idea for a workflow, close or reopen
+  a run, mark the current stage advanced, answer a run's open question. Starting
+  agents is the heartbeat's job alone. No request executes code — but agents
+  read those writes in their prompts, and an armed serve's heartbeat starts
+  agents because of them: whoever can reach the listener steers the machine.
+  Reach is the only auth, so whatever sits in front of the listener is the
+  security boundary. Interactive stage-driving happens in a terminal. Separately
+  from all that, and armed or not, serve drains the bureaucracy's local main to
+  origin every couple of seconds; this does not ship a project's code branch.
+  Journal verbs commit and return; the push is serve's. With no serve running,
+  commits sit on local main until `moe sync` or the next serve start takes them
+  — `git status` in the bureaucracy says how many are waiting, and serve's log
+  carries any push failure. `--dynamic` (or a non-empty `MOE_SERVE_DYNAMIC`) is
+  the standing consent rung: it starts the resident heartbeat, a per-project
+  ticker that runs `moe pulse new --dynamic` when the board warrants it.
+  Unarmed, the ticker never fires and what the web wrote simply waits. Stopping
+  the process retracts it: no new sweep starts. At armed startup, serve looks
+  for a local Rex server. With a usable server, serve opens a Rex session named
+  `moe`, reached from the Rex client like any other session, whose `dash` block
+  runs `moe dash --watch`; each armed start replaces that block with a fresh
+  one. Each sweep runs in that session as a block labelled
+  `heartbeat:<project>`. Such a sweep finishes even if serve stops or crashes;
+  an armed restart with a usable Rex host picks it up rather than starting
+  another, and Ctrl-C in its block is how to stop it. After reporting an exit,
+  serve renames the block to `done:heartbeat:<project>`; `done` acknowledges
+  reporting, including a failed notification attempt. Successful blocks close,
+  while failed screens stay readable until that project's next sweep. Restart
+  skips done blocks; the next sweep cleans them up before launching. Old
+  unmarked exits are reported once on upgrade. A crash between reporting and
+  renaming can still duplicate a report, and failure cooldown remains
+  process-local. With no Rex server, sweeps run on serve's own terminals and
+  stop with it. If startup cannot read a recorded session's jobs, serve keeps
+  its identity and holds all new sweeps, retrying adoption on each heartbeat
+  tick, even when no project is due. Only a valid session listing proving
+  absence permits replacement. The dash opens after reconciliation; a dash
+  failure alone does not hold sweeps. An incompatible Rex discovery reply
+  instead requires fixing the host and restarting serve. The startup log,
+  `moe dash` and `/serve` name which host is in use. A `/serve` page owns that
+  ticker's status and trace — what each recent tick decided, and the output tail
+  of any sweep that failed — reachable from the menu and from the one-line
+  status cluster every board header carries. `MOE_SERVE_NOTIFY_URL` is the other
+  env var: set it and serve POSTs a small JSON body to that URL each time a
+  heartbeat sweep exits on its own, naming which project's sweep it was and
+  whether it succeeded. A sweep serve interrupted on its way down sends nothing:
+  an `ok:false` there would report a failure the operator caused. A failed POST
+  is logged and blocks nothing.
 - `moe project mode <id> [paused|safe|auto]` caps what the heartbeat may start
   in one project, without stopping the process. See below.
 - `moe chore list|check|open|skip` lists due project chores, dry-runs a chore

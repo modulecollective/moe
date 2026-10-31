@@ -44,15 +44,42 @@ for arg do
   if [ -e "$D/$k@$arg.status" ]; then k="$k@$arg"; break; fi
 done
 while [ -e "$D/$k.hold" ]; do sleep 0.02; done
-[ -e "$D/$k.out" ] && cat "$D/$k.out"
 s=0
 [ -e "$D/$k.status" ] && s=$(cat "$D/$k.status")
+if [ -d "$D/blocks" ]; then
+  case "$k" in
+    block-ls)
+      [ "$s" = 0 ] || exit "$s"
+      printf '{"blocks":['
+      sep=''
+      for file in "$D/blocks/"*; do
+        [ -f "$file" ] || continue
+        printf '%s{"block_id":"%s","label":"%s"}' "$sep" "${file##*/}" "$(cat "$file")"
+        sep=,
+      done
+      printf ']}\n'
+      exit 0;;
+    block-rename)
+      if [ "$s" = 0 ] || [ -e "$D/rename-lost" ]; then
+        [ -f "$D/blocks/$5" ] || exit 1
+        printf '%s' "$6" > "$D/blocks/$5"
+      fi;;
+    block-close)
+      if [ "$s" = 0 ] || [ -e "$D/close-lost" ]; then
+        [ -f "$D/blocks/$3" ] || exit 1
+        rm "$D/blocks/$3"
+      fi;;
+  esac
+fi
+[ -e "$D/$k.out" ] && cat "$D/$k.out"
 exit $s
 `
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	return &fakeRex{t: t, dir: dir, bin: bin}
+	f := &fakeRex{t: t, dir: dir, bin: bin}
+	f.reply("block-ls", `{"blocks":[]}`, 0)
+	return f
 }
 
 // reply sets what the subcommand key prints and its exit status.
@@ -142,8 +169,8 @@ func TestRexLaunchArgvIsExact(t *testing.T) {
 		" -- /usr/bin/env MOE_HOME=" + root + " MOE_SERVE_AGENT=1 " + moe +
 		" pulse new --dynamic --heartbeat --emit-run " + sweepRunPath(root, "alpha") +
 		` --pr-checks {"k":"v w"} alpha`
-	if calls := fake.calls(); len(calls) == 0 || calls[0] != want {
-		t.Errorf("first rex call = %q\nwant %q", calls, want)
+	if calls := fake.calls(); len(calls) < 2 || calls[0] != "block ls --json -s session:S" || calls[1] != want {
+		t.Errorf("rex calls = %q\nwant cleanup listing then %q", calls, want)
 	}
 }
 
@@ -281,6 +308,7 @@ func TestRexRetention(t *testing.T) {
 
 	s.heartbeatTick()
 	waitFor(t, "the first sweep", func() bool { return len(gate.sweptList()) == 1 })
+	waitRexWorkers(t, s.children.rex)
 	if fake.called("block close") {
 		t.Fatal("failed block closed on exit")
 	}
@@ -322,6 +350,7 @@ func TestRexKeptBlockGoneDoesNotWedge(t *testing.T) {
 
 	s.heartbeatTick()
 	waitFor(t, "the first sweep", func() bool { return len(gate.sweptList()) == 1 })
+	waitRexWorkers(t, s.children.rex)
 
 	// A close that fails with B1 still in the session holds the launch.
 	fake.reply("block-close", "", 1)
@@ -330,8 +359,8 @@ func TestRexKeptBlockGoneDoesNotWedge(t *testing.T) {
 	fake.reply("wait", `{"exit_code":0}`, 0)
 	s.heartbeat.record("alpha", false) // spend the cool-off the failure earned
 	s.heartbeatTick()
-	if n := strings.Count(strings.Join(fake.calls(), "\n"), "\nrun "); n != 0 {
-		t.Fatalf("launched beside a kept block that would not close (%d runs after the first)", n)
+	if n := fake.count("run "); n != 1 {
+		t.Fatalf("launched beside a kept block that would not close (%d runs after the first)", n-1)
 	}
 
 	// The operator closes B1 by hand.
