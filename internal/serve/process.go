@@ -50,12 +50,17 @@ var shutdownHangupGrace = 10 * time.Second
 // stays small enough for `moe dash` to re-read on every watch repaint.
 const childTailBytes = 8 << 10
 
-// child is one PTY-backed moe run the server is parenting.
+// child is one moe run the server is parenting, wherever it runs. The
+// registry half — id, start, exit, tail — is the same for every host;
+// what differs is who owns the process.
 type child struct {
 	id      string // "<project>/<slug>" — known at spawn time
-	cmd     *exec.Cmd
-	pty     *pty.Pty
 	started time.Time
+
+	// localProc is set when serve owns the process on a PTY of its own,
+	// and nil when a Rex block does (rex.go). Embedded so the PTY code
+	// reads c.cmd and c.pty as it always has.
+	*localProc
 
 	done    chan struct{}
 	exitErr error
@@ -64,6 +69,13 @@ type child struct {
 	// a request handler may be rendering it.
 	tailMu  sync.Mutex
 	tailBuf []byte
+}
+
+// localProc is the local host: an exec.Cmd on a PTY serve holds the
+// master of, drained by read and wound down by shutdown's four phases.
+type localProc struct {
+	cmd *exec.Cmd
+	pty *pty.Pty
 }
 
 // children is the live PTY-child registry, keyed by id.
@@ -142,11 +154,10 @@ func (cs *children) spawn(id, moeBin string, args []string, root string, logger 
 	}
 
 	c := &child{
-		id:      id,
-		cmd:     cmd,
-		pty:     p,
-		started: time.Now(),
-		done:    make(chan struct{}),
+		id:        id,
+		localProc: &localProc{cmd: cmd, pty: p},
+		started:   time.Now(),
+		done:      make(chan struct{}),
 	}
 	onSpawn, onExit := cs.onSpawn, cs.onExit
 	cs.all[id] = c
@@ -323,7 +334,15 @@ func (c *child) read(cs *children, logger io.Writer, onExit func(string, time.Ti
 			break
 		}
 	}
-	c.exitErr = c.cmd.Wait()
+	c.finish(cs, c.cmd.Wait(), logger, onExit)
+}
+
+// finish is the exit path every host shares: record the status, release
+// anyone waiting on done, then the notify and activity hooks. Rex's
+// watcher reaches it with an exit status read from the block rather than
+// from Wait.
+func (c *child) finish(cs *children, exitErr error, logger io.Writer, onExit func(string, time.Time, error, string)) {
+	c.exitErr = exitErr
 	close(c.done)
 	if logger != nil {
 		fmt.Fprintf(logger, "serve: child %s exited: %v\n", c.id, c.exitErr)
