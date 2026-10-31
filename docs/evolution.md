@@ -225,14 +225,15 @@ a survey adds nothing. Ctrl-C is the operator's brake on one already in flight.
 
 Underneath those, nothing that made step 2 safe was traded away. A clock did
 arrive since: an armed `moe serve --dynamic` carries a resident heartbeat that
-looks at each project's board every twenty minutes. It only wakes the machine
-to look, and every guard that follows applies to the sweep it fires exactly as
-it applies to a typed one. The survey sandbox is read-only; the agent proposes
-JSON and the harness stamps it. Every ridden run still walks test and review.
-Every merge is still fast-forward behind the push hooks. Parked chains never
-move on their own — appending to a parked chain is curation, not execution. And
-the retreat is built in: stop typing the fourth bang, stop the armed serve, or
-Ctrl-C a sweep already in flight.
+looks at each project's board every twenty minutes. It only wakes the machine to
+look, and every guard that follows applies to the sweep it fires exactly as it
+applies to a typed one. The survey sandbox is read-only; the agent proposes JSON
+and the harness stamps it. Every ridden run still walks test and review. Every
+merge is still fast-forward behind the push hooks. Parked chains never move on
+their own — appending to a parked chain is curation, not execution. And the
+retreat is built in: stop typing the fourth bang, stop the armed serve so no new
+sweep starts, or Ctrl-C a sweep already in flight — in its Rex block, when Rex
+hosts it.
 
 ## What we're still finding out
 

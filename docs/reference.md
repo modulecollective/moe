@@ -54,15 +54,23 @@ source of truth for the exact command surface; this page is a map.
   `--dynamic` (or a non-empty `MOE_SERVE_DYNAMIC`) is the standing consent rung:
   it starts the resident heartbeat, a per-project ticker that runs `moe pulse
   new --dynamic` when the board warrants it. Unarmed, the ticker never fires and
-  what the web wrote simply waits. Stopping the process retracts it. A `/serve`
-  page owns that ticker's status and trace — what each recent tick decided, and
-  the output tail of any sweep that failed — reachable from the menu and from
-  the one-line status cluster every board header carries. `MOE_SERVE_NOTIFY_URL`
-  is the other env var: set it and serve POSTs a small JSON body to that URL
-  each time a heartbeat sweep exits on its own, naming which project's sweep it
-  was and whether it succeeded. A sweep serve interrupted on its way down sends
-  nothing: an `ok:false` there would report a failure the operator caused. A
-  failed POST is logged and blocks nothing.
+  what the web wrote simply waits. Stopping the process retracts it: no new
+  sweep starts. Where a local Rex server answers when serve starts, each sweep
+  runs as a block labelled `heartbeat:<project>` in a Rex session named `moe`,
+  opened from the Rex client like any other session. Such a sweep finishes even
+  if serve stops or crashes, a restarted serve picks it up rather than starting
+  another, and Ctrl-C in its block is how to stop it. A failed sweep's block
+  stays open for reading until that project's next sweep. With no Rex server,
+  sweeps run on serve's own terminals and stop with it. The startup log and
+  `/serve` name which host is in use. A `/serve` page owns that ticker's status
+  and trace — what each recent tick decided, and the output tail of any sweep
+  that failed — reachable from the menu and from the one-line status cluster
+  every board header carries. `MOE_SERVE_NOTIFY_URL` is the other env var: set
+  it and serve POSTs a small JSON body to that URL each time a heartbeat sweep
+  exits on its own, naming which project's sweep it was and whether it
+  succeeded. A sweep serve interrupted on its way down sends nothing: an
+  `ok:false` there would report a failure the operator caused. A failed POST is
+  logged and blocks nothing.
 - `moe project mode <id> [paused|safe|auto]` caps what the heartbeat may start
   in one project, without stopping the process. See below.
 - `moe chore list|check|open|skip` lists due project chores, dry-runs a chore
