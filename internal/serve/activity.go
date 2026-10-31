@@ -224,10 +224,10 @@ func (a *activity) recordSweepEnd(projectID string, at time.Time, clean bool, fa
 // hooks off the registry rather than the caller keeps it one call per
 // child whoever spawns it. The child id is the subject:
 // "heartbeat:<project>".
-func (a *activity) recordChildSpawn(id string, at time.Time) {
+func (a *activity) recordChildSpawn(id string, at time.Time, detail string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.push(activityEvent{At: at, Kind: "spawn", Subject: id, Detail: "started"})
+	a.push(activityEvent{At: at, Kind: "spawn", Subject: id, Detail: detail})
 }
 
 func (a *activity) recordChildExit(id string, at time.Time, exitErr error, tail, runID string) {

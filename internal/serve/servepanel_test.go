@@ -214,7 +214,7 @@ func TestServePageDoesNotReadTheStateFile(t *testing.T) {
 func TestServePanelLinksSweepsToTheirRuns(t *testing.T) {
 	s := panelServer(t)
 	s.activity.recordSweepRun("alpha", "pulse-2026-04-01")
-	s.activity.recordChildSpawn("alpha/fix-it", time.Now().Add(-2*time.Minute))
+	s.activity.recordChildSpawn("alpha/fix-it", time.Now().Add(-2*time.Minute), "started")
 
 	body := getBody(t, s, "/serve")
 	for _, want := range []string{

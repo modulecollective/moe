@@ -61,6 +61,9 @@ type child struct {
 	// and nil when a Rex block does (rex.go). Embedded so the PTY code
 	// reads c.cmd and c.pty as it always has.
 	*localProc
+	// block is the Rex block id hosting the process; "" for a local
+	// one, and for a Rex one whose block serve has since closed.
+	block string
 
 	done    chan struct{}
 	exitErr error
@@ -82,6 +85,9 @@ type localProc struct {
 type children struct {
 	mu  sync.RWMutex
 	all map[string]*child
+	// rex hosts new children in Rex blocks (rex.go); nil hosts them on
+	// local PTYs. Chosen once, before the first spawn.
+	rex *rexHost
 	// notify fires once per child on natural exit. Empty by default;
 	// Server.New wires it when Options.NotifyURL is set. Read through
 	// exitNotifier rather than captured at spawn, so shutdown can
@@ -99,7 +105,8 @@ type children struct {
 	// rather than at the one spawn site there is today (the heartbeat
 	// sweep), so any future spawner lands in the ring without
 	// remembering to say so.
-	onSpawn func(id string, at time.Time)
+	// onSpawn's detail says how the child came to be and where it runs.
+	onSpawn func(id string, at time.Time, detail string)
 	onExit  func(id string, at time.Time, exitErr error, tail string)
 }
 
@@ -116,6 +123,9 @@ func newChildren() *children {
 // (see internal/agent/claude/executor.go's CopyTranscript call) —
 // serve doesn't snag JSONL on its own.
 func (cs *children) spawn(id, moeBin string, args []string, root string, logger io.Writer) (*child, error) {
+	if cs.rex != nil {
+		return cs.spawnRex(id, moeBin, args, root, logger)
+	}
 	cs.mu.Lock()
 	if existing, dup := cs.all[id]; dup {
 		// If the prior run already exited, replace it. Otherwise refuse.
@@ -164,7 +174,7 @@ func (cs *children) spawn(id, moeBin string, args []string, root string, logger 
 	cs.mu.Unlock()
 
 	if onSpawn != nil {
-		onSpawn(id, c.started)
+		onSpawn(id, c.started, "started on a local pty")
 	}
 	go c.read(cs, logger, onExit)
 	return c, nil

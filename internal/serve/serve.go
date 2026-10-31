@@ -318,8 +318,8 @@ func New(opts Options) (*Server, error) {
 	if opts.NotifyURL != "" {
 		s.children.notify = makeNotifier(opts.NotifyURL, opts.Logger)
 	}
-	s.children.onSpawn = func(id string, at time.Time) {
-		s.activity.recordChildSpawn(id, at)
+	s.children.onSpawn = func(id string, at time.Time, detail string) {
+		s.activity.recordChildSpawn(id, at, detail)
 		s.saveActivity()
 	}
 	s.children.onExit = func(id string, at time.Time, exitErr error, tail string) {

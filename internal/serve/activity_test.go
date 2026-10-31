@@ -99,7 +99,7 @@ func TestActivityRingIsBounded(t *testing.T) {
 	now := time.Now()
 	a := testActivity(t, now, true)
 	for i := range activityRing * 3 {
-		a.recordChildSpawn("alpha/run", now.Add(time.Duration(i)*time.Second))
+		a.recordChildSpawn("alpha/run", now.Add(time.Duration(i)*time.Second), "started")
 	}
 	if got := len(a.events); got != activityRing {
 		t.Errorf("ring holds %d events, want it capped at %d", got, activityRing)
@@ -300,8 +300,8 @@ func TestActivityPanelIsBoardWide(t *testing.T) {
 		{Project: "bureaucracy", Held: true, Reason: "somebody is already inside the project"},
 	})
 	a.recordSweepStart("moe", now)
-	a.recordChildSpawn(heartbeatChildPrefix+"moe", now)
-	a.recordChildSpawn("bureaucracy/other", now)
+	a.recordChildSpawn(heartbeatChildPrefix+"moe", now, "started")
+	a.recordChildSpawn("bureaucracy/other", now, "started")
 
 	vm := a.panel(now)
 	if len(vm.Projects) != 2 {
@@ -406,8 +406,8 @@ func TestActivityPanelHasNoLastTickBeforeTheFirstOne(t *testing.T) {
 func TestActivityPanelIsNewestFirst(t *testing.T) {
 	now := time.Now()
 	a := testActivity(t, now, true)
-	a.recordChildSpawn("alpha/first", now)
-	a.recordChildSpawn("alpha/second", now.Add(time.Minute))
+	a.recordChildSpawn("alpha/first", now, "started")
+	a.recordChildSpawn("alpha/second", now.Add(time.Minute), "started")
 
 	vm := a.panel(now)
 	if len(vm.Events) != 2 || vm.Events[0].Subject != "alpha/second" {
