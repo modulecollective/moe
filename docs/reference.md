@@ -511,6 +511,12 @@ from the session worktree (or use the corresponding diagnostic path).
   dir, argv, duration, error — to stderr. First tool to reach for when a
   stage open or sync stalls inside git.
 
+If a stage reports `session: incomplete setup`, its session checkout never
+finished and cannot resume. After addressing the underlying setup failure, run
+`moe session abandon <branch>` with the exact branch printed in the error, then
+re-run the original stage command. Abandon discards that incomplete session's
+worktree and branch.
+
 Each document keeps its latest conversation per backend. Switching backends and
 returning resumes that backend's conversation; changing its model keeps the
 same conversation. The canvas carries shared work between backends. Headless
