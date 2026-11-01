@@ -1,10 +1,13 @@
 package run_test
 
 import (
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/modulecollective/moe/internal/git/gittest"
@@ -96,5 +99,38 @@ func TestArtifactReaderReturnsIndexErrors(t *testing.T) {
 	}
 	if _, err := a.Open("missing"); err == nil || os.IsNotExist(err) {
 		t.Fatalf("index failure became absence: %v", err)
+	}
+}
+
+func TestArtifactReaderReturnsBlobAndFilesystemErrors(t *testing.T) {
+	root := gittest.Init(t)
+	path := run.ThreadPathFor("claude", "beta", "history", "design")
+	gittest.WriteAndCommit(t, root, path, "archive\n", "seed")
+	s, err := session.Open(root, "alpha", "active", "design")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, s.WorktreePath, "update-index", "--cacheinfo", "100644,"+strings.Repeat("1", 40)+","+path)
+	gittest.Run(t, s.WorktreePath, "update-index", "--skip-worktree", "--", path)
+	a := run.NewArtifactReader(s.WorktreePath)
+	if exists, err := a.Exists(path); err != nil || !exists {
+		t.Fatalf("indexed artifact not discovered: %v, %v", exists, err)
+	}
+	if _, err := a.Open(path); err == nil || os.IsNotExist(err) {
+		t.Fatalf("missing blob became an absent artifact: %v", err)
+	}
+	file := filepath.Join(s.WorktreePath, path)
+	if err := os.MkdirAll(filepath.Dir(file), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// A present but unreadable path must not fall back to its indexed blob.
+	if err := os.Symlink(filepath.Base(file), file); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Open(path); !errors.Is(err, syscall.ELOOP) {
+		t.Fatalf("filesystem read error lost: %v", err)
+	}
+	if _, err := a.Exists(path); !errors.Is(err, syscall.ELOOP) {
+		t.Fatalf("filesystem discovery error lost: %v", err)
 	}
 }
