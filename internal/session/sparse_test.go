@@ -1,6 +1,7 @@
 package session
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -155,6 +156,73 @@ func TestFullSessionResumeKeepsCheckout(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(s.WorktreePath, path)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSparseCheckoutFailureCleanup(t *testing.T) {
+	for _, failCleanup := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cleanup-fails=%t", failCleanup), func(t *testing.T) {
+			root := newTestRoot(t)
+			previous := git.Hook
+			defer func() { git.Hook = previous }()
+			var worktree, gitdir string
+			checkoutFailed := false
+			git.Hook = func(dir string, args []string, _ time.Duration, err error) {
+				if args[0] == "checkout" && err != nil {
+					checkoutFailed = true
+				}
+				if args[0] != "sparse-checkout" || err != nil {
+					return
+				}
+				worktree = dir
+				b, e := os.ReadFile(filepath.Join(dir, ".git"))
+				if e != nil {
+					t.Fatal(e)
+				}
+				gitdir = strings.TrimSpace(strings.TrimPrefix(string(b), "gitdir: "))
+				// Prevent checkout after sparse setup has succeeded.
+				if e := os.WriteFile(filepath.Join(gitdir, "index.lock"), nil, 0644); e != nil {
+					t.Fatal(e)
+				}
+				if failCleanup {
+					// One --force cannot remove a locked worktree.
+					if e := os.WriteFile(filepath.Join(gitdir, "locked"), []byte("probe"), 0644); e != nil {
+						t.Fatal(e)
+					}
+				}
+			}
+			_, err := Open(root, "alpha", "active", "design")
+			git.Hook = previous
+			if err == nil || !checkoutFailed {
+				t.Fatalf("checkout failure not reached: %v", err)
+			}
+			branch := BranchName("alpha", "active", "design")
+			if failCleanup {
+				for _, want := range []string{"surviving branch", branch, worktree} {
+					if !strings.Contains(err.Error(), want) {
+						t.Fatalf("cleanup failure missing %q: %v", want, err)
+					}
+				}
+				if !branchExists(root, branch) {
+					t.Fatal("surviving branch was not retained")
+				}
+				if err := os.Remove(filepath.Join(gitdir, "locked")); err != nil {
+					t.Fatal(err)
+				}
+				if err := Abandon(&Session{Root: root, Branch: branch, WorktreePath: worktree}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if branchExists(root, branch) {
+				t.Fatal("partial branch survived cleanup")
+			}
+			if _, err := os.Stat(worktree); !os.IsNotExist(err) {
+				t.Fatalf("partial worktree survived cleanup: %v", err)
+			}
+			if _, err := Open(root, "alpha", "active", "design"); err != nil {
+				t.Fatalf("retry after cleanup: %v", err)
+			}
+		})
 	}
 }
 
