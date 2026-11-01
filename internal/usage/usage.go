@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"sort"
 	"sync"
 	"time"
@@ -382,10 +381,15 @@ func scan(root string, cutoff time.Time, warn io.Writer) (*scanResult, error) {
 		return nil, fmt.Errorf("build journal index: %w", err)
 	}
 	sc := &scanResult{last: map[string]time.Time{}}
+	artifacts := run.NewArtifactReader(root)
 	for _, md := range mds {
 		runKey := md.Project + "/" + md.ID
 		sc.last[runKey] = idx.LastActivity[runKey]
-		for _, stage := range stageDocsOnDisk(root, md) {
+		stages, err := artifacts.DocumentIDs(md.Project, md.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, stage := range stages {
 			when := idx.WorkTurnTime[run.WorkTurnKey{Project: md.Project, Run: md.ID, Doc: stage}]
 			if when.IsZero() {
 				when = idx.LastActivity[runKey]
@@ -394,8 +398,11 @@ func scan(root string, cutoff time.Time, warn io.Writer) (*scanResult, error) {
 				continue
 			}
 			for _, agent := range []string{"claude", "codex"} {
-				path := filepath.Join(root, run.ThreadPathFor(agent, md.Project, md.ID, stage))
-				u, ok := readTranscriptUsage(agent, path, warn)
+				path := run.ThreadPathFor(agent, md.Project, md.ID, stage)
+				u, ok, err := readTranscriptUsage(artifacts, agent, path, warn)
+				if err != nil {
+					return nil, err
+				}
 				if !ok {
 					continue
 				}
@@ -510,40 +517,24 @@ func Tokens(u transcript.ModelUsage) int64 {
 	return Input(u) + u.Output
 }
 
-// stageDocsOnDisk lists the document ids a run has directories for,
-// sorted. Read from disk rather than from run.Documents because that map
-// records sessions, and a stage can have a mirrored transcript without
-// one (a headless one-shot that never resumed).
-func stageDocsOnDisk(root string, md *run.Metadata) []string {
-	entries, err := os.ReadDir(filepath.Join(root, run.Dir(md.Project, md.ID), "documents"))
-	if err != nil {
-		return nil
-	}
-	var out []string
-	for _, e := range entries {
-		if e.IsDir() {
-			out = append(out, e.Name())
-		}
-	}
-	sort.Strings(out)
-	return out
-}
-
 // readTranscriptUsage parses one thread file, or reports false when it
 // isn't there. A parse failure warns and counts what it got: transcripts
 // are forensic files, and one truncated tail shouldn't take the report
 // down with it.
-func readTranscriptUsage(agent, path string, warn io.Writer) (transcript.Usage, bool) {
-	f, err := os.Open(path)
+func readTranscriptUsage(artifacts *run.ArtifactReader, agent, path string, warn io.Writer) (transcript.Usage, bool, error) {
+	f, err := artifacts.Open(path)
+	if os.IsNotExist(err) {
+		return nil, false, nil
+	}
 	if err != nil {
-		return nil, false
+		return nil, false, err
 	}
 	defer f.Close()
 	u, err := transcript.ParseUsage(agent, f)
 	if err != nil {
 		cliout.Printf(warn, "moe usage: %s: %v\n", path, err)
 	}
-	return u, len(u) > 0
+	return u, len(u) > 0, nil
 }
 
 // ModelNotional renders one model's cost, or "—" when it has no price on

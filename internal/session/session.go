@@ -8,7 +8,7 @@
 // <root>/.moe/worktrees/<uuid>/. Mutations during the session land on
 // the session branch — no lock needed because the branch has a single
 // writer. At session close, we rebase the session branch onto main,
-// fast-forward main to the rebased tip, push (best effort), and tear
+// fast-forward main to the rebased tip, and tear
 // down the worktree and branch.
 //
 // Caller responsibility: Open and Close must run with the repo lock
@@ -33,9 +33,11 @@ package session
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/modulecollective/moe/internal/git"
@@ -187,6 +189,12 @@ func worktreesDir(root string) string {
 // botched close or manual tampering), return an error pointing the
 // operator at `moe session abandon`.
 func Open(root, projectID, runID, docID string) (*Session, error) {
+	// These IDs become literal sparse patterns as well as branch components.
+	for _, id := range []string{projectID, runID} {
+		if !sessionIDPattern.MatchString(id) {
+			return nil, fmt.Errorf("session: invalid ID %q", id)
+		}
+	}
 	branch := BranchName(projectID, runID, docID)
 
 	existing, err := findWorktreeForBranch(root, branch)
@@ -228,19 +236,56 @@ func Open(root, projectID, runID, docID string) (*Session, error) {
 	// worktree at HEAD, not origin/main — the caller takes the repo
 	// lock before Open, so a moved origin is the next caller's
 	// concern (their sync will handle it).
-	if out, err := git.Combined(root, "worktree", "add", "-b", branch, worktreePath); err != nil {
-		_ = os.RemoveAll(worktreePath)
-		return nil, fmt.Errorf("session: git worktree add: %w (%s)", err, strings.TrimSpace(out))
+	if out, err := git.Combined(root, "worktree", "add", "--no-checkout", "-b", branch, worktreePath); err != nil {
+		return nil, cleanupNewSession(root, branch, worktreePath,
+			fmt.Errorf("session: git worktree add: %w (%s)", err, strings.TrimSpace(out)))
+	}
+	patterns := []string{
+		"/*",
+		"!/projects/*/runs/*/documents/*/thread*.jsonl",
+		"!/projects/*/runs/*/documents/*/prompt-*.md",
+		"!/projects/*/runs/*/diagnostics/*/*/thread*.jsonl",
+		"!/projects/*/runs/*/diagnostics/*/*/prompt-*.md",
+		"/" + filepath.ToSlash(run.Dir(projectID, runID)) + "/**",
+	}
+	args := append([]string{"sparse-checkout", "set", "--no-cone", "--no-sparse-index", "--"}, patterns...)
+	if err := git.Run(worktreePath, args...); err != nil {
+		return nil, cleanupNewSession(root, branch, worktreePath, err)
+	}
+	// set does not populate a worktree created without an index.
+	if err := git.Run(worktreePath, "checkout", "HEAD"); err != nil {
+		return nil, cleanupNewSession(root, branch, worktreePath, err)
 	}
 
 	abs, err := canonPath(worktreePath)
 	if err != nil {
-		return nil, fmt.Errorf("session: resolve worktree path: %w", err)
+		return nil, cleanupNewSession(root, branch, worktreePath, err)
 	}
 	return &Session{
 		Root: root, Project: projectID, Run: runID, Doc: docID,
 		Branch: branch, WorktreePath: abs,
 	}, nil
+}
+
+var sessionIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// Only called for state created by this Open, never a resumed session.
+func cleanupNewSession(root, branch, path string, cause error) error {
+	if existing, err := findWorktreeForBranch(root, branch); err != nil {
+		return errors.Join(cause, fmt.Errorf("session setup cleanup: branch %s, worktree %s: %w", branch, path, err))
+	} else if existing != "" {
+		if err := git.Run(root, "worktree", "remove", "--force", path); err != nil {
+			return errors.Join(cause, fmt.Errorf("session setup cleanup: surviving branch %s and worktree %s: %w", branch, path, err))
+		}
+	} else if err := os.RemoveAll(path); err != nil {
+		return errors.Join(cause, fmt.Errorf("session setup cleanup: surviving path %s: %w", path, err))
+	}
+	if branchExists(root, branch) {
+		if err := git.Run(root, "branch", "-D", branch); err != nil {
+			return errors.Join(cause, fmt.Errorf("session setup cleanup: surviving branch %s: %w", branch, err))
+		}
+	}
+	return fmt.Errorf("session setup: %w", cause)
 }
 
 // reconcileWithMain replays a resumed session branch onto current

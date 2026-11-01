@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
-	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -121,8 +120,17 @@ func (s *Server) handleTranscript(w http.ResponseWriter, r *http.Request) {
 	// as of the last closed turn, same posture as `moe <wf> log`.
 	claudePath := filepath.Join(s.opts.Root, run.ThreadPathFor("claude", projectID, slug, stage))
 	codexPath := filepath.Join(s.opts.Root, run.ThreadPathFor("codex", projectID, slug, stage))
-	claudeExists := fileExists(claudePath)
-	codexExists := fileExists(codexPath)
+	artifacts := run.NewArtifactReader(s.opts.Root)
+	claudeExists, err := artifacts.Exists(run.ThreadPathFor("claude", projectID, slug, stage))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	codexExists, err := artifacts.Exists(run.ThreadPathFor("codex", projectID, slug, stage))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	// Agent pick: an explicit ?agent= wins; with none, render the sole
 	// thread, or claude when both (or neither) exist. Unlike the CLI's
@@ -162,7 +170,12 @@ func (s *Server) handleTranscript(w http.ResponseWriter, r *http.Request) {
 		vm.OtherAgent = "claude"
 	}
 
-	f, err := os.Open(path)
+	rel, err := filepath.Rel(s.opts.Root, path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	f, err := artifacts.Open(rel)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			vm.Missing = true
@@ -360,10 +373,4 @@ func countLines(s string) int {
 		return 0
 	}
 	return strings.Count(strings.TrimRight(s, "\n"), "\n") + 1
-}
-
-// fileExists reports whether path is a regular file (not a directory).
-func fileExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && !info.IsDir()
 }

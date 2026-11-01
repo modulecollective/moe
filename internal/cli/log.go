@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 
 	"github.com/modulecollective/moe/internal/run"
@@ -111,6 +110,7 @@ func runLog(workflow, defaultStage string) func(args []string, stdout, stderr io
 			moePrintf(stderr, "moe %s log: %v\n", workflow, err)
 			return 1
 		}
+		artifacts := run.NewArtifactReader(root)
 		stages := wf.Stages()
 		if md.Workflow != workflow {
 			if _, err := LookupWorkflow(md.Workflow); err == nil {
@@ -118,10 +118,13 @@ func runLog(workflow, defaultStage string) func(args []string, stdout, stderr io
 				return 1
 			}
 			// Retired workflow: no live verb owns this run, so this one
-			// renders it. The run's documents/ dir replaces the ladder —
-			// see runDocIDs. A transcript is JSONL on disk, so no error
-			// message could stand in for actually rendering it.
-			stages = runDocIDs(root, md)
+			// renders it. Discover stages in both the checkout and sparse
+			// index: an omitted transcript may be the only stage artifact.
+			stages, err = artifacts.DocumentIDs(md.Project, md.ID)
+			if err != nil {
+				moePrintf(stderr, "moe %s log: %v\n", workflow, err)
+				return 1
+			}
 		}
 		if !stageRegistered(stages, stage) {
 			moePrintf(stderr, "moe %s log: no such stage: %s (have: %v)\n", workflow, stage, stages)
@@ -150,7 +153,7 @@ func runLog(workflow, defaultStage string) func(args []string, stdout, stderr io
 			agentName = failure.Agent
 			threadPath = filepath.Join(root, diagnosticDir, "thread-"+agentName+".jsonl")
 		} else {
-			threadPath, agentName, err = pickLogThread(root, projectID, runID, stage, *agentF)
+			threadPath, agentName, err = pickLogThread(artifacts, root, projectID, runID, stage, *agentF)
 		}
 		if err != nil {
 			moePrintf(stderr, "moe %s log: %v\n", workflow, err)
@@ -161,7 +164,12 @@ func runLog(workflow, defaultStage string) func(args []string, stdout, stderr io
 			return 1
 		}
 
-		f, err := os.Open(threadPath)
+		rel, err := filepath.Rel(root, threadPath)
+		if err != nil {
+			moePrintf(stderr, "moe %s log: %v\n", workflow, err)
+			return 1
+		}
+		f, err := artifacts.Open(rel)
 		if err != nil {
 			moePrintf(stderr, "moe %s log: %v\n", workflow, err)
 			return 1
@@ -186,18 +194,20 @@ func runLog(workflow, defaultStage string) func(args []string, stdout, stderr io
 
 // pickLogThread chooses the (path, agent) tuple to render for a stage
 // the operator named. When agentArg is set, the named thread file must
-// exist on disk. When unset, the stage must have exactly one of
+// exist in the checkout or sparse index. When unset, the stage must
+// have exactly one of
 // thread-claude.jsonl / thread-codex.jsonl: both present is a refusal
 // (disambiguation is the operator's call), neither is the empty case
 // the caller surfaces with a friendly message.
-func pickLogThread(root, projectID, runID, stage, agentArg string) (string, string, error) {
+func pickLogThread(artifacts *run.ArtifactReader, root, projectID, runID, stage, agentArg string) (string, string, error) {
 	if agentArg != "" {
 		abs := filepath.Join(root, run.ThreadPathFor(agentArg, projectID, runID, stage))
-		if _, err := os.Stat(abs); err != nil {
-			if os.IsNotExist(err) {
-				return "", "", nil
-			}
-			return "", "", fmt.Errorf("stat %s: %w", abs, err)
+		exists, err := artifacts.Exists(run.ThreadPathFor(agentArg, projectID, runID, stage))
+		if err != nil {
+			return "", "", err
+		}
+		if !exists {
+			return "", "", nil
 		}
 		return abs, agentArg, nil
 	}
@@ -205,11 +215,12 @@ func pickLogThread(root, projectID, runID, stage, agentArg string) (string, stri
 	var found []hit
 	for _, agent := range []string{"claude", "codex"} {
 		abs := filepath.Join(root, run.ThreadPathFor(agent, projectID, runID, stage))
-		if _, err := os.Stat(abs); err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return "", "", fmt.Errorf("stat %s: %w", abs, err)
+		exists, err := artifacts.Exists(run.ThreadPathFor(agent, projectID, runID, stage))
+		if err != nil {
+			return "", "", err
+		}
+		if !exists {
+			continue
 		}
 		found = append(found, hit{abs, agent})
 	}

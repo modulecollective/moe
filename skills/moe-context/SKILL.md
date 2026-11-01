@@ -92,6 +92,14 @@ text, turn boundaries, tool calls collapsed. Reach for that, not
 `cat`, when you want to follow how a past stage arrived at its
 canvas.
 
+New session worktrees omit other runs' raw transcripts and saved prompts
+from disk. Canvases, metadata and project context remain present, as does
+all of the active run. The log command reads omitted transcripts from
+this session's Git index without restoring files. For a committed prompt
+snapshot, use `git show HEAD:projects/<p>/runs/<run>/documents/<stage>/prompt-<agent>.md`
+(or the corresponding diagnostic path). Stay in the session repository
+so the history agrees with the snapshot you are working against.
+
 ## Read, don't write
 
 Anything under `projects/<p>/runs/<other-slug>/` is somebody else's

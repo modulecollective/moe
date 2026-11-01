@@ -966,6 +966,7 @@ func (s *Server) canvasLinks(projectID, slug string, now time.Time) []canvasLink
 	// building it per stage would re-walk the same ids.
 	refs := s.canvasReferenceResolver(projectID)
 	out := make([]canvasLink, 0, len(ladder))
+	artifacts := run.NewArtifactReader(s.opts.Root)
 	for _, stage := range ladder {
 		path, err := s.opts.ResolveCanvas(projectID, slug, stage)
 		if err != nil {
@@ -987,7 +988,7 @@ func (s *Server) canvasLinks(projectID, slug string, now time.Time) []canvasLink
 			Stage:       stage,
 			URL:         "/run/" + projectID + "/" + slug + "/canvas/" + stage,
 			ModTime:     dash.HumanAgo(now, st.ModTime()),
-			Transcripts: s.transcriptLinks(projectID, slug, stage),
+			Transcripts: s.transcriptLinks(artifacts, projectID, slug, stage),
 			Body:        body,
 		})
 	}
@@ -1003,11 +1004,15 @@ func (s *Server) canvasLinks(projectID, slug string, now time.Time) []canvasLink
 // none yet (accurate as of the last closed turn, same posture as the
 // canvas route's live view). Chat runs are where this pays most: the
 // chat canvas is only session markers, the transcript is the content.
-func (s *Server) transcriptLinks(projectID, slug, stage string) []transcriptLink {
+func (s *Server) transcriptLinks(artifacts *run.ArtifactReader, projectID, slug, stage string) []transcriptLink {
 	var links []transcriptLink
 	for _, agent := range []string{"claude", "codex"} {
-		path := filepath.Join(s.opts.Root, run.ThreadPathFor(agent, projectID, slug, stage))
-		if !fileExists(path) {
+		exists, err := artifacts.Exists(run.ThreadPathFor(agent, projectID, slug, stage))
+		if err != nil {
+			s.logf("transcript lookup: %v", err)
+			continue
+		}
+		if !exists {
 			continue
 		}
 		links = append(links, transcriptLink{
