@@ -100,6 +100,11 @@ snapshot, use `git show HEAD:projects/<p>/runs/<run>/documents/<stage>/prompt-<a
 (or the corresponding diagnostic path). Stay in the session repository
 so the history agrees with the snapshot you are working against.
 
+To discover relevant omitted transcripts, use the indexed search in the
+worked sequence below. Rendered log output elides long tool results, so
+grepping that rendering cannot establish that a term is absent from the
+raw transcript.
+
 ## Read, don't write
 
 Anything under `projects/<p>/runs/<other-slug>/` is somebody else's
@@ -119,17 +124,73 @@ read-oriented skill grants none.
 ## Worked shape
 
 Before committing to a direction, check whether a past run already
-considered it. Two passes are usually enough:
+considered it. Run these searches from `{{.BureaucracyRoot}}`, not the
+project source clone. Start with this project's checked-out canvases and
+metadata; widen to other projects when the question warrants it:
 
-1. `git log --all --grep='MoE-Document: design' --grep='<keyword>'
-   --all-match` — every design commit whose subject or trailer
-   mentions the keyword.
-2. `rg '<keyword>' projects/*/runs/*/documents/design/content.md` —
-   every design canvas with the keyword in prose.
+```sh
+rg -l -i -e 'robot.?pm' \
+  -g 'content.md' -g 'run.json' \
+  'projects/{{.Project}}/runs'
+```
 
-A hit gives you a run slug; from there
-`moe sdlc log {{.Project}}/<slug> design` renders the transcript, and
-`projects/{{.Project}}/runs/<slug>/documents/design/content.md` is the
-decided canvas. Either supersede the prior thinking, branch from it,
-or note in your own canvas that you reviewed it and why you're taking
-a different turn.
+Replace the example expression with the topic's keywords or synonyms.
+Inspect matching canvases and `run.json` first. For historical questions,
+use the journal/trailer recipes above too; for example,
+`git log --all --grep='MoE-Document: design' --grep='<keyword>' --all-match`
+finds design commits whose messages mention the keyword. Journal and
+canvas matches are leads, not complete transcript discovery.
+
+When those leads are insufficient, search indexed transcript blobs:
+
+```sh
+git grep --cached -l -i -E -e 'robot.?pm' -- \
+  ':(glob)projects/{{.Project}}/runs/*/documents/*/thread*.jsonl' \
+  ':(glob)projects/{{.Project}}/runs/*/diagnostics/*/*/thread*.jsonl'
+```
+
+The second path covers failed attempts under
+`diagnostics/<stage>/<attempt-id>/`. Quoting leaves expansion to Git;
+`:(glob)` keeps each `*` within a path component. `--cached` searches this
+session's index, including sparse-omitted blobs, without restoring files.
+It does not search every historical revision or unstaged changes. `-l`
+prints filenames rather than enormous JSONL records. Exit 1 means no
+matches; an error is not evidence of absence.
+
+Group candidate paths by `projects/<project>/runs/<slug>` (pipe the
+filename output through `cut -d/ -f1-4 | sort -u`), retaining the original
+paths for stage and backend selection. Inspect each candidate's
+`run.json` for its workflow, then read the matching session:
+
+```sh
+MOE_HOME='{{.BureaucracyRoot}}' moe <workflow> log <project>/<slug> <stage> --agent <claude-or-codex>
+```
+
+The angle-bracket fields are placeholders. Pin `MOE_HOME` as shown:
+CLI discovery checks it before cwd, and a stage's dev environment may
+point it elsewhere. Choose the backend from the matched filename;
+`--agent` is required when both backends have a normal stage transcript.
+Read the relevant conversation alongside its canvas, if one exists.
+Record whether the run actually attempted the idea, merely discussed it,
+or only quoted related material. Copied documents, injected context,
+tool results and prior search output can all create raw matches; neither
+a hit nor the number of matching files establishes an attempt.
+
+Keep these evidence limits in view:
+
+- Saved `prompt-*.md` snapshots are excluded by default because they
+  repeat steering and upstream context. Use the targeted `git show`
+  recipe above for questions specifically about a saved prompt.
+- Rendered `moe ... log` output elides long tool results; grepping it is
+  not an exhaustive raw-transcript search.
+- A diagnostic hit can name an older attempt. `log` selects the current
+  normal transcript or latest applicable failure in journal order; it
+  has no attempt selector. It does not render every matching diagnostic
+  file. If the selected log does not resolve an older hit, retain the
+  exact path and mark the evidence unresolved.
+- Index search is lexical and snapshot-scoped, not an exhaustive account
+  of every historical discussion. Say what was searched when reporting
+  no evidence.
+
+Either supersede the prior thinking, branch from it, or note in your own
+canvas that you reviewed it and why you're taking a different turn.
