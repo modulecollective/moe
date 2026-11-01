@@ -181,6 +181,9 @@ func TestExecuteArgsResumePrependsSid(t *testing.T) {
 	if args[len(args)-1] != "follow-up" {
 		t.Errorf("InitialPrompt should be the last positional arg, got %q", args[len(args)-1])
 	}
+	if indexOf(args, "--no-daemon") < 0 {
+		t.Errorf("resume turn lost --no-daemon: %v", args)
+	}
 	assertGitWritableProfile(t, args)
 }
 
@@ -259,6 +262,10 @@ func TestExecuteOneShotArgsPinsApprovalNever(t *testing.T) {
 	if !containsPair(args, "-c", "approval_policy=never") {
 		t.Errorf("args missing `-c approval_policy=never` pair: %v", args)
 	}
+	// `codex exec` has no --no-daemon flag; clap would reject the argv.
+	if indexOf(args, "--no-daemon") >= 0 {
+		t.Errorf("one-shot path must not carry --no-daemon: %v", args)
+	}
 	// Sandbox stays on — pinning approval doesn't lift it. The bound is
 	// the permissions profile, not `--sandbox`.
 	assertGitWritableProfile(t, args)
@@ -327,6 +334,11 @@ func TestExecuteArgsInteractiveUsesApprovalNever(t *testing.T) {
 	}
 	if !strings.Contains(got, "--ask-for-approval never") {
 		t.Errorf("interactive path lost --ask-for-approval never: %s", got)
+	}
+	// The -c overrides force embedded mode; --no-daemon makes it
+	// explicit so codex doesn't warn about the shared background server.
+	if indexOf(args, "--no-daemon") < 0 {
+		t.Errorf("interactive path missing --no-daemon: %v", args)
 	}
 	// Sandbox-loosening fix for codex: the profile must be selected so
 	// `.git/index.lock` writes during commit don't EROFS regardless of

@@ -26,7 +26,9 @@
 //     the one-shot path can't satisfy. On interactive `codex` and on `codex
 //     resume`, we pass `--ask-for-approval never` so MoE-managed
 //     interactive Codex has the same approval posture while keeping the
-//     same sandbox boundary.
+//     same sandbox boundary, plus `--no-daemon`: the `-c` overrides
+//     already force embedded mode, and the flag stops codex warning
+//     about it.
 //
 // System prompt injection uses `-c developer_instructions="""<prompt>"""`.
 // The triple-quoted TOML multi-line form sidesteps the
@@ -404,6 +406,12 @@ func executeArgs(r agent.Request) []string {
 	// failures return to the model/operator instead of asking for
 	// approval.
 	args = append(args, "--ask-for-approval", "never")
+	// The -c overrides above already force codex's embedded app server;
+	// --no-daemon only makes that choice explicit so codex stops warning
+	// "Running without the shared background server". The flag exists
+	// from codex 0.156.0; `codex exec` has no such flag and never
+	// consults the daemon, so the one-shot path doesn't carry it.
+	args = append(args, "--no-daemon")
 	if !r.NewSession {
 		// Subsequent turn: `codex resume <sid> [prompt]`. The session
 		// id was stored on r.SessionID after the first turn returned
