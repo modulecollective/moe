@@ -182,12 +182,13 @@ func worktreesDir(root string) string {
 // docID). The caller must hold the repo lock.
 //
 // Resume logic: if the session branch exists and its worktree is
-// registered, reconcile it with main (see reconcileWithMain) and
-// return the existing Session — the operator is picking up where they
-// left off, and must pick it up from the current contract. If the
+// registered with setup complete, reconcile it with main (see
+// reconcileWithMain) and return the existing Session — the operator is
+// picking up where they left off, from the current contract. If the
 // branch exists without a registered worktree (orphaned state from a
 // botched close or manual tampering), return an error pointing the
-// operator at `moe session abandon`.
+// operator at `moe session abandon`. Incomplete setup is also refused:
+// it has no usable session snapshot to resume.
 func Open(root, projectID, runID, docID string) (*Session, error) {
 	// These IDs become literal sparse patterns as well as branch components.
 	for _, id := range []string{projectID, runID} {
@@ -210,6 +211,14 @@ func Open(root, projectID, runID, docID string) (*Session, error) {
 			Root: root, Project: projectID, Run: runID, Doc: docID,
 			Branch: branch, WorktreePath: abs,
 		}
+		if _, err := os.Stat(abs + ".setup-pending"); err == nil {
+			return nil, fmt.Errorf("session: incomplete setup for branch %s\n"+
+				"  worktree: %s\n"+
+				"  drop it with `moe session abandon %s`, then re-run the stage",
+				branch, abs, branch)
+		} else if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("session: check setup state for %s: %w", abs, err)
+		}
 		if err := reconcileWithMain(s); err != nil {
 			return nil, err
 		}
@@ -230,6 +239,12 @@ func Open(root, projectID, runID, docID string) (*Session, error) {
 	worktreePath := filepath.Join(worktreesDir(root), uuid)
 	if err := os.MkdirAll(worktreesDir(root), 0o755); err != nil {
 		return nil, fmt.Errorf("session: mkdir %s: %w", worktreesDir(root), err)
+	}
+	// Mark setup before registration: a killed opener or failed cleanup
+	// must never leave an unpopulated tree that a retry treats as resumable.
+	// Keep the marker beside the tree so worktree add still gets an empty path.
+	if err := os.WriteFile(worktreePath+".setup-pending", nil, 0o644); err != nil {
+		return nil, fmt.Errorf("session: mark setup for %s: %w", worktreePath, err)
 	}
 
 	// -b <branch> creates the branch off HEAD (main). We stage the
@@ -261,6 +276,9 @@ func Open(root, projectID, runID, docID string) (*Session, error) {
 	if err != nil {
 		return nil, cleanupNewSession(root, branch, worktreePath, err)
 	}
+	if err := os.Remove(worktreePath + ".setup-pending"); err != nil {
+		return nil, cleanupNewSession(root, branch, worktreePath, err)
+	}
 	return &Session{
 		Root: root, Project: projectID, Run: runID, Doc: docID,
 		Branch: branch, WorktreePath: abs,
@@ -284,6 +302,9 @@ func cleanupNewSession(root, branch, path string, cause error) error {
 		if err := git.Run(root, "branch", "-D", branch); err != nil {
 			return errors.Join(cause, fmt.Errorf("session setup cleanup: surviving branch %s: %w", branch, err))
 		}
+	}
+	if err := os.Remove(path + ".setup-pending"); err != nil && !os.IsNotExist(err) {
+		return errors.Join(cause, fmt.Errorf("session setup cleanup: clear setup marker for %s: %w", path, err))
 	}
 	return fmt.Errorf("session setup: %w", cause)
 }
@@ -504,6 +525,11 @@ func Abandon(s *Session) error {
 	if branchExists(s.Root, s.Branch) {
 		if out, err := git.Combined(s.Root, "branch", "-D", s.Branch); err != nil {
 			return fmt.Errorf("session abandon: delete branch: %w (%s)", err, strings.TrimSpace(out))
+		}
+	}
+	if s.WorktreePath != "" {
+		if err := os.Remove(s.WorktreePath + ".setup-pending"); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("session abandon: clear setup marker: %w", err)
 		}
 	}
 	// The other clean ending — including the heartbeat's own reap, which
