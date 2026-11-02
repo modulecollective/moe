@@ -1,6 +1,6 @@
 ---
 name: moe-context
-description: How to read the MoE bureaucracy as context — prior runs' canvases, journal trailers for slicing by run/doc/workflow, past stage transcripts, the digital twin, and lore. Use when you want to check whether a topic has been worked before, find prior decisions, or read past stage canvases.
+description: How to read the MoE bureaucracy as context — project knowledge, prior runs' canvases, journal trailers for slicing by run/doc/workflow, past stage transcripts, the digital twin, and lore. Use when you want to discover relevant knowledge, check whether a topic has been worked before, find prior decisions, or read past stage canvases.
 ---
 
 # Reading the MoE bureaucracy as context
@@ -57,9 +57,17 @@ The shape under `{{.BureaucracyRoot}}` is the same for every project:
   the open intents are the aim; read the ones that bear on it. The
   always-on stage prompt lists them in a catalog, and the pulse's
   fragment makes reading them mandatory.
-- `projects/<p>/knowledge/topics/` — the project's open-schema wiki.
+- `projects/<p>/knowledge/index.md` — the project's knowledge catalog;
+  `knowledge/topics/` holds the topic bodies.
 - `lore/<slug>.md` — cross-project facts; the always-on stage prompt
   catalog lists which apply to which contexts.
+
+On first use of this skill in the current agent context, read
+`projects/{{.Project}}/knowledge/index.md` if it exists, then open relevant
+topics. Reuse that catalog read while it is current and available in
+context; refresh it if the index changes or its contents are no longer
+available. Do not reread it every conversational turn or load every topic.
+For lore, use the injected catalog's applies-when hints to select bodies.
 
 ## Slicing the journal
 
@@ -93,12 +101,19 @@ text, turn boundaries, tool calls collapsed. Reach for that, not
 canvas.
 
 New session worktrees omit other runs' raw transcripts and saved prompts
-from disk. Canvases, metadata and project context remain present, as does
-all of the active run. The log command reads omitted transcripts from
-this session's Git index without restoring files. For a committed prompt
-snapshot, use `git show HEAD:projects/<p>/runs/<run>/documents/<stage>/prompt-<agent>.md`
-(or the corresponding diagnostic path). Stay in the session repository
-so the history agrees with the snapshot you are working against.
+only under document and diagnostic artifact directories. Global lore,
+all projects' knowledge indexes/topics and digital twins, run canvases,
+metadata, intents, followups and feedback, hooks/chores, and the entire
+active run stay on disk. Sparse omission preserves indexed blobs; it is
+not deletion. Existing full worktrees stay full.
+
+The log command reads omitted transcripts from this session's Git index
+without restoring files. For a committed prompt snapshot, use
+`git show HEAD:projects/<p>/runs/<run>/documents/<stage>/prompt-<agent>.md`
+(or the corresponding diagnostic path). `HEAD:<path>` reads a committed
+snapshot; `:<path>` reads the current index. Neither includes unstaged
+edits. Stay in the session repository so the history agrees with the
+snapshot you are working against.
 
 To discover relevant omitted transcripts, use the indexed search in the
 worked sequence below. Rendered log output elides long tool results, so
@@ -123,10 +138,28 @@ read-oriented skill grants none.
 
 ## Worked shape
 
-Before committing to a direction, check whether a past run already
-considered it. Run these searches from `{{.BureaucracyRoot}}`, not the
-project source clone. Start with this project's checked-out canvases and
-metadata; widen to other projects when the question warrants it:
+Before committing to a direction, check relevant durable reference and
+whether a past run already considered it. Run these searches from
+`{{.BureaucracyRoot}}`, not the project source clone. After reading the
+knowledge index, search the relevant context with filename-only output:
+
+```sh
+context_paths=()
+for path in 'projects/{{.Project}}/knowledge' 'projects/{{.Project}}/digital-twin' 'projects/{{.Project}}/runs' lore; do
+  if [ -d "$path" ]; then context_paths+=("$path"); fi
+done
+if [ "${#context_paths[@]}" -gt 0 ]; then
+  rg -l -i -e 'robot.?pm' -g '*.md' \
+    -g '!**/documents/*/prompt-*.md' -g '!**/diagnostics/*/*/prompt-*.md' \
+    "${context_paths[@]}"
+fi
+```
+
+This Bash example includes followups and both feedback channels. Missing
+optional trees are normal; a real read/search error still needs attention.
+Exit 1 from `rg` means no matches. Replace the expression with the topic's
+keywords or synonyms and open relevant matches. Widen to other projects'
+context when warranted. Then search this project's canvases and metadata:
 
 ```sh
 rg -l -i -e 'robot.?pm' \
@@ -186,11 +219,81 @@ Keep these evidence limits in view:
 - A diagnostic hit can name an older attempt. `log` selects the current
   normal transcript or latest applicable failure in journal order; it
   has no attempt selector. It does not render every matching diagnostic
-  file. If the selected log does not resolve an older hit, retain the
-  exact path and mark the evidence unresolved.
+  file. Use the exact indexed-artifact fallback below when the selected
+  log does not resolve an older hit or elides the relevant tool result.
 - Index search is lexical and snapshot-scoped, not an exhaustive account
   of every historical discussion. Say what was searched when reporting
   no evidence.
 
 Either supersede the prior thinking, branch from it, or note in your own
 canvas that you reviewed it and why you're taking a different turn.
+
+## Exact indexed artifacts
+
+For an older diagnostic attempt, substitute the exact candidate path and
+read it from the session index into a fresh scratch file outside the
+checkout. Check Git succeeded before interpreting the file:
+
+```sh
+artifact_file=$(mktemp /tmp/moe-context-thread.XXXXXX) || exit 1
+if ! git -C '{{.BureaucracyRoot}}' show ':projects/<p>/runs/<run>/diagnostics/<stage>/<attempt>/thread-<agent>.jsonl' > "$artifact_file"; then
+  rm -- "$artifact_file"
+  exit 1
+fi
+```
+
+Parse the scratch JSONL using the matched backend's record shape (the
+Claude and Codex adapters in `internal/transcript` are references when
+MoE source is available). Select relevant event types, turn/call IDs
+and matching tool results; print only bounded excerpts of those records.
+Set record and output-length limits before inspection. Do not dump the
+whole blob into the conversation or equate a raw hit with an attempt.
+If targeted inspection cannot resolve it, retain the exact artifact path
+and report the uncertainty. Remove the scratch file when finished.
+
+The same `git show ':<exact-path>'` fallback retrieves omitted prompts,
+including diagnostic prompts. A missing indexed path is a Git failure,
+not evidence of an empty artifact. These reads do not hydrate the checkout.
+
+## When a tool needs the full checkout
+
+Ordinary searches need no hydration. To search indexed transcripts across
+all projects, widen the quoted pathspecs above from
+`projects/{{.Project}}/runs/...` to `projects/*/runs/...`, keeping `:(glob)`
+and the artifact-directory boundaries.
+
+For a tool that requires files on disk, you may temporarily materialize
+the session's full bureaucracy tree. This costs disk space and I/O; prefer
+indexed search for ordinary greps. It restores this session snapshot,
+not every historical revision or other projects' source submodules.
+Scope every Git command to `{{.BureaucracyRoot}}`, never the source clone
+or canonical main.
+
+First check `git -C '{{.BureaucracyRoot}}' config --bool --get core.sparseCheckout`.
+`true` means sparse; `false` or an unset key (exit 1, no output) means
+already full, so leave it full without creating sparse configuration.
+Treat other errors as failures. Only for a sparse session, save the
+patterns to a fresh scratch file outside the checkout before disabling:
+
+```sh
+patterns_file=$(mktemp /tmp/moe-context-sparse.XXXXXX) || exit 1
+if ! git -C '{{.BureaucracyRoot}}' sparse-checkout list > "$patterns_file" || ! test -s "$patterns_file"; then
+  rm -- "$patterns_file"
+  exit 1
+fi
+git -C '{{.BureaucracyRoot}}' sparse-checkout disable || exit 1
+```
+
+Keep the scratch filename available across tool calls. After the read-only
+scan, restore the saved patterns and remove the scratch file only after
+success (if using a new shell, set `patterns_file` to that saved filename):
+
+```sh
+git -C '{{.BureaucracyRoot}}' sparse-checkout set --no-cone --no-sparse-index --stdin < "$patterns_file" || exit 1
+rm -- "$patterns_file"
+```
+
+Check each command's success. Preserve existing edits throughout: never
+use reset, clean or force in this workflow. Reapplying sparsity may retain
+modified paths on disk; report that outcome instead of discarding work.
+Returning to sparsity never takes priority over preserving edits.
