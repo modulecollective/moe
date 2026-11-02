@@ -23,14 +23,35 @@ func TestSparseSessionPreservesArchive(t *testing.T) {
 		active, run.PromptPathFor("codex", "alpha", "active", "code"),
 		"projects/alpha/runs/active/diagnostics/design/attempt/thread-codex.jsonl",
 		"projects/alpha/runs/active/diagnostics/design/attempt/prompt-codex.md",
-		run.ContentPath("beta", "other", "design"),
-		"projects/beta/knowledge/topics/prompt-example.md",
-		"projects/beta/hooks/thread-example.jsonl",
-		"projects/beta/runs/other/followups.md", "soul.md",
+		run.ContentPath("alpha", "active", "design"),
+		"projects/alpha/runs/active/run.json",
+		"lore/sparse-checkout.md", "soul.md", "AGENTS.md",
 	}
-	omitted := []string{other, diagnostic,
-		run.PromptPathFor("claude", "beta", "other", "code"),
-		"projects/beta/runs/other/diagnostics/design/attempt/prompt-claude.md",
+	var omitted []string
+	for _, project := range []string{"alpha", "beta"} {
+		for _, path := range []string{
+			"knowledge/index.md",
+			"knowledge/topics/prompt-example.md",
+			"digital-twin/architecture.md",
+			"hooks/thread-example.jsonl",
+			"hooks/pre-push.d/check.sh",
+			"chores/example/chore.json",
+			"chores/example/prompt.md",
+			"runs/other/run.json",
+			"runs/other/documents/design/content.md",
+			"runs/other/documents/intent/content.md",
+			"runs/other/followups.md",
+			"runs/other/feedback/twin.md",
+			"runs/other/feedback/lore.md",
+		} {
+			included = append(included, "projects/"+project+"/"+path)
+		}
+		omitted = append(omitted,
+			run.ThreadPathFor("codex", project, "other", "design"),
+			run.PromptPathFor("claude", project, "other", "code"),
+			"projects/"+project+"/runs/other/diagnostics/design/attempt/thread-claude.jsonl",
+			"projects/"+project+"/runs/other/diagnostics/design/attempt/prompt-claude.md",
+		)
 	}
 	for _, path := range append(included, omitted...) {
 		gittest.WriteAndCommit(t, root, path, "original\n", "seed artifact")
@@ -40,15 +61,18 @@ func TestSparseSessionPreservesArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, path := range included {
-		if _, err := os.Stat(filepath.Join(s.WorktreePath, path)); err != nil {
-			t.Errorf("included %s: %v", path, err)
+		if body, err := os.ReadFile(filepath.Join(s.WorktreePath, path)); err != nil || string(body) != "original\n" {
+			t.Errorf("included %s = %q, %v", path, body, err)
+		}
+		if out := gittest.Output(t, s.WorktreePath, "ls-files", "-t", "--", path); out != "H "+path {
+			t.Errorf("included path not fully checked out: %q", out)
 		}
 	}
 	for _, path := range omitted {
 		if _, err := os.Stat(filepath.Join(s.WorktreePath, path)); !os.IsNotExist(err) {
 			t.Errorf("omitted %s: %v", path, err)
 		}
-		if out := gittest.Output(t, s.WorktreePath, "ls-files", "-t", "--", path); !strings.HasPrefix(out, "S ") {
+		if out := gittest.Output(t, s.WorktreePath, "ls-files", "-t", "--", path); out != "S "+path {
 			t.Errorf("not skip-worktree: %q", out)
 		}
 		if _, err := os.Stat(filepath.Join(root, path)); err != nil {
