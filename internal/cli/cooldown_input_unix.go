@@ -12,31 +12,18 @@ import (
 // terminal while a stage waits, and guarantees the reader is gone when
 // stop returns.
 //
-// A plain goroutine blocked in os.Stdin.Read can't be cancelled, and one
-// left behind would take the interactive agent's first keystrokes. So
-// the reader runs on a dup of stdin switched to non-blocking, which Go
-// registers with its poller; closing that file wakes the pending read
-// and the goroutine exits. The non-blocking flag lives on the shared
-// open file description, so stop restores it before the agent inherits
-// stdin.
+// A separate /dev/tty open owns its non-blocking flag, leaving inherited
+// stdin unchanged even if the process is killed. Go registers this file
+// with its poller, so closing it wakes a pending read. Stop must also
+// join the reader before dispatch so it cannot take the agent's input.
 func openCooldownControls() (<-chan cooldownControl, func()) {
 	if !cooldownControlsAttached() {
 		return nil, func() {}
 	}
-	stdinFD := os.Stdin.Fd()
-	flags, _, errno := syscall.Syscall(syscall.SYS_FCNTL, stdinFD, syscall.F_GETFL, 0)
-	if errno != 0 {
-		return nil, func() {}
-	}
-	fd, err := syscall.Dup(int(stdinFD))
+	f, err := os.OpenFile("/dev/tty", os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOCTTY, 0)
 	if err != nil {
 		return nil, func() {}
 	}
-	if err := syscall.SetNonblock(fd, true); err != nil {
-		_ = syscall.Close(fd)
-		return nil, func() {}
-	}
-	f := os.NewFile(uintptr(fd), "cooldown-stdin")
 	ch := make(chan cooldownControl, 1)
 	done := make(chan struct{})
 	go func() {
@@ -54,8 +41,5 @@ func openCooldownControls() (<-chan cooldownControl, func()) {
 	return ch, func() {
 		_ = f.Close()
 		<-done
-		if flags&syscall.O_NONBLOCK == 0 {
-			_ = syscall.SetNonblock(int(stdinFD), false)
-		}
 	}
 }
