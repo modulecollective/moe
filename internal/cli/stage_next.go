@@ -1497,12 +1497,12 @@ func indexOfString(xs []string, s string) int {
 // cascadeDispatcher is the Go-level seam a workflow's per-stage init
 // registers so the chain prompt's cascade driver (`!` / `!<stage>` /
 // `!!` / `!!!`) can drive a stage without a hardcoded switch on
-// workflow name. The contract matches openSdlcStage / openTwinStage
-// exactly: take (stage, projectID, runID, headless, stdout, stderr),
-// invoke the right per-stage helper, return its exit code. Every
-// cascade dispatch is headless, and a headless turn skips the post-turn
-// prompt structurally (runStageSession's tail guards on opts.Headless),
-// so there is no separate "suppress next stage" flag to thread.
+// workflow name. The contract matches openSdlcStage exactly: take
+// (stage, projectID, runID, headless, stdout, stderr), invoke the right
+// per-stage helper, return its exit code. Every cascade dispatch is
+// headless, and a headless turn skips the post-turn prompt structurally
+// (runStageSession's tail guards on opts.Headless), so there is no
+// separate "suppress next stage" flag to thread.
 type cascadeDispatcher func(stage, projectID, runID string, headless bool, stdout, stderr io.Writer) int
 
 var cascadeDispatchers = map[string]cascadeDispatcher{}
