@@ -119,10 +119,11 @@ type cooldownGate struct {
 	now   func() time.Time
 	after func(time.Duration) <-chan time.Time
 	read  func(ctx context.Context, agentName, model string) (agent.Quota, error)
-	// openControls starts the attached-terminal reader the first time
-	// the stage has to wait. It returns a nil channel when the
-	// invocation is unattended. The returned stop must not return until
-	// the reader has let go of stdin.
+	// openControls starts the attached-terminal reader for the whole
+	// check, first read included, so a control typed during a slow read
+	// is honoured too. It returns a nil channel when the invocation is
+	// unattended. The returned stop must not return until the reader has
+	// let go of stdin.
 	openControls func() (<-chan cooldownControl, func())
 	stderr       io.Writer
 	// resume is the ordinary invocation that re-runs this stage, printed
@@ -381,10 +382,23 @@ func stageCooldown(g *cooldownGate, agentName, model *string, resolve func(*run.
 		if nextAgent == *agentName && nextModel == *model && !g.refreshChanged {
 			return 0
 		}
-		moePrintf(stderr, "cooldown: stage configuration changed while waiting (%s %s → %s %s); checking again\n", *agentName, *model, nextAgent, nextModel)
+		if nextAgent == *agentName && nextModel == *model {
+			moePrintf(stderr, "cooldown: stage environment changed while waiting; checking again\n")
+		} else {
+			moePrintf(stderr, "cooldown: stage configuration changed while waiting (%s → %s); checking again\n", selectionLabel(*agentName, *model), selectionLabel(nextAgent, nextModel))
+		}
 		*agentName, *model = nextAgent, nextModel
 		g.refreshChanged = false
 	}
+}
+
+// selectionLabel renders a backend/model pair for the operator; the
+// backend's default model has no name to print.
+func selectionLabel(agentName, model string) string {
+	if model == "" {
+		return agentName
+	}
+	return agentName + " " + model
 }
 
 // cooldownControlsAttached reports whether this invocation has an
