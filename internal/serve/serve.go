@@ -15,9 +15,11 @@
 // machine. Reach is the only auth, so whatever sits in front of the
 // listener is the security boundary.
 //
-// The server is still the parent process of every sweep the heartbeat
-// starts, so it owns each child's TTY (via a PTY) and can show its
-// output tail. Nothing else in the process spawns.
+// The server records every job the heartbeat starts — id, start, exit,
+// output tail — in one registry. Which process parents the job is the
+// selected host's business: a PTY serve owns when no Rex server
+// answers, a block in the `moe` Rex session otherwise (process.go,
+// rex.go). Nothing else in the process spawns.
 //
 // Auth is network reach. The listener binds to 127.0.0.1 by default,
 // so nothing off-box can reach it directly. Exposing it to the tailnet

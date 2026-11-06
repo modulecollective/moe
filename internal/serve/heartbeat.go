@@ -19,15 +19,16 @@ import (
 // Everything here is a ticker, a gate check and a child spawn. It
 // decides nothing — on each tick it asks the cli-side gate which
 // projects warrant a look, and for each one runs `moe pulse new
-// --dynamic --heartbeat <project>` as an ordinary PTY child (plus the
-// --emit-run plumbing documented below). --heartbeat is the clock
-// signing its own work, which is what lets the per-project mode (`moe
-// project mode`) cap the clock rather than the operator: the gate never
-// sweeps a paused project, and a safe one's kick starts only
-// operator-marked threads. The sweep that child runs is the only
-// automatic pulse there is, held to a fixed floor: only settled designs
-// with nobody inside get started, every ride walks test and review, and
-// every act it takes is journal-marked.
+// --dynamic --heartbeat <project>` as a child of the selected job host
+// (a local PTY, or a Rex block — rex.go), plus the --emit-run plumbing
+// documented below. --heartbeat is the clock signing its own work,
+// which is what lets the per-project mode (`moe project mode`) cap the
+// clock rather than the operator: the gate never sweeps a paused
+// project, and a safe one's kick starts only operator-marked threads.
+// The sweep that child runs is the only automatic pulse there is, held
+// to a fixed floor: only settled designs with nobody inside get
+// started, every ride walks test and review, and every act it takes is
+// journal-marked.
 //
 // Three properties are load-bearing:
 //
@@ -57,7 +58,7 @@ var heartbeatInterval = 20 * time.Minute
 // back on its own once the vendor does.
 const heartbeatBackoffCap = 6
 
-// heartbeatChildPrefix namespaces heartbeat children in the PTY child
+// heartbeatChildPrefix namespaces heartbeat children in the child
 // registry. The colon is what keeps them from colliding with a run id:
 // ids there are "<project>/<slug>" and both halves are slugs, so no run
 // can ever be spelled this way. Riding the same registry is what gets
@@ -366,8 +367,8 @@ func heartbeatProject(childID string) string {
 }
 
 // logSweepExit writes the sweep's ending to serve's log, which is the
-// only channel here that outlives the process. The exit error, the PTY
-// tail and the minted slug are held by the child registry and the
+// only channel here that outlives the process. The exit error, the
+// output tail and the minted slug are held by the child registry and the
 // activity ring, both of which reset on restart — so an account of a
 // sweep that died before the last restart had to be dug out of dangling
 // commits. The log is already durable and already rotated wherever

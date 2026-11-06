@@ -432,12 +432,12 @@ func (s *Server) closeCaptureRun(w http.ResponseWriter, r *http.Request, project
 
 // closeWorkflowRun closes an in-progress non-capture run through the
 // CloseRun callback, which dispatches the registered close pipeline by
-// the run's workflow. serve owns the PTY children it spawned, so the
-// one guard it applies itself is the live-child refusal: closing while
-// the agent is mid-turn would yank the sandbox clone out from under
-// it. Every other guard (pushed, terminal, canvas-empty, no registered
-// close) lives on the cli side and surfaces through the callback's
-// error.
+// the run's workflow. serve's registry is the only place that knows
+// whether a run has a live child, so the one guard it applies itself
+// is the live-child refusal: closing while the agent is mid-turn would
+// yank the sandbox clone out from under it. Every other guard (pushed,
+// terminal, canvas-empty, no registered close) lives on the cli side
+// and surfaces through the callback's error.
 func (s *Server) closeWorkflowRun(w http.ResponseWriter, r *http.Request, projectID, slug, id string) {
 	if s.opts.CloseRun == nil {
 		http.Error(w, "close not configured (Options.CloseRun is nil)", http.StatusInternalServerError)

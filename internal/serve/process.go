@@ -148,8 +148,8 @@ func (c *child) finish(cs *children, exitErr error, logger io.Writer) {
 	}
 }
 
-// appendTail folds one PTY read into the bounded tail, dropping the
-// oldest bytes once it is full.
+// appendTail folds one chunk of output into the bounded tail, dropping
+// the oldest bytes once it is full.
 func (c *child) appendTail(p []byte) {
 	c.tailMu.Lock()
 	defer c.tailMu.Unlock()

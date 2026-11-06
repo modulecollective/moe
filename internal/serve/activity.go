@@ -61,8 +61,9 @@ type activityEvent struct {
 	// child's subject already names its run — and empty for a sweep that
 	// died before minting one.
 	Run string
-	// Tail is the child's last PTY bytes, ANSI-stripped. Exit events
-	// only, and web-only: it never reaches the state file.
+	// Tail is the child's last output bytes (a PTY read or a Rex screen
+	// capture), ANSI-stripped. Exit events only, and web-only: it never
+	// reaches the state file.
 	Tail string
 	// Decisions is the whole per-project verdict set for a tick — the
 	// gate trace. Tick events only.
@@ -229,11 +230,11 @@ func (a *activity) setHost(host, hostErr string) {
 }
 
 // recordChildSpawn and recordChildExit are the registry's two hooks, so
-// every PTY child serve parents lands in the ring on the same terms.
-// Today that's one spawn site — the heartbeat sweep — but hanging the
-// hooks off the registry rather than the caller keeps it one call per
-// child whoever spawns it. The child id is the subject:
-// "heartbeat:<project>".
+// every child the registry spawns, whichever host parents it, lands in
+// the ring on the same terms. Today that's one spawn site — the
+// heartbeat sweep — but hanging the hooks off the registry rather than
+// the caller keeps it one call per child whoever spawns it. The child
+// id is the subject: "heartbeat:<project>".
 func (a *activity) recordChildSpawn(id string, at time.Time, detail string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
