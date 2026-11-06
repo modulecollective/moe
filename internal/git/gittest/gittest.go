@@ -15,7 +15,7 @@
 // outside internal/git; test code elsewhere should route git setup
 // through gittest instead.
 //
-// Every exported helper takes *testing.T and fails the test on error.
+// Fixture helpers take *testing.T and fail the test on error.
 // Fixtures don't compose with error returns — the caller's only
 // response to "setup failed" is to abort the test — so the t.Fatalf
 // style produces shorter callsites without losing diagnostics.
@@ -58,6 +58,21 @@ func Init(t *testing.T) string {
 func InitSeeded(t *testing.T) string {
 	t.Helper()
 	dir := Init(t)
+	Run(t, dir, "commit", "--allow-empty", "-m", "seed")
+	return dir
+}
+
+// InitSeededUsingEnv creates a fresh repo with an empty seed commit, using
+// the caller's environment without changing it. Before parallel tests run,
+// the caller must establish isolated Git defaults (for example, WriteConfig
+// and GIT_CONFIG_GLOBAL/GIT_CONFIG_SYSTEM in TestMain). The config must stay
+// immutable while those tests run, including in secondary repos.
+func InitSeededUsingEnv(t *testing.T) string {
+	t.Helper()
+	requireGit(t)
+	dir := t.TempDir()
+	Run(t, dir, "init", "-q")
+	scheduleRepoCleanup(t, dir)
 	Run(t, dir, "commit", "--allow-empty", "-m", "seed")
 	return dir
 }
@@ -241,6 +256,17 @@ func requireGit(t *testing.T) {
 func isolateConfig(t *testing.T) {
 	t.Helper()
 	cfg := filepath.Join(t.TempDir(), "gitconfig")
+	if err := WriteConfig(cfg); err != nil {
+		t.Fatalf("seed gitconfig: %v", err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
+}
+
+// WriteConfig writes isolated test defaults to path without changing the
+// environment. Callers sharing this config across parallel tests must keep
+// it immutable until every test and its cleanup have finished.
+func WriteConfig(path string) error {
 	// init.defaultBranch is pinned so tests don't depend on whether the
 	// host git defaults to `main` or `master` — production root branches
 	// are `main`, so that's the fixture default too.
@@ -260,9 +286,5 @@ func isolateConfig(t *testing.T) {
 		"[fetch]\n\twriteCommitGraph = false\n" +
 		"[core]\n\tfsmonitor = false\n\tcommitGraph = false\n" +
 		"[commitGraph]\n\tgenerationVersion = 1\n"
-	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
-		t.Fatalf("seed gitconfig: %v", err)
-	}
-	t.Setenv("GIT_CONFIG_GLOBAL", cfg)
-	t.Setenv("GIT_CONFIG_SYSTEM", "/dev/null")
+	return os.WriteFile(path, []byte(body), 0o644)
 }

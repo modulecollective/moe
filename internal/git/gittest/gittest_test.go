@@ -186,3 +186,51 @@ func TestOutput_TrimsTrailingNewline(t *testing.T) {
 		t.Fatalf("Output = %q, want %q (no trailing whitespace)", got, "init")
 	}
 }
+
+func TestInitSeededUsingEnv_PreservesDefaultsAndCleansUp(t *testing.T) {
+	// A hostile inherited config must not override the caller's isolation.
+	hostile := filepath.Join(t.TempDir(), "hostile.gitconfig")
+	if err := os.WriteFile(hostile, []byte("[commit]\n\tgpgsign = true\n[init]\n\tdefaultBranch = hostile\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", hostile)
+	t.Setenv("GIT_CONFIG_SYSTEM", hostile)
+	SetupEnv(t)
+	cfg := os.Getenv("GIT_CONFIG_GLOBAL")
+	before, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dir string
+	t.Run("seed", func(t *testing.T) {
+		dir = InitSeededUsingEnv(t)
+		if got := Output(t, dir, "symbolic-ref", "--short", "HEAD"); got != "main" {
+			t.Fatalf("branch = %q, want main", got)
+		}
+		if got := Output(t, dir, "log", "-1", "--format=%an <%ae>"); got != "test <test@example.com>" {
+			t.Fatalf("identity = %q", got)
+		}
+		if got := Output(t, dir, "status", "--porcelain"); got != "" {
+			t.Fatalf("dirty seeded repo: %s", got)
+		}
+		if got := os.Getenv("GIT_CONFIG_GLOBAL"); got != cfg {
+			t.Fatalf("helper changed global config from %q to %q", cfg, got)
+		}
+	})
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("fixture survived cleanup: %v", err)
+	}
+	after, err := os.ReadFile(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatal("helper modified caller's config")
+	}
+}
+
+func TestWriteConfig_ReportsWriteFailure(t *testing.T) {
+	if err := WriteConfig(filepath.Join(t.TempDir(), "missing", "gitconfig")); err == nil {
+		t.Fatal("writing into a missing directory succeeded")
+	}
+}
