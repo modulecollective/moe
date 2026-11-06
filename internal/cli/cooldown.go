@@ -196,6 +196,11 @@ func (g *cooldownGate) check(ctx context.Context, agentName, model string) (outc
 			status = fmt.Sprintf("%s quota check failed (%v); retrying in %s", agentName, err, pause)
 		} else {
 			failures = 0
+			for _, w := range q.Unresolved {
+				if w.UsedPercent >= cooldownThreshold {
+					return g.stop(fmt.Sprintf("%s %s %.0f%%: cannot identify which model this limit applies to", agentName, w.ID, w.UsedPercent)), waited
+				}
+			}
 			blocking, until, poll := quotaBlock(q, g.now())
 			if len(blocking) == 0 && !q.Denied {
 				if waited {
@@ -376,7 +381,7 @@ func stageCooldown(g *cooldownGate, agentName, model *string, resolve func(*run.
 		if nextAgent == *agentName && nextModel == *model && !g.refreshChanged {
 			return 0
 		}
-		moePrintf(stderr, "cooldown: selection changed while waiting (%s %s → %s %s); checking again\n", *agentName, *model, nextAgent, nextModel)
+		moePrintf(stderr, "cooldown: stage configuration changed while waiting (%s %s → %s %s); checking again\n", *agentName, *model, nextAgent, nextModel)
 		*agentName, *model = nextAgent, nextModel
 		g.refreshChanged = false
 	}

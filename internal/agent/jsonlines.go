@@ -9,6 +9,7 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+	"sync"
 
 	"github.com/modulecollective/moe/internal/procgroup"
 )
@@ -24,7 +25,33 @@ type JSONLines struct {
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
 	lines  *bufio.Scanner
-	stderr bytes.Buffer
+	stderr quotaStderr
+}
+
+type quotaStderr struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *quotaStderr) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n := len(p)
+	const tailBytes = 4096
+	if len(p) > tailBytes {
+		p = p[len(p)-tailBytes:]
+	}
+	if overflow := b.buf.Len() + len(p) - tailBytes; overflow > 0 {
+		b.buf.Next(overflow)
+	}
+	_, _ = b.buf.Write(p)
+	return n, nil
+}
+
+func (b *quotaStderr) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 // StartJSONLines starts bin with args under ctx. env replaces the

@@ -843,3 +843,10 @@ control interface and Codex CLI 0.167.0's app-server
 `account/rateLimits/read`. They use the executor's authentication filter
 and dev-env overrides. An incompatible CLI or unsupported login stops
 with the bypass route rather than assuming zero usage.
+
+Claude's experimental response must establish freshness. Model-specific
+windows with no usable model identity remain unresolved: low readings
+can admit, while a reading at or above 95% stops with the bypass route.
+MoE never identifies a model from its display label. Codex snapshots
+from an unknown quota pool likewise stop rather than being treated as
+the selected model's allowance.

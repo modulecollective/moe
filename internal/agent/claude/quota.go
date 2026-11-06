@@ -99,7 +99,7 @@ func claudeControl(p *agent.JSONLines, id string, request map[string]any) (json.
 // by a substring of the model id they meter. Both are structural JSON
 // keys; the human display names elsewhere in the reply are never read.
 // An unset model (the CLI's default) can't be matched to a family, so
-// only the account-wide windows apply to it.
+// family windows are unresolved until policy evaluates the reading.
 var (
 	claudeAccountWindows = []string{"five_hour", "seven_day"}
 	claudeModelWindows   = map[string]string{"seven_day_opus": "opus", "seven_day_sonnet": "sonnet"}
@@ -116,8 +116,8 @@ type claudeWindow struct {
 // plan answer; it is not a zero reading.
 func parseClaudeUsage(raw json.RawMessage, model string) (agent.Quota, error) {
 	var reply struct {
-		Available  *bool                    `json:"rate_limits_available"`
-		RateLimits map[string]*claudeWindow `json:"rate_limits"`
+		Available  *bool                      `json:"rate_limits_available"`
+		RateLimits map[string]json.RawMessage `json:"rate_limits"`
 	}
 	if err := json.Unmarshal(raw, &reply); err != nil {
 		return agent.Quota{}, fmt.Errorf("%w: claude get_usage: %v", agent.ErrQuotaMalformed, err)
@@ -130,13 +130,18 @@ func parseClaudeUsage(raw json.RawMessage, model string) (agent.Quota, error) {
 	}
 	ids := append([]string(nil), claudeAccountWindows...)
 	for id, family := range claudeModelWindows {
-		if strings.Contains(strings.ToLower(model), family) {
+		if model == "" || strings.Contains(strings.ToLower(model), family) {
 			ids = append(ids, id)
 		}
 	}
 	var q agent.Quota
 	for _, id := range ids {
-		w := reply.RateLimits[id]
+		var w *claudeWindow
+		if raw := reply.RateLimits[id]; len(raw) > 0 {
+			if err := json.Unmarshal(raw, &w); err != nil {
+				return agent.Quota{}, fmt.Errorf("%w: claude %s: %v", agent.ErrQuotaMalformed, id, err)
+			}
+		}
 		if w == nil {
 			// Absent or null: this plan doesn't meter that bucket. The
 			// five-hour window is the one every subscription carries; a
@@ -149,6 +154,9 @@ func parseClaudeUsage(raw json.RawMessage, model string) (agent.Quota, error) {
 		if w.Utilization == nil {
 			return agent.Quota{}, fmt.Errorf("%w: claude get_usage: %s has no utilization", agent.ErrQuotaMalformed, id)
 		}
+		if *w.Utilization < 0 || *w.Utilization > 100 {
+			return agent.Quota{}, fmt.Errorf("%w: claude %s utilization outside 0–100", agent.ErrQuotaMalformed, id)
+		}
 		qw := agent.QuotaWindow{ID: id, UsedPercent: *w.Utilization}
 		if w.ResetsAt != nil && *w.ResetsAt != "" {
 			t, err := time.Parse(time.RFC3339Nano, *w.ResetsAt)
@@ -157,11 +165,39 @@ func parseClaudeUsage(raw json.RawMessage, model string) (agent.Quota, error) {
 			}
 			qw.ResetsAt = t
 		}
+		if _, family := claudeModelWindows[id]; family && model == "" {
+			if w.LockedReason != nil && *w.LockedReason != "" {
+				return agent.Quota{}, fmt.Errorf("%w: claude unidentified model window is locked", agent.ErrQuotaUnsupported)
+			}
+			q.Unresolved = append(q.Unresolved, qw)
+			continue
+		}
 		if w.LockedReason != nil && *w.LockedReason != "" {
 			q.Denied = true
 			q.Reason = id + " locked: " + *w.LockedReason
 		}
 		q.Windows = append(q.Windows, qw)
+	}
+	// On 2.1.316 the SDK documents model_scoped as absent on cached
+	// replies. Only a present array establishes a fresh endpoint response.
+	// Display labels cannot identify a model. Preserve their readings as
+	// unresolved; the shared policy can admit when every possible limit is low.
+	var scoped []*claudeWindow
+	rawScoped := reply.RateLimits["model_scoped"]
+	if len(rawScoped) == 0 || string(rawScoped) == "null" {
+		return agent.Quota{}, fmt.Errorf("%w: claude freshness unavailable (model_scoped absent)", agent.ErrQuotaUnsupported)
+	}
+	if err := json.Unmarshal(rawScoped, &scoped); err != nil {
+		return agent.Quota{}, fmt.Errorf("%w: claude model_scoped: %v", agent.ErrQuotaMalformed, err)
+	}
+	for i, w := range scoped {
+		if w == nil || w.Utilization == nil || *w.Utilization < 0 || *w.Utilization > 100 {
+			return agent.Quota{}, fmt.Errorf("%w: claude model_scoped[%d] missing or invalid utilization", agent.ErrQuotaMalformed, i)
+		}
+		if w.LockedReason != nil && *w.LockedReason != "" {
+			return agent.Quota{}, fmt.Errorf("%w: claude unidentified model window is locked", agent.ErrQuotaUnsupported)
+		}
+		q.Unresolved = append(q.Unresolved, agent.QuotaWindow{ID: fmt.Sprintf("model_scoped[%d]", i), UsedPercent: *w.Utilization})
 	}
 	return q, nil
 }

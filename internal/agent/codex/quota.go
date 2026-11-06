@@ -95,6 +95,7 @@ func parseCodexRateLimits(raw json.RawMessage) (agent.Quota, error) {
 	var reply struct {
 		Allowed    *bool `json:"ordinaryUsageAllowed"`
 		RateLimits *struct {
+			LimitID   string       `json:"limitId"`
 			Reached   *string      `json:"rateLimitReachedType"`
 			Primary   *codexWindow `json:"primary"`
 			Secondary *codexWindow `json:"secondary"`
@@ -106,6 +107,9 @@ func parseCodexRateLimits(raw json.RawMessage) (agent.Quota, error) {
 	if reply.RateLimits == nil {
 		return agent.Quota{}, fmt.Errorf("%w: codex rateLimits: no rateLimits snapshot", agent.ErrQuotaMalformed)
 	}
+	if id := reply.RateLimits.LimitID; id != "" && id != "codex" {
+		return agent.Quota{}, fmt.Errorf("%w: codex snapshot belongs to unknown pool %q", agent.ErrQuotaUnsupported, id)
+	}
 	var q agent.Quota
 	for _, w := range []struct {
 		id  string
@@ -116,6 +120,9 @@ func parseCodexRateLimits(raw json.RawMessage) (agent.Quota, error) {
 		}
 		if w.win.UsedPercent == nil {
 			return agent.Quota{}, fmt.Errorf("%w: codex rateLimits: %s has no usedPercent", agent.ErrQuotaMalformed, w.id)
+		}
+		if *w.win.UsedPercent < 0 || *w.win.UsedPercent > 100 {
+			return agent.Quota{}, fmt.Errorf("%w: codex %s usedPercent outside 0–100", agent.ErrQuotaMalformed, w.id)
 		}
 		qw := agent.QuotaWindow{ID: w.id, UsedPercent: *w.win.UsedPercent}
 		if w.win.ResetsAt != nil {

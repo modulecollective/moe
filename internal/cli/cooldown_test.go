@@ -390,3 +390,52 @@ func TestCooldownRefreshesSelectionAndPromptFromMain(t *testing.T) {
 		t.Fatalf("stale prompt (read err %v)", err)
 	}
 }
+
+func TestCooldownUnidentifiedScopeOnlyRefusesWhenItCouldBlock(t *testing.T) {
+	for _, percent := range []float64{12, 94, 95, 99} {
+		t.Run(fmt.Sprint(percent), func(t *testing.T) {
+			g, _, out := testCooldown(t)
+			g.read = func(context.Context, string, string) (agent.Quota, error) {
+				q := quota(1, time.Time{})
+				q.Unresolved = []agent.QuotaWindow{{ID: "model_scoped[0]", UsedPercent: percent}}
+				return q, nil
+			}
+			g.after = func(time.Duration) <-chan time.Time { t.Fatal("must not wait on an unidentified model"); return nil }
+			got, _ := g.check(context.Background(), "claude", "opus")
+			want := cooldownAdmit
+			if percent >= 95 {
+				want = cooldownStop
+			}
+			if got != want {
+				t.Fatalf("got %v want %v: %s", got, want, out)
+			}
+		})
+	}
+}
+
+func TestCooldownRefusalIsNotAnAgentFailureInCascadeSummary(t *testing.T) {
+	res := cascadeResult{ran: []cascadeStepResult{{stage: "code", code: exitNotStarted}}}
+	if got := renderCascadeSummary("tele/r", res); got != "cascade tele/r: code not started: quota — stopped" {
+		t.Fatal(got)
+	}
+}
+
+func TestStageCooldownSelectionChangesDoNotRenewBudget(t *testing.T) {
+	g, now, _ := testCooldown(t)
+	reads := 0
+	g.read = func(_ context.Context, name, _ string) (agent.Quota, error) {
+		reads++
+		if name == "codex" {
+			return quota(99, now.Add(2*time.Hour)), nil
+		}
+		if reads == 1 {
+			return quota(99, now.Add(5*time.Hour)), nil
+		}
+		return quota(1, time.Time{}), nil
+	}
+	name, model := "claude", "opus"
+	code := stageCooldown(g, &name, &model, func(*run.Metadata) (string, string, error) { return "codex", "gpt", nil }, func() (*run.Metadata, error) { return &run.Metadata{}, nil }, io.Discard)
+	if code != exitNotStarted || reads != 3 || now.Sub(g.start) != 5*time.Hour+5*time.Second {
+		t.Fatalf("code %d reads %d elapsed %v", code, reads, now.Sub(g.start))
+	}
+}

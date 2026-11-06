@@ -117,3 +117,15 @@ func TestReadQuotaServerErrorIsUnsupported(t *testing.T) {
 		t.Fatalf("err = %v, want unsupported", err)
 	}
 }
+
+func TestParseCodexRateLimitsRejectsUnknownPoolAndInvalidPercentage(t *testing.T) {
+	if _, err := parseCodexRateLimits(json.RawMessage(`{"rateLimits":{"limitId":"other-model","primary":{"usedPercent":1}}}`)); !errors.Is(err, agent.ErrQuotaUnsupported) {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"-1", "101"} {
+		raw := `{"rateLimits":{"primary":{"usedPercent":` + p + `}}}`
+		if _, err := parseCodexRateLimits(json.RawMessage(raw)); !errors.Is(err, agent.ErrQuotaMalformed) {
+			t.Errorf("percent %s: %v", p, err)
+		}
+	}
+}

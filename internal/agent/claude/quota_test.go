@@ -16,23 +16,21 @@ import (
 // claudeUsageFixture is a sanitized get_usage reply in the shape claude
 // 2.1.316 returned during design: windows as 0–100 utilisation with ISO
 // resets, unrelated product buckets null, a model-scoped list keyed by
-// display name that must never be read.
+// display names that must never select a window.
 const claudeUsageFixture = `{"rate_limits_available":true,"rate_limits":{
  "five_hour":{"utilization":65,"resets_at":"2026-11-06T06:10:00.314102+00:00","locked_reason":null},
  "seven_day":{"utilization":8,"resets_at":"2026-11-09T08:00:00.314124+00:00","locked_reason":null},
  "seven_day_opus":{"utilization":97,"resets_at":"2026-11-09T08:00:00+00:00","locked_reason":null},
- "seven_day_sonnet":null,"seven_day_oauth_apps":null,"tangelo":null},
- "limits":[{"kind":"session","percent":65}],
- "model_scoped":[{"display_name":"Fable","utilization":99}],
+ "seven_day_sonnet":null,"seven_day_oauth_apps":null,"tangelo":null,"model_scoped":[]},
  "behaviors":null,"session":{"total_cost_usd":0}}`
 
 func TestParseClaudeUsageAppliesAccountAndMatchingModelWindows(t *testing.T) {
-	q, err := parseClaudeUsage(json.RawMessage(claudeUsageFixture), "")
+	q, err := parseClaudeUsage(json.RawMessage(claudeUsageFixture), "sonnet")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(q.Windows) != 2 || q.Windows[0].ID != "five_hour" || q.Windows[1].ID != "seven_day" {
-		t.Fatalf("default model windows = %+v, want five_hour + seven_day only", q.Windows)
+		t.Fatalf("sonnet model windows = %+v, want five_hour + seven_day only", q.Windows)
 	}
 	if q.Windows[0].UsedPercent != 65 || !q.Windows[0].ResetsAt.Equal(time.Date(2026, 11, 6, 6, 10, 0, 314102000, time.UTC)) {
 		t.Fatalf("five_hour = %+v", q.Windows[0])
@@ -76,7 +74,7 @@ func TestParseClaudeUsageRefusesUnestablishedReadings(t *testing.T) {
 }
 
 func TestParseClaudeUsageLockedWindowIsDenial(t *testing.T) {
-	q, err := parseClaudeUsage(json.RawMessage(`{"rate_limits_available":true,"rate_limits":{"five_hour":{"utilization":3,"locked_reason":"limit_reached"}}}`), "")
+	q, err := parseClaudeUsage(json.RawMessage(`{"rate_limits_available":true,"rate_limits":{"five_hour":{"utilization":3,"locked_reason":"limit_reached"},"model_scoped":[]}}`), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +107,7 @@ cat >> ` + stdin + `
 }
 
 func TestReadQuotaSpeaksControlProtocolWithoutAUserTurn(t *testing.T) {
-	reply := `{"type":"control_response","response":{"subtype":"success","request_id":"moe-usage","response":{"rate_limits_available":true,"rate_limits":{"five_hour":{"utilization":96,"resets_at":"2026-11-06T06:10:00Z"}}}}}`
+	reply := `{"type":"control_response","response":{"subtype":"success","request_id":"moe-usage","response":{"rate_limits_available":true,"rate_limits":{"five_hour":{"utilization":96,"resets_at":"2026-11-06T06:10:00Z"},"model_scoped":[]}}}}`
 	argvPath, stdinPath := fakeClaudeQuota(t, reply)
 	t.Setenv("ANTHROPIC_API_KEY", "sk-must-not-reach-probe")
 	q, err := Agent{}.ReadQuota(context.Background(), agent.QuotaRequest{})
@@ -156,5 +154,36 @@ func TestReadQuotaDeadlineKillsSilentChild(t *testing.T) {
 	}
 	if time.Since(start) > 10*time.Second {
 		t.Fatalf("read outlived its deadline by %v", time.Since(start))
+	}
+}
+
+func TestParseClaudeUsageRefusesCachedAndInvalidReadings(t *testing.T) {
+	for name, raw := range map[string]string{
+		"cached low reading": `{"rate_limits_available":true,"rate_limits":{"five_hour":{"utilization":1}}}`,
+	} {
+		if _, err := parseClaudeUsage(json.RawMessage(raw), ""); !errors.Is(err, agent.ErrQuotaUnsupported) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	for _, p := range []string{"-1", "101"} {
+		raw := `{"rate_limits_available":true,"rate_limits":{"five_hour":{"utilization":` + p + `},"model_scoped":[]}}`
+		if _, err := parseClaudeUsage(json.RawMessage(raw), ""); !errors.Is(err, agent.ErrQuotaMalformed) {
+			t.Errorf("percent %s: %v", p, err)
+		}
+	}
+}
+
+func TestParseClaudeUsagePreservesUnidentifiedScopeWithoutGuessing(t *testing.T) {
+	raw := `{"rate_limits_available":true,"rate_limits":{"five_hour":{"utilization":1},"model_scoped":[{"display_name":"Fable","utilization":12}]}}`
+	q, err := parseClaudeUsage(json.RawMessage(raw), "claude-fable-5-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(q.Windows) != 1 || len(q.Unresolved) != 1 || q.Unresolved[0].UsedPercent != 12 {
+		t.Fatalf("quota %+v", q)
+	}
+	q, err = parseClaudeUsage(json.RawMessage(claudeUsageFixture), "")
+	if err != nil || len(q.Unresolved) != 1 || q.Unresolved[0].ID != "seven_day_opus" {
+		t.Fatalf("default quota %+v err %v", q, err)
 	}
 }
