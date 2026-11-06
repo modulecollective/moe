@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"testing"
-	"time"
 )
 
 func TestJSONLinesCancellationWithConcurrentStderr(t *testing.T) {
@@ -16,19 +15,20 @@ func TestJSONLinesCancellationWithConcurrentStderr(t *testing.T) {
 	dir := t.TempDir()
 	script := `printf 'ready\n'; while :; do echo diagnostic >&2; done &
 wait`
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	p, err := StartJSONLines(ctx, shell, []string{"-c", script}, os.Environ(), dir)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer p.Close()
 	if _, err := p.Next(); err != nil {
 		t.Fatal(err)
 	}
+	cancel()
 	if _, err := p.Next(); err == nil {
 		t.Fatal("expected cancellation")
 	}
-	p.Close()
 	if ctx.Err() == nil {
 		t.Fatal("read ended before its deadline")
 	}
