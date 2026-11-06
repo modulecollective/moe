@@ -370,7 +370,7 @@ func New(root, projectID string, opts Options) (*Metadata, error) {
 	runDirRel := Dir(projectID, id)
 
 	if !opts.AllowDirty {
-		dirty, err := workingTreeDirty(root)
+		dirty, err := WorkingTreeDirty(root)
 		if err != nil {
 			return nil, err
 		}
@@ -608,7 +608,10 @@ func Stage(root string, pathspecs ...string) error {
 // HasStagedChanges reports whether the index has anything staged
 // relative to HEAD.
 func HasStagedChanges(root string) bool {
-	return hasStagedChanges(root)
+	// `diff --cached --quiet` exits 0 if nothing is staged, 1 if there
+	// are staged changes — Probe returns true on exit 0, so a Probe of
+	// true means "no staged changes" and we negate it.
+	return !git.Probe(root, "diff", "--cached", "--quiet")
 }
 
 // ErrNothingToCommit is returned by StageAndCommit when git has no staged
@@ -621,13 +624,6 @@ var ErrNothingToCommit = errors.New("run: nothing to commit")
 // the condition with errors.Is and retry under a different slug — the
 // followups harvester uses this for auto-disambiguation across a batch.
 var ErrSlugTaken = errors.New("run: slug already used")
-
-func hasStagedChanges(root string) bool {
-	// `diff --cached --quiet` exits 0 if nothing is staged, 1 if there
-	// are staged changes — Probe returns true on exit 0, so a Probe of
-	// true means "no staged changes" and we negate it.
-	return !git.Probe(root, "diff", "--cached", "--quiet")
-}
 
 // LatestWorkTurnSHA returns the SHA and committer time of the most recent
 // `work: update <docID>` commit for the run. Slugs are unique per
@@ -1603,7 +1599,15 @@ func SlugTaken(root, projectID, slug string) (bool, error) {
 	return strings.TrimSpace(out) != "", nil
 }
 
-func workingTreeDirty(root string) (bool, error) {
+// WorkingTreeDirty is the precondition New checks before it commits;
+// other commit-on-create entry points (e.g. `moe idea add`) use it to
+// refuse to ride a stray edit on their commit.
+//
+// Untracked files never count as dirty: every commit these guards front
+// stages its own paths, so a file outside the index can't ride along.
+// Counting them made the guard unreachable inside an agent sandbox,
+// which always carries untracked `.claude/` and `.mcp.json` mounts.
+func WorkingTreeDirty(root string) (bool, error) {
 	entries, err := git.Status(root)
 	if err != nil {
 		return false, fmt.Errorf("run: git status: %w", err)
@@ -1614,18 +1618,6 @@ func workingTreeDirty(root string) (bool, error) {
 		}
 	}
 	return false, nil
-}
-
-// WorkingTreeDirty exposes the same precondition New uses internally so
-// other commit-on-create entry points (e.g. `moe idea add`) can refuse
-// to ride a stray edit on their commit.
-//
-// Untracked files never count as dirty: every commit these guards front
-// stages its own paths, so a file outside the index can't ride along.
-// Counting them made the guard unreachable inside an agent sandbox,
-// which always carries untracked `.claude/` and `.mcp.json` mounts.
-func WorkingTreeDirty(root string) (bool, error) {
-	return workingTreeDirty(root)
 }
 
 func writeJSON(path string, v any) error {
