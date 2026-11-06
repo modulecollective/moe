@@ -268,7 +268,7 @@ func promoteLoreEntry(root, projectID, runID string, p parsedLore) (string, erro
 		if statErr != nil {
 			return "", fmt.Errorf("stat %s: %w", abs, statErr)
 		}
-		if stringSliceContains(p.supersedes, slug) {
+		if slices.Contains(p.supersedes, slug) {
 			inPlace = true
 			break
 		}
@@ -327,14 +327,10 @@ func appendUpdatedIn(existing, discoveredIn, thisRun string) string {
 			refs = append(refs, ref)
 		}
 	}
-	if thisRun == discoveredIn || stringSliceContains(refs, thisRun) {
+	if thisRun == discoveredIn || slices.Contains(refs, thisRun) {
 		return strings.Join(refs, ", ")
 	}
 	return strings.Join(append(refs, thisRun), ", ")
-}
-
-func stringSliceContains(values []string, want string) bool {
-	return slices.Contains(values, want)
 }
 
 // harvestLore is the lore counterpart of harvestFollowups. Same flow,

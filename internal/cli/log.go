@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"slices"
 
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/transcript"
@@ -126,7 +127,7 @@ func runLog(workflow, defaultStage string) func(args []string, stdout, stderr io
 				return 1
 			}
 		}
-		if !stageRegistered(stages, stage) {
+		if !slices.Contains(stages, stage) {
 			moePrintf(stderr, "moe %s log: no such stage: %s (have: %v)\n", workflow, stage, stages)
 			return 1
 		}

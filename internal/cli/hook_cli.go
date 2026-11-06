@@ -52,10 +52,6 @@ const hookFireWorkflow = "hook-fire"
 // two surfaces can't drift on which names are accepted.
 var hookFireEvents = []string{"dev-env", "dev-env-teardown", "pre-push"}
 
-func isHookFireEvent(s string) bool {
-	return slices.Contains(hookFireEvents, s)
-}
-
 func unknownHookFireEventMsg(event string) string {
 	return fmt.Sprintf("hook fire: unknown event %q (known: %s)",
 		event, strings.Join(hookFireEvents, ", "))
@@ -85,7 +81,7 @@ func runHookFire(args []string, stdout, stderr io.Writer) int {
 	// and mintHookFireSandbox both touch disk; a typo'd event name shouldn't
 	// look like "something ran" to the operator. Placement pre-findRoot is
 	// deliberate — operator typos surface fast regardless of CWD.
-	if !isHookFireEvent(event) {
+	if !slices.Contains(hookFireEvents, event) {
 		moePrintln(stderr, unknownHookFireEventMsg(event))
 		return 2
 	}

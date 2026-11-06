@@ -139,7 +139,7 @@ func resolveCanvasPath(root, workflow, projectID, runID, stage string) (string, 
 			return "", fmt.Errorf("%s is a %s run, use 'moe %s cat'", runID, md.Workflow, md.Workflow)
 		}
 	}
-	if !stageRegistered(docs, stage) {
+	if !slices.Contains(docs, stage) {
 		return "", fmt.Errorf("no such stage: %s (have: %v)", stage, docs)
 	}
 
@@ -191,10 +191,6 @@ func runDocIDs(root string, md *run.Metadata) []string {
 		}
 	}
 	return ids
-}
-
-func stageRegistered(stages []string, stage string) bool {
-	return slices.Contains(stages, stage)
 }
 
 // liveSessionFor returns the open session for (run, stage), or nil
