@@ -733,8 +733,10 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			err = prepareWorkspace()
 		}
 		if err != nil {
-			moePrintf(stderr, "not started: %v\n", err)
-			return exitNotStarted
+			// A setup failure, not a quota refusal: keep exit 1 so a
+			// cascade doesn't summarise it as "not started: quota".
+			moePrintf(stderr, "%v\n", err)
+			return 1
 		}
 		if opts.projectDocFixTurn {
 			return 0
