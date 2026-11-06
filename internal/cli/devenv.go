@@ -314,13 +314,6 @@ func validDevEnvRevision(revision string) bool {
 	return true
 }
 
-// writeDevEnvCache writes a legacy headerless cache for compatibility
-// fixtures and raw lifecycle callers. Production setup uses the
-// revisioned sibling below.
-func writeDevEnvCache(cachePath string, env map[string]string) error {
-	return writeDevEnvCacheRevision(cachePath, env, "", "")
-}
-
 func writeDevEnvCacheRevision(cachePath string, env map[string]string, owner, revision string) error {
 	if err := os.MkdirAll(filepath.Dir(cachePath), 0o755); err != nil {
 		return fmt.Errorf("dev-env: mkdir cache dir: %w", err)

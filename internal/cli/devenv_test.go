@@ -95,7 +95,7 @@ func TestDevEnvCacheRoundTrip(t *testing.T) {
 		"PORT":         "8080",
 		"MOE_HOME":     "/tmp/bureaucracy",
 	}
-	if err := writeDevEnvCache(cache, env); err != nil {
+	if err := writeDevEnvCacheRevision(cache, env, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	body, err := os.ReadFile(cache)
@@ -500,7 +500,7 @@ printf 'teardown:%%s\n' "$GEN" >> %q
 	// Model an environment minted by the pre-header implementation. Once
 	// this run gains a hook commit, the legacy cache cannot prove it
 	// incorporated that commit and must rebuild once.
-	if err := writeDevEnvCache(filepath.Join(workTree, devEnvCacheRel), env); err != nil {
+	if err := writeDevEnvCacheRevision(filepath.Join(workTree, devEnvCacheRel), env, "", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -559,7 +559,7 @@ func TestDevEnvSetupEnvAdoptsLegacyCacheWithoutOwnHookChange(t *testing.T) {
 
 	workTree := t.TempDir()
 	cachePath := filepath.Join(workTree, devEnvCacheRel)
-	if err := writeDevEnvCache(cachePath, map[string]string{"GEN": "warm"}); err != nil {
+	if err := writeDevEnvCacheRevision(cachePath, map[string]string{"GEN": "warm"}, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	md := &run.Metadata{ID: "new-run", Project: projectID, Workflow: "sdlc"}
@@ -677,7 +677,7 @@ func TestDevEnvSetupEnvValidWritableDirCacheHit(t *testing.T) {
 	workTree := t.TempDir()
 	writableDir := t.TempDir()
 	cache := filepath.Join(workTree, devEnvCacheRel)
-	if err := writeDevEnvCache(cache, map[string]string{"MOE_HOME": writableDir}); err != nil {
+	if err := writeDevEnvCacheRevision(cache, map[string]string{"MOE_HOME": writableDir}, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	md := &run.Metadata{ID: "verify", Project: projID, Workflow: "sdlc"}
@@ -793,7 +793,7 @@ func TestDevEnvSetupEnvStaleCacheTeardownFailurePreservesCache(t *testing.T) {
 	workTree := t.TempDir()
 	missing := filepath.Join(t.TempDir(), "vanished")
 	cache := filepath.Join(workTree, devEnvCacheRel)
-	if err := writeDevEnvCache(cache, map[string]string{"MOE_HOME": missing}); err != nil {
+	if err := writeDevEnvCacheRevision(cache, map[string]string{"MOE_HOME": missing}, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	md := &run.Metadata{ID: "verify", Project: projID, Workflow: "sdlc"}
@@ -822,7 +822,7 @@ func TestDevEnvSetupEnvStaleCacheSetupFailureLeavesNoCache(t *testing.T) {
 	}
 	workTree := t.TempDir()
 	cache := filepath.Join(workTree, devEnvCacheRel)
-	if err := writeDevEnvCache(cache, map[string]string{"MOE_HOME": filepath.Join(t.TempDir(), "vanished")}); err != nil {
+	if err := writeDevEnvCacheRevision(cache, map[string]string{"MOE_HOME": filepath.Join(t.TempDir(), "vanished")}, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	md := &run.Metadata{ID: "verify", Project: projID, Workflow: "sdlc"}
@@ -974,10 +974,10 @@ echo "tearing down DATABASE_URL=$DATABASE_URL MOE_HOME=$MOE_HOME" > ` + receipt 
 	workTree := t.TempDir()
 	vanishedHome := filepath.Join(t.TempDir(), "vanished")
 	// Pre-seed the cache as if dev-env.d had already produced it.
-	if err := writeDevEnvCache(filepath.Join(workTree, devEnvCacheRel), map[string]string{
+	if err := writeDevEnvCacheRevision(filepath.Join(workTree, devEnvCacheRel), map[string]string{
 		"DATABASE_URL": "postgres://localhost/x",
 		"MOE_HOME":     vanishedHome,
-	}); err != nil {
+	}, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	md := &run.Metadata{ID: "x", Project: projID, Workflow: "sdlc"}
@@ -1024,7 +1024,7 @@ func TestDevEnvRunTeardownNoCacheNoOp(t *testing.T) {
 func TestDevEnvClearCacheIdempotent(t *testing.T) {
 	workTree := t.TempDir()
 	cache := filepath.Join(workTree, devEnvCacheRel)
-	if err := writeDevEnvCache(cache, map[string]string{"K": "v"}); err != nil {
+	if err := writeDevEnvCacheRevision(cache, map[string]string{"K": "v"}, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if err := devEnvClearCache(workTree); err != nil {

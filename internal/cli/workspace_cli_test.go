@@ -156,8 +156,8 @@ func TestWorkspaceRemoveDeletesAndRunsTeardown(t *testing.T) {
 	}
 	wp := workspace.Path(root, "tele", "dev")
 	// Seed a cached env so teardown has something to load.
-	if err := writeDevEnvCache(filepath.Join(wp, devEnvCacheRel),
-		map[string]string{"DATABASE_URL": "postgres://localhost/x"}); err != nil {
+	if err := writeDevEnvCacheRevision(filepath.Join(wp, devEnvCacheRel),
+		map[string]string{"DATABASE_URL": "postgres://localhost/x"}, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	// Drop a teardown script that records the env it saw.

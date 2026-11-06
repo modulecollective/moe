@@ -328,7 +328,7 @@ func TestShellRunWorkspaceRefusesStaleDevEnvCache(t *testing.T) {
 		t.Fatalf("attach sandbox: %v", err)
 	}
 	missing := filepath.Join(t.TempDir(), "vanished")
-	if err := writeDevEnvCache(filepath.Join(wp, devEnvCacheRel), map[string]string{"MOE_HOME": missing}); err != nil {
+	if err := writeDevEnvCacheRevision(filepath.Join(wp, devEnvCacheRel), map[string]string{"MOE_HOME": missing}, "", ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -469,7 +469,7 @@ func TestShellNamedWorkspaceRefusesStaleDevEnvCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	missing := filepath.Join(t.TempDir(), "vanished")
-	if err := writeDevEnvCache(filepath.Join(wp, devEnvCacheRel), map[string]string{"MOE_DEV_TMPDIR": missing}); err != nil {
+	if err := writeDevEnvCacheRevision(filepath.Join(wp, devEnvCacheRel), map[string]string{"MOE_DEV_TMPDIR": missing}, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	cwdLog, stubShell := writeShellStub(t)
