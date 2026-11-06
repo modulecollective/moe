@@ -683,8 +683,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 					// this turn's own commit so sizing it later is a
 					// `git log --grep='^MoE-Timed-Out:'`.
 					var timedOut time.Duration
-					var toErr *agent.TimeoutError
-					if errors.As(runErr, &toErr) {
+					if toErr, ok := errors.AsType[*agent.TimeoutError](runErr); ok {
 						timedOut = toErr.Timeout
 					}
 					if err := commitTurn(workRoot, md, docID, agentName, timedOut, extras...); err != nil {

@@ -167,7 +167,7 @@ func latestStageFailure(root, projectID, runID, stage, agentArg string) (string,
 		if err != nil {
 			return "", nil, err
 		}
-		for _, name := range strings.Split(strings.TrimSpace(names), "\n") {
+		for name := range strings.SplitSeq(strings.TrimSpace(names), "\n") {
 			if filepath.Base(name) != "failure.json" {
 				continue
 			}

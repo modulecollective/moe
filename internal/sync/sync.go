@@ -444,7 +444,8 @@ func pointerBumpCommitMessage(bumps []Bump, consent string) string {
 		fmt.Fprintf(&sb, "%s: %s..%s\n", id, git.ShortSHA(b.FromSHA), git.ShortSHA(b.ToSHA))
 	}
 	if consent != "" {
-		sb.WriteString("\n" + trailers.Block{Consent: consent}.String())
+		sb.WriteString("\n")
+		sb.WriteString(trailers.Block{Consent: consent}.String())
 	}
 	return sb.String()
 }
