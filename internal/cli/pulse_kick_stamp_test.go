@@ -155,3 +155,54 @@ func TestPulseSurveyKickStampFailureLeavesRunOpen(t *testing.T) {
 		t.Errorf("tree dirty after a failed stamp (dirty=%v, err=%v); the repo-wide gate would wedge every later close", dirty, err)
 	}
 }
+
+// TestPulseSurveyKickCloseRefusedBeforeStampLeavesRunAlone: the mirror
+// of the stamp failure. The close refuses at its dirty-tree gate, before
+// the stamp ever runs, so there is nothing to put back — and the restore
+// that runs anyway on a failed stamped close must be a no-op: the canvas
+// as the survey left it, nothing staged, the run open, and the
+// operator's own dirty file untouched.
+func TestPulseSurveyKickCloseRefusedBeforeStampLeavesRunAlone(t *testing.T) {
+	defer withRideMode(rideDynamic)()
+	root, _, _ := kickFixture(t)
+	stray := filepath.Join(root, "stray.txt")
+	if err := os.WriteFile(stray, []byte("committed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Output(t, root, "add", "stray.txt")
+	gittest.Output(t, root, "commit", "-q", "-m", "stray")
+
+	var surveyed string
+	orig := openPulse
+	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+		writePulseGate(t, root, projectID, runID, `{"status":"ok"}`)
+		surveyed = readPulseCanvas(t, root, projectID, runID)
+		// A tracked file dirty outside the run trips the close's
+		// repo-wide gate before its cleanup is reached.
+		if err := os.WriteFile(stray, []byte("operator's edit\n"), 0o644); err != nil {
+			t.Error(err)
+		}
+		return surveyOutcome{code: 0, agentStarted: true}
+	}
+	t.Cleanup(func() { openPulse = orig })
+
+	var errb bytes.Buffer
+	runPulseSurvey(root, "moe", "" /*emitRun*/, nil /*pi*/, io.Discard, &errb)
+
+	if !strings.Contains(errb.String(), "uncommitted changes") {
+		t.Fatalf("stderr = %q, want the close refused at its dirty-tree gate", errb.String())
+	}
+	open := openPulseRuns(t, root, "moe")
+	if len(open) != 1 {
+		t.Fatalf("open pulse runs = %v, want the refused sweep left open", open)
+	}
+	if canvas := readPulseCanvas(t, root, "moe", open[0]); canvas != surveyed {
+		t.Errorf("canvas =\n%s\nwant the survey's report exactly as written:\n%s", canvas, surveyed)
+	}
+	if staged := gittest.Output(t, root, "diff", "--cached", "--name-only"); strings.TrimSpace(staged) != "" {
+		t.Errorf("index carries %q after a refused close, want nothing staged", staged)
+	}
+	if body, err := os.ReadFile(stray); err != nil || string(body) != "operator's edit\n" {
+		t.Errorf("stray.txt = %q (err=%v), want the operator's edit left alone", body, err)
+	}
+}
