@@ -23,14 +23,12 @@ import (
 	"github.com/modulecollective/moe/internal/twin"
 )
 
-// newTestBureaucracy initializes a throwaway git repo with scoped git config,
-// so commits can happen without polluting ~/.gitconfig. Returns the root path.
+// newTestBureaucracy initializes a throwaway git repo with scoped git config
+// and one seed commit, so commits can happen without polluting ~/.gitconfig.
+// Returns the root path.
 func newTestBureaucracy(t *testing.T) string {
 	t.Helper()
-	root := t.TempDir()
-	gittest.InitAt(t, root)
-	gittest.Commit(t, root, "seed")
-	return root
+	return gittest.InitSeeded(t)
 }
 
 // ensureClaudeDocument seeds commit fixtures with a selected Claude slot.

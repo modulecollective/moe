@@ -46,6 +46,24 @@ func TestInit_IdentityCoversSecondaryRepos(t *testing.T) {
 	Run(t, second, "commit", "--allow-empty", "-m", "secondary")
 }
 
+// TestInitSeeded_HasHeadOnMainAndCleanTree confirms the two-call seed
+// lands the shape Init+Commit did: one root commit on main, HEAD
+// resolvable, nothing staged or untracked.
+func TestInitSeeded_HasHeadOnMainAndCleanTree(t *testing.T) {
+	dir := InitSeeded(t)
+
+	HeadSHA(t, dir)
+	if got := Output(t, dir, "symbolic-ref", "--short", "HEAD"); got != "main" {
+		t.Fatalf("branch = %q, want main", got)
+	}
+	if got := Output(t, dir, "rev-list", "--count", "HEAD"); got != "1" {
+		t.Fatalf("commit count = %q, want 1", got)
+	}
+	if got := Output(t, dir, "status", "--porcelain"); got != "" {
+		t.Fatalf("status --porcelain = %q, want empty", got)
+	}
+}
+
 // TestInitAt_UsesGivenDir confirms InitAt initializes the repo at the
 // caller-provided path rather than a fresh TempDir.
 func TestInitAt_UsesGivenDir(t *testing.T) {

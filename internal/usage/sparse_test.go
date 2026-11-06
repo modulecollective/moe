@@ -9,12 +9,13 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/session"
 )
 
 func TestSparseUsageMatchesFull(t *testing.T) {
-	root := newTestBureaucracy(t)
+	root := gittest.InitSeeded(t)
 	for _, p := range []string{"alpha", "beta"} {
 		seedRun(t, root, p, "history", "sdlc", run.StatusInProgress, time.Now(), nil)
 		// No canvas: sparse checkout removes this entire stage directory.

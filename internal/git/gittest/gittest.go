@@ -51,6 +51,17 @@ func Init(t *testing.T) string {
 	return dir
 }
 
+// InitSeeded is Init plus one empty root commit on main, so HEAD
+// resolves. Two git invocations; use it where a test only needs a repo
+// that has a HEAD, not a tree. Reach for Commit when files exist or the
+// SHA is wanted — its add and rev-parse are what this skips.
+func InitSeeded(t *testing.T) string {
+	t.Helper()
+	dir := Init(t)
+	Run(t, dir, "commit", "--allow-empty", "-m", "seed")
+	return dir
+}
+
 // scheduleRepoCleanup registers a t.Cleanup that runs *before* the
 // surrounding t.TempDir cleanup (LIFO order). It RemoveAll's repoDir
 // with a short retry loop, swallowing only ENOTEMPTY — which is exactly

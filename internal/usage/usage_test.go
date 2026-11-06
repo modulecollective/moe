@@ -14,16 +14,6 @@ import (
 	"github.com/modulecollective/moe/internal/transcript"
 )
 
-// newTestBureaucracy initializes a throwaway git repo with scoped git
-// config, so commits can happen without polluting ~/.gitconfig.
-func newTestBureaucracy(t *testing.T) string {
-	t.Helper()
-	root := t.TempDir()
-	gittest.InitAt(t, root)
-	gittest.Commit(t, root, "seed")
-	return root
-}
-
 // seedRun writes a run.json (and optional canvases) straight to disk —
 // run.Scan reads nothing else, and going through run.New would drag in
 // the whole open pipeline for a fixture.
@@ -138,7 +128,7 @@ func runByKey(rep Report, key string) (Run, bool) {
 // buckets, and the per-turn dedupe survives the walk (each turn is two
 // lines on disk).
 func TestUsageBucketsByWorkflowStageModel(t *testing.T) {
-	root := newTestBureaucracy(t)
+	root := gittest.InitSeeded(t)
 	now := time.Now().Local()
 	seedRun(t, root, "tele", "ship-it", "sdlc", run.StatusMerged, now, nil)
 	gittest.Run(t, root, "add", "-A")
@@ -181,7 +171,7 @@ func TestUsageBucketsByWorkflowStageModel(t *testing.T) {
 // bureaucracy is checked out into per-session worktrees, where every
 // mtime is the checkout's.
 func TestUsageSinceWindowDropsOlderStages(t *testing.T) {
-	root := newTestBureaucracy(t)
+	root := gittest.InitSeeded(t)
 	now := time.Now().Local()
 	seedRun(t, root, "tele", "ship-it", "sdlc", run.StatusMerged, now, nil)
 	gittest.Run(t, root, "add", "-A")
@@ -197,7 +187,7 @@ func TestUsageSinceWindowDropsOlderStages(t *testing.T) {
 
 // TestUsageProjectFilter scopes the report to one project.
 func TestUsageProjectFilter(t *testing.T) {
-	root := newTestBureaucracy(t)
+	root := gittest.InitSeeded(t)
 	now := time.Now().Local()
 	seedRun(t, root, "tele", "ship-it", "sdlc", run.StatusMerged, now, nil)
 	seedRun(t, root, "moe", "other", "sdlc", run.StatusMerged, now, nil)
@@ -213,7 +203,7 @@ func TestUsageProjectFilter(t *testing.T) {
 }
 
 func TestUsageByRunGroupsQualifiedRunsAndConservesTotals(t *testing.T) {
-	root := newTestBureaucracy(t)
+	root := gittest.InitSeeded(t)
 	now := time.Now().Local()
 	seedRun(t, root, "alpha", "shared", "sdlc", run.StatusMerged, now, nil)
 	seedRun(t, root, "beta", "shared", "chat", run.StatusClosed, now, nil)
@@ -258,7 +248,7 @@ func TestUsageByRunGroupsQualifiedRunsAndConservesTotals(t *testing.T) {
 // last activity, newest first, with a run the journal has no commit for
 // at the bottom rather than sorted as a 1970 zero time.
 func TestUsageRunOrderIsRecencyThenUntimed(t *testing.T) {
-	root := newTestBureaucracy(t)
+	root := gittest.InitSeeded(t)
 	now := time.Now().Local()
 	seedRun(t, root, "tele", "older", "sdlc", run.StatusMerged, now, nil)
 	seedRun(t, root, "tele", "newer", "sdlc", run.StatusMerged, now, nil)
@@ -295,7 +285,7 @@ func TestUsageRunOrderIsRecencyThenUntimed(t *testing.T) {
 }
 
 func TestUsageCutoffKeepsOnlyInWindowStagesInRunView(t *testing.T) {
-	root := newTestBureaucracy(t)
+	root := gittest.InitSeeded(t)
 	now := time.Now().Local()
 	seedRun(t, root, "tele", "split", "sdlc", run.StatusMerged, now, nil)
 	gittest.Commit(t, root, "seed run")
@@ -317,7 +307,7 @@ func TestUsageCutoffKeepsOnlyInWindowStagesInRunView(t *testing.T) {
 // record still contributes its tokens; only the dollar column abstains.
 // Inventing a rate would be worse than admitting the gap.
 func TestUsageUnknownModelKeepsTokensDropsDollars(t *testing.T) {
-	root := newTestBureaucracy(t)
+	root := gittest.InitSeeded(t)
 	now := time.Now().Local()
 	seedRun(t, root, "tele", "ship-it", "sdlc", run.StatusMerged, now, nil)
 	gittest.Run(t, root, "add", "-A")
@@ -344,7 +334,7 @@ func TestUsageUnknownModelKeepsTokensDropsDollars(t *testing.T) {
 }
 
 func TestUsageMixedPriceTotalsAreStarred(t *testing.T) {
-	root := newTestBureaucracy(t)
+	root := gittest.InitSeeded(t)
 	now := time.Now().Local()
 	seedRun(t, root, "tele", "mixed", "sdlc", run.StatusMerged, now, nil)
 	gittest.Commit(t, root, "seed run")
@@ -369,7 +359,7 @@ func TestUsageMixedPriceTotalsAreStarred(t *testing.T) {
 // transcript adapters run, while an unrelated unknown model still preserves
 // its tokens and marks the mixed total partial.
 func TestUsageNewPricesAggregateThroughParsers(t *testing.T) {
-	root := newTestBureaucracy(t)
+	root := gittest.InitSeeded(t)
 	now := time.Now().Local()
 	seedRun(t, root, "tele", "new-prices", "sdlc", run.StatusMerged, now, nil)
 	seedRun(t, root, "tele", "sol-6-1", "sdlc", run.StatusMerged, now, nil)
@@ -405,7 +395,7 @@ func TestUsageNewPricesAggregateThroughParsers(t *testing.T) {
 }
 
 func TestUsageUntimedTranscriptStaysOutOfByDay(t *testing.T) {
-	root := newTestBureaucracy(t)
+	root := gittest.InitSeeded(t)
 	now := time.Now().Local()
 	seedRun(t, root, "tele", "untimed", "sdlc", run.StatusMerged, now,
 		map[string]string{"design": ""})
@@ -425,7 +415,7 @@ func TestUsageUntimedTranscriptStaysOutOfByDay(t *testing.T) {
 // commit is invisible until one moves HEAD. Same shape as
 // TestJournalIndexMemoizedOnHEAD.
 func TestScanMemoizedOnHEAD(t *testing.T) {
-	root := newTestBureaucracy(t)
+	root := gittest.InitSeeded(t)
 	now := time.Now().Local()
 	seedRun(t, root, "tele", "memo", "sdlc", run.StatusMerged, now, nil)
 	gittest.Commit(t, root, "seed run")
@@ -472,7 +462,7 @@ func TestScanMemoizedOnHEAD(t *testing.T) {
 // TestGatherReusesScanAcrossFilters: the memo is what makes the page's
 // project and window controls cheap — changing either must not re-walk.
 func TestGatherReusesScanAcrossFilters(t *testing.T) {
-	root := newTestBureaucracy(t)
+	root := gittest.InitSeeded(t)
 	now := time.Now().Local()
 	seedRun(t, root, "alpha", "one", "sdlc", run.StatusMerged, now, nil)
 	seedRun(t, root, "beta", "two", "sdlc", run.StatusMerged, now, nil)
@@ -511,7 +501,7 @@ func TestGatherReusesScanAcrossFilters(t *testing.T) {
 // covers; a wider one misses and re-parses; and a narrow request after
 // that hits the wider entry, because a narrower window is a subset.
 func TestScanIsBoundedByTheWindow(t *testing.T) {
-	root := newTestBureaucracy(t)
+	root := gittest.InitSeeded(t)
 	now := time.Now().Local()
 	old := now.Add(-60 * 24 * time.Hour)
 	seedRun(t, root, "tele", "recent", "sdlc", run.StatusMerged, now, nil)
