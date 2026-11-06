@@ -135,9 +135,10 @@ source of truth for the exact command surface; this page is a map.
   context, per backend, with the pulse apart. `--by-backend` splits that table
   by month and lists named path misses; `--sessions` emits one JSON line per
   session for hand review. A mention counts only when a read or search verb
-  carries the path; a truncated result or a not-found error naming the path is
-  counted, not read. Lore is bureaucracy-wide, so its counts cover every reader
-  only without `--project`. `--since` defaults to `90d`, the cadence of the
+  carries the path. A truncated result still counts as a read and is tallied
+  in the TRUNC column; a not-found error naming the path is a miss, not a
+  read. Lore is bureaucracy-wide, so its counts cover every reader only
+  without `--project`. `--since` defaults to `90d`, the cadence of the
   `context-use-audit` chore that reads it.
 - `moe where` prints the resolved bureaucracy path.
 - `moe version` prints the moe version.
