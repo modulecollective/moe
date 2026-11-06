@@ -17,7 +17,16 @@ func RenderHygiene(w io.Writer, sessions []Session, inv Inventory, projects []st
 	rateTable(w, sessions, false)
 
 	loreReads := counts(sessions, func(s Session) []string { return s.Lore })
-	fmt.Fprintf(w, "\nLORE  %d entries, %d read by these sessions\n", len(inv.Lore), len(loreReads))
+	// Count inventory entries, not distinct read keys: a glob ("*") or a
+	// scratch board's lore file a test-stage drive opened is a read key
+	// with no entry behind it.
+	read := 0
+	for _, name := range inv.Lore {
+		if loreReads[name] > 0 || loreReads[strings.TrimSuffix(name, ".md")] > 0 {
+			read++
+		}
+	}
+	fmt.Fprintf(w, "\nLORE  %d entries, %d read by these sessions\n", len(inv.Lore), read)
 	unreadAndTop(w, inv.Lore, loreReads)
 
 	for _, p := range projects {

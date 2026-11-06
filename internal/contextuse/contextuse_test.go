@@ -197,6 +197,9 @@ func TestGatherCodex(t *testing.T) {
 
 func TestRenderHygiene(t *testing.T) {
 	root, sessions := fixture(t)
+	// A glob read and a lore file outside the inventory (a scratch
+	// board's) are read keys with no entry; the header must not count them.
+	sessions[0].Lore = append(sessions[0].Lore, "*", "scratch-only")
 	var out bytes.Buffer
 	RenderHygiene(&out, sessions, ReadInventory(root, []string{"p"}), []string{"p"})
 	got := out.String()
