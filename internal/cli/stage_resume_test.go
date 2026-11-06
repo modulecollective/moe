@@ -125,9 +125,7 @@ func (f *fakeAgent) RestoreTranscript(sessionID, cwd, mirrorPath string) (agent.
 // caller can drive turns and inspect the recorded calls.
 func setupResumeFixture(t *testing.T, name string) (string, *fakeAgent) {
 	t.Helper()
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("MOE_FORCE_AGENT", "") // don't let a stray env override opts.Agent
 	t.Setenv("NO_COLOR", "1")
 	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)

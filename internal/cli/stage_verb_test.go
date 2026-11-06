@@ -108,9 +108,7 @@ func TestStageVerbMutualExclusionAcrossWorkflows(t *testing.T) {
 // so no fixture is needed.
 // Both fire before any run lookup, so no fixture is needed.
 func TestStageVerbToNamesWorkflowLadder(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer

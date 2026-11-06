@@ -48,9 +48,7 @@ func TestProjectRegistered(t *testing.T) {
 }
 
 func TestProjectListEmpty(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
@@ -64,9 +62,7 @@ func TestProjectListEmpty(t *testing.T) {
 }
 
 func TestProjectListPrintsRows(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	writeProjectMetadata(t, root, &project.Metadata{
@@ -95,9 +91,7 @@ func TestProjectListPrintsRows(t *testing.T) {
 }
 
 func TestProjectListWarnsAndContinues(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	writeProjectMetadata(t, root, &project.Metadata{
@@ -131,9 +125,7 @@ func TestProjectListWarnsAndContinues(t *testing.T) {
 }
 
 func TestProjectListRejectsArgs(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer

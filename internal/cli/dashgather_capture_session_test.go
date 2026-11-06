@@ -37,9 +37,7 @@ func activeRowFor(t *testing.T, root, project, slug string) *dash.Row {
 // land there until close, so a row dated from LastActivity would call a
 // minutes-old session stale.
 func TestGatherDashSnapshotIntentChatSessionRow(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 
 	trailerstest.SeedRun(t, root, "tele", "sharpen-me", dash.IntentWorkflow, run.StatusInProgress)
 	writeContent(t, root, "tele", "sharpen-me", dash.IntentDocID, "# Sharpen me\n")

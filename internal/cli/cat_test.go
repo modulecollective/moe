@@ -56,9 +56,7 @@ func TestSdlcCatPrintsDesignCanvas(t *testing.T) {
 // TestCatUnknownProject: missing project surfaces with the design's
 // error shape and exit 1, before any run lookup.
 func TestCatUnknownProject(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer

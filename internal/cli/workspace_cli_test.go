@@ -101,9 +101,7 @@ func TestWorkspaceListPrintsRows(t *testing.T) {
 // nothing and exits 0 — same posture project list takes for
 // empty state.
 func TestWorkspaceListEmptyIsSilent(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer

@@ -240,9 +240,7 @@ func TestIdeaTagRefusesDirtyWorkingTree(t *testing.T) {
 
 // TestIdeaTagUsageErrors: wrong arity exits 2 on both verbs.
 func TestIdeaTagUsageErrors(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	for _, args := range [][]string{

@@ -333,9 +333,7 @@ func TestIdeaNewRequiresEditor(t *testing.T) {
 }
 
 func TestIdeaNewRefusesUnregisteredProject(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
 
@@ -751,9 +749,7 @@ func TestIdeaCloseRejectsAlreadyClosed(t *testing.T) {
 }
 
 func TestIdeaCloseUsageErrorsOnMissingArgs(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
@@ -863,9 +859,7 @@ func TestIdeaCatStatusAgnostic(t *testing.T) {
 
 // TestIdeaCatUsageErrors: wrong arity exits 2.
 func TestIdeaCatUsageErrors(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
@@ -1194,9 +1188,7 @@ func TestIdeaMoveRefusesDirtyWorkingTree(t *testing.T) {
 
 // TestIdeaMoveUsageErrors: wrong arity exits 2.
 func TestIdeaMoveUsageErrors(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
@@ -1457,9 +1449,7 @@ func TestIdeaReopenRefusesDirtyWorkingTree(t *testing.T) {
 
 // TestIdeaReopenUsageErrors: wrong arity exits 2.
 func TestIdeaReopenUsageErrors(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer

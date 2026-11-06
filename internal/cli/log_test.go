@@ -43,9 +43,7 @@ func TestLogRegisteredOnEveryWorkflow(t *testing.T) {
 }
 
 func TestMoeLog_RequiresStageForMultiStage(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	for _, args := range [][]string{
@@ -65,9 +63,7 @@ func TestMoeLog_RequiresStageForMultiStage(t *testing.T) {
 }
 
 func TestMoeLog_UnknownRun(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	// project.json exists but the named run does not.
@@ -84,9 +80,7 @@ func TestMoeLog_UnknownRun(t *testing.T) {
 }
 
 func TestMoeLog_UnknownProject(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
@@ -100,9 +94,7 @@ func TestMoeLog_UnknownProject(t *testing.T) {
 }
 
 func TestMoeLog_RendersClaudeThread(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "moe", "demo-run", "sdlc", run.StatusInProgress)
@@ -125,9 +117,7 @@ func TestMoeLog_RendersClaudeThread(t *testing.T) {
 }
 
 func TestMoeLog_StagePicksThatStage(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "moe", "demo-run", "sdlc", run.StatusInProgress)
@@ -153,9 +143,7 @@ func TestMoeLog_StagePicksThatStage(t *testing.T) {
 }
 
 func TestMoeLog_NoTranscriptForStage(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "moe", "demo-run", "sdlc", run.StatusInProgress)
@@ -174,9 +162,7 @@ func TestMoeLog_NoTranscriptForStage(t *testing.T) {
 }
 
 func TestMoeLog_AgentFlagPins(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "moe", "demo-run", "sdlc", run.StatusInProgress)
@@ -202,9 +188,7 @@ func TestMoeLog_AgentFlagPins(t *testing.T) {
 }
 
 func TestMoeLog_AmbiguousAgentRefuses(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "moe", "demo-run", "sdlc", run.StatusInProgress)
@@ -232,9 +216,7 @@ func TestMoeLog_AmbiguousAgentRefuses(t *testing.T) {
 }
 
 func TestMoeLog_BadAgentFlag(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer

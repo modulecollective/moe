@@ -87,9 +87,7 @@ func TestFindOrphanClonesNoClonesDir(t *testing.T) {
 // removes terminal-status clones, leaves in-progress and pushed ones
 // alone, prints one line per removal, and exits 0.
 func TestCloneGCRemovesOrphans(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "alpha", "in-flight", "sdlc", run.StatusInProgress)
@@ -138,9 +136,7 @@ func TestCloneGCRemovesOrphans(t *testing.T) {
 // status line and exits 0 — sync runs this in a loop, so a clean
 // bureaucracy must not surface as a failure.
 func TestCloneGCNoOrphans(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
@@ -158,9 +154,7 @@ func TestCloneGCNoOrphans(t *testing.T) {
 // with the run-registry status — or `(missing)` for a phantom clone
 // whose run.json was never seeded.
 func TestCloneListSortedWithStatus(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "alpha", "in-flight", "sdlc", run.StatusInProgress)
@@ -204,9 +198,7 @@ func TestCloneListSortedWithStatus(t *testing.T) {
 // TestCloneListNoClones: an empty bureaucracy must surface "no clones"
 // rather than a stat error or an empty body.
 func TestCloneListNoClones(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer

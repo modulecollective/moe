@@ -17,9 +17,7 @@ import (
 // when there is nothing in the window, rather than printing a bare
 // header over an empty table.
 func TestUsageCommandEmptyBureaucracy(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 	var out, errb bytes.Buffer
 	if code := Run([]string{"usage"}, &out, &errb); code != 0 {

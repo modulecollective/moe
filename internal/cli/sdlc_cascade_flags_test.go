@@ -563,9 +563,7 @@ func TestSDLCStageRoutesEachCascadeMode(t *testing.T) {
 func TestSDLCStageNoFlagRoutesInteractive(t *testing.T) {
 	for _, sv := range sdlcStageVerbs {
 		t.Run(sv.name, func(t *testing.T) {
-			root := newTestBureaucracy(t)
-			markBureaucracy(t, root)
-			t.Setenv("MOE_HOME", root)
+			newMoeHome(t)
 			t.Setenv("NO_COLOR", "1")
 
 			stages := stubOpenSdlcStage(t, nil)
@@ -602,9 +600,7 @@ func TestSDLCStageRejectsToWhenNothingFollows(t *testing.T) {
 	// stage. The workflow lookup inside dispatchCascadeForStage
 	// reads the registered sdlc ladder, so "push" is the last
 	// index and stages[startIdx+1:] is empty.
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer

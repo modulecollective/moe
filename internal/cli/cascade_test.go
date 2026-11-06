@@ -262,9 +262,7 @@ func TestCascadeFromGateRunsBetweenStartAndDestination(t *testing.T) {
 // reads as not-blocked, so it takes the hard-park path rather than the
 // blocked→chain-prompt affordance that `blocked` now earns.
 func TestCascadeFromGateStopsWhenStageGateUnsatisfied(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
@@ -403,9 +401,7 @@ func cascadeFixtureRoot(t *testing.T, md *run.Metadata) string {
 
 func isolateCascadeMoeHome(t *testing.T) string {
 	t.Helper()
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 	return root
 }

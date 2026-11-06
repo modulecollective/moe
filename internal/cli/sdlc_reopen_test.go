@@ -347,9 +347,7 @@ func TestSDLCReopenDashMarkerDropsAfterReopen(t *testing.T) {
 // surfacing the marker on twin rows would advertise an action the
 // operator can't take.
 func TestDashClosedNonSDLCHasNoReopenMarker(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "tele", "chat-dead", "chat", run.StatusClosed)

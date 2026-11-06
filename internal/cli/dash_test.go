@@ -39,10 +39,19 @@ func markBureaucracy(t *testing.T, root string) {
 	}
 }
 
-func TestDashEmptyBureaucracy(t *testing.T) {
+// newMoeHome is the standard cli fixture: a seeded bureaucracy root,
+// marked, and bound as MOE_HOME so Run(...) resolves it and nothing
+// leaks to the ambient bureaucracy.
+func newMoeHome(t *testing.T) string {
+	t.Helper()
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	t.Setenv("MOE_HOME", root)
+	return root
+}
+
+func TestDashEmptyBureaucracy(t *testing.T) {
+	newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
@@ -70,9 +79,7 @@ func TestDashEmptyBureaucracy(t *testing.T) {
 // "sdlc:code". The operator either re-runs code, which fires the push
 // chain prompt again, or types `moe sdlc push` directly to ship.
 func TestDashAfterCodeShowsCodeStage(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
@@ -106,9 +113,7 @@ func TestDashAfterCodeShowsCodeStage(t *testing.T) {
 // "design"; the previous backward-walking rule would have shown "code"
 // (code stale because prereq newer).
 func TestDashPrereqReworkedShowsDesignStage(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
@@ -138,9 +143,7 @@ func TestDashPrereqReworkedShowsDesignStage(t *testing.T) {
 // TestDashFreshRunShowsFirstStage: a seeded run with no work turns at
 // all still shows up, with "design" as its next stage.
 func TestDashFreshRunShowsFirstStage(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
@@ -164,9 +167,7 @@ func TestDashFreshRunShowsFirstStage(t *testing.T) {
 // sees it still owes a click on GitHub. PR number comes from the
 // MoE-PR trailer.
 func TestDashPushedRunShowsAwaitingMerge(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusPushed)
@@ -194,9 +195,7 @@ func TestDashPushedRunShowsAwaitingMerge(t *testing.T) {
 // TestDashMergedRunShowsMerged: a run with StatusMerged renders as
 // "merged" in COMPLETED.
 func TestDashMergedRunShowsMerged(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusMerged)
@@ -226,9 +225,7 @@ func TestDashMergedRunShowsMerged(t *testing.T) {
 // as a candidate to carry forward via `moe sdlc reopen`. The marker
 // is gated on workflow ("sdlc") because reopen is an sdlc verb.
 func TestDashClosedRunShowsClosed(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusClosed)
@@ -256,9 +253,7 @@ func TestDashClosedRunShowsClosed(t *testing.T) {
 // for grooming, not hidden. (Inverts the former
 // TestDashDormantHiddenWithoutAll, which asserted the opposite.)
 func TestDashStaleInProgressRunSurfacesInActive(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "tele", "old-one", "sdlc", run.StatusInProgress)
@@ -291,9 +286,7 @@ func TestDashStaleInProgressRunSurfacesInActive(t *testing.T) {
 // drifted down day by day. The completed count is cumulative history —
 // it should only climb.
 func TestDashStaleMergedRunCountsInCompleted(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "tele", "long-merged", "sdlc", run.StatusMerged)
@@ -316,9 +309,7 @@ func TestDashStaleMergedRunCountsInCompleted(t *testing.T) {
 }
 
 func TestDashSortsNewestFirstWithinBucket(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "tele", "older", "sdlc", run.StatusInProgress)
@@ -398,9 +389,7 @@ func TestDashBacklogShowsCapturedIdeas(t *testing.T) {
 }
 
 func TestDashBacklogEmptyShowsNone(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
@@ -414,9 +403,7 @@ func TestDashBacklogEmptyShowsNone(t *testing.T) {
 }
 
 func TestDashProjectCountReflectsProjectJSON(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	for _, p := range []string{"alpha", "beta", "gamma"} {
@@ -448,9 +435,7 @@ func TestDashProjectCountReflectsProjectJSON(t *testing.T) {
 // dashboard already shows the row count on the ACTIVE header, so the
 // footer carries a fact you can't read off the section headers.
 func TestDashFooterActiveCountsProjectsNotRuns(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "tele", "fix-a", "sdlc", run.StatusInProgress)
@@ -475,9 +460,7 @@ func TestDashFooterActiveCountsProjectsNotRuns(t *testing.T) {
 // (b) only the newest CompletedCap rows render. The cap exists so the
 // section doesn't grow unbounded and drown the live sections above it.
 func TestDashCompletedCapsAtCap(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	// 12 merged runs, oldest first so "newest-first" ordering pushes
@@ -516,9 +499,7 @@ func TestDashCompletedCapsAtCap(t *testing.T) {
 // implementation-flavored "RUNS" suffix that used to read like a
 // schema label rather than a status.
 func TestDashSectionHeadingsDropRuns(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
@@ -545,9 +526,7 @@ func TestDashSectionHeadingsDropRuns(t *testing.T) {
 // destination run directly; the workflow is already visible once that
 // run shows up in ACTIVE/COMPLETED.
 func TestDashPromotedIdeaShowsSuccessorSlug(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "tele", "search-idea", dash.IdeaWorkflow, run.StatusPromoted)
@@ -573,9 +552,7 @@ func TestDashPromotedIdeaShowsSuccessorSlug(t *testing.T) {
 // "idea:promoted" label — the arrow only appears when we can name the
 // destination run.
 func TestDashPromotedIdeaMissingTargetFallsBack(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "tele", "ghost-idea", dash.IdeaWorkflow, run.StatusPromoted)
@@ -602,9 +579,7 @@ func TestDashPromotedIdeaMissingTargetFallsBack(t *testing.T) {
 // ladder — the idea row on top, the run nested beneath it as a "↳" row,
 // the same grammar chain and spawn lineage already use.
 func TestDashPromotedIdeaNestsSettledSuccessor(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "tele", "search-idea", dash.IdeaWorkflow, run.StatusPromoted)
@@ -641,9 +616,7 @@ func TestDashPromotedIdeaNestsSettledSuccessor(t *testing.T) {
 // Empty-string default = no filter, so this also pins that the flag
 // only kicks in when set.
 func TestDashFilterByProject(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "foo", "alpha", "sdlc", run.StatusInProgress)
@@ -669,9 +642,7 @@ func TestDashFilterByProject(t *testing.T) {
 // TestDashFilterByWorkflow: two runs in the same project on different
 // workflows; `--workflow chat` keeps the chat row and drops the sdlc row.
 func TestDashFilterByWorkflow(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
@@ -697,9 +668,7 @@ func TestDashFilterByWorkflow(t *testing.T) {
 // TestDashFilterCombined: --project and --workflow compose to the
 // intersection. Only the row matching both flags survives.
 func TestDashFilterCombined(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "foo", "alpha", "sdlc", run.StatusInProgress)
@@ -730,9 +699,7 @@ func TestDashFilterCombined(t *testing.T) {
 // error — the dashboard renders with empty section bodies and exit 0.
 // Filtering is read-only; "(none)" is the obvious miss signal.
 func TestDashFilterUnknownReturnsEmpty(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
@@ -758,9 +725,7 @@ func TestDashFilterUnknownReturnsEmpty(t *testing.T) {
 // `--all` lifts the truncation and renders the full list with a plain
 // "COMPLETED (Y)" header.
 func TestDashAllLiftsCompletedCap(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	for i := range 12 {
@@ -805,9 +770,7 @@ func TestDashAllLiftsCompletedCap(t *testing.T) {
 // the parked-stage prefix already names the doc, so a "[code running]"
 // repeat would buy nothing.
 func TestDashOpenSessionSameDocMarksRunning(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
@@ -840,9 +803,7 @@ func TestDashOpenSessionSameDocMarksRunning(t *testing.T) {
 // would say "design" while the operator knows code is in flight off
 // the dashboard.
 func TestDashOpenSessionDifferentDocMarksDocRunning(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	// Fresh run with no work turns: parked at design.
@@ -868,9 +829,7 @@ func TestDashOpenSessionDifferentDocMarksDocRunning(t *testing.T) {
 // behaviour before this rail. Pins the no-marker default so a future
 // change can't smuggle a marker into the no-session case.
 func TestDashNoOpenSessionLeavesNoteUnchanged(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
@@ -1183,9 +1142,7 @@ func TestBuildFactoryArtAwaitingMergeRunningSmokesAndSwapsGlyph(t *testing.T) {
 // lands a running-doc glyph in the dash's rail. Pins the wiring
 // classify → dashRow.runningDoc → dash.FactoryState → buildRail.
 func TestDashOpenSessionSwapsArtGlyph(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	// Fresh sdlc run: parked at design.
@@ -1222,9 +1179,7 @@ func TestDashOpenSessionSwapsArtGlyph(t *testing.T) {
 // it's the easiest deterministic shape (dotted line, no RNG drift on
 // stations).
 func TestDashRendersFactoryArt(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
@@ -1249,9 +1204,7 @@ func TestDashRendersFactoryArt(t *testing.T) {
 // loop off pipes and scripts — and, not incidentally, out of the test
 // binary, which is why this is the only unit test watch mode gets.
 func TestDashWatchRejectsNonTTY(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
@@ -1423,9 +1376,7 @@ func TestTTYFrameBufferKeepsColourGate(t *testing.T) {
 // Without the swap this assertion is vacuous on a UTC host, which is
 // most of them. Safe here because no test in this package is parallel.
 func TestDashBannerTimestampIsLocal(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	t.Setenv("MOE_HOME", root)
+	newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	// An offset no host is plausibly in, and not a whole number of
