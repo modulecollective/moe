@@ -127,7 +127,7 @@ func TestBuildSystemPromptInjectsLoreAfterTwin(t *testing.T) {
 	}
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
-	got, _, err := buildSystemPrompt(root, md, "code", "", false)
+	got, _, err := buildSystemPrompt(root, md, "code", "", false, "claude")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,34 +176,61 @@ func seedIntentRun(t *testing.T, root, projectID, slug, status, canvasBody strin
 	}
 }
 
-// TestIntentsReferenceSection pins the catalog: open intents render as
-// `slug — title` lines (title from the canvas's first heading) pointing
-// at each canvas path; closed intents are excluded; and a project with
-// no open intents produces no section at all.
+// TestIntentsReferenceSection pins the inlined intents: each open intent
+// renders under a `### `slug` — title` heading (title from the canvas's
+// first heading) with its body below — that heading dropped, the rest
+// demoted two levels, fenced lines left alone; closed intents are
+// excluded; and a project with no open intents produces no section.
 func TestIntentsReferenceSection(t *testing.T) {
 	root := newTestBureaucracy(t)
-	seedIntentRun(t, root, "tele", "north-star", run.StatusInProgress, "# Be the fastest dash\n\nbody\n")
-	seedIntentRun(t, root, "tele", "retired", run.StatusClosed, "# Old direction\n")
+	seedIntentRun(t, root, "tele", "north-star", run.StatusInProgress,
+		"# Be the fastest dash\n\nThe bet body.\n\n## Done when\n\n```sh\n# not a heading\n```\n#hashtag\n")
+	seedIntentRun(t, root, "tele", "retired", run.StatusClosed, "# Old direction\n\nold body\n")
 
 	got := intentsReferenceSection(root, "tele")
 	for _, want := range []string{
 		"## Project intents",
-		"`north-star` — Be the fastest dash",
-		filepath.Join(root, run.ContentPath("tele", "north-star", "intent")),
+		"### `north-star` — Be the fastest dash\n\nThe bet body.\n\n#### Done when\n\n```sh\n# not a heading\n```\n#hashtag\n",
 		"never create or edit",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("intents section missing %q in:\n%s", want, got)
 		}
 	}
-	if strings.Contains(got, "retired") || strings.Contains(got, "Old direction") {
-		t.Errorf("closed intent must be excluded from the catalog:\n%s", got)
+	if strings.Count(got, "Be the fastest dash") != 1 {
+		t.Errorf("title should render once, as the ### heading:\n%s", got)
+	}
+	if strings.Contains(got, "retired") || strings.Contains(got, "Old direction") || strings.Contains(got, "old body") {
+		t.Errorf("closed intent must be excluded:\n%s", got)
 	}
 
 	// A project with no open intents produces no section — the empty
 	// case pays zero prompt cost.
 	if empty := intentsReferenceSection(root, "no-such-project"); empty != "" {
 		t.Errorf("expected empty section for a project with no open intents, got:\n%s", empty)
+	}
+}
+
+// TestKnowledgeReferenceSection: a project with knowledge/index.md gets
+// one section naming its absolute path and line count; a project
+// without one gets nothing.
+func TestKnowledgeReferenceSection(t *testing.T) {
+	root := newTestBureaucracy(t)
+	index := filepath.Join(root, "projects", "tele", "knowledge", "index.md")
+	if err := os.MkdirAll(filepath.Dir(index), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(index, []byte("# tele knowledge\n\n- [a](topics/a.md)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := knowledgeReferenceSection(root, "tele")
+	for _, want := range []string{"## Project knowledge", index + " (3 lines)", "`knowledge/topics/`"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("knowledge section missing %q in:\n%s", want, got)
+		}
+	}
+	if empty := knowledgeReferenceSection(root, "other"); empty != "" {
+		t.Errorf("expected no section without a knowledge index, got:\n%s", empty)
 	}
 }
 
@@ -218,10 +245,10 @@ func TestIntentTitleFallsBackToSlug(t *testing.T) {
 }
 
 // TestBuildSystemPromptInjectsIntentsBetweenTwinAndLore pins the design
-// contract: the intents catalog lands after the twin reference and
-// before the lore catalog, so the agent reads project-specific direction
-// between what the project *is* (twin) and the project-agnostic facts
-// (lore).
+// contract: twin, then intents, then the knowledge line, then lore, so
+// the agent reads project-specific direction between what the project
+// *is* (twin) and the project-agnostic facts (lore). Also pins the
+// agent plumbing: only the codex prompt names the tool-result cap.
 func TestBuildSystemPromptInjectsIntentsBetweenTwinAndLore(t *testing.T) {
 	root := newTestBureaucracy(t)
 
@@ -241,20 +268,38 @@ func TestBuildSystemPromptInjectsIntentsBetweenTwinAndLore(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedIntentRun(t, root, "tele", "aim-here", run.StatusInProgress, "# Aim here\n")
+	index := filepath.Join(root, "projects", "tele", "knowledge", "index.md")
+	if err := os.MkdirAll(filepath.Dir(index), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(index, []byte("# tele knowledge\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
-	got, _, err := buildSystemPrompt(root, md, "code", "", false)
+	got, _, err := buildSystemPrompt(root, md, "code", "", false, "claude")
 	if err != nil {
 		t.Fatal(err)
 	}
 	twinIdx := strings.Index(got, "## Project digital twin")
 	intentIdx := strings.Index(got, "## Project intents")
+	knowIdx := strings.Index(got, "## Project knowledge")
 	loreIdx := strings.Index(got, "## Lore (cross-project)")
-	if twinIdx < 0 || intentIdx < 0 || loreIdx < 0 {
-		t.Fatalf("missing a section; twin=%d intents=%d lore=%d in:\n%s", twinIdx, intentIdx, loreIdx, got)
+	if twinIdx < 0 || intentIdx < 0 || knowIdx < 0 || loreIdx < 0 {
+		t.Fatalf("missing a section; twin=%d intents=%d knowledge=%d lore=%d in:\n%s", twinIdx, intentIdx, knowIdx, loreIdx, got)
 	}
-	if !(twinIdx < intentIdx && intentIdx < loreIdx) {
-		t.Errorf("expected twin < intents < lore ordering; got twin=%d intents=%d lore=%d", twinIdx, intentIdx, loreIdx)
+	if !(twinIdx < intentIdx && intentIdx < knowIdx && knowIdx < loreIdx) {
+		t.Errorf("expected twin < intents < knowledge < lore ordering; got twin=%d intents=%d knowledge=%d lore=%d", twinIdx, intentIdx, knowIdx, loreIdx)
+	}
+	if strings.Contains(got, "capped at about 10k tokens") {
+		t.Errorf("claude prompt must not carry the codex result-cap sentence")
+	}
+	codex, _, err := buildSystemPrompt(root, md, "code", "", false, "codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(codex, "capped at about 10k tokens") {
+		t.Errorf("codex prompt missing the result-cap sentence in:\n%s", codex)
 	}
 }
 
@@ -264,7 +309,7 @@ func TestBuildSystemPromptInjectsIntentsBetweenTwinAndLore(t *testing.T) {
 func TestBuildSystemPromptOmitsIntentsWhenNone(t *testing.T) {
 	root := newTestBureaucracy(t)
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
-	got, _, err := buildSystemPrompt(root, md, "code", "", false)
+	got, _, err := buildSystemPrompt(root, md, "code", "", false, "claude")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +365,7 @@ func TestFollowupsReferenceSection(t *testing.T) {
 func TestBuildSystemPromptIncludesFollowupsNudge(t *testing.T) {
 	root := newTestBureaucracy(t)
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
-	got, _, err := buildSystemPrompt(root, md, "code", "", false)
+	got, _, err := buildSystemPrompt(root, md, "code", "", false, "claude")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -761,7 +806,7 @@ func TestBuildSystemPromptIncludesPriorRunsAfterProjectGuidance(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(clone, "AGENTS.md"), []byte("stdlib only\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got, _, err := buildSystemPrompt(root, md, "code", clone, false)
+	got, _, err := buildSystemPrompt(root, md, "code", clone, false, "claude")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -814,7 +859,7 @@ func TestOperationalCoreNamesProjectCommitDirs(t *testing.T) {
 	}
 	for _, tc := range cases {
 		md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: tc.workflow}
-		got, _, err := buildSystemPrompt(root, md, tc.docID, "", false)
+		got, _, err := buildSystemPrompt(root, md, tc.docID, "", false, "claude")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -837,7 +882,7 @@ func TestSDLCPromptsAuthorizeProposedStylesheet(t *testing.T) {
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: sdlcWorkflow}
 	for _, stage := range []string{"design", "code", "test", "review", "push"} {
 		for _, readOnly := range []bool{false, true} {
-			got, _, err := buildSystemPrompt(root, md, stage, "/sandbox/clone", readOnly)
+			got, _, err := buildSystemPrompt(root, md, stage, "/sandbox/clone", readOnly, "claude")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -869,7 +914,7 @@ func TestSDLCPromptsDoNotRevokeProjectCommitDirs(t *testing.T) {
 	root := newTestBureaucracy(t)
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: sdlcWorkflow}
 	for _, docID := range []string{"design", "code", "test", "push"} {
-		got, _, err := buildSystemPrompt(root, md, docID, "", false)
+		got, _, err := buildSystemPrompt(root, md, docID, "", false, "claude")
 		if err != nil {
 			t.Fatal(err)
 		}

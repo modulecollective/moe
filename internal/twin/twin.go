@@ -13,6 +13,7 @@
 package twin
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -49,62 +50,67 @@ func Dir(root, projectID string) string {
 	return filepath.Join(root, "projects", projectID, DirRel)
 }
 
+// docBlurbs is the one-line purpose each managed doc gets in the stage
+// prompt's twin section. The moe-twin skill carries the long form.
+var docBlurbs = map[string]string{
+	"vision.md":       "what this project is trying to be; the bets, the problem, the non-goals.",
+	"architecture.md": "components, boundaries, load-bearing decisions.",
+	"patterns.md":     "named patterns and anti-patterns; the project's prose-form eval suite.",
+	"operations.md":   "how the project runs day-to-day.",
+	"glossary.md":     "project-specific vocabulary; terse entries pointing back to the home doc where each term is anchored.",
+}
+
 // ReferenceSectionAt emits a system-prompt block that names the
 // project's digital twin and tells the agent to read it before doing
 // substantive work. Reference, not splice — the agent decides what to
 // read each turn rather than every prompt carrying the full twin.
 //
-// Returns "" when the project has no digital-twin/ dir on disk.
-// Stages don't need to branch on this: empty input concatenates
-// cleanly into buildSystemPrompt's section join.
-func ReferenceSectionAt(root, projectID string) string {
+// Each managed doc on disk is listed by absolute path with its line
+// count. Both exist because of what the 2026-11 transcript audit found:
+// agents typed twin paths relative to the wrong root, and Codex `cat`ed
+// the whole twin in one call and silently lost its middle to the tool
+// result cap. A doc missing from disk is not listed — pointing at it
+// only manufactures a not-found error, and the twin gate already
+// reports it. agent is the backend name; codex additionally gets the
+// cap spelled out, since that backend is the one that truncates.
+//
+// Returns "" when the project has no managed twin doc on disk. Stages
+// don't need to branch on this: empty input concatenates cleanly into
+// buildSystemPrompt's section join.
+func ReferenceSectionAt(root, projectID, agent string) string {
 	if root == "" || projectID == "" {
 		return ""
 	}
 	dir := Dir(root, projectID)
-	info, err := os.Stat(dir)
-	if err != nil || !info.IsDir() {
-		return ""
-	}
-	// Empty dir → no twin to reference. Any .md counts: the managed
-	// docs are the only thing that lives here now that nothing
-	// generates a log alongside them.
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return ""
-	}
-	hasManagedDoc := false
-	for _, e := range entries {
-		if e.IsDir() {
+	var docs strings.Builder
+	for _, name := range managedDocs {
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
 			continue
 		}
-		if !strings.HasSuffix(e.Name(), ".md") {
-			continue
-		}
-		hasManagedDoc = true
-		break
+		fmt.Fprintf(&docs, "- %s — %s (%d lines)\n  %s\n",
+			name, docBlurbs[name], lineCount(data), filepath.Join(dir, name))
 	}
-	if !hasManagedDoc {
+	if docs.Len() == 0 {
 		return ""
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "## Project digital twin\n\n")
-	fmt.Fprintf(&b, "This project has a digital twin under\n  %s\n", dir)
+	b.WriteString("## Project digital twin\n\n")
+	b.WriteString(`This project has a digital twin. It is the durable layer of intent —
+read it before doing substantive work. Read one doc per tool call, by
+the absolute path given:
+
+`)
+	b.WriteString(docs.String())
+	if agent == "codex" {
+		b.WriteString(`
+Your tool results are capped at about 10k tokens, and anything longer
+is cut in the middle with a "truncated output" warning. A single ` + "`cat`" + `
+of several docs is not a read; read a long doc in line ranges.
+`)
+	}
 	b.WriteString(`
-It is the durable layer of intent — read it before doing
-substantive work:
-
-- vision.md — what this project is trying to be; the bets, the
-  problem, the non-goals.
-- architecture.md — components, boundaries, load-bearing
-  decisions.
-- patterns.md — named patterns and anti-patterns; the project's
-  prose-form eval suite.
-- operations.md — how the project runs day-to-day.
-- glossary.md — project-specific vocabulary; terse entries
-  pointing back to the home doc where each term is anchored.
-
 When your work would contradict a recorded decision in
 architecture.md, name the conflict before continuing. When you'd
 deviate from a recorded pattern, name the deviation. The twin
@@ -117,4 +123,14 @@ about the twin (and how to slice the journal for twin-touching
 work), use the sibling ` + "`moe-context`" + ` skill.
 `)
 	return b.String()
+}
+
+// lineCount counts lines the way `wc -l` would, plus a final
+// unterminated line — the number an agent sizing a `sed -n` range wants.
+func lineCount(data []byte) int {
+	n := bytes.Count(data, []byte("\n"))
+	if len(data) > 0 && data[len(data)-1] != '\n' {
+		n++
+	}
+	return n
 }

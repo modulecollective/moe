@@ -36,11 +36,14 @@ import (
 // BuildSpec for the strict-boundary stages — design, chat, pulse —
 // whose close gate refuses any tracked-file change.
 //
+// agent is the backend name ("claude", "codex"); the twin section uses it
+// to spell out the codex tool-result cap.
+//
 // The second return is the operator-input entry ids this prompt
 // rendered. The caller stamps them delivered once the turn succeeds, so
 // what was consumed is exactly what the agent was shown. Nil for the
 // runs — nearly all of them — carrying no input record.
-func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string, sandboxReadOnly bool) (string, []int, error) {
+func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string, sandboxReadOnly bool, agent string) (string, []int, error) {
 	var sections []string
 
 	if soul := moe.Soul(); soul != "" {
@@ -64,7 +67,7 @@ func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string, s
 	// Twin-as-context: every stage gets a reference block pointing at
 	// the project's digital-twin/ dir (when one exists). Lands early:
 	// what the project *is* frames everything that follows.
-	if ref := twin.ReferenceSectionAt(root, md.Project); ref != "" {
+	if ref := twin.ReferenceSectionAt(root, md.Project, agent); ref != "" {
 		sections = append(sections, ref)
 	}
 
@@ -79,8 +82,17 @@ func buildSystemPrompt(root string, md *run.Metadata, docID, clonePath string, s
 		sections = append(sections, ref)
 	}
 
+	// Knowledge-as-context: one line naming the project's knowledge
+	// catalog, when it has one. It used to be named only inside the
+	// moe-context skill, which the 2026-11 transcript audit found Claude
+	// almost never loads outside the pulse; the always-on line reaches
+	// both backends. The catalog itself stays on disk.
+	if ref := knowledgeReferenceSection(root, md.Project); ref != "" {
+		sections = append(sections, ref)
+	}
+
 	// Lore-as-context: portable, cross-project facts catalog. Lands
-	// right after the intents so project-specific intent is read before
+	// after the intents and knowledge so project-specific context is read before
 	// the project-agnostic operational facts that build on it.
 	if ref := lore.ReferenceSectionAt(root); ref != "" {
 		sections = append(sections, ref)
@@ -320,15 +332,18 @@ func upstreamChangeBanner(root string, md *run.Metadata, docID string) (string, 
 	return b.String(), nil
 }
 
-// intentsReferenceSection emits a catalog of the project's open intents
-// — the operator's standing direction — in the same lore-style grammar:
-// one line per intent (backtick slug, em-dash, title from the canvas's
-// first heading), each pointing at its canvas path, with a framing that
-// tells the agent to read the ones that bear on what it's deciding.
-// Bodies stay on disk; the catalog is the budgeted summary, and a lazy
-// agent can skip the read everywhere except the pulse (whose fragment
-// mandates it) — the accepted lore trade, ambient cheapness over
-// guaranteed ingestion.
+// intentsReferenceSection inlines the project's open intents — the
+// operator's standing direction — under one `### `slug` — Title` heading
+// each, title from the canvas's first heading, body below it with that
+// heading dropped and the rest demoted two levels so an intent's own
+// `## ` sections can't pose as prompt sections.
+//
+// It was a slug/title/path catalog, the lore trade (bodies on disk,
+// ambient cheapness over guaranteed ingestion). The 2026-11 transcript
+// audit found most sessions never opened the files, even in the pulse
+// that mandates the read. Intents are operator-authored and short by
+// design, so the bodies ride every turn instead; an intent too long to
+// inline is a reason to shorten the intent.
 //
 // Returns "" when the project has no open intents (or on any scan
 // error), so the empty case slots cleanly into buildSystemPrompt's
@@ -346,16 +361,20 @@ func intentsReferenceSection(root, projectID string) string {
 	var b strings.Builder
 	b.WriteString("## Project intents\n\n")
 	b.WriteString(`This project has open intents — short, operator-authored statements
-of where it's going: a theme, a bet, a direction it's heading. Read the
-ones that bear on what you're deciding before substantive work. They
-aim the discretionary calls (what to propose, what to prioritise); they
-don't fence what's allowed.
-
+of where it's going: a theme, a bet, a direction it's heading. They are
+inlined below. They aim the discretionary calls (what to propose, what
+to prioritise); they don't fence what's allowed.
 `)
 	for _, e := range entries {
 		title := intentTitle(root, e.project, e.slug)
-		path := filepath.Join(root, run.ContentPath(e.project, e.slug, dash.IntentDocID))
-		fmt.Fprintf(&b, "- `%s` — %s\n  %s\n", e.slug, title, path)
+		fmt.Fprintf(&b, "\n### `%s` — %s\n", e.slug, title)
+		content, err := os.ReadFile(filepath.Join(root, run.ContentPath(e.project, e.slug, dash.IntentDocID)))
+		if err != nil {
+			continue
+		}
+		if body := intentPromptBody(string(content)); body != "" {
+			b.WriteString("\n" + body + "\n")
+		}
 	}
 	b.WriteString(`
 Intents are operator-authored — you read them, you never create or edit
@@ -363,6 +382,54 @@ them. If a theme looks missing, name it in a report; the operator
 decides whether to park it.
 `)
 	return b.String()
+}
+
+// intentPromptBody returns an intent canvas ready to sit under its
+// `### ` heading: the first `# ` heading (already the title) dropped,
+// every other ATX heading outside a code fence demoted two levels, and
+// surrounding blank lines trimmed.
+func intentPromptBody(content string) string {
+	var out []string
+	titleDropped, inFence := false, false
+	for line := range strings.SplitSeq(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			inFence = !inFence
+		}
+		if rest := strings.TrimLeft(line, "#"); !inFence && rest != line && (rest == "" || rest[0] == ' ') {
+			if !titleDropped && strings.HasPrefix(line, "# ") {
+				titleDropped = true
+				continue
+			}
+			line = "##" + line
+		}
+		out = append(out, line)
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
+}
+
+// knowledgeReferenceSection names the project's knowledge catalog by
+// absolute path and size, when `knowledge/index.md` exists. The
+// moe-context skill keeps the longer rule (reuse the read while it is
+// current, refresh on change); this line is the first-read cue for the
+// backend that never loads the skill. Returns "" without an index.
+func knowledgeReferenceSection(root, projectID string) string {
+	if root == "" || projectID == "" {
+		return ""
+	}
+	path := filepath.Join(root, project.Dir(projectID), "knowledge", "index.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	lines := strings.Count(string(data), "\n")
+	return fmt.Sprintf(`## Project knowledge
+
+This project's knowledge catalog is at
+  %s (%d lines)
+Read it before substantive work, then open the topics under
+`+"`knowledge/topics/`"+` that bear on the task — not every topic.
+`, path, lines)
 }
 
 // followupsReferenceSection emits a one-paragraph nudge naming the

@@ -146,7 +146,7 @@ func TestBuildSystemPromptInjectsChatFragment(t *testing.T) {
 		Project:  "moe",
 		Workflow: chatWorkflow,
 	}
-	got, _, err := buildSystemPrompt(root, md, chatDoc, "", false)
+	got, _, err := buildSystemPrompt(root, md, chatDoc, "", false, "claude")
 	if err != nil {
 		t.Fatal(err)
 	}

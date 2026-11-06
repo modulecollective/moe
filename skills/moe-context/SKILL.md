@@ -54,19 +54,20 @@ The shape under `{{.BureaucracyRoot}}` is the same for every project:
   read-only context — the operator authors them, agents never do (see
   the write-side rule in `moe-bureaucracy`). When you're making a
   judgment call about direction (what to propose, what to prioritise),
-  the open intents are the aim; read the ones that bear on it. The
-  always-on stage prompt lists them in a catalog, and the pulse's
-  fragment makes reading them mandatory.
+  the open intents are the aim. The always-on stage prompt inlines
+  their bodies, so you already have them; the pulse's fragment makes
+  steering by them mandatory.
 - `projects/<p>/knowledge/index.md` — the project's knowledge catalog;
   `knowledge/topics/` holds the topic bodies.
 - `lore/<slug>.md` — cross-project facts; the always-on stage prompt
   catalog lists which apply to which contexts.
 
-On first use of this skill in the current agent context, read
-`projects/{{.Project}}/knowledge/index.md` if it exists, then open relevant
-topics. Reuse that catalog read while it is current and available in
-context; refresh it if the index changes or its contents are no longer
-available. Do not reread it every conversational turn or load every topic.
+The always-on stage prompt names
+`projects/{{.Project}}/knowledge/index.md` when it exists. If you have not
+read it yet in this agent context, read it now, then open relevant topics.
+Reuse that catalog read while it is current and available in context;
+refresh it if the index changes or its contents are no longer available.
+Do not reread it every conversational turn or load every topic.
 For lore, use the injected catalog's applies-when hints to select bodies.
 
 ## Slicing the journal

@@ -663,7 +663,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 					// commits its own fixes (BoundaryAllowsCommits), so
 					// the writable paragraph is the true one there.
 					readOnly := opts.EnforceSandboxBoundary && !opts.BoundaryAllowsCommits
-					p, inputIDs, err := buildSystemPrompt(workRoot, md, docID, clonePath, readOnly)
+					p, inputIDs, err := buildSystemPrompt(workRoot, md, docID, clonePath, readOnly, agentName)
 					if err != nil {
 						return "", err
 					}

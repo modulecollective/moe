@@ -112,9 +112,11 @@ inputs are plain markdown:
 - `workflows/<workflow>/<stage>.md` defines the lens for the current stage.
 - The stage-location header says where the run is in the ladder and what the
   chain prompt will offer next.
-- Project digital-twin documents point the agent at recorded intent.
-- Open project intents supply operator-authored standing direction; a catalog
-  points the agent at the relevant intent canvases.
+- Project digital-twin documents point the agent at recorded intent, each by
+  absolute path and line count.
+- Open project intents supply operator-authored standing direction, inlined in
+  full.
+- The project's knowledge index, when one exists, is named by path and size.
 - Operator input — prose pushed at the run, or a pulse question and your
   answer — is delivered to that run's next stage prompt.
 - Lore and followup pointers tell the agent where to look and where to leave

@@ -356,10 +356,11 @@ priority, no until-date. Parked = open.
 Where intents reach the robots:
 
 - **Stage prompts.** Every agent-facing stage on a project with open intents
-  gets a short catalog section (slug — title, canvas path) between the digital
-  twin and the lore catalog, framed as "where this project is going — read the
-  ones that bear on what you're deciding." It aims the discretionary calls
-  (what to propose, what to prioritise); it doesn't fence what's allowed.
+  gets their bodies inlined between the digital twin and the lore catalog, each
+  under a `slug — title` heading, framed as where the project is going. They
+  aim the discretionary calls (what to propose, what to prioritise); they don't
+  fence what's allowed. Intents are short by design; one too long to inline is
+  a reason to shorten it.
 - **The pulse.** The pulse is the one consumer whose job includes the intents,
   so its fragment makes the read mandatory: open intents join the survey floor,
   speculative proposals aim at an open intent (`intent: <slug>` in the Why),
