@@ -1317,29 +1317,16 @@ func slugBaseMatches(slugs []string, base string) bool {
 	return false
 }
 
-// pulseKickoffWithContext appends the harness-computed context to the
+// pulseKickoffFromScan appends the harness-computed context to the
 // static kickoff: six blocks (GitHub, recently-settled runs, chain
 // state, advanced-and-left runs, openable judged chores, the input
 // channel) and two trailing lines (what this invocation licensed, and
-// what the project's standing mode does with that licence). Wired as
-// InitialPromptBuilder, so root is the session worktree
-// runStageSession hands the builder. Best-effort throughout: a gather
-// that fails drops its own block rather than failing the sweep.
-func pulseKickoffWithContext(root, projectID, runID string, stderr io.Writer) (string, map[string]string) {
-	blocks := []string{pulseKickoff}
-	// Every block wants the same two reads. Doing them once here is not
-	// just cheaper — it means the blocks describe one consistent moment
-	// rather than six successive ones.
-	sc, ok := newPulseScan(root)
-	if !ok {
-		// Best-effort like each block was individually: a sweep with no
-		// context blocks is a worse sweep, not a failed one.
-		moePrintf(stderr, "pulse: kickoff: could not read runs for %s — context blocks dropped\n", projectID)
-		return strings.Join(blocks, "\n\n"), nil
-	}
-	return pulseKickoffFromScan(sc, projectID, runID, stderr)
-}
-
+// what the project's standing mode does with that licence). The
+// survey's InitialPromptBuilder calls it with a scan of the session
+// worktree runStageSession hands the builder; every block reads that
+// one scan, so the blocks describe one consistent moment rather than
+// six successive ones. Best-effort throughout: a gather that fails
+// drops its own block rather than failing the sweep.
 func pulseKickoffFromScan(sc *pulseScan, projectID, runID string, stderr io.Writer) (string, map[string]string) {
 	blocks := []string{pulseKickoff}
 	if gh := pulseGitHubContext(sc, projectID, runID, stderr); gh != "" {

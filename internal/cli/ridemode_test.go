@@ -97,14 +97,14 @@ func TestPulseKickoffCarriesRideLineWithNothingChained(t *testing.T) {
 	}
 	func() {
 		defer withRideMode(rideDynamic)()
-		got, _ := pulseKickoffWithContext(root, "moe", "pulse-x", io.Discard)
+		got, _ := pulseKickoffFromScan(mustPulseScan(t, root), "moe", "pulse-x", io.Discard)
 		if !strings.Contains(got, "a **dynamic** sweep") {
 			t.Errorf("dynamic sweep line missing from the kickoff:\n%s", got)
 		}
 	}()
 	// A hand-typed sweep starts nothing, and a block saying so is
 	// context the agent can't act on.
-	got, _ := pulseKickoffWithContext(root, "moe", "pulse-x", io.Discard)
+	got, _ := pulseKickoffFromScan(mustPulseScan(t, root), "moe", "pulse-x", io.Discard)
 	if strings.Contains(got, "**dynamic** sweep") {
 		t.Errorf("kickoff claims a dynamic sweep outside one:\n%s", got)
 	}

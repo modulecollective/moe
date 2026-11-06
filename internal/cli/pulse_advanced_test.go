@@ -119,8 +119,8 @@ func TestAdvancedRunsBlockSkipsLiveSession(t *testing.T) {
 	}
 
 	// The block does not render against the bureaucracy root in
-	// production: pulseKickoffWithContext is wired as an
-	// InitialPromptBuilder, so it is handed the pulse's *own* session
+	// production: pulseKickoffFromScan runs inside the survey's
+	// InitialPromptBuilder, whose scan is of the pulse's *own* session
 	// worktree. A guard that reads worktree-registry state (session.List)
 	// resolves its paths against that workRoot and silently finds
 	// nothing, which is how the first attempt at this fix still shipped
@@ -188,7 +188,7 @@ func TestAdvancedRunsBlockOrdersOldestFirst(t *testing.T) {
 }
 
 // TestAdvancedRunsBlockEmpty: nothing advanced means no block at all,
-// consistent with every sibling in pulseKickoffWithContext. An empty
+// consistent with every sibling in pulseKickoffFromScan. An empty
 // block with a header reads as a bug.
 func TestAdvancedRunsBlockEmpty(t *testing.T) {
 	root := newTestBureaucracy(t)

@@ -21,8 +21,8 @@ import (
 
 // chainStateBlock renders the chain-state context block, or "" when
 // nothing is sequenced. Best-effort like its siblings in
-// pulseKickoffWithContext: the sweep's shared scan is best-effort and
-// a failure drops the block rather than failing the sweep.
+// pulseKickoffFromScan: a block that finds nothing renders nothing
+// rather than failing the sweep.
 //
 // Selection reuses activeChainItems — the same grouping the dash and
 // the chain editor render, so the three views cannot drift — then keeps

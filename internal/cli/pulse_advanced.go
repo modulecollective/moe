@@ -79,7 +79,7 @@ type advancedRun struct {
 
 // advancedRunsBlock renders the advanced-runs context block, or "" when
 // no run in the project is waiting on an advance marker. Best-effort
-// like its siblings in pulseKickoffWithContext: a block that finds
+// like its siblings in pulseKickoffFromScan: a block that finds
 // nothing renders nothing rather than failing the sweep.
 //
 // No age window and no cap, unlike settledRunsBlock: an advanced run is

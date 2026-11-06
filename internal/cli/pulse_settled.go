@@ -47,8 +47,8 @@ type settledRun struct {
 
 // settledRunsBlock renders the recently-settled-runs context block, or
 // "" when there is nothing to say. Best-effort like its siblings in
-// pulseKickoffWithContext: a failed scan drops the block rather than
-// failing the sweep.
+// pulseKickoffFromScan: a block that finds nothing renders nothing
+// rather than failing the sweep.
 //
 // Selection is terminal-and-recent: `closed` or `merged`, this project,
 // non-pulse workflow, created inside the window. `promoted` is
