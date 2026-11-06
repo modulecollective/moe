@@ -19,8 +19,9 @@
 // output tail — in one registry. Which process parents the job is the
 // selected host's business: a PTY serve owns when no Rex server
 // answers, a block in the `moe` Rex session otherwise (process.go,
-// rex.go). Beyond those jobs, the only other spawns are the short `rex`
-// CLI calls that drive the Rex host.
+// rex.go). Beyond those jobs, the only other process this package
+// spawns is the `rex` CLI, in short calls that drive the Rex host; the
+// cli callbacks it is handed run git on their own account.
 //
 // Auth is network reach. The listener binds to 127.0.0.1 by default,
 // so nothing off-box can reach it directly. Exposing it to the tailnet
