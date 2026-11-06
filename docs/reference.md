@@ -126,6 +126,19 @@ source of truth for the exact command surface; this page is a map.
   `/usage`: the totals and the workflow/stage/model table on top, a table of
   runs below linking to each run page, both sortable by any column and
   scoped by the same `project` and `since` filters.
+- `moe context-use [--project <id>] [--since <dur>] [--by-backend | --sessions]`
+  reads the same mirrored transcripts for which steering agents actually read:
+  twin docs, lore entries, the knowledge index and topics, intents, and other
+  runs. The default view leads with hygiene — lore entries and knowledge topics
+  no session in the window opened, and each twin doc's size against the codex
+  result cap — after a table of the share of sessions reaching each kind of
+  context, per backend, with the pulse apart. `--by-backend` splits that table
+  by month and lists named path misses; `--sessions` emits one JSON line per
+  session for hand review. A mention counts only when a read or search verb
+  carries the path; a truncated result or a not-found error naming the path is
+  counted, not read. Lore is bureaucracy-wide, so its counts cover every reader
+  only without `--project`. `--since` defaults to `90d`, the cadence of the
+  `context-use-audit` chore that reads it.
 - `moe where` prints the resolved bureaucracy path.
 - `moe version` prints the moe version.
 - `moe <workflow> cat <project>/<run> [<stage>]` prints a canvas.
