@@ -64,14 +64,6 @@ func claimPath(workspacePath string) string {
 	return filepath.Join(workspacePath, ".moe", "claim.json")
 }
 
-// legacyClaimPath is the pre-migration claim location, at the
-// workspace root. Read-only fallback used by readClaim to migrate
-// existing workspaces forward without operator intervention; also
-// cleaned by Release so a re-acquire doesn't resurrect it.
-func legacyClaimPath(workspacePath string) string {
-	return filepath.Join(workspacePath, "claim.json")
-}
-
 // ValidateName reports whether name is a usable workspace identifier.
 // Exposed so callers can reject bad input before doing any work
 // (writing project state, opening a run).
@@ -136,32 +128,8 @@ func ReadClaim(root, projectID, name string) (*Claim, error) {
 
 // readClaim is the workspace-path-keyed sibling of ReadClaim, used
 // internally where the workspace path has already been resolved.
-//
-// If the new-layout claim is missing but a legacy `<wp>/claim.json`
-// exists, the claim is migrated forward (rewritten under `.moe/` and
-// the old file removed) before returning. After one read every
-// workspace is on the new layout; no compat shim survives past that.
 func readClaim(workspacePath string) (*Claim, error) {
 	b, err := os.ReadFile(claimPath(workspacePath))
-	if errors.Is(err, os.ErrNotExist) {
-		return migrateLegacyClaim(workspacePath)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("workspace: read claim: %w", err)
-	}
-	var c Claim
-	if err := json.Unmarshal(b, &c); err != nil {
-		return nil, fmt.Errorf("workspace: parse claim: %w", err)
-	}
-	return &c, nil
-}
-
-// migrateLegacyClaim reads `<wp>/claim.json` (the pre-`.moe/` layout),
-// rewrites it under `<wp>/.moe/claim.json`, and removes the old file.
-// Returns (nil, nil) if the legacy file isn't there either.
-func migrateLegacyClaim(workspacePath string) (*Claim, error) {
-	legacy := legacyClaimPath(workspacePath)
-	b, err := os.ReadFile(legacy)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -171,12 +139,6 @@ func migrateLegacyClaim(workspacePath string) (*Claim, error) {
 	var c Claim
 	if err := json.Unmarshal(b, &c); err != nil {
 		return nil, fmt.Errorf("workspace: parse claim: %w", err)
-	}
-	if err := writeClaim(workspacePath, c); err != nil {
-		return nil, err
-	}
-	if err := os.Remove(legacy); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("workspace: remove legacy claim: %w", err)
 	}
 	return &c, nil
 }
@@ -363,9 +325,6 @@ func Release(root, projectID, name string) error {
 	}
 	if err := os.Remove(claimPath(wp)); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("workspace: remove claim: %w", err)
-	}
-	if err := os.Remove(legacyClaimPath(wp)); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("workspace: remove legacy claim: %w", err)
 	}
 	return nil
 }
