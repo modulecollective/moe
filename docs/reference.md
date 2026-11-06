@@ -6,6 +6,11 @@ source of truth for the exact command surface; this page is a map.
 
 ## Command Catalog
 
+Global `--no-cooldown`, accepted anywhere before `--`, skips subscription quota
+checks for the entire invocation, including cascades and chain rides. See
+[Subscription quota cooldown](workflows.md#subscription-quota-cooldown) for the
+wait policy, controls, exit codes, and consequences of choosing to bypass it.
+
 ### Re-Entry And Supervision
 
 - `moe dash [--all] [--project <id>] [--workflow <name>] [--watch]` prints the

@@ -611,8 +611,10 @@ is walking, so what you kicked is what runs.
 
 ### Prose, both directions
 
-You can push a chunk of prose at any in-progress run and its next agent turn
-receives it verbatim:
+You can push a chunk of prose at any in-progress or pushed run, and its next
+agent turn receives it verbatim. Open ideas also accept notes; when an idea is
+promoted, its undelivered notes carry to the destination run. Closed, merged,
+and promoted records refuse new input.
 
 ```
 moe input add moe/change-auth-defaults "The failing test is a known flake — skip it and ship."
@@ -622,11 +624,11 @@ moe input add moe/change-auth-defaults          # no text: reads stdin
 That is the stuck-run loop: from the terminal or from the web's `/input` queue
 on a phone, write a sentence, and the next turn on that run acts on it. The
 note starts nothing — it writes one journal commit, so an armed serve's next
-heartbeat offers the project to a pulse and the ordinary kick carries the
-thread on; `moe pulse new --dynamic <project>` is the expedite path. A pending
-note counts as an operator mark under `safe` mode, so the loop works on a
-project that otherwise starts nothing on its own. It is not an advance marker:
-it licenses the kick and says nothing about whether a stage was read.
+heartbeat offers the project to a pulse; `moe pulse new --dynamic <project>`
+is the expedite path. A note can steer further work on an open PR or accompany
+an idea into its eventual run. A pending note counts as an operator mark under
+`safe` mode, so eligible work can continue on a project that otherwise starts
+nothing on its own. It neither tags an untagged idea nor advances a stage.
 
 Delivery is once. A pending note reaches exactly one *successful* turn, then
 lives on the run page as history — the canvas that turn writes is where durable
