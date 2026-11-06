@@ -86,7 +86,8 @@ func liveEdges(t *testing.T, root string) map[string]string {
 // `head`, from an unchained spawner, parks as a bare chain of ordinary
 // runs. No placeholder is minted — headless is the default shape.
 func TestGroomSelfRootsAHeadlessThread(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	minted := groomFixture(t, root, "fix-a", "fix-b", "fix-c")
 
 	groomed := groomChains(root, "moe", "pulse-groom",
@@ -112,7 +113,8 @@ func TestGroomSelfRootsAHeadlessThread(t *testing.T) {
 // TestGroomOntoAppendsAtATail: `onto` naming the last member of an
 // existing thread appends behind it.
 func TestGroomOntoAppendsAtATail(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	minted := groomFixture(t, root, "fix-a", "fix-b", "fix-c")
 	a, b, c := "moe/"+minted["fix-a"], "moe/"+minted["fix-b"], "moe/"+minted["fix-c"]
 
@@ -132,7 +134,8 @@ func TestGroomOntoAppendsAtATail(t *testing.T) {
 // Mid-ride this is the queue jump — work attached after an
 // already-merged member runs before the hop that was next.
 func TestGroomOntoSplicesMidChain(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	minted := groomFixture(t, root, "fix-a", "fix-b", "fix-c")
 	a, b, c := "moe/"+minted["fix-a"], "moe/"+minted["fix-b"], "moe/"+minted["fix-c"]
 
@@ -155,7 +158,8 @@ func TestGroomOntoSplicesMidChain(t *testing.T) {
 // gap. This is the no-source-filter decision's mechanical half — an
 // operator-minted head is not special here.
 func TestGroomMoveRestitchesTheOldUnit(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	minted := groomFixture(t, root, "fix-a", "fix-b", "fix-c", "fix-d")
 	a := "moe/" + minted["fix-a"]
 	b := "moe/" + minted["fix-b"]
@@ -187,7 +191,8 @@ func TestGroomMoveRestitchesTheOldUnit(t *testing.T) {
 // with the survey that spawned it. Provenance goes on machine-minted
 // heads and nowhere else.
 func TestGroomExplicitHeadMintsAndCarriesProvenance(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	minted := groomFixture(t, root, "fix-a", "fix-b")
 
 	groomed := groomChains(root, "moe", "pulse-groom",
@@ -222,7 +227,8 @@ func TestGroomExplicitHeadMintsAndCarriesProvenance(t *testing.T) {
 // drops the group with a stderr line, matching the spawn path's
 // warn-only ethos. The group's runs stay where they were.
 func TestGroomOntoUnknownWarnsAndSkips(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	groomFixture(t, root, "fix-a")
 
 	var errb bytes.Buffer
@@ -244,7 +250,8 @@ func TestGroomOntoUnknownWarnsAndSkips(t *testing.T) {
 // TestGroomRejectsOntoAndHeadTogether: two different answers to the
 // same question — skip rather than pick one.
 func TestGroomRejectsOntoAndHeadTogether(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	groomFixture(t, root, "fix-a", "fix-b")
 
 	var errb bytes.Buffer
@@ -267,7 +274,8 @@ func TestGroomRejectsOntoAndHeadTogether(t *testing.T) {
 // the harness may have minted a dated sibling. The resolver has to see
 // through that or every collision would silently drop its group.
 func TestGroomResolvesADatedSlug(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 
 	// Mint fix-a, close it out of the live set, then mint fix-a again —
 	// the second one gets a dated slug.
@@ -298,7 +306,8 @@ func TestGroomResolvesADatedSlug(t *testing.T) {
 // a root captured at group 1's time would name a run that no longer heads
 // anything, and the kick would silently park.
 func TestGroomKickRootFollowsALaterGroupsMove(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	minted := groomFixture(t, root, "fix-a", "fix-b", "fix-c")
 	a, c := "moe/"+minted["fix-a"], "moe/"+minted["fix-c"]
 
@@ -327,7 +336,8 @@ func TestGroomKickRootFollowsALaterGroupsMove(t *testing.T) {
 // line naming what moved. Spawns are unaffected — they already landed,
 // and they carry their own dedupe.
 func TestGroomSkipsWhenChainEdgesMovedUnderTheSweep(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	minted := groomFixture(t, root, "fix-a", "fix-b", "fix-c")
 	a, b := "moe/"+minted["fix-a"], "moe/"+minted["fix-b"]
 
@@ -360,7 +370,8 @@ func TestGroomSkipsWhenChainEdgesMovedUnderTheSweep(t *testing.T) {
 // sweep's own spawns commit between kickoff and apply and move no chain
 // edge, so the common case still grooms.
 func TestGroomProceedsWhenTheEdgeSetIsUnchanged(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	minted := groomFixture(t, root, "fix-a", "fix-b")
 	a, b := "moe/"+minted["fix-a"], "moe/"+minted["fix-b"]
 
@@ -395,7 +406,8 @@ func stagedUnderHead(t *testing.T, root, headSlug string, members ...string) str
 // re-stamp a run *out* of a unit the operator was still composing, and
 // under a resident clock that would make hand-curation impossible.
 func TestGroomWontMoveAMemberOutOfAnOperatorHead(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	minted := groomFixture(t, root, "fix-a", "fix-b")
 	headKey := stagedUnderHead(t, root, "operator-topic", minted["fix-a"])
 
@@ -419,7 +431,8 @@ func TestGroomWontMoveAMemberOutOfAnOperatorHead(t *testing.T) {
 // splicing, the same redirect the static-ride fence takes. The work is
 // still worth teeing up; it just doesn't join the operator's batch.
 func TestGroomWontSpliceIntoAnOperatorHead(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	minted := groomFixture(t, root, "fix-a", "fix-b")
 	headKey := stagedUnderHead(t, root, "operator-topic", minted["fix-a"])
 
@@ -445,7 +458,8 @@ func TestGroomWontSpliceIntoAnOperatorHead(t *testing.T) {
 // actually runs — which is the whole story the no-source-filter rule
 // was written for.
 func TestGroomStillConsolidatesUnderAMachineHead(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	minted := groomFixture(t, root, "fix-a", "fix-b")
 	head, err := mintChainRun(root, "moe", "machine-topic", "moe/pulse-1", "")
 	if err != nil {

@@ -38,7 +38,8 @@ func writePulseGateCanvas(t *testing.T, root, projectID, pulseSlug, gateJSON str
 // point being that none of this should need a journal-archaeology
 // session.
 func TestRunProvenanceNamesTheSpawnerAndItsReason(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	// The pulse is a real run an operator opened — the top of the chain
 	// the page is meant to draw.
 	if _, err := run.New(root, "moe", run.Options{ID: "pulse-2026-07-20", Workflow: "pulse"}); err != nil {
@@ -106,7 +107,8 @@ func TestRunProvenanceNamesTheSpawnerAndItsReason(t *testing.T) {
 // the oldest run it can still stand behind and starts there — the
 // honesty rule again, this time by saying less.
 func TestRunProvenanceDeadEndChainStartsMidStory(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	if _, err := run.New(root, "moe", run.Options{ID: "pulse-2026-07-20", Workflow: "pulse"}); err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +162,8 @@ func TestRunProvenanceDeadEndChainStartsMidStory(t *testing.T) {
 // fine; linking it would put the same 404 one click deeper than the root
 // case. Its neighbours keep their links.
 func TestRunProvenanceUnlinksAPrunedMidChainRun(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	if _, err := run.New(root, "moe", run.Options{ID: "pulse-2026-07-20", Workflow: "pulse"}); err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +219,8 @@ func TestRunProvenanceUnlinksAPrunedMidChainRun(t *testing.T) {
 // or a prune can remove. A missing or unparseable gate must cost the hop
 // its reason and nothing else — no error, no dropped hop, no page 500.
 func TestRunProvenanceDegradesWithNoGateCanvas(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	// No writePulseGateCanvas call: the spawner has no canvas at all.
 	spawnAndHead(t, root, "moe", "pulse-2026-07-20", "batch", []pulseRunSpec{
 		{Slug: "fix-orphaned", Title: "Fix"},
@@ -252,7 +256,8 @@ func TestRunProvenanceDegradesWithNoGateCanvas(t *testing.T) {
 // verb writes any of the marks the arms above it read, so an open commit
 // carrying none of them is the one origin the walk may state positively.
 func TestRunProvenanceOperatorOpenedRun(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	md, err := run.New(root, "moe", run.Options{ID: "hand-opened", Workflow: "sdlc"})
 	if err != nil {
 		t.Fatal(err)
@@ -278,7 +283,8 @@ func TestRunProvenanceOperatorOpenedRun(t *testing.T) {
 // "what did the agent add" question — a run can be operator-opened and
 // still be sequenced by a pulse.
 func TestChainMembersCarryEdgeAttribution(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	head, _, _ := chainBatch(t, root)
 
 	members, err := chainMembers(root, "moe", head, time.Now().UTC())
@@ -318,7 +324,8 @@ func harvestedIdea(t *testing.T, root, projectID, ideaID, sourceRun, consent str
 // the one fact the reader wanted was on the open commit and dropped at
 // the index.
 func TestRunProvenanceNamesTheRunACapturedIdeaCameFrom(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	if _, err := run.New(root, "moe", run.Options{ID: "design-only-spawn", Workflow: "sdlc"}); err != nil {
 		t.Fatal(err)
 	}
@@ -360,7 +367,8 @@ func TestRunProvenanceNamesTheRunACapturedIdeaCameFrom(t *testing.T) {
 // it is the whole answer to "where did this come from" — but its page is
 // gone, so the name carries no link.
 func TestRunProvenanceCaptureNamesAPrunedSourceWithoutALink(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	harvestedIdea(t, root, "moe", "tag-on-ideas", "moe/long-gone", "none")
 
 	hops, err := runProvenance(root, "moe", "tag-on-ideas")
@@ -387,7 +395,8 @@ func TestRunProvenanceCaptureNamesAPrunedSourceWithoutALink(t *testing.T) {
 // the idea. Every hop of that is on disk, and the page tells it as one
 // story rather than four disconnected facts.
 func TestRunProvenanceWalksSpawnThenCaptureThenPromote(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	if _, err := run.New(root, "moe", run.Options{ID: "pulse-2026-09-01", Workflow: "pulse"}); err != nil {
 		t.Fatal(err)
 	}
@@ -444,7 +453,8 @@ func TestRunProvenanceWalksSpawnThenCaptureThenPromote(t *testing.T) {
 // and no consent word, because nothing machine-authored is on either
 // commit.
 func TestRunProvenanceHandPromotedIdeaKeepsItsOperator(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	if _, err := run.New(root, "moe", run.Options{ID: "an-idea", Workflow: "idea"}); err != nil {
 		t.Fatal(err)
 	}
@@ -474,7 +484,8 @@ func TestRunProvenanceHandPromotedIdeaKeepsItsOperator(t *testing.T) {
 // act — so consent standing alone is the whole mark, and it used to read
 // as the operator's own work.
 func TestRunProvenanceDynamicPulseSurveyOpensAsAMachineWalk(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	if _, err := run.New(root, "moe", run.Options{
 		ID: "pulse-swept", Workflow: "pulse",
 		Trailers: trailers.Block{Consent: "dynamic"},
@@ -530,7 +541,8 @@ func writeChoreDefinition(t *testing.T, root, projectID, name string) {
 // consent on the open commit is what separates a clock-fired run from
 // `moe chore open` typed by hand.
 func TestRunProvenanceChoreRunNamesItsChore(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	writeChoreDefinition(t, root, "moe", "readme-refresh")
 	// The run's own slug is the chore's name, which is the collision the
 	// walk's chore-liveness answer has to stay out of the run map for.
@@ -564,7 +576,8 @@ func TestRunProvenanceChoreRunNamesItsChore(t *testing.T) {
 // open` typed at a terminal. The chore is still what the run is for, so
 // it is still named; nothing machine-authored caused it, so no badge.
 func TestRunProvenanceHandOpenedChoreRunNamesTheChoreUnbadged(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	writeChoreDefinition(t, root, "moe", "readme-refresh")
 	if _, err := run.New(root, "moe", run.Options{
 		ID: "readme-refresh-2", Workflow: "sdlc",
@@ -593,7 +606,8 @@ func TestRunProvenanceHandOpenedChoreRunNamesTheChoreUnbadged(t *testing.T) {
 // key is named and not linked — the same trade the walk makes for a
 // pruned run.
 func TestRunProvenanceRetiredChoreIsNamedWithoutALink(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	if _, err := run.New(root, "moe", run.Options{
 		ID: "retired-chore-run", Workflow: "sdlc",
 		Trailers: trailers.Block{Chore: "moe/long-retired", Consent: "dynamic"},
@@ -623,7 +637,8 @@ func TestRunProvenanceRetiredChoreIsNamedWithoutALink(t *testing.T) {
 // take that answer rather than the raw field, or the spawn root is a
 // key it can't load and so a name with no link.
 func TestRunProvenanceLinksALegacyBareSpawner(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	if _, err := run.New(root, "moe", run.Options{ID: "pulse-2026-07-17", Workflow: "pulse"}); err != nil {
 		t.Fatal(err)
 	}

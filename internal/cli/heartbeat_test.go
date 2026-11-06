@@ -133,7 +133,8 @@ func heldFor(decisions []serve.HeartbeatDecision, projectID string) bool {
 // — the parked-work leg is how an armed serve picks up real work, and
 // that leg means something.
 func TestHeartbeatFirstLookIsQuiet(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	journalCommit(t, root, "moe", "operator: a note", "")
 
 	if got := dueProjects(t, newHeartbeatGate(root)); len(got) != 0 {
@@ -147,7 +148,8 @@ func TestHeartbeatFirstLookIsQuiet(t *testing.T) {
 // diagnosed by reading code and inferring invisible cursor state. Now
 // every project's reason crosses with it, in the gate's own words.
 func TestHeartbeatStandDownReasonsCrossTheSeam(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	journalCommit(t, root, "moe", "operator: a note", "")
 	g := newHeartbeatGate(root)
 
@@ -173,7 +175,8 @@ func TestHeartbeatStandDownReasonsCrossTheSeam(t *testing.T) {
 // reason-string match on the render side, which is what keeps the reason
 // strings free to be reworded.
 func TestHeartbeatMarksTheHeldStandDowns(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	journalCommit(t, root, "moe", "operator: a note", "")
 	g := newHeartbeatGate(root)
 
@@ -193,7 +196,8 @@ func TestHeartbeatMarksTheHeldStandDowns(t *testing.T) {
 // inside the project, which is a fact about the board the operator can
 // see the consequence of, so it earns its row on /serve.
 func TestHeartbeatMarksALiveSessionAsHeld(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	minted := groomFixture(t, root, "fix-a")
 	g := sweptOnceOverParkedWork(t, root, true /*clean*/)
 
@@ -218,7 +222,8 @@ func TestHeartbeatMarksALiveSessionAsHeld(t *testing.T) {
 // project the gate looked at and stood down on has to come back — an
 // absent project would render as one the heartbeat has never heard of.
 func TestHeartbeatEveryProjectGetsAVerdict(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	decisions := dueDecisions(t, newHeartbeatGate(root), testTick)
 	if len(decisions) == 0 {
 		t.Fatal("no verdicts at all on a registered board")
@@ -233,7 +238,8 @@ func TestHeartbeatEveryProjectGetsAVerdict(t *testing.T) {
 // TestHeartbeatSweepsOnJournalDelta: the primary trigger. Something
 // landed in the project since the last sweep, so the machine looks.
 func TestHeartbeatSweepsOnJournalDelta(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	journalCommit(t, root, "moe", "machine: a merge", "MoE-Consent: dynamic")
 	g := newHeartbeatGate(root)
 	dueProjects(t, g) // seeds the cursor
@@ -249,7 +255,8 @@ func TestHeartbeatSweepsOnJournalDelta(t *testing.T) {
 // and every quiet tick would cost an agent turn — the exact cost the
 // gate exists to avoid.
 func TestHeartbeatSweptMovesTheCursor(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	journalCommit(t, root, "moe", "machine: a merge", "MoE-Consent: dynamic")
 	g := newHeartbeatGate(root)
 	dueProjects(t, g)
@@ -300,7 +307,8 @@ func sweptOverAMidSweepOperatorCommit(t *testing.T, root string, clean bool) *he
 // stands the parked leg down too, so a real journal move the machine
 // misreads as its own goes nowhere, silently.
 func TestHeartbeatSweepsACommitThatLandedMidSweep(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	g := sweptOverAMidSweepOperatorCommit(t, root, true /*clean*/)
 
 	if got := dueProjectsPastTheWindow(t, g); len(got) != 1 || got[0] != "moe" {
@@ -327,7 +335,8 @@ func TestHeartbeatSweepsACommitThatLandedMidSweep(t *testing.T) {
 // the range was never anyone's to swallow, and the failure backoff still
 // paces the spawn.
 func TestHeartbeatSweepsACommitThatLandedMidFailedSweep(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	g := sweptOverAMidSweepOperatorCommit(t, root, false /*died*/)
 
 	if got := dueProjectsPastTheWindow(t, g); len(got) != 1 || got[0] != "moe" {
@@ -369,7 +378,8 @@ func sweptOverARideItKicked(t *testing.T, root string, clean bool) *heartbeatGat
 // landed. Absorbing them is what stopped pulse_kick's walk at its first
 // generation and left the board waiting on a human.
 func TestHeartbeatSweepsWorkARideLandedMidSweep(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	g := sweptOverARideItKicked(t, root, true /*clean*/)
 
 	if got := dueProjectsPastTheWindow(t, g); len(got) != 1 || got[0] != "moe" {
@@ -393,7 +403,8 @@ func TestHeartbeatSweepsWorkARideLandedMidSweep(t *testing.T) {
 // paces the respawn, so refusing the tips cursor here costs a cool-off,
 // not a loop.
 func TestHeartbeatSweepsWorkARideLandedMidFailedSweep(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	g := sweptOverARideItKicked(t, root, false /*died*/)
 
 	if got := dueProjectsPastTheWindow(t, g); len(got) != 1 || got[0] != "moe" {
@@ -409,7 +420,8 @@ func TestHeartbeatSweepsWorkARideLandedMidFailedSweep(t *testing.T) {
 // None of them is work landing under the survey's feet, and the board
 // must go quiet.
 func TestHeartbeatSweptMovesTheCursorOverItsOwnBookkeeping(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	journalCommit(t, root, "moe", "machine: a merge", "MoE-Consent: dynamic")
 	g := newHeartbeatGate(root)
 	dueProjects(t, g)
@@ -437,6 +449,7 @@ func TestHeartbeatSweptMovesTheCursorOverItsOwnBookkeeping(t *testing.T) {
 // is a real commit shape from the journal: the top three are how a ride
 // lands work, the rest are a sweep describing itself.
 func TestRideAuthored(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		body string
@@ -468,7 +481,8 @@ func TestRideAuthored(t *testing.T) {
 // again, every tick forever. The base has to be the tip the gate
 // dispatched on.
 func TestHeartbeatSettlesAfterAnOperatorTriggeredSweep(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	g := newHeartbeatGate(root)
 	dueProjectsPastTheWindow(t, g) // seeds the cursor
 
@@ -491,7 +505,8 @@ func TestHeartbeatSettlesAfterAnOperatorTriggeredSweep(t *testing.T) {
 // machine-minted thread with a settled design and nobody inside is
 // exactly what the self-kick admits.
 func TestHeartbeatSweepsWhenSettledWorkIsParked(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	groomFixture(t, root, "fix-a")
 	g := newHeartbeatGate(root)
 
@@ -525,7 +540,8 @@ func sweptOnceOverParkedWork(t *testing.T, root string, clean bool) *heartbeatGa
 // of having looked, every tick after re-asks the same question at the
 // cost of a full agent turn, forever.
 func TestHeartbeatStopsOfferingWorkASweepAlreadyDeclined(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	groomFixture(t, root, "fix-a")
 	g := sweptOnceOverParkedWork(t, root, true /*clean*/)
 
@@ -542,7 +558,8 @@ func TestHeartbeatStopsOfferingWorkASweepAlreadyDeclined(t *testing.T) {
 // ledger is what paces the retry, and it can only do that job if the
 // gate keeps saying yes.
 func TestHeartbeatKeepsOfferingWorkAfterAFailedSweep(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	groomFixture(t, root, "fix-a")
 	g := sweptOnceOverParkedWork(t, root, false /*died*/)
 
@@ -557,7 +574,8 @@ func TestHeartbeatKeepsOfferingWorkAfterAFailedSweep(t *testing.T) {
 // so the moved leg is the whole re-arm, and a clean sweep quiets it
 // again.
 func TestHeartbeatDeltaReArmsADeclinedBoard(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	groomFixture(t, root, "fix-a")
 	g := sweptOnceOverParkedWork(t, root, true /*clean*/)
 	if got := dueProjects(t, g); len(got) != 0 {
@@ -581,7 +599,8 @@ func TestHeartbeatDeltaReArmsADeclinedBoard(t *testing.T) {
 // cursor is what keeps "moe died mid-turn" recoverable, and because reap
 // runs at the top of Due it lands in the same tick.
 func TestHeartbeatReapReArmsADeclinedBoard(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	minted := groomFixture(t, root, "fix-a")
 	g := sweptOnceOverParkedWork(t, root, true /*clean*/)
 	if got := dueProjects(t, g); len(got) != 0 {
@@ -628,7 +647,8 @@ func seedPulseRun(t *testing.T, root, projectID, id, status string, ago time.Dur
 // project that lives this: reinstalling the binary restarts serve right
 // on top of the merge that just landed.
 func TestHeartbeatSweepsWorkThatLandedWhileServeWasDown(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	seedPulseRun(t, root, "moe", "pulse-1", run.StatusClosed, 30*time.Minute)
 	journalCommit(t, root, "moe", "machine: a merge", "MoE-Consent: dynamic")
 
@@ -648,7 +668,8 @@ func TestHeartbeatSweepsWorkThatLandedWhileServeWasDown(t *testing.T) {
 // nothing. Without the equality this leg would fire on every restart,
 // forever, which is a worse bug than the one it fixes.
 func TestHeartbeatIsQuietOnARestartOverASweptBoard(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	seedPulseRun(t, root, "moe", "pulse-1", run.StatusClosed, 0 /*at the tip*/)
 
 	if got := dueProjectsPastTheWindow(t, newHeartbeatGate(root)); len(got) != 0 {
@@ -663,7 +684,8 @@ func TestHeartbeatIsQuietOnARestartOverASweptBoard(t *testing.T) {
 // not the claim "has unswept work", so the leg abstains and the project
 // stays reachable through the moved and parked legs exactly as before.
 func TestHeartbeatIsQuietForAProjectThatWasNeverSwept(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	journalCommit(t, root, "moe", "machine: a merge", "MoE-Consent: dynamic")
 
 	if got := dueProjectsPastTheWindow(t, newHeartbeatGate(root)); len(got) != 0 {
@@ -678,7 +700,8 @@ func TestHeartbeatIsQuietForAProjectThatWasNeverSwept(t *testing.T) {
 // every tick. Pacing the retry stays the failure backoff's job, through
 // the parked leg, which is what it was written for.
 func TestHeartbeatDeltaDoesNotRetriggerAFailedSweep(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	seedPulseRun(t, root, "moe", "pulse-1", run.StatusClosed, 30*time.Minute)
 	journalCommit(t, root, "moe", "machine: a merge", "MoE-Consent: dynamic")
 
@@ -706,7 +729,8 @@ func TestHeartbeatDeltaDoesNotRetriggerAFailedSweep(t *testing.T) {
 // because the sweep's own close commit lands after the pulse activity it
 // is compared against on the *next* tick's read.
 func TestHeartbeatSurveyedShortCircuitsTheDelta(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	seedPulseRun(t, root, "moe", "pulse-1", run.StatusClosed, 30*time.Minute)
 	journalCommit(t, root, "moe", "machine: a merge", "MoE-Consent: dynamic")
 
@@ -729,7 +753,8 @@ func TestHeartbeatSurveyedShortCircuitsTheDelta(t *testing.T) {
 // operator's last act on this project is minutes old, so the machine
 // waits a full tick rather than picking work up from under their hands.
 func TestHeartbeatHoldsForOneQuietTick(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	groomFixture(t, root, "fix-a")
 	// An operator-authored commit lands now: no machine trailers on it.
 	journalCommit(t, root, "moe", "chain: edit", "")
@@ -742,7 +767,8 @@ func TestHeartbeatHoldsForOneQuietTick(t *testing.T) {
 // TestHeartbeatMovesOnceTheOperatorIsQuiet: the same board a tick later.
 // The window is a hesitation, not a hold.
 func TestHeartbeatMovesOnceTheOperatorIsQuiet(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	groomFixture(t, root, "fix-a")
 	journalCommit(t, root, "moe", "chain: edit", "")
 
@@ -760,7 +786,8 @@ func TestHeartbeatMovesOnceTheOperatorIsQuiet(t *testing.T) {
 // whose arrangement is minutes old — the staging race the window exists
 // to close, arriving through the one door a tip-only read leaves open.
 func TestHeartbeatHoldsWhenAMachineCommitMasksTheOperator(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	groomFixture(t, root, "fix-a")
 	journalCommit(t, root, "moe", "chain: edit", "")
 	journalCommit(t, root, "moe", "push: a ride merged", "MoE-Consent: dynamic")
@@ -774,7 +801,8 @@ func TestHeartbeatHoldsWhenAMachineCommitMasksTheOperator(t *testing.T) {
 // later. The window scan is a hesitation like the tip check it joins, so
 // it must expire on the same terms.
 func TestHeartbeatMovesOnceAMaskedOperatorIsQuiet(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	groomFixture(t, root, "fix-a")
 	journalCommit(t, root, "moe", "chain: edit", "")
 	journalCommit(t, root, "moe", "push: a ride merged", "MoE-Consent: dynamic")
@@ -789,7 +817,8 @@ func TestHeartbeatMovesOnceAMaskedOperatorIsQuiet(t *testing.T) {
 // commits move the journal tip when they land, so the next tick's moved
 // leg picks the project back up.
 func TestHeartbeatStandsDownForALiveSession(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	minted := groomFixture(t, root, "fix-a")
 	if _, err := session.Open(root, "moe", minted["fix-a"], "design"); err != nil {
 		t.Fatal(err)
@@ -805,7 +834,8 @@ func TestHeartbeatStandsDownForALiveSession(t *testing.T) {
 // for its whole agent turn, exactly like any other stage. A sweep
 // already running owns this generation.
 func TestHeartbeatStandsDownForASurveyMidTurn(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	groomFixture(t, root, "fix-a")
 	seedRun(t, root, "moe", "pulse-in-flight", pulseWorkflow, run.StatusInProgress, time.Now().Local(), nil)
 	if _, err := session.Open(root, "moe", "pulse-in-flight", pulseDoc); err != nil {
@@ -830,7 +860,8 @@ func TestHeartbeatStandsDownForASurveyMidTurn(t *testing.T) {
 // it must *not* do is stop existing: `moe session resolve` / `abandon`
 // still expect the branch and the record exactly where they are.
 func TestHeartbeatSweepsPastAStrandedOperatorSession(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	groomFixture(t, root, "fix-a")
 	seedRun(t, root, "moe", "pulse-ctrl-c", pulseWorkflow, run.StatusInProgress, time.Now().Local(), nil)
 	s, err := session.Open(root, "moe", "pulse-ctrl-c", pulseDoc)
@@ -854,7 +885,8 @@ func TestHeartbeatSweepsPastAStrandedOperatorSession(t *testing.T) {
 // wrong answer costs something: an operator sitting in a live stage,
 // beating. Dead means provably dead, and a live pid is not it.
 func TestHeartbeatStandsDownForAHeldOperatorSession(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	groomFixture(t, root, "fix-a")
 	seedRun(t, root, "moe", "pulse-in-flight", pulseWorkflow, run.StatusInProgress, time.Now().Local(), nil)
 	s, err := session.Open(root, "moe", "pulse-in-flight", pulseDoc)
@@ -880,7 +912,8 @@ func TestHeartbeatStandsDownForAHeldOperatorSession(t *testing.T) {
 // failure backoff pacing a loop that never gets to run. The open run is
 // the operator's tell; the backoff is what bounds the pile.
 func TestHeartbeatSweepsPastALingeringOpenSurvey(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	groomFixture(t, root, "fix-a")
 	// A run open with no session branch under it: the shape a survey
 	// leaves behind when its agent turn died.
@@ -896,7 +929,8 @@ func TestHeartbeatSweepsPastALingeringOpenSurvey(t *testing.T) {
 // leg does not fire on it. Staging a batch by hand must not summon the
 // machine.
 func TestHeartbeatIgnoresAnOperatorStagedHead(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	head, err := mintChainRun(root, "moe", "operator-topic", "" /*spawnedBy*/, "")
 	if err != nil {
 		t.Fatal(err)
@@ -936,7 +970,8 @@ func strandFixture(t *testing.T, root string) string {
 // tick ever fired and the documented "parks for the next pulse to
 // place" recovery never got a pulse to run in.
 func TestParkedLegLooksPastAHeldHead(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	want := "moe/" + strandFixture(t, root)
 
 	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe", false); got != want {
@@ -950,7 +985,8 @@ func TestParkedLegLooksPastAHeldHead(t *testing.T) {
 // and therefore settled — the exact shape that would otherwise summon a
 // sweep onto work somebody is still arranging.
 func TestParkedLegHoldsAnOperatorStagedBatch(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	head, err := mintChainRun(root, "moe", "operator-topic", "" /*spawnedBy*/, "")
 	if err != nil {
 		t.Fatal(err)
@@ -966,7 +1002,8 @@ func TestParkedLegHoldsAnOperatorStagedBatch(t *testing.T) {
 // floor's whole question, not just the design half. Somebody sitting in
 // the stranded run is the same occupancy that holds a root.
 func TestParkedLegSkipsAnOccupiedStrandedMember(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	stranded := strandFixture(t, root)
 	if _, err := session.Open(root, "moe", stranded, "design"); err != nil {
 		t.Fatal(err)
@@ -981,7 +1018,8 @@ func TestParkedLegSkipsAnOccupiedStrandedMember(t *testing.T) {
 // change: a root that clears the floor itself is still what the leg
 // names, and the walk below it never runs.
 func TestParkedLegStillReturnsAnAdmittingRoot(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	want := "moe/" + groomFixture(t, root, "fix-a")["fix-a"]
 
 	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe", false); got != want {
@@ -993,7 +1031,8 @@ func TestParkedLegStillReturnsAnAdmittingRoot(t *testing.T) {
 // it strands nobody. Offering it would spend an agent turn on a board
 // whose only content is a door the operator has not opened.
 func TestParkedLegHoldsALoneHeldRun(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	seedRun(t, root, "moe", "sketch", "sdlc", run.StatusInProgress, time.Now().Local(),
 		map[string]string{"design": "# A promoted idea\n\nseed\n"})
 
@@ -1024,7 +1063,8 @@ func parkTaggedIdea(t *testing.T, root, slug, promoteTo string) string {
 // bought nothing, and a tag stamped while it was up bought exactly one
 // sweep it could not afford to lose.
 func TestParkedLegSeesATaggedIdea(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	want := parkTaggedIdea(t, root, "cleanup-foo", "sdlc")
 
 	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe", false); got != want {
@@ -1037,7 +1077,8 @@ func TestParkedLegSeesATaggedIdea(t *testing.T) {
 // the operator's inbox, and summoning a sweep onto it is the whole thing
 // the tag exists to gate.
 func TestParkedLegHoldsAnUntaggedIdea(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	parkTaggedIdea(t, root, "needs-triage", "" /*untagged*/)
 
 	if got := parkedKickableThread(root, mustPulseScan(t, root), "moe", false); got != "" {
@@ -1048,7 +1089,8 @@ func TestParkedLegHoldsAnUntaggedIdea(t *testing.T) {
 // TestParkedLegHoldsAPromotedIdea: promotion is terminal for the idea,
 // and the run it promoted into answers for the work from then on.
 func TestParkedLegHoldsAPromotedIdea(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	parkTaggedIdea(t, root, "cleanup-foo", "sdlc")
 	md, err := run.Load(root, "moe", "cleanup-foo")
 	if err != nil {
@@ -1070,7 +1112,8 @@ func TestParkedLegHoldsAPromotedIdea(t *testing.T) {
 // today's claim on it deliberately, so the reason strings a settled
 // board produces are unchanged by this leg existing.
 func TestParkedLegPrefersAParkedRunToATaggedIdea(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	want := "moe/" + groomFixture(t, root, "fix-a")["fix-a"]
 	parkTaggedIdea(t, root, "cleanup-foo", "sdlc")
 
@@ -1084,7 +1127,8 @@ func TestParkedLegPrefersAParkedRunToATaggedIdea(t *testing.T) {
 // a serve that was armed the whole time or has just restarted — either
 // way the tick fires and says why in the operator's own terms.
 func TestHeartbeatSweepsForATaggedIdea(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	idea := parkTaggedIdea(t, root, "cleanup-foo", "sdlc")
 	g := newHeartbeatGate(root)
 
@@ -1102,7 +1146,8 @@ func TestHeartbeatSweepsForATaggedIdea(t *testing.T) {
 // the idea and left it parked answered the question, and re-asking it
 // every tick costs an agent turn forever.
 func TestHeartbeatStopsOfferingATaggedIdeaASweepDeclined(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	parkTaggedIdea(t, root, "cleanup-foo", "sdlc")
 	g := newHeartbeatGate(root)
 	if got := dueProjects(t, g); len(got) != 1 || got[0] != "moe" {
@@ -1124,7 +1169,8 @@ func TestHeartbeatStopsOfferingATaggedIdeaASweepDeclined(t *testing.T) {
 // CanvasUnchangedError — and a robot turn that produced nothing is
 // regenerable, so the branch goes and the run re-parks.
 func TestHeartbeatReapsADeadMachineSession(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	minted := groomFixture(t, root, "fix-a")
 	s, err := session.Open(root, "moe", minted["fix-a"], "design")
 	if err != nil {
@@ -1153,7 +1199,8 @@ func TestHeartbeatReapsADeadMachineSession(t *testing.T) {
 // gone is not enough on its own: abandon satisfies that too, which is
 // exactly how the bug hid.
 func TestHeartbeatLandsADeadMachineSessionThatCommitted(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	minted := groomFixture(t, root, "fix-a")
 	s, err := session.Open(root, "moe", minted["fix-a"], "design")
 	if err != nil {
@@ -1189,7 +1236,8 @@ func TestHeartbeatLandsADeadMachineSessionThatCommitted(t *testing.T) {
 // resolve it — the same escalation-by-visibility every ambiguous session
 // shape already gets.
 func TestHeartbeatLeavesADeadMachineSessionThatWontLand(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	minted := groomFixture(t, root, "fix-a")
 	s, err := session.Open(root, "moe", minted["fix-a"], "design")
 	if err != nil {
@@ -1236,7 +1284,8 @@ func commitCanvasOnSession(t *testing.T, s *session.Session, body string) {
 // session, and any session opened by a binary that predates the claim,
 // both land here.
 func TestHeartbeatNeverReapsAnUnmarkedSession(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	minted := groomFixture(t, root, "fix-a")
 	s, err := session.Open(root, "moe", minted["fix-a"], "design")
 	if err != nil {
@@ -1302,7 +1351,8 @@ func writeDeadClaim(t *testing.T, s *session.Session, machine bool) {
 // here moves the journal, so the surveyed cursor is what would
 // otherwise keep declining a board the reap just changed.
 func TestHeartbeatGCFreesABoardAClaimlessBranchHeldForever(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	groomFixture(t, root, "fix-a")
 	g := sweptOnceOverParkedWork(t, root, true /*clean*/)
 	if got := dueProjects(t, g); len(got) != 0 {
@@ -1333,7 +1383,8 @@ func TestHeartbeatGCFreesABoardAClaimlessBranchHeldForever(t *testing.T) {
 // close?"), so the stage rerun the branch belongs to can never start
 // until somebody clears it by hand.
 func TestHeartbeatGCClearsARefWithNoWorktree(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	groomFixture(t, root, "fix-a")
 	seedRun(t, root, "moe", "closed-by-hand", "sdlc", run.StatusClosed, time.Now().Local(), nil)
 	branch := session.BranchName("moe", "closed-by-hand", "design")
@@ -1358,7 +1409,8 @@ func TestHeartbeatGCClearsARefWithNoWorktree(t *testing.T) {
 // worktree with --force and takes the uncommitted work with it, which
 // was tolerable for a hand verb and is not for a twenty-minute tick.
 func TestHeartbeatGCHoldsALiveClaimOnATerminalRun(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	groomFixture(t, root, "fix-a")
 	seedRun(t, root, "moe", "closed-underneath", "sdlc", run.StatusClosed, time.Now().Local(), nil)
 	s, err := session.Open(root, "moe", "closed-underneath", "design")
@@ -1391,7 +1443,8 @@ func TestHeartbeatGCHoldsALiveClaimOnATerminalRun(t *testing.T) {
 // still goes — and this one is operator-marked, so the reap above would
 // never touch it.
 func TestHeartbeatGCReapsATerminalRunWithADeadClaim(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	groomFixture(t, root, "fix-a")
 	seedRun(t, root, "moe", "merged-and-dead", "sdlc", run.StatusMerged, time.Now().Local(), nil)
 	s, err := session.Open(root, "moe", "merged-and-dead", "code")

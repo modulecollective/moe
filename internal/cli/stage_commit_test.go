@@ -17,6 +17,7 @@ import (
 // carry hooks/, chores/, knowledge/, and digital-twin/ edits, and every
 // other workflow (chat, pulse, …) carries nothing.
 func TestProjectCommitDirsPerWorkflow(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		workflow string
 		want     []string
@@ -37,7 +38,8 @@ func TestProjectCommitDirsPerWorkflow(t *testing.T) {
 // chores/. The callback stats before returning, so a project with only
 // one of the two still commits cleanly.
 func TestStageProjectDirsSkipsMissingDirs(t *testing.T) {
-	root := newTestBureaucracy(t)
+	t.Parallel()
+	root := parallelBureaucracy(t)
 	if err := os.MkdirAll(filepath.Join(root, "projects", "tele", "chores"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -64,6 +66,7 @@ func TestStageProjectDirsSkipsMissingDirs(t *testing.T) {
 // TestCommitTurnStagesProposedStylesheet: a stage proposes a model switch
 // in its run dir, and the turn commit carries every shape of that edit.
 func TestCommitTurnStagesProposedStylesheet(t *testing.T) {
+	t.Parallel()
 	proposed := filepath.Join(run.Dir("tele", "fix-it"), stylesheet.FileName)
 	for _, tc := range []struct {
 		name       string
@@ -77,7 +80,7 @@ func TestCommitTurnStagesProposedStylesheet(t *testing.T) {
 		{name: "never existed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			root := newTestBureaucracy(t)
+			root := parallelBureaucracy(t)
 			if tc.initial != "" {
 				gittest.WriteAndCommit(t, root, proposed, tc.initial, "seed stylesheet")
 			}
@@ -163,7 +166,8 @@ func TestCommitTurnStagesProposedStylesheet(t *testing.T) {
 }
 
 func TestNonSDLCCommitPathsExcludeStylesheet(t *testing.T) {
-	root := newTestBureaucracy(t)
+	t.Parallel()
+	root := parallelBureaucracy(t)
 	proposed := filepath.Join(root, run.Dir("tele", "fix-it"), stylesheet.FileName)
 	if err := os.MkdirAll(filepath.Dir(proposed), 0o755); err != nil {
 		t.Fatal(err)
@@ -188,7 +192,8 @@ func TestNonSDLCCommitPathsExcludeStylesheet(t *testing.T) {
 // canvas had the chore file left untracked, dying with the pruned
 // session worktree while the canvas claimed it landed.
 func TestCommitTurnCarriesSdlcChoreEdit(t *testing.T) {
-	root := newTestBureaucracy(t)
+	t.Parallel()
+	root := parallelBureaucracy(t)
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: sdlcWorkflow,
 		Documents: map[string]*run.Document{}}
@@ -232,7 +237,8 @@ func TestCommitTurnCarriesSdlcChoreEdit(t *testing.T) {
 // the next drive of the stage — so `git log --grep='^MoE-Timed-Out:'`
 // has to find it.
 func TestCommitTurnStampsTimedOut(t *testing.T) {
-	root := newTestBureaucracy(t)
+	t.Parallel()
+	root := parallelBureaucracy(t)
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: sdlcWorkflow,
 		Documents: map[string]*run.Document{}}
@@ -272,7 +278,8 @@ func TestCommitTurnStampsTimedOut(t *testing.T) {
 // wrote before the trailer existed. No MoE-Timed-Out, and nothing else
 // shifted around it.
 func TestCommitTurnWithoutTimeoutIsUnchanged(t *testing.T) {
-	root := newTestBureaucracy(t)
+	t.Parallel()
+	root := parallelBureaucracy(t)
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: sdlcWorkflow,
 		Documents: map[string]*run.Document{}}

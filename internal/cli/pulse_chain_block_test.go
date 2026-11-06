@@ -24,7 +24,8 @@ func chainEdge(t *testing.T, root, parent, child string) {
 // in-progress run carries no order information the disk scan doesn't
 // already give the agent, so listing it is pure noise.
 func TestChainStateBlockRendersUnits(t *testing.T) {
-	root := newTestBureaucracy(t)
+	t.Parallel()
+	root := parallelBureaucracy(t)
 	now := time.Now().Local()
 
 	seedRun(t, root, "moe", "chain-batch", chainWorkflow, run.StatusInProgress, now, nil)
@@ -49,7 +50,8 @@ func TestChainStateBlockRendersUnits(t *testing.T) {
 // as one of its own. A chain wholly inside another project is not this
 // sweep's business.
 func TestChainStateBlockCrossProject(t *testing.T) {
-	root := newTestBureaucracy(t)
+	t.Parallel()
+	root := parallelBureaucracy(t)
 	now := time.Now().Local()
 
 	seedRun(t, root, "moe", "mine", "sdlc", run.StatusInProgress, now, nil)
@@ -78,7 +80,8 @@ func TestChainStateBlockCrossProject(t *testing.T) {
 // absent block reads as "nothing is sequenced"; an empty one with a
 // header reads as a bug.
 func TestChainStateBlockEmpty(t *testing.T) {
-	root := newTestBureaucracy(t)
+	t.Parallel()
+	root := parallelBureaucracy(t)
 	seedRun(t, root, "moe", "lone-run", "sdlc", run.StatusInProgress, time.Now().Local(), nil)
 
 	if got := chainStateBlock(mustPulseScan(t, root), "moe"); got != "" {
@@ -93,7 +96,8 @@ func TestChainStateBlockEmpty(t *testing.T) {
 // been deliberately un-threaded. The settled head must render as the
 // leading term.
 func TestChainStateBlockKeepsTailOfShippedChain(t *testing.T) {
-	root := newTestBureaucracy(t)
+	t.Parallel()
+	root := parallelBureaucracy(t)
 	now := time.Now().Local()
 
 	seedRun(t, root, "moe", "shipped-head", "sdlc", run.StatusMerged, now, nil)
@@ -115,7 +119,8 @@ func TestChainStateBlockKeepsTailOfShippedChain(t *testing.T) {
 // narrow. A one-member unit with no chain edge at all is still an orphan
 // and still carries no order information worth spending context on.
 func TestChainStateBlockOrphanStillDropped(t *testing.T) {
-	root := newTestBureaucracy(t)
+	t.Parallel()
+	root := parallelBureaucracy(t)
 	now := time.Now().Local()
 
 	seedRun(t, root, "moe", "shipped-head", "sdlc", run.StatusMerged, now, nil)
@@ -133,7 +138,8 @@ func TestChainStateBlockOrphanStillDropped(t *testing.T) {
 // another project must render qualified, same rule as active foreign
 // members — an agent must never read `other`'s run as one of its own.
 func TestChainStateBlockSettledParentCrossProject(t *testing.T) {
-	root := newTestBureaucracy(t)
+	t.Parallel()
+	root := parallelBureaucracy(t)
 	now := time.Now().Local()
 
 	seedRun(t, root, "other", "their-head", "sdlc", run.StatusMerged, now, nil)
@@ -150,7 +156,8 @@ func TestChainStateBlockSettledParentCrossProject(t *testing.T) {
 // this project whose tail lives entirely elsewhere is not this sweep's
 // business — the touches rule is unchanged by the new exception.
 func TestChainStateBlockSettledParentOnlyForeignTail(t *testing.T) {
-	root := newTestBureaucracy(t)
+	t.Parallel()
+	root := parallelBureaucracy(t)
 	now := time.Now().Local()
 
 	seedRun(t, root, "moe", "my-head", "sdlc", run.StatusMerged, now, nil)
@@ -172,7 +179,8 @@ func TestChainStateBlockSettledParentOnlyForeignTail(t *testing.T) {
 // a *runnable* head is just the next stage's work, and annotating every
 // unwritten design would bury the one hold that strands anything.
 func TestChainStateBlockNamesAHeldHead(t *testing.T) {
-	root := newTestBureaucracy(t)
+	t.Parallel()
+	root := parallelBureaucracy(t)
 	now := time.Now().Local()
 
 	seedRun(t, root, "moe", "sketch", "sdlc", run.StatusInProgress, now,
@@ -199,7 +207,8 @@ func TestChainStateBlockNamesAHeldHead(t *testing.T) {
 // wordings come from the kick's own vocabulary so the two surfaces
 // cannot describe the same disk fact two ways.
 func TestChainStateBlockNamesAWorkedButUnadvancedHead(t *testing.T) {
-	root := newTestBureaucracy(t)
+	t.Parallel()
+	root := parallelBureaucracy(t)
 	now := time.Now().Local()
 
 	seedRun(t, root, "moe", "reopened", "sdlc", run.StatusInProgress, now,
@@ -219,7 +228,8 @@ func TestChainStateBlockNamesAWorkedButUnadvancedHead(t *testing.T) {
 // guidance has always described, and marking it would teach the survey
 // to unpick threads that are about to run on their own.
 func TestChainStateBlockLeavesARunnableHeadAlone(t *testing.T) {
-	root := newTestBureaucracy(t)
+	t.Parallel()
+	root := parallelBureaucracy(t)
 	now := time.Now().Local()
 
 	seedRun(t, root, "moe", "advanced", "sdlc", run.StatusInProgress, now,

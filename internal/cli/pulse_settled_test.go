@@ -52,7 +52,8 @@ func seedRun(t *testing.T, root, projectID, id, workflow, status string, created
 // list. The exclusions are the whole point: a block padded with pulses
 // and promoted ideas is one the agent stops reading.
 func TestSettledRunsBlockSelection(t *testing.T) {
-	root := newTestBureaucracy(t)
+	t.Parallel()
+	root := parallelBureaucracy(t)
 	now := time.Now().Local()
 
 	seedRun(t, root, "moe", "settled-drop", "sdlc", run.StatusClosed, now,
@@ -88,7 +89,8 @@ func TestSettledRunsBlockSelection(t *testing.T) {
 // renders no block at all, rather than a "none" line that costs tokens
 // on every quiet pulse.
 func TestSettledRunsBlockEmpty(t *testing.T) {
-	root := newTestBureaucracy(t)
+	t.Parallel()
+	root := parallelBureaucracy(t)
 	seedRun(t, root, "moe", "still-open", "sdlc", run.StatusInProgress, time.Now().Local(), nil)
 
 	if got := settledRunsBlock(mustPulseScan(t, root), "moe"); got != "" {
@@ -99,7 +101,8 @@ func TestSettledRunsBlockEmpty(t *testing.T) {
 // TestSettledRunsBlockTitleFallsBackToDesign: an sdlc run spawned from
 // a pulse has no idea canvas, so the design H1 is the headline.
 func TestSettledRunsBlockTitleFallsBackToDesign(t *testing.T) {
-	root := newTestBureaucracy(t)
+	t.Parallel()
+	root := parallelBureaucracy(t)
 	seedRun(t, root, "moe", "spawned-fix", "sdlc", run.StatusClosed, time.Now().Local(),
 		map[string]string{"design": "intro line\n\n# Stop chains refiling one observation\n"})
 
@@ -112,7 +115,8 @@ func TestSettledRunsBlockTitleFallsBackToDesign(t *testing.T) {
 // TestSettledRunsBlockCapped keeps a busy fortnight from crowding out
 // the rest of the kickoff.
 func TestSettledRunsBlockCapped(t *testing.T) {
-	root := newTestBureaucracy(t)
+	t.Parallel()
+	root := parallelBureaucracy(t)
 	now := time.Now().Local()
 	for i := range settledRunsCap + 5 {
 		seedRun(t, root, "moe", "closed-"+string(rune('a'+i)), "sdlc", run.StatusClosed, now, nil)
@@ -126,7 +130,8 @@ func TestSettledRunsBlockCapped(t *testing.T) {
 // TestPulseKickoffCarriesSettledBlock pins the wiring, not just the
 // renderer — the block has to reach the survey's first turn.
 func TestPulseKickoffCarriesSettledBlock(t *testing.T) {
-	root := newTestBureaucracy(t)
+	t.Parallel()
+	root := parallelBureaucracy(t)
 	markBureaucracy(t, root)
 	seedRun(t, root, "moe", "settled-drop", "sdlc", run.StatusClosed, time.Now().Local(), nil)
 

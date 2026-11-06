@@ -43,7 +43,8 @@ func completeChoreAt(t *testing.T, root, projectID, name string, ago time.Durati
 // TestHeartbeatSweepsForADueChore is the gap itself: nothing has landed,
 // nothing is parked, and the only thing that changed is the clock.
 func TestHeartbeatSweepsForADueChore(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	seedChoreDef(t, root, "readme-refresh", `{"cadence":"168h"}`, time.Hour)
 
 	decisions := dueDecisions(t, newHeartbeatGate(root), testTick)
@@ -61,7 +62,8 @@ func TestHeartbeatSweepsForADueChore(t *testing.T) {
 // a chore's clock elapses, so a leg consulted after it would never fire
 // at all.
 func TestHeartbeatChoreLegOutlivesTheSurveyedCursor(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	seedChoreDef(t, root, "readme-refresh", `{"cadence":"168h"}`, time.Hour)
 	g := newHeartbeatGate(root)
 
@@ -85,7 +87,8 @@ func TestHeartbeatChoreLegOutlivesTheSurveyedCursor(t *testing.T) {
 // chore.Evaluate's open-run guard makes the chore not-due from there. One
 // firing, not one per tick forever.
 func TestHeartbeatChoreLegQuietsOnceTheChoreHasARun(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	seedChoreDef(t, root, "readme-refresh", `{"cadence":"168h"}`, time.Hour)
 	g := newHeartbeatGate(root)
 	if got := dueProjects(t, g); len(got) != 1 || got[0] != "moe" {
@@ -107,7 +110,8 @@ func TestHeartbeatChoreLegQuietsOnceTheChoreHasARun(t *testing.T) {
 // pacing, and the leg reads chore.Evaluate's answer rather than
 // re-deriving one of its own.
 func TestHeartbeatIsQuietForACoolingChore(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	seedChoreDef(t, root, "readme-refresh", `{"cadence":"168h","cooldown":"168h"}`, time.Hour)
 	completeChoreAt(t, root, "moe", "readme-refresh", 30*time.Minute)
 
@@ -120,7 +124,8 @@ func TestHeartbeatIsQuietForACoolingChore(t *testing.T) {
 // standing cap and sits ahead of every read, chore legs included. A
 // clock that outranked it would make the brake a suggestion.
 func TestHeartbeatPausedCapsTheChoreClock(t *testing.T) {
-	root := quietFixture(t)
+	t.Parallel()
+	root := parallelQuietFixture(t)
 	seedChoreDef(t, root, "readme-refresh", `{"cadence":"168h"}`, time.Hour)
 	if err := project.SetMode(root, "moe", project.ModePaused); err != nil {
 		t.Fatal(err)
@@ -141,7 +146,7 @@ func TestHeartbeatPausedCapsTheChoreClock(t *testing.T) {
 // owed: eligible since an hour ago, and no pulse has looked since.
 func judgedBoard(t *testing.T, cooldown string, seedBeforeThePulse func(root string)) string {
 	t.Helper()
-	root := quietFixture(t)
+	root := parallelQuietFixture(t)
 	seedChoreDef(t, root, "lore-sweep", `{"when":"lore has drifted"`+cooldown+`}`, 3*time.Hour)
 	completeChoreAt(t, root, "moe", "lore-sweep", 2*time.Hour)
 	if seedBeforeThePulse != nil {
@@ -156,6 +161,7 @@ func judgedBoard(t *testing.T, cooldown string, seedBeforeThePulse func(root str
 // so on a quiet board the only thing that can change the answer is the
 // cooldown expiring. That expiry is the edge this leg fires on.
 func TestHeartbeatProbesAJudgedChoreOnceEligible(t *testing.T) {
+	t.Parallel()
 	root := judgedBoard(t, `,"cooldown":"1h"`, nil)
 
 	decisions := dueDecisions(t, newHeartbeatGate(root), testTick)
@@ -173,6 +179,7 @@ func TestHeartbeatProbesAJudgedChoreOnceEligible(t *testing.T) {
 // happens to hold; the probe sweep mints a pulse run of its own, which
 // moves lastPulseAt past the expiry and closes the edge.
 func TestHeartbeatProbesAJudgedChoreExactlyOnce(t *testing.T) {
+	t.Parallel()
 	root := judgedBoard(t, `,"cooldown":"1h"`, nil)
 	g := newHeartbeatGate(root)
 	if got := dueProjects(t, g); len(got) != 1 || got[0] != "moe" {
@@ -195,6 +202,7 @@ func TestHeartbeatProbesAJudgedChoreExactlyOnce(t *testing.T) {
 // TestHeartbeatIsQuietForAJudgedChoreStillCoolingDown: the cooldown is
 // the whole clock here, so a chore inside it has no edge to fire on.
 func TestHeartbeatIsQuietForAJudgedChoreStillCoolingDown(t *testing.T) {
+	t.Parallel()
 	root := judgedBoard(t, `,"cooldown":"168h"`, nil)
 
 	if got := dueProjects(t, newHeartbeatGate(root)); len(got) != 0 {
@@ -209,6 +217,7 @@ func TestHeartbeatIsQuietForAJudgedChoreStillCoolingDown(t *testing.T) {
 // to avoid. It stays reachable through the moved leg, because
 // registering or editing a chore is itself a journal commit.
 func TestHeartbeatIsQuietForAJudgedChoreWithNoCooldown(t *testing.T) {
+	t.Parallel()
 	root := judgedBoard(t, "", nil)
 
 	if got := dueProjects(t, newHeartbeatGate(root)); len(got) != 0 {
@@ -225,6 +234,7 @@ func TestHeartbeatIsQuietForAJudgedChoreWithNoCooldown(t *testing.T) {
 // it. What must not happen is the *probe* — asking the survey to judge a
 // condition whose answer is already being acted on.
 func TestHeartbeatIsQuietForAJudgedChoreWithAnOpenRun(t *testing.T) {
+	t.Parallel()
 	root := judgedBoard(t, `,"cooldown":"1h"`, func(root string) {
 		seedRun(t, root, "moe", "lore-sweep-2026-08-22", "sdlc", run.StatusInProgress, time.Now().Local(), nil)
 		journalCommit(t, root, "moe", "open: lore-sweep-2026-08-22",

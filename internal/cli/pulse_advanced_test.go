@@ -25,7 +25,8 @@ func advanceAt(t *testing.T, root, projectID, runID, docID string, when time.Tim
 // picked it up — the block names it, the stage it waits at, and the
 // marker's age.
 func TestAdvancedRunsBlockListsAdvancedRun(t *testing.T) {
-	root := newTestBureaucracy(t)
+	t.Parallel()
+	root := parallelBureaucracy(t)
 	now := time.Now().Local()
 	seedRun(t, root, "moe", "evolution", "sdlc", run.StatusInProgress, now,
 		map[string]string{"design": "# Evolve the ladder\n\nbody\n"})
@@ -44,7 +45,8 @@ func TestAdvancedRunsBlockListsAdvancedRun(t *testing.T) {
 // carries no marker is *not* eligible. A finished canvas is not consent
 // to proceed, and an in-flight run must never be groomed underneath.
 func TestAdvancedRunsBlockSkipsUnadvancedRun(t *testing.T) {
-	root := newTestBureaucracy(t)
+	t.Parallel()
+	root := parallelBureaucracy(t)
 	now := time.Now().Local()
 	seedRun(t, root, "moe", "in-flight", "sdlc", run.StatusInProgress, now, nil)
 	trailerstest.CommitWorkTurnAt(t, root, "moe", "in-flight", "sdlc", "design", now.Add(-time.Hour))
@@ -64,7 +66,8 @@ func TestAdvancedRunsBlockSkipsUnadvancedRun(t *testing.T) {
 // every in-flight stage, which is what shipped until the test stage
 // drove a real pulse.
 func TestAdvancedRunsBlockSkipsStartedSuccessor(t *testing.T) {
-	root := newTestBureaucracy(t)
+	t.Parallel()
+	root := parallelBureaucracy(t)
 	now := time.Now().Local()
 	seedRun(t, root, "moe", "picked-up", "sdlc", run.StatusInProgress, now, nil)
 	advanceAt(t, root, "moe", "picked-up", "design", now.Add(-2*time.Hour))
@@ -102,7 +105,8 @@ func TestAdvancedRunsBlockSkipsStartedSuccessor(t *testing.T) {
 // still waiting. session.Open is the production seam, so the test
 // drives it rather than simulating a branch.
 func TestAdvancedRunsBlockSkipsLiveSession(t *testing.T) {
-	root := newTestBureaucracy(t)
+	t.Parallel()
+	root := parallelBureaucracy(t)
 	now := time.Now().Local()
 	seedRun(t, root, "moe", "picked-up-live", "sdlc", run.StatusInProgress, now, nil)
 	advanceAt(t, root, "moe", "picked-up-live", "design", now.Add(-2*time.Hour))
@@ -139,7 +143,8 @@ func TestAdvancedRunsBlockSkipsLiveSession(t *testing.T) {
 // applies. The operator advanced past design, then re-opened design —
 // the run is being worked again, not waiting.
 func TestAdvancedRunsBlockSkipsReopenedStage(t *testing.T) {
-	root := newTestBureaucracy(t)
+	t.Parallel()
+	root := parallelBureaucracy(t)
 	now := time.Now().Local()
 	seedRun(t, root, "moe", "reopened", "sdlc", run.StatusInProgress, now, nil)
 	advanceAt(t, root, "moe", "reopened", "design", now.Add(-5*time.Hour))
@@ -154,7 +159,8 @@ func TestAdvancedRunsBlockSkipsReopenedStage(t *testing.T) {
 // design-stage marker forever. Terminal status short-circuits in
 // NextWithIndex, so it never reads as waiting.
 func TestAdvancedRunsBlockSkipsTerminalRun(t *testing.T) {
-	root := newTestBureaucracy(t)
+	t.Parallel()
+	root := parallelBureaucracy(t)
 	now := time.Now().Local()
 	seedRun(t, root, "moe", "shipped", "sdlc", run.StatusMerged, now, nil)
 	advanceAt(t, root, "moe", "shipped", "design", now.Add(-4*time.Hour))
@@ -168,7 +174,8 @@ func TestAdvancedRunsBlockSkipsTerminalRun(t *testing.T) {
 // Oldest marker first: the longest-stranded run is the one most worth
 // a thread. A run in another project is not this sweep's business.
 func TestAdvancedRunsBlockOrdersOldestFirst(t *testing.T) {
-	root := newTestBureaucracy(t)
+	t.Parallel()
+	root := parallelBureaucracy(t)
 	now := time.Now().Local()
 	seedRun(t, root, "moe", "recent", "sdlc", run.StatusInProgress, now, nil)
 	seedRun(t, root, "moe", "stranded", "sdlc", run.StatusInProgress, now, nil)
@@ -191,7 +198,8 @@ func TestAdvancedRunsBlockOrdersOldestFirst(t *testing.T) {
 // consistent with every sibling in pulseKickoffFromScan. An empty
 // block with a header reads as a bug.
 func TestAdvancedRunsBlockEmpty(t *testing.T) {
-	root := newTestBureaucracy(t)
+	t.Parallel()
+	root := parallelBureaucracy(t)
 	seedRun(t, root, "moe", "lone-run", "sdlc", run.StatusInProgress, time.Now().Local(), nil)
 	if got := advancedRunsBlock(mustPulseScan(t, root), "moe"); got != "" {
 		t.Errorf("expected no block, got:\n%s", got)

@@ -42,7 +42,8 @@ func chainBatch(t *testing.T, root string) (string, string, string) {
 // ride. This is the live truth that replaced the canvas's frozen
 // membership lines.
 func TestChainMembersWalksTheBatch(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	head, first, second := chainBatch(t, root)
 
 	members, err := chainMembers(root, "moe", head, time.Now().UTC())
@@ -67,7 +68,8 @@ func TestChainMembersWalksTheBatch(t *testing.T) {
 // walk, not every edge ever stamped. The runs behind it keep their
 // edges; `moe chain edit` is what re-strings them.
 func TestChainMembersStopsAtATerminalMember(t *testing.T) {
-	root := spawnFixture(t)
+	t.Parallel()
+	root := parallelProjectFixture(t)
 	head, first, _ := chainBatch(t, root)
 
 	md, err := run.Load(root, "moe", first)
