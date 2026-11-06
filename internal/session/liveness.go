@@ -47,8 +47,7 @@ import (
 const StaleAfter = 10 * time.Minute
 
 // beatInterval is how often a claimed session rewrites heartbeat_at.
-// Variable rather than const so tests can shorten it.
-var beatInterval = 30 * time.Second
+const beatInterval = 30 * time.Second
 
 // Claim is the on-disk record of who is inside a session right now.
 type Claim struct {

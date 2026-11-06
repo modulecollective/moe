@@ -592,9 +592,6 @@ func TestScanListsLiveEntriesOldestFirstAndDropsTerminalRuns(t *testing.T) {
 	if !waiting[0].Entry.Open() || waiting[1].Entry.Open() {
 		t.Fatalf("Scan = %+v, want zulu's ping open and alpha's note pending", waiting)
 	}
-	if got := waiting[0].Ref(); got != "moe/zulu#1" {
-		t.Fatalf("Ref() = %q", got)
-	}
 	// The terminal run keeps its history for its own page.
 	f, err := Load(root, "moe", "gone")
 	if err != nil || len(f.Notes) != 1 {

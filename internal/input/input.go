@@ -560,11 +560,6 @@ type Waiting struct {
 	When time.Time
 }
 
-// Ref renders the address the CLI and the web both print.
-func (w Waiting) Ref() string {
-	return w.Project + "/" + w.Run + "#" + strconv.Itoa(w.Entry.ID)
-}
-
 // Scan returns everything still in flight on the board, oldest first:
 // open pings the operator owes an answer, and pending notes a turn owes
 // a pickup. Callers partition with Entry.Open().

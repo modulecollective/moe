@@ -34,9 +34,8 @@ type claudeMessage struct {
 }
 
 type claudeBlock struct {
-	Type     string `json:"type"`
-	Text     string `json:"text,omitempty"`
-	Thinking string `json:"thinking,omitempty"`
+	Type string `json:"type"`
+	Text string `json:"text,omitempty"`
 	// tool_use
 	ID    string         `json:"id,omitempty"`
 	Name  string         `json:"name,omitempty"`

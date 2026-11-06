@@ -132,19 +132,6 @@ func (g *ChainGraph) Thread(key string) []string {
 	return out
 }
 
-// Unit returns every member of the thread key belongs to: back to the
-// root, then forward.
-func (g *ChainGraph) Unit(key string) map[string]bool {
-	if key == "" {
-		return nil
-	}
-	members := map[string]bool{}
-	for _, k := range g.Thread(g.Root(key)) {
-		members[k] = true
-	}
-	return members
-}
-
 // LiveParentOf returns the in-progress run that chains to key, or "" for
 // none. The guard behind `moe chain kick`: riding a chain from the
 // middle is what it refuses, and the caller names the head instead.
