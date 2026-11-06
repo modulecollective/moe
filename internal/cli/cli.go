@@ -42,6 +42,23 @@ func Register(c *Command) {
 
 // Run dispatches one invocation and returns the process exit code.
 func Run(args []string, stdout, stderr io.Writer) int {
+	// The bypass lasts through every direct stage/cascade dispatch in this
+	// invocation, including overrides typed while waiting.
+	previous := cooldownSkipped.Swap(false)
+	defer cooldownSkipped.Store(previous)
+	filtered := make([]string, 0, len(args))
+	for i, arg := range args {
+		if arg == "--" {
+			filtered = append(filtered, args[i:]...)
+			break
+		}
+		if arg == "--no-cooldown" {
+			cooldownSkipped.Store(true)
+			continue
+		}
+		filtered = append(filtered, arg)
+	}
+	args = filtered
 	installGitTrace()
 	if len(args) == 0 {
 		PrintUsage(stdout)
@@ -60,7 +77,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 
 // PrintUsage writes the top-level help message.
 func PrintUsage(w io.Writer) {
-	moePrintln(w, "usage: moe <command> [args...]")
+	moePrintln(w, "usage: moe [--no-cooldown] <command> [args...]")
 	moePrintln(w, "")
 	moePrintln(w, "commands:")
 	names := make([]string, 0, len(commands))

@@ -110,7 +110,9 @@ func Hold(s *Session, machine bool) (release func(), err error) {
 		return func() {}, err
 	}
 	stop := make(chan struct{})
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		t := time.NewTicker(beatInterval)
 		defer t.Stop()
 		for {
@@ -132,6 +134,7 @@ func Hold(s *Session, machine bool) (release func(), err error) {
 		}
 		once = true
 		close(stop)
+		<-done
 	}, nil
 }
 

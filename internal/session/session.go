@@ -158,6 +158,8 @@ type Session struct {
 	// WorktreePath is the absolute path to the worktree directory under
 	// <root>/.moe/worktrees/<uuid>/.
 	WorktreePath string
+	// freshReservation is true only for the Open that created this branch.
+	freshReservation bool
 }
 
 // BranchName returns the branch name for a (project, run, doc) tuple.
@@ -281,7 +283,7 @@ func Open(root, projectID, runID, docID string) (*Session, error) {
 	}
 	return &Session{
 		Root: root, Project: projectID, Run: runID, Doc: docID,
-		Branch: branch, WorktreePath: abs,
+		Branch: branch, WorktreePath: abs, freshReservation: true,
 	}, nil
 }
 
@@ -333,6 +335,28 @@ func reconcileWithMain(s *Session) error {
 	// Covers both stale shapes: a branch with no commits of its own
 	// fast-forwards to main, a diverged one replays on top.
 	return rebaseOntoMain(s, opOpen)
+}
+
+// Reconcile refreshes a reserved session after waiting, under the repo lock.
+func Reconcile(s *Session) error { return reconcileWithMain(s) }
+
+// CancelReservation ends admission without invoking Close's canvas gate.
+// Resumed sessions are retained. A new reservation may be removed only while
+// it has no work of its own; unexpected changes are preserved and reported.
+// The caller must stop its heartbeat and hold the repo lock.
+func CancelReservation(s *Session) error {
+	clearClaim(s)
+	if !s.freshReservation {
+		return nil
+	}
+	status, err := git.Output(s.WorktreePath, "status", "--porcelain")
+	if err != nil {
+		return err
+	}
+	if status != "" || !git.Probe(s.Root, "merge-base", "--is-ancestor", s.Branch, "main") {
+		return fmt.Errorf("session: unstarted reservation changed; preserved at %s", s.WorktreePath)
+	}
+	return Abandon(s)
 }
 
 // rebaseOntoMain replays the session branch onto main inside its

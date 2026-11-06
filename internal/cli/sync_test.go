@@ -732,7 +732,7 @@ func TestOpenStageSessionRunsAutoPullBeforeSessionOpen(t *testing.T) {
 		LockPurpose: "stage",
 	}
 	var stdout, stderr bytes.Buffer
-	sess, closeSess, err := openStageSession(f.root, in, &stdout, &stderr)
+	sess, closeSess, _, err := openStageSession(f.root, in, &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("openStageSession: %v\nstderr=%s", err, stderr.String())
 	}
@@ -776,7 +776,7 @@ func TestCloseSessLandsOnLocalMainWithoutPushing(t *testing.T) {
 		LockPurpose: "stage",
 	}
 	var stdout, stderr bytes.Buffer
-	sess, closeSess, err := openStageSession(f.root, in, &stdout, &stderr)
+	sess, closeSess, _, err := openStageSession(f.root, in, &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("openStageSession: %v\nstderr=%s", err, stderr.String())
 	}
@@ -846,7 +846,7 @@ func TestOpenStageSessionRefusesOnRebaseConflict(t *testing.T) {
 		LockPurpose: "stage",
 	}
 	var stdout, stderr bytes.Buffer
-	_, _, err := openStageSession(f.root, in, &stdout, &stderr)
+	_, _, _, err := openStageSession(f.root, in, &stdout, &stderr)
 	if err == nil {
 		t.Fatal("openStageSession: expected refusal on rebase conflict")
 	}

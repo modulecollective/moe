@@ -13,10 +13,12 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"time"
@@ -382,6 +384,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		moePrintf(stderr, "stylesheet %s: %v\n", filepath.Join(root, stylesheet.FileName), err)
 		return 1
 	}
+	explicitModel := opts.Model
 	sheetAgent, sheetModel := sheet.Resolve(md.Workflow, docID)
 	agentName := stageAgentName(opts, md, sheetAgent)
 	opts.Model = stageModel(opts.Model, sheet.ModelForAgent(md.Workflow, docID, agentName), sheetAgent, sheetModel, agentName, stderr)
@@ -409,6 +412,82 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	// captured by BuildPrompt and stamped delivered below once the turn
 	// succeeds. Nil for nearly every turn.
 	var deliveredInputIDs []int
+
+	var clonePath string
+	var devEnv map[string]string
+	prepareWorkspace := func() error {
+		// Code workspace — still keyed off the canonical bureaucracy
+		// root so per-run sandbox persistence works across turns.
+		// Document-only stages see no clone; code stages insist on one
+		// and pre-position it on the moe/<run-id> branch so the
+		// agent's commits (and any later `moe sdlc push`) land on a
+		// branch we own; design opts in read-only. attachRunWorkspace
+		// routes per-run sandbox vs named workspace based on
+		// md.Workspace; the callers here don't need to know which.
+		clonePath = ""
+		devEnv = nil
+		if opts.NeedsSandbox {
+			if _, err := os.Stat(filepath.Join(root, project.SubmoduleDir(md.Project))); err != nil {
+				return fmt.Errorf("project %q has no submodule on disk; cannot run %q without code to edit", md.Project, docID)
+			}
+			clonePath, err = attachRunWorkspace(root, md, branchPrefix+md.ID)
+			if err != nil {
+				return err
+			}
+			// Dev-env hooks fire on every code/review/test stage open
+			// against this working tree. First touch runs the
+			// project's dev-env.d/* setup scripts and caches the
+			// parsed KEY=VALUE output to <tree>/.moe/dev-env.env;
+			// later turns re-source the cache while its allowlisted
+			// directories remain valid, or tear it down and rebuild it
+			// when one has vanished. Projects with no dev-env.d/
+			// directory get an empty env (the single-driver default) —
+			// no warning, no refusal.
+			env, _, err := devEnvSetupEnv(root, clonePath, md, stdout, stderr)
+			if err != nil {
+				return fmt.Errorf("dev-env: %w", err)
+			}
+			devEnv = env
+			if opts.EnforceSandboxBoundary {
+				sandboxBoundaryClone = clonePath
+				// Snapshot post-dev-env so the boundary check
+				// tolerates dev-env hooks that may legitimately touch
+				// the worktree (e.g. cache writes outside tracked
+				// files). Hooks are contracted to leave tracked files
+				// alone — see checkSandboxBoundary's hooks-side contract.
+				//
+				// BoundaryAllowsCommits skips the snapshot: a stage
+				// that may commit (review) leaves entryHEAD empty, and
+				// checkSandboxBoundary reads that as "don't compare
+				// HEAD" — only the dirty-tracked leg runs.
+				if !opts.BoundaryAllowsCommits {
+					head, err := git.HEAD(clonePath)
+					if err != nil {
+						return fmt.Errorf("sandbox boundary: snapshot HEAD: %w", err)
+					}
+					sandboxBoundaryEntryHEAD = head
+				}
+			}
+		}
+
+		return nil
+	}
+	// Re-resolve against the reserved worktree: it carries post-pull main,
+	// or the recovered session state. Keep the explicit model separate.
+	resolveSelection := func(workRoot string, fresh *run.Metadata) (string, string, error) {
+		currentSheet, err := stylesheet.Load(workRoot)
+		if err != nil {
+			return "", "", err
+		}
+		if err := currentSheet.Validate(stylesheetVocab()); err != nil {
+			return "", "", err
+		}
+		sa, sm := currentSheet.Resolve(fresh.Workflow, docID)
+		name := stageAgentName(opts, fresh, sa)
+		model := stageModel(explicitModel, currentSheet.ModelForAgent(fresh.Workflow, docID, name), sa, sm, name, stderr)
+		*md = *fresh
+		return name, model, nil
+	}
 
 	in := stageTurnInputs{
 		Project:     projectID,
@@ -465,60 +544,6 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			// faster than reasoning about staleness across resumes.
 			if err := materializeMoeBureaucracySkill(workRoot, sessionCwd, md); err != nil {
 				return stageTurnSpec{}, err
-			}
-
-			// Code workspace — still keyed off the canonical bureaucracy
-			// root so per-run sandbox persistence works across turns.
-			// Document-only stages see no clone; code stages insist on one
-			// and pre-position it on the moe/<run-id> branch so the
-			// agent's commits (and any later `moe sdlc push`) land on a
-			// branch we own; design opts in read-only. attachRunWorkspace
-			// routes per-run sandbox vs named workspace based on
-			// md.Workspace; the callers here don't need to know which.
-			clonePath := ""
-			var devEnv map[string]string
-			if opts.NeedsSandbox {
-				if _, err := os.Stat(filepath.Join(root, project.SubmoduleDir(md.Project))); err != nil {
-					return stageTurnSpec{}, fmt.Errorf("project %q has no submodule on disk; cannot run %q without code to edit", md.Project, docID)
-				}
-				clonePath, err = attachRunWorkspace(root, md, branchPrefix+md.ID)
-				if err != nil {
-					return stageTurnSpec{}, err
-				}
-				// Dev-env hooks fire on every code/review/test stage open
-				// against this working tree. First touch runs the
-				// project's dev-env.d/* setup scripts and caches the
-				// parsed KEY=VALUE output to <tree>/.moe/dev-env.env;
-				// later turns re-source the cache while its allowlisted
-				// directories remain valid, or tear it down and rebuild it
-				// when one has vanished. Projects with no dev-env.d/
-				// directory get an empty env (the single-driver default) —
-				// no warning, no refusal.
-				env, _, err := devEnvSetupEnv(root, clonePath, md, stdout, stderr)
-				if err != nil {
-					return stageTurnSpec{}, fmt.Errorf("dev-env: %w", err)
-				}
-				devEnv = env
-				if opts.EnforceSandboxBoundary {
-					sandboxBoundaryClone = clonePath
-					// Snapshot post-dev-env so the boundary check
-					// tolerates dev-env hooks that may legitimately touch
-					// the worktree (e.g. cache writes outside tracked
-					// files). Hooks are contracted to leave tracked files
-					// alone — see checkSandboxBoundary's hooks-side contract.
-					//
-					// BoundaryAllowsCommits skips the snapshot: a stage
-					// that may commit (review) leaves entryHEAD empty, and
-					// checkSandboxBoundary reads that as "don't compare
-					// HEAD" — only the dirty-tracked leg runs.
-					if !opts.BoundaryAllowsCommits {
-						head, err := git.HEAD(clonePath)
-						if err != nil {
-							return stageTurnSpec{}, fmt.Errorf("sandbox boundary: snapshot HEAD: %w", err)
-						}
-						sandboxBoundaryEntryHEAD = head
-					}
-				}
 			}
 
 			// Chat grooms the operator's real backlog in-session — point
@@ -699,6 +724,48 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		},
 	}
 
+	in.Admit = func(sess *session.Session) int {
+		fresh, err := run.Load(sess.WorktreePath, projectID, runID)
+		if err == nil {
+			agentName, opts.Model, err = resolveSelection(sess.WorktreePath, fresh)
+		}
+		if err == nil {
+			err = prepareWorkspace()
+		}
+		if err != nil {
+			moePrintf(stderr, "not started: %v\n", err)
+			return exitNotStarted
+		}
+		if opts.projectDocFixTurn {
+			return 0
+		}
+		g := newCooldownGate(fmt.Sprintf("moe %s %s %s/%s", md.Workflow, docID, projectID, runID), stderr)
+		if opts.Headless || serveAgentSuppress() {
+			g.openControls = func() (<-chan cooldownControl, func()) { return nil, func() {} }
+		}
+		g.read = func(ctx context.Context, name, model string) (agent.Quota, error) {
+			return readStageQuota(ctx, name, model, mapToEnv(devEnv))
+		}
+		code := stageCooldown(g, &agentName, &opts.Model,
+			func(fresh *run.Metadata) (string, string, error) {
+				oldEnv := devEnv
+				name, model, err := resolveSelection(sess.WorktreePath, fresh)
+				if err == nil {
+					err = prepareWorkspace()
+				}
+				g.refreshChanged = !maps.Equal(oldEnv, devEnv)
+				return name, model, err
+			}, func() (*run.Metadata, error) {
+				err := repolock.With(root, stageLockOptions(in, "refresh"), func() error { return session.Reconcile(sess) })
+				if err != nil {
+					return nil, err
+				}
+				return run.Load(sess.WorktreePath, projectID, runID)
+			}, stderr)
+		in.Agent = agentName
+		return code
+	}
+
 	code := runStageTurn(root, in, stdout, stderr)
 	if code != 0 {
 		// Error exit — skip the footer. Pairing every error with a
@@ -836,6 +903,9 @@ type stageTurnInputs struct {
 	// BuildSpec resolves the per-turn parameters once the worktree is
 	// open. Errors abort with a stderr report and exit code 1.
 	BuildSpec func(workRoot string) (stageTurnSpec, error)
+	// Admit runs with the session claimed, before any canvas/session writes.
+	// A nonzero result cancels the reservation without the canvas gate.
+	Admit func(*session.Session) int
 }
 
 // stageTurnSpec is the data BuildSpec hands back to runStageTurn.
@@ -951,10 +1021,18 @@ func closeBootstrapFailedSession(closeSess func() error, stderr io.Writer) {
 // in runStageSession, its only caller. Returns the exit code to
 // bubble up.
 func runStageTurn(root string, in stageTurnInputs, stdout, stderr io.Writer) int {
-	sess, closeSess, err := openStageSession(root, in, stdout, stderr)
+	sess, closeSess, cancelReservation, err := openStageSession(root, in, stdout, stderr)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
+	}
+	if in.Admit != nil {
+		if code := in.Admit(sess); code != 0 {
+			if err := cancelReservation(); err != nil {
+				moePrintf(stderr, "%v\n", err)
+			}
+			return code
+		}
 	}
 	workRoot := sess.WorktreePath
 
@@ -1008,9 +1086,7 @@ func runStageTurn(root string, in stageTurnInputs, stdout, stderr io.Writer) int
 	if agentName == "" {
 		agentName = resolveAgentName("", "", "")
 	}
-	if in.Agent == "" {
-		in.Agent = agentName
-	}
+	in.Agent = agentName
 	a, err := agent.Get(agentName)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
@@ -1151,7 +1227,7 @@ func runStageTurn(root string, in stageTurnInputs, stdout, stderr io.Writer) int
 // within seconds. Heartbeat is on because the pull can sit for several
 // seconds on a slow link and we don't want a contending invocation to
 // declare the lock stale.
-func openStageSession(root string, in stageTurnInputs, stdout, stderr io.Writer) (*session.Session, func() error, error) {
+func openStageSession(root string, in stageTurnInputs, stdout, stderr io.Writer) (*session.Session, func() error, func() error, error) {
 	// Open (or resume) the session worktree under the repo lock.
 	// The local work is just `git worktree add` (or a lookup); the
 	// auto-pull before it can sit on the network briefly.
@@ -1168,7 +1244,7 @@ func openStageSession(root string, in stageTurnInputs, stdout, stderr io.Writer)
 		return nil
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	// Claim the session for this process. The branch alone says a stage
 	// is open; the claim says who is inside it and whether they are still
@@ -1194,7 +1270,13 @@ func openStageSession(root string, in stageTurnInputs, stdout, stderr io.Writer)
 			return session.Close(sess)
 		})
 	}
-	return sess, closeSess, nil
+	cancelReservation := func() error {
+		release()
+		return repolock.With(root, stageLockOptions(in, "cancel"), func() error {
+			return session.CancelReservation(sess)
+		})
+	}
+	return sess, closeSess, cancelReservation, nil
 }
 
 // stageLockOptions builds the repo-lock options for one of a stage

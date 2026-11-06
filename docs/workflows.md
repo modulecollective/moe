@@ -810,3 +810,36 @@ canvas.
 The hook events themselves (`dev-env.d`, `dev-env-teardown.d`, `pre-push.d`) and
 per-project dev secrets are covered in
 [reference.md §Hooks And Environments](reference.md#hooks-and-environments).
+
+## Subscription quota cooldown
+
+Before each top-level agent stage, including the first stage of a ride,
+MoE checks the selected backend's subscription usage without running a
+model turn. At 95% used it waits for all applicable blocking windows to
+reset, then reads usage again. The wait has a six-hour total budget per
+stage; a reset beyond that budget stops immediately. Unsupported quota
+interfaces and malformed readings stop clearly. Transport errors retry
+twice, one minute apart. No backend or billing setting changes.
+
+At an interactive stage's attached terminal, `c` + Enter continues that
+stage now, `a` + Enter skips checks for the rest of this invocation, and
+`q` + Enter or Ctrl-C cancels. Headless and serve-hosted stages read no
+terminal input. Add `--no-cooldown` anywhere before `--` in the launch
+command to skip checks for the entire invocation, including its cascade
+and chain ride. For example:
+
+```sh
+moe sdlc code --no-cooldown --chain myproject/my-run
+```
+
+A quota refusal returns 75 and leaves the stage unstarted; Ctrl-C returns
+130. Re-run the printed stage command to resume. Existing resumed work
+is preserved. Five percent headroom cannot reserve quota or guarantee
+that a stage finishes. Bypassing may consume paid credits if the agent's
+existing account settings allow it; MoE does not enable overage.
+
+The adapters target Claude Code 2.1.316's experimental `get_usage`
+control interface and Codex CLI 0.167.0's app-server
+`account/rateLimits/read`. They use the executor's authentication filter
+and dev-env overrides. An incompatible CLI or unsupported login stops
+with the bypass route rather than assuming zero usage.

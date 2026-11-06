@@ -1436,6 +1436,8 @@ func renderCascadeSummary(runKey string, res cascadeResult) string {
 		switch {
 		case r.deferred != "":
 			parts = append(parts, fmt.Sprintf("%s deferred to recovery (%s)", r.stage, deferredLabel(r.deferred)))
+		case r.code == exitNotStarted:
+			parts = append(parts, fmt.Sprintf("%s not started: quota", r.stage))
 		case r.code == exitInterrupted:
 			// An operator Ctrl-C, not a stage failure — read it as
 			// "interrupted" so the summary doesn't libel a clean,
