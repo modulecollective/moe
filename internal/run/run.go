@@ -1108,7 +1108,7 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 	// the counts, not the sets, keeps the index small.
 	dailyProjSlugs := make(map[string]map[string]map[string]struct{})
 	quotaSeen := make(map[string]bool)
-	quotaResolved := make(map[string]string)
+	quotaResolved := make(map[string]map[string]bool)
 	for record := range strings.SplitSeq(out, "\x1e") {
 		record = strings.TrimLeft(record, "\n")
 		if record == "" {
@@ -1325,14 +1325,17 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 		if quotaRetry != nil {
 			// History is newest first. A resolution consumes only the
 			// observed version; an aggregate updated concurrently survives.
+			// Keep all later resolutions so a stale completion cannot hide
+			// a valid resolution of the newest update.
 			// Pin the newest event even when resolved, preventing resurrection.
 			for token, fingerprint := range quotaRetry.Resolves {
-				if _, seen := quotaResolved[token]; !seen {
-					quotaResolved[token] = fingerprint
+				if quotaResolved[token] == nil {
+					quotaResolved[token] = make(map[string]bool)
 				}
+				quotaResolved[token][fingerprint] = true
 			}
 			if token := quotaRetry.Token; token != "" && !quotaSeen[token] {
-				if quotaResolved[token] != quotaRetry.Fingerprint() {
+				if !quotaResolved[token][quotaRetry.Fingerprint()] {
 					idx.QuotaRetries[token] = *quotaRetry
 				}
 				quotaSeen[token] = true
