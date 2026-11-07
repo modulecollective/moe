@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/modulecollective/moe/internal/project"
-	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 )
 
@@ -509,12 +508,7 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 		// with everything else, so a reader of origin sees the marker
 		// within seconds rather than the run still parked at priorCanvas
 		// — the exact re-run `a` exists to prevent.
-		err := repolock.With(root, repolock.Options{
-			Purpose: "stage-advance",
-			Run:     md.Project + "/" + md.ID,
-		}, func() error {
-			return commitAdvance(root, md, priorCanvas)
-		})
+		err := commitAdvance(root, md, priorCanvas)
 		if err != nil {
 			moePrintf(stderr, "advance: %v\n", err)
 			return 1

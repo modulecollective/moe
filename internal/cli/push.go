@@ -101,6 +101,7 @@ const pushCanvasSkeleton = `# Push
 // synthesis sits inside the push action, which owns its own routing.
 func runPushSynthesisSession(projectID, runID string, headless bool, stdout, stderr io.Writer) int {
 	opts := stageSessionOpts{
+		ValidateEntry:   sdlcSessionEntry,
 		NeedsSandbox:    true,
 		Headless:        headless,
 		SkipNextStage:   true,

@@ -228,6 +228,7 @@ func openSdlcDesign(projectID, runID string, headless bool, agentOverride string
 	runID = resolved
 	return runStageSession(projectID, runID, "design",
 		stageSessionOpts{
+			ValidateEntry:          sdlcSessionEntry,
 			NeedsSandbox:           true,
 			EnforceSandboxBoundary: true,
 			Headless:               headless,
@@ -255,6 +256,7 @@ func openSdlcCode(projectID, runID string, headless bool, agentOverride string, 
 	}
 	return runStageSession(projectID, runID, "code",
 		stageSessionOpts{
+			ValidateEntry:   sdlcSessionEntry,
 			NeedsSandbox:    true,
 			Headless:        headless,
 			Agent:           agentOverride,
@@ -279,6 +281,7 @@ func openSdlcReview(projectID, runID string, headless bool, agentOverride string
 	}
 	return runStageSession(projectID, runID, "review",
 		stageSessionOpts{
+			ValidateEntry:          sdlcSessionEntry,
 			NeedsSandbox:           true,
 			EnforceSandboxBoundary: true,
 			BoundaryAllowsCommits:  true,
@@ -304,6 +307,7 @@ func openSdlcTest(projectID, runID string, headless bool, agentOverride string, 
 	}
 	return runStageSession(projectID, runID, "test",
 		stageSessionOpts{
+			ValidateEntry:   sdlcSessionEntry,
 			NeedsSandbox:    true,
 			Headless:        headless,
 			CanvasSkeleton:  testCanvasSkeleton,
@@ -591,4 +595,12 @@ func canvasKickoffCommit(root, canvasRel string) (sha, subject string, err error
 	}
 	sha, subject, _ = strings.Cut(last, " ")
 	return sha, subject, nil
+}
+
+// Pushed runs remain editable for PR iteration and CI repair.
+func sdlcSessionEntry(md *run.Metadata) error {
+	if md.Workflow == sdlcWorkflow && (md.Status == run.StatusInProgress || md.Status == run.StatusPushed) {
+		return nil
+	}
+	return fmt.Errorf("run %s/%s is %s (%s); retry or reopen before entering sdlc", md.Project, md.ID, md.Status, md.Workflow)
 }

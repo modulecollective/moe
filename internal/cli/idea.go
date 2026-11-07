@@ -401,6 +401,7 @@ const ideaChatKickoff = "The operator just opened this idea to refine it. Read t
 func openIdeaChat(projectID, slug, agentOverride string, stdout, stderr io.Writer) int {
 	return runStageSession(projectID, slug, dash.IdeaDocID,
 		stageSessionOpts{
+			ValidateEntry: inProgressSessionEntry(dash.IdeaWorkflow),
 			InitialPrompt: ideaChatKickoff,
 			SkipNextStage: true,
 			HarvestOnExit: true,

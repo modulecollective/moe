@@ -1511,7 +1511,7 @@ func TestRunPageHidesAdvanceChipsBeforePush(t *testing.T) {
 // TestAdvanceRefusesNonSDLC: POST /advance on an idea run is the wrong
 // surface — 409, no spawn.
 func TestAdvanceRefusesNonSDLC(t *testing.T) {
-	root := t.TempDir()
+	root := newGitServeRoot(t)
 	seedRun(t, root, "alpha", "my-idea", "idea")
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo"})
 
@@ -1553,7 +1553,7 @@ func TestAdvanceRefusesTerminalRun(t *testing.T) {
 // gets 409 — push stays terminal/CLI-only even via the route, and the
 // server re-derives the stage rather than trusting the caller.
 func TestAdvanceRefusesPushStage(t *testing.T) {
-	root := t.TempDir()
+	root := newGitServeRoot(t)
 	seedRun(t, root, "alpha", "fix-it", "sdlc")
 	now := time.Now().UTC()
 	s := newTestServer(t, Options{

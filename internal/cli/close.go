@@ -13,6 +13,7 @@ import (
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
+	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
@@ -145,109 +146,8 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 // (serve answers 500). skipEdit threads to enterTerminal's harvest
 // pre-flight: serve always passes true since it can't host $EDITOR.
 func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, projectID, runID string, skipEdit bool, stderr io.Writer, extraTrailers ...trailers.Block) error {
-	if err := requireProject(root, projectID); err != nil {
-		return err
-	}
-
-	// Capture closes (idea, intent) have no follow-ups dance — the run
-	// *is* the capture. For everything else, the operator's local edits
-	// to the harvest scratch files (followups.md, feedback/lore.md, feedback/twin.md) are
-	// expected — that's where stage-time captures land — so the
-	// clean-tree gate ignores changes on those paths. Anything else dirty
-	// stays a refusal.
-	//
-	// lore/ is exempt for the same reason one level out: it's harvest
-	// *output*, and enterTerminal stages it into this very close commit.
-	// The exemption list is exactly the set of paths the close is about
-	// to commit anyway, so exempting them widens nothing. It still earns
-	// its keep on a retry after a failed close commit: a re-promoted
-	// lore/<slug>.md that already existed is tracked-and-modified, which
-	// would otherwise trip the run's own gate.
-	if !isCaptureWorkflow(workflow) {
-		followupsRel := run.FollowupsPath(projectID, runID)
-		loreRel := run.FeedbackPath(projectID, runID, "lore")
-		twinRel := run.FeedbackPath(projectID, runID, "twin")
-		dirty, derr := dirtyOutsidePaths(root, followupsRel, loreRel, twinRel, lore.DirRel+"/")
-		if derr != nil {
-			return derr
-		}
-		if dirty {
-			return errors.New("working tree has uncommitted changes; commit or stash first")
-		}
-	} else if err := requireCleanTree(root); err != nil {
-		return err
-	}
-
-	md, err := run.Load(root, projectID, runID)
-	if err != nil {
-		if errors.Is(err, run.ErrRunNotFound) {
-			return fmt.Errorf("%s %s/%s does not exist", workflow, projectID, runID)
-		}
-		return fmt.Errorf("%s: %w", workflow, err)
-	}
-	if md.Workflow != workflow {
-		return &runopen.NotClosableError{Reason: fmt.Sprintf(
-			"run %s/%s is a %s run, not %s", projectID, runID, md.Workflow, workflow)}
-	}
-
-	switch md.Status {
-	case run.StatusInProgress:
-		// Proceed.
-	case run.StatusPushed:
-		// Refusing here keeps PR-state reconciliation on a single path
-		// (GitHub → sync); letting local close race the remote state
-		// risks divergence on partial failure.
-		return &runopen.NotClosableError{Reason: fmt.Sprintf(
-			"%s %s/%s is pushed — close the PR on GitHub and run `moe sync` to reconcile",
-			workflow, projectID, runID)}
-	case run.StatusMerged, run.StatusClosed, run.StatusPromoted:
-		return &runopen.NotClosableError{Reason: fmt.Sprintf(
-			"%s %s/%s already %s", workflow, projectID, runID, md.Status)}
-	default:
-		return &runopen.NotClosableError{Reason: fmt.Sprintf(
-			"%s %s/%s has unexpected status %q", workflow, projectID, runID, md.Status)}
-	}
-
-	// Mirror commitTurn's per-turn predicate at the close seal: every
-	// document the run reached must have a non-empty canvas on disk.
-	// This is the post-merge belt to gate-1's pre-merge braces — it
-	// catches a canvas hand-edited or `git rm`'d to zero bytes after
-	// the session merged. Capture workflows (idea, intent) are exempt:
-	// their content.md is the operator's free-form capture written at
-	// open time, and an empty one on close is operator intent, not a
-	// missed write.
-	//
-	// The walk is over md.Documents, which only carries entries for
-	// documents the run actually opened (EnsureDocument populates it
-	// from the stage session). A run that never reached `code` has no
-	// `code` entry to verify — same satisfaction model Workflow.Next
-	// uses.
-	if !isCaptureWorkflow(workflow) {
-		for _, docID := range sortedDocIDs(md) {
-			canvasRel := run.ContentPath(md.Project, md.ID, docID)
-			info, err := os.Stat(filepath.Join(root, canvasRel))
-			if err != nil || info.Size() == 0 {
-				return fmt.Errorf(
-					"%s %s/%s: canvas %s is empty\n"+
-						"  reopen the session (`moe %s %s %s/%s`) and write to the canvas,\n"+
-						"  or restore the file from git history",
-					workflow, projectID, runID, canvasRel,
-					workflow, docID, projectID, runID)
-			}
-		}
-	}
-
-	msg := fmt.Sprintf(subject+"\n\n", projectID, runID) +
-		trailers.Block{
-			Run:      runID,
-			Project:  projectID,
-			Workflow: workflow,
-			Consent:  walkConsent(),
-		}.String()
-	for _, block := range extraTrailers {
-		msg += block.String()
-	}
-	if err := repolock.With(root, repolock.Options{
+	var md *run.Metadata
+	err := repolock.With(root, repolock.Options{
 		Purpose: workflow + "-close",
 		Run:     projectID + "/" + runID,
 		// enterTerminal harvests, and an interactive harvest pops
@@ -259,6 +159,114 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 		// can still sit.
 		Heartbeat: true,
 	}, func() error {
+		if err := requireProject(root, projectID); err != nil {
+			return err
+		}
+
+		// Capture closes (idea, intent) have no follow-ups dance — the run
+		// *is* the capture. For everything else, the operator's local edits
+		// to the harvest scratch files (followups.md, feedback/lore.md, feedback/twin.md) are
+		// expected — that's where stage-time captures land — so the
+		// clean-tree gate ignores changes on those paths. Anything else dirty
+		// stays a refusal.
+		//
+		// lore/ is exempt for the same reason one level out: it's harvest
+		// *output*, and enterTerminal stages it into this very close commit.
+		// The exemption list is exactly the set of paths the close is about
+		// to commit anyway, so exempting them widens nothing. It still earns
+		// its keep on a retry after a failed close commit: a re-promoted
+		// lore/<slug>.md that already existed is tracked-and-modified, which
+		// would otherwise trip the run's own gate.
+		if !isCaptureWorkflow(workflow) {
+			followupsRel := run.FollowupsPath(projectID, runID)
+			loreRel := run.FeedbackPath(projectID, runID, "lore")
+			twinRel := run.FeedbackPath(projectID, runID, "twin")
+			dirty, derr := dirtyOutsidePaths(root, followupsRel, loreRel, twinRel, lore.DirRel+"/")
+			if derr != nil {
+				return derr
+			}
+			if dirty {
+				return errors.New("working tree has uncommitted changes; commit or stash first")
+			}
+		} else if err := requireCleanTree(root); err != nil {
+			return err
+		}
+
+		fresh, err := run.Load(root, projectID, runID)
+		if err != nil {
+			if errors.Is(err, run.ErrRunNotFound) {
+				return fmt.Errorf("%s %s/%s does not exist", workflow, projectID, runID)
+			}
+			return fmt.Errorf("%s: %w", workflow, err)
+		}
+		md = fresh
+		if md.Workflow != workflow {
+			return &runopen.NotClosableError{Reason: fmt.Sprintf(
+				"run %s/%s is a %s run, not %s", projectID, runID, md.Workflow, workflow)}
+		}
+
+		switch md.Status {
+		case run.StatusInProgress:
+			// Proceed.
+		case run.StatusPushed:
+			// Refusing here keeps PR-state reconciliation on a single path
+			// (GitHub → sync); letting local close race the remote state
+			// risks divergence on partial failure.
+			return &runopen.NotClosableError{Reason: fmt.Sprintf(
+				"%s %s/%s is pushed — close the PR on GitHub and run `moe sync` to reconcile",
+				workflow, projectID, runID)}
+		case run.StatusMerged, run.StatusClosed, run.StatusPromoted:
+			return &runopen.NotClosableError{Reason: fmt.Sprintf(
+				"%s %s/%s already %s", workflow, projectID, runID, md.Status)}
+		default:
+			return &runopen.NotClosableError{Reason: fmt.Sprintf(
+				"%s %s/%s has unexpected status %q", workflow, projectID, runID, md.Status)}
+		}
+
+		// Mirror commitTurn's per-turn predicate at the close seal: every
+		// document the run reached must have a non-empty canvas on disk.
+		// This is the post-merge belt to gate-1's pre-merge braces — it
+		// catches a canvas hand-edited or `git rm`'d to zero bytes after
+		// the session merged. Capture workflows (idea, intent) are exempt:
+		// their content.md is the operator's free-form capture written at
+		// open time, and an empty one on close is operator intent, not a
+		// missed write.
+		//
+		// The walk is over md.Documents, which only carries entries for
+		// documents the run actually opened (EnsureDocument populates it
+		// from the stage session). A run that never reached `code` has no
+		// `code` entry to verify — same satisfaction model Workflow.Next
+		// uses.
+		if !isCaptureWorkflow(workflow) {
+			for _, docID := range sortedDocIDs(md) {
+				canvasRel := run.ContentPath(md.Project, md.ID, docID)
+				info, err := os.Stat(filepath.Join(root, canvasRel))
+				if err != nil || info.Size() == 0 {
+					return fmt.Errorf(
+						"%s %s/%s: canvas %s is empty\n"+
+							"  reopen the session (`moe %s %s %s/%s`) and write to the canvas,\n"+
+							"  or restore the file from git history",
+						workflow, projectID, runID, canvasRel,
+						workflow, docID, projectID, runID)
+				}
+			}
+		}
+
+		msg := fmt.Sprintf(subject+"\n\n", projectID, runID) +
+			trailers.Block{
+				Run:      runID,
+				Project:  projectID,
+				Workflow: workflow,
+				Consent:  walkConsent(),
+			}.String()
+		for _, block := range extraTrailers {
+			msg += block.String()
+		}
+
+		if err := session.RequireUnreserved(root, projectID, runID); err != nil {
+			return err
+		}
+
 		if cleanup != nil {
 			if err := cleanup(root, md); err != nil {
 				return err
@@ -269,7 +277,8 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 			return err
 		}
 		return commitTerminal(root, md, run.StatusInProgress, msg, paths)
-	}); err != nil {
+	})
+	if err != nil {
 		return err
 	}
 

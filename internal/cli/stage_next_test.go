@@ -468,6 +468,10 @@ func TestPromptStageNextStageAdvanceMarksAndDeclines(t *testing.T) {
 		},
 	}
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Commit(t, root, "persist run")
 
 	r, w, err := os.Pipe()
 	if err != nil {
@@ -527,6 +531,10 @@ func TestPromptStageNextStageAdvanceCommitsMarkerLocally(t *testing.T) {
 
 	next := &Command{Name: "code", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Commit(t, root, "persist run")
 	feedStdin(t, "a\n")
 
 	var stdout, stderr bytes.Buffer

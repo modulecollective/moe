@@ -145,6 +145,7 @@ func TestMissingCanvasRetainsDiagnostic(t *testing.T) {
 			if err := os.Chtimes(attempts[0], future, future); err != nil {
 				t.Fatal(err)
 			}
+			writeDeadClaim(t, &session.Session{Root: root, Project: "tele", Run: "fix-it", Doc: "design", Branch: session.BranchName("tele", "fix-it", "design")}, false)
 			if code := runStageSession("tele", "fix-it", "design", stageSessionOpts{Agent: "codex", Headless: true, SkipNextStage: true}, &out, &errb); code == 0 {
 				t.Fatal("retry advanced without a canvas")
 			}
@@ -270,6 +271,7 @@ func TestDiagnosticDoesNotReusePriorMirror(t *testing.T) {
 	root, fake := diagnosticFixture(t)
 	driveDesignTurnCode(t, "codex", true)
 	fake.noTranscript = true
+	writeDeadClaim(t, &session.Session{Root: root, Project: "tele", Run: "fix-it", Doc: "design", Branch: session.BranchName("tele", "fix-it", "design")}, false)
 	driveDesignTurnCode(t, "codex", true)
 	rel, failure, err := latestStageFailure(root, "tele", "fix-it", "design", "")
 	if err != nil || failure == nil || failure.TranscriptAvailable {
@@ -314,6 +316,7 @@ func TestDiagnosticSuccessfulResume(t *testing.T) {
 	path := diagnosticAttempts(t, root, 1)[0]
 	original := append([]byte(nil), fake.transcript...)
 	fake.succeed = true
+	writeDeadClaim(t, &session.Session{Root: root, Project: "tele", Run: "fix-it", Doc: "design", Branch: session.BranchName("tele", "fix-it", "design")}, false)
 	driveDesignTurn(t, "codex", true)
 	var out, errb bytes.Buffer
 	if code := runLog("sdlc", "")([]string{"tele/fix-it", "design"}, &out, &errb); code != 0 || !strings.Contains(out.String(), "completed implementation") || strings.Contains(out.String(), "without the required canvas") {

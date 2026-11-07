@@ -313,6 +313,7 @@ func TestClockAdmissionPreservesInputAndResumedDirtyWork(t *testing.T) {
 	if err := cancel(); err == nil {
 		t.Fatal("fresh dirty reservation unexpectedly removed")
 	}
+	writeDeadClaim(t, sess, false)
 	defer withClockInvoked()()
 	prev := readStageQuota
 	readStageQuota = func(context.Context, string, string, []string) (agent.Quota, error) {

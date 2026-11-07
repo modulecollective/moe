@@ -301,6 +301,7 @@ const intentChatKickoff = "The operator just opened this intent to sharpen it. R
 func openIntentChat(projectID, slug, agentOverride string, stdout, stderr io.Writer) int {
 	return runStageSession(projectID, slug, dash.IntentDocID,
 		stageSessionOpts{
+			ValidateEntry: inProgressSessionEntry(dash.IntentWorkflow),
 			InitialPrompt: intentChatKickoff,
 			SkipNextStage: true,
 			HarvestOnExit: true,

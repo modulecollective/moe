@@ -179,6 +179,7 @@ func openChat(projectID, runID, agentOverride string, stdout, stderr io.Writer) 
 		"in one line and ask what they'd like to think through. Then wait for their reply."
 	code := runStageSession(projectID, runID, chatDoc,
 		stageSessionOpts{
+			ValidateEntry:          inProgressSessionEntry(chatWorkflow),
 			NeedsSandbox:           true,
 			EnforceSandboxBoundary: true,
 			InitialPrompt:          kickoff,

@@ -44,20 +44,28 @@ func commitSessionStart(root string, md *run.Metadata, docID, sessionID string) 
 	return err
 }
 
-// commitAdvance records that docID's stage is done without producing a
-// work-turn for the next stage. The operator hit the chain prompt's
-// "decline, advance" key: they don't want to run the next stage now, but
-// they don't want the run to re-open and re-run docID's agent the next
-// time it's picked up either.
-//
-// The commit itself is runopen.AdvanceMarker — shared with serve's
-// advance-mark route, which writes the same marker from the web. What
-// stays here is the ride's consent: a chain prompt answered mid-cascade
-// stamps the level it is riding at, which a click has nothing to say
-// about. Lock policy lives at the callsite, like every other main
-// writer: the chain prompt's `a` branch wraps this in repolock.With.
+// commitAdvance preserves the ride consent while sharing the guarded writer.
 func commitAdvance(root string, md *run.Metadata, docID string) error {
-	return runopen.AdvanceMarker(root, md, docID, walkConsent())
+	return runopen.MarkAdvanced(root, md.Project, md.ID, docID, runopen.AdvanceOptions{
+		Consent: walkConsent(),
+		Validate: func(fresh *run.Metadata) (string, error) {
+			wf, err := LookupWorkflow(fresh.Workflow)
+			if err != nil {
+				return "", err
+			}
+			if fresh.Workflow != md.Workflow || wf.Successor(docID) == "" {
+				return "", fmt.Errorf("%w: invalid prior stage %s", runopen.ErrNotAdvanceable, docID)
+			}
+			ok, err := wf.CheckStageGate(root, fresh, docID)
+			if err != nil {
+				return "", err
+			}
+			if !ok {
+				return "", fmt.Errorf("%w: stage %s gate not satisfied", runopen.ErrNotAdvanceable, docID)
+			}
+			return docID, nil
+		},
+	})
 }
 
 // canvasRefusalError identifies the two refusals whose failure evidence is

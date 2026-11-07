@@ -2,6 +2,7 @@ package serve
 
 import (
 	"errors"
+	"fmt"
 	"html/template"
 	"io/fs"
 	"net/http"
@@ -21,6 +22,7 @@ import (
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
+	"github.com/modulecollective/moe/internal/session"
 )
 
 // slugPattern is the kebab-case shape `moe idea new` accepts. Mirrors
@@ -408,6 +410,8 @@ func (s *Server) closeCaptureRun(w http.ResponseWriter, r *http.Request, project
 		switch {
 		case errors.Is(err, run.ErrRunNotFound):
 			http.Error(w, "no such run: "+id, http.StatusNotFound)
+		case isSessionConflict(err):
+			http.Error(w, "close: "+err.Error(), http.StatusConflict)
 		case errors.Is(err, runopen.ErrNotCapture):
 			http.Error(w, "run "+id+" is not a closable "+workflow, http.StatusConflict)
 		default:
@@ -421,14 +425,14 @@ func (s *Server) closeCaptureRun(w http.ResponseWriter, r *http.Request, project
 
 // closeWorkflowRun delegates non-capture close validation to CloseRun's
 // registered workflow pipeline. State refusals and other failures surface
-// through the callback's error; this route does not check session occupancy.
+// through the callback's error, including unresolved session reservations.
 func (s *Server) closeWorkflowRun(w http.ResponseWriter, r *http.Request, projectID, slug, id string) {
 	if s.opts.CloseRun == nil {
 		http.Error(w, "close not configured (Options.CloseRun is nil)", http.StatusInternalServerError)
 		return
 	}
 	if err := s.opts.CloseRun(projectID, slug); err != nil {
-		if _, ok := errors.AsType[*runopen.NotClosableError](err); ok {
+		if _, ok := errors.AsType[*runopen.NotClosableError](err); ok || isSessionConflict(err) {
 			http.Error(w, "close: "+err.Error(), http.StatusConflict)
 			return
 		}
@@ -541,23 +545,14 @@ func (s *Server) handleAdvance(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 	id := projectID + "/" + slug
 
-	md, ok := s.loadRunOr404(w, projectID, slug, "advance")
-	if !ok {
-		return
-	}
-	stage, ok := s.markableStage(w, projectID, slug, md)
-	if !ok {
-		return
-	}
-	// A replayed POST is harmless and deliberately not special-cased: a
-	// second marker is the same claim as the first, and stageSatisfied
-	// reads the freshest one.
-	switch err := runopen.MarkAdvanced(s.opts.Root, projectID, slug, stage); {
+	switch err := runopen.MarkAdvanced(s.opts.Root, projectID, slug, "", runopen.AdvanceOptions{
+		Validate: func(md *run.Metadata) (string, error) { return s.markableStage(projectID, slug, md) },
+	}); {
 	case err == nil:
 	case errors.Is(err, run.ErrRunNotFound):
 		http.Error(w, "no such run: "+id, http.StatusNotFound)
 		return
-	case errors.Is(err, runopen.ErrNotAdvanceable):
+	case errors.Is(err, runopen.ErrNotAdvanceable), isSessionConflict(err):
 		http.Error(w, "advance: "+err.Error(), http.StatusConflict)
 		return
 	default:
@@ -577,51 +572,37 @@ func (s *Server) handleAdvance(w http.ResponseWriter, r *http.Request) {
 // operator just read. It must be in the workflow's declared set, which
 // is what keeps push out: sdlc excludes it, and a marker on push would
 // satisfy the ladder without anything ever being pushed.
-//
-// ok=false means the response is already written.
-func (s *Server) markableStage(w http.ResponseWriter, projectID, slug string, md *run.Metadata) (string, bool) {
+func (s *Server) markableStage(projectID, slug string, md *run.Metadata) (string, error) {
 	id := projectID + "/" + slug
 	if s.opts.WorkflowUI == nil {
-		http.Error(w, "advance not configured (Options.WorkflowUI is nil)", http.StatusInternalServerError)
-		return "", false
+		return "", errors.New("advance not configured (Options.WorkflowUI is nil)")
 	}
 	ui, ok := s.opts.WorkflowUI(md.Workflow)
 	if !ok {
-		http.Error(w, "workflow "+md.Workflow+" does not advance from serve", http.StatusConflict)
-		return "", false
+		return "", fmt.Errorf("%w: workflow %s does not advance from serve", runopen.ErrNotAdvanceable, md.Workflow)
 	}
 	stage, err := s.nextStage(projectID, slug)
 	if err != nil {
-		s.logf("advance %s: next stage: %v", id, err)
-		http.Error(w, "advance: "+err.Error(), http.StatusInternalServerError)
-		return "", false
+		return "", err
 	}
 	if !slices.Contains(ui.Stages, stage) {
-		http.Error(w,
-			"run "+id+" has no markable stage (next="+strconv.Quote(stage)+")",
-			http.StatusConflict)
-		return "", false
+		return "", fmt.Errorf("%w: run %s has no markable stage (next=%s)", runopen.ErrNotAdvanceable, id, strconv.Quote(stage))
 	}
-	// A marker landed against a blocked gate is inert — stageSatisfied
-	// ANDs the gate in, and the re-edit turn that later flips it
-	// out-dates the marker anyway. Refusing here buys no safety; it buys
-	// honesty. A stale tab (chip rendered while the gate was ready) or a
-	// hand-rolled POST would otherwise get a 303 and silence, which is
-	// exactly the failure this check exists to kill.
 	if s.opts.CheckStageGate != nil {
-		switch ok, err := s.opts.CheckStageGate(md, stage); {
-		case err != nil:
-			s.logf("advance %s: gate for %s: %v", id, stage, err)
-			http.Error(w, "advance: "+err.Error(), http.StatusInternalServerError)
-			return "", false
-		case !ok:
-			http.Error(w,
-				"run "+id+": stage "+stage+" gate not satisfied",
-				http.StatusConflict)
-			return "", false
+		ok, err := s.opts.CheckStageGate(md, stage)
+		if err != nil {
+			return "", err
+		}
+		if !ok {
+			return "", fmt.Errorf("%w: run %s: stage %s gate not satisfied", runopen.ErrNotAdvanceable, id, stage)
 		}
 	}
-	return stage, true
+	return stage, nil
+}
+
+func isSessionConflict(err error) bool {
+	_, ok := errors.AsType[*session.UnresolvedError](err)
+	return ok
 }
 
 // nextStage re-derives a run's bare next-stage name through the

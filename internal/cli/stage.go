@@ -66,6 +66,8 @@ const headlessTurnTimeout = 180 * time.Minute
 // beyond the run identifiers. Most stages just set NeedsSandbox and
 // InitialPrompt.
 type stageSessionOpts struct {
+	// ValidateEntry rechecks workflow entry under the admission lock after pull.
+	ValidateEntry func(*run.Metadata) error
 	// NeedsSandbox switches the per-run sandbox clone on. Code stages
 	// require it; document-only stages leave it false. Design stage
 	// also opts in (read-only) so the agent can verify facts about the
@@ -493,12 +495,13 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	}
 
 	in := stageTurnInputs{
-		Project:     projectID,
-		RunSlug:     runID,
-		DocID:       docID,
-		Agent:       agentName,
-		LockPurpose: "stage",
-		Headless:    opts.Headless,
+		ValidateEntry: opts.ValidateEntry,
+		Project:       projectID,
+		RunSlug:       runID,
+		DocID:         docID,
+		Agent:         agentName,
+		LockPurpose:   "stage",
+		Headless:      opts.Headless,
 		// md is pre-loaded at runStageSession entry from the canonical
 		// root, *before* openStageSession pulled origin/main under the
 		// repolock. Reload it here from the session worktree — which
@@ -902,6 +905,7 @@ func serveAgentSuppress() bool {
 // the executor, commit, and close. The BuildSpec callback defers the
 // work that depends on the worktree path.
 type stageTurnInputs struct {
+	ValidateEntry func(*run.Metadata) error
 	// Project / RunSlug / DocID identify the session worktree branch
 	// (`session/<project>/<runslug>/<doc>`); RunSlug is the run's real
 	// id.
@@ -1255,37 +1259,29 @@ func openStageSession(root string, in stageTurnInputs, stdout, stderr io.Writer)
 	// The local work is just `git worktree add` (or a lookup); the
 	// auto-pull before it can sit on the network briefly.
 	var sess *session.Session
+	var release func()
 	err := repolock.With(root, stageLockOptions(in, "open"), func() error {
 		if err := sync.AutoPull(root, stdout, stderr); err != nil {
 			return err
 		}
-		s, err := session.Open(root, in.Project, in.RunSlug, in.DocID)
+		if in.ValidateEntry != nil {
+			fresh, err := run.Load(root, in.Project, in.RunSlug)
+			if err != nil {
+				return err
+			}
+			if err := in.ValidateEntry(fresh); err != nil {
+				return err
+			}
+		}
+		s, stop, err := session.Reserve(root, in.Project, in.RunSlug, in.DocID, rideWalkActive)
 		if err != nil {
 			return err
 		}
-		sess = s
+		sess, release = s, stop
 		return nil
 	})
 	if err != nil {
 		return nil, nil, nil, err
-	}
-	// Claim the session for this process. The branch alone says a stage
-	// is open; the claim says who is inside it and whether they are still
-	// running, which is what lets the heartbeat's reap tell a dead robot
-	// session (retryable) from a live one or a human's (never touched).
-	//
-	// rideWalkActive is the machine mark and is exactly right here: every
-	// withRideMode entry point is a machine-walk entry, so a `!!!`
-	// cascade in a tmux pane marks itself as a robot session — and the
-	// liveness half is what keeps that same live pane from being reaped.
-	// A bare `moe sdlc code` leaves it false, and an operator session is
-	// never reapable.
-	//
-	// Best-effort: a claim that fails to write leaves the session
-	// unmarked, which reads as unknown and so is only ever surfaced.
-	release, claimErr := session.Hold(sess, rideWalkActive)
-	if claimErr != nil {
-		moePrintf(stderr, "session: could not record liveness for %s: %v\n", sess.Branch, claimErr)
 	}
 	closeSess := func() error {
 		release()
@@ -1485,5 +1481,15 @@ func tailHeadlessTranscript(agentName, threadPath, logCmd string, w io.Writer) {
 	moePrintf(w, "--- last %d transcript events (%s for full) ---\n", min(headlessTailLines, len(events)), logCmd)
 	if err := transcript.Render(w, transcript.Tail(events, headlessTailLines), transcript.RenderOptions{}); err != nil {
 		moePrintf(w, "auto-tail render: %v\n", err)
+	}
+}
+
+// Entry callbacks are read-only and run inside the caller's admission lock.
+func inProgressSessionEntry(workflow string) func(*run.Metadata) error {
+	return func(md *run.Metadata) error {
+		if md.Workflow == workflow && md.Status == run.StatusInProgress {
+			return nil
+		}
+		return fmt.Errorf("run %s/%s is %s (%s); retry or reopen before entering %s", md.Project, md.ID, md.Status, md.Workflow, workflow)
 	}
 }

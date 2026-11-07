@@ -317,6 +317,7 @@ func TestCooldownCancellationPreservesResumedDirtySession(t *testing.T) {
 	if err := cancel(); err == nil {
 		t.Fatal("changed fresh reservation was deleted")
 	}
+	writeDeadClaim(t, sess, false)
 	in.Admit = func(*session.Session) int { return exitInterrupted }
 	in.BuildSpec = func(string) (stageTurnSpec, error) {
 		t.Fatal("BuildSpec ran before admission")
@@ -329,8 +330,8 @@ func TestCooldownCancellationPreservesResumedDirtySession(t *testing.T) {
 	if err != nil || string(body) != "saved" {
 		t.Fatalf("saved work %q err %v", body, err)
 	}
-	if _, ok := session.ReadClaim(root, "tele", "r", "code"); ok {
-		t.Error("claim retained after cancellation")
+	if _, ok := session.ReadClaim(root, "tele", "r", "code"); !ok {
+		t.Error("claim lost after resumed cancellation")
 	}
 }
 

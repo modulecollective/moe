@@ -85,10 +85,8 @@ func ClaimPath(root, projectID, runID, docID string) string {
 // delete the record, because a turn that ends without Close or Abandon
 // is precisely the orphan the reap looks for. Close and Abandon delete.
 //
-// machine is the caller's own knowledge of who is driving — cli passes
-// its ride-walk flag. Best-effort by construction: a claim that can't
-// be written leaves the session unmarked, which reads as unknown and so
-// is never reaped. Losing the record can only ever cost a retry.
+// machine is the caller's own knowledge of who is driving. Reserve requires
+// this initial write to succeed; later heartbeat failures only age the record.
 func Hold(s *Session, machine bool) (release func(), err error) {
 	host, hostErr := os.Hostname()
 	if hostErr != nil {

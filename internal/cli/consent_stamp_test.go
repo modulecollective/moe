@@ -261,7 +261,7 @@ func TestStageCommitsStampConsentOnlyInsideAWalk(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := newTestBureaucracy(t)
-			md := &run.Metadata{ID: "stamp-me", Project: "tele", Workflow: "sdlc",
+			md := &run.Metadata{ID: "stamp-me", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress,
 				Documents: map[string]*run.Document{}}
 			if _, _, err := ensureClaudeDocument(root, md, "code"); err != nil {
 				t.Fatal(err)

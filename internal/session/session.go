@@ -181,7 +181,9 @@ func worktreesDir(root string) string {
 }
 
 // Open creates (or resumes) a session worktree for (projectID, runID,
-// docID). The caller must hold the repo lock.
+// docID). The caller must hold the repo lock. Open is a low-level recovery
+// and fixture primitive; production stage admission must use Reserve, which
+// checks run reservations and publishes the initial claim before unlock.
 //
 // Resume logic: if the session branch exists and its worktree is
 // registered with setup complete, reconcile it with main (see
@@ -341,11 +343,10 @@ func reconcileWithMain(s *Session) error {
 func Reconcile(s *Session) error { return reconcileWithMain(s) }
 
 // CancelReservation ends admission without invoking Close's canvas gate.
-// Resumed sessions are retained. A new reservation may be removed only while
+// Resumed sessions and their claims are retained. A new reservation may be removed only while
 // it has no work of its own; unexpected changes are preserved and reported.
 // The caller must stop its heartbeat and hold the repo lock.
 func CancelReservation(s *Session) error {
-	clearClaim(s)
 	if !s.freshReservation {
 		return nil
 	}

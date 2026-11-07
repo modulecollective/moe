@@ -573,6 +573,7 @@ var openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt,
 	out := surveyOutcome{}
 	out.code = runStageSession(projectID, runID, pulseDoc,
 		stageSessionOpts{
+			ValidateEntry:          inProgressSessionEntry(pulseWorkflow),
 			NeedsSandbox:           true,
 			EnforceSandboxBoundary: true,
 			Headless:               headless,

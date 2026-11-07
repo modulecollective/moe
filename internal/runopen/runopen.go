@@ -33,6 +33,7 @@ import (
 	"github.com/modulecollective/moe/internal/input"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
@@ -340,23 +341,9 @@ func TagIdea(root, projectID, slug, workflow string, designOnly bool) error {
 // text names which.
 var ErrNotAdvanceable = errors.New("runopen: not an advanceable stage")
 
-// AdvanceMarker writes the `advance: <docID>` marker commit: an empty
-// commit whose distinct subject and MoE-* trailers record that docID's
-// stage is done without producing a work turn for the next one.
-// stageSatisfied treats docID as satisfied when this marker is at least
-// as recent as docID's own latest work turn, so the run's next pickup
-// steps to the successor stage instead of re-opening docID; a later
-// re-edit lands a fresher work turn that out-dates the marker and flips
-// the run back.
-//
-// Bare on purpose: no lock, no push, no guards. Both callers already own
-// those, and they own them differently — the chain prompt's `a` writes
-// this inside a journal push it opened for the whole branch, and it
-// stamps the ride's consent; serve's advance route wraps it through
-// MarkAdvanced below with no consent to stamp, because a click is not a
-// ride. What they must not disagree on is the commit, which is why it
-// lives here rather than twice.
-func AdvanceMarker(root string, md *run.Metadata, docID, consent string) error {
+// advanceMarker writes the empty stage-done commit. Only the guarded writer
+// below may call it, with the repository lock held.
+func advanceMarker(root string, md *run.Metadata, docID, consent string) error {
 	msg := fmt.Sprintf("advance: %s\n\n", docID) +
 		trailers.Block{
 			Run:      md.ID,
@@ -368,45 +355,49 @@ func AdvanceMarker(root string, md *run.Metadata, docID, consent string) error {
 	return git.Run(root, "commit", "--allow-empty", "-m", msg)
 }
 
-// MarkAdvanced is the operator's consent verb without a terminal: it
-// records that docID's stage is done, under the journal push, and starts
-// nothing. `moe serve`'s advance route is the caller — the web writes
-// licences and marks, and the heartbeat is the only thing that spawns.
-//
-// Two guards, both re-derived here rather than trusted from a page that
-// may be stale:
-//
-//   - the run must be in progress. A marker on a terminal run records
-//     consent to move something that has stopped.
-//   - the stage must have a work turn. stageSatisfied wants a marker
-//     *and* a turn — a marker on a never-worked stage satisfies nothing,
-//     so writing one would leave a mark the ladder ignores.
-//
-// No consent trailer: a click is the operator's own act, and the ride
-// levels are what MoE-Consent names.
-func MarkAdvanced(root, projectID, slug, docID string) error {
-	if docID == "" {
-		return fmt.Errorf("%w: no stage named", ErrNotAdvanceable)
+// AdvanceOptions carries caller-specific, read-only eligibility validation.
+// Validate runs under the lock against fresh metadata and selects the stage;
+// it must neither write nor acquire a lock. Consent is absent for web callers.
+type AdvanceOptions struct {
+	Consent  string
+	Validate func(*run.Metadata) (string, error)
+}
+
+// MarkAdvanced shares one lock-owning writer between the CLI and web. A
+// validator may rederive the nominated stage and gate while holding the lock.
+func MarkAdvanced(root, projectID, slug, docID string, options ...AdvanceOptions) error {
+	var opts AdvanceOptions
+	if len(options) != 0 {
+		opts = options[0]
 	}
-	md, err := run.Load(root, projectID, slug)
-	if err != nil {
-		return err
-	}
-	if md.Status != run.StatusInProgress {
-		return fmt.Errorf("%w: run %s/%s is %s, not in progress", ErrNotAdvanceable, projectID, slug, md.Status)
-	}
-	sha, _, err := run.LatestWorkTurnSHA(root, projectID, slug, docID)
-	if err != nil {
-		return err
-	}
-	if sha == "" {
-		return fmt.Errorf("%w: %s has no work turn to advance past", ErrNotAdvanceable, docID)
-	}
-	return repolock.With(root, repolock.Options{
-		Purpose: "stage-advance",
-		Run:     projectID + "/" + slug,
-	}, func() error {
-		return AdvanceMarker(root, md, docID, "")
+	return repolock.With(root, repolock.Options{Purpose: "stage-advance", Run: projectID + "/" + slug}, func() error {
+		md, err := run.Load(root, projectID, slug)
+		if err != nil {
+			return err
+		}
+		if md.Status != run.StatusInProgress {
+			return fmt.Errorf("%w: run %s/%s is %s, not in progress", ErrNotAdvanceable, projectID, slug, md.Status)
+		}
+		if err := session.RequireUnreserved(root, projectID, slug); err != nil {
+			return err
+		}
+		if opts.Validate != nil {
+			docID, err = opts.Validate(md)
+			if err != nil {
+				return err
+			}
+		}
+		if docID == "" {
+			return fmt.Errorf("%w: no stage named", ErrNotAdvanceable)
+		}
+		sha, _, err := run.LatestWorkTurnSHA(root, projectID, slug, docID)
+		if err != nil {
+			return err
+		}
+		if sha == "" {
+			return fmt.Errorf("%w: %s has no work turn to advance past", ErrNotAdvanceable, docID)
+		}
+		return advanceMarker(root, md, docID, opts.Consent)
 	})
 }
 
@@ -416,30 +407,35 @@ func MarkAdvanced(root, projectID, slug, docID string) error {
 // workflow, so the resulting commit is byte-identical to the one the
 // matching CLI verb (`moe idea close` / `moe intent close`) writes.
 func CloseCapture(root, projectID, slug string) error {
-	md, err := run.Load(root, projectID, slug)
+	preflight, err := run.Load(root, projectID, slug)
 	if err != nil {
 		return err
 	}
-	if !dash.IsCapture(md.Workflow) || md.Status != run.StatusInProgress {
-		return ErrNotCapture
-	}
-
-	runJSONRel := filepath.Join(run.Dir(projectID, slug), "run.json")
-	msg := fmt.Sprintf("Close %s %s/%s\n\n", md.Workflow, projectID, slug) +
-		trailers.Block{
-			Run:      slug,
-			Project:  projectID,
-			Workflow: md.Workflow,
-		}.String()
-	return repolock.With(root, repolock.Options{
-		Purpose: md.Workflow + "-close",
-		Run:     projectID + "/" + slug,
-	}, func() error {
+	return repolock.With(root, repolock.Options{Purpose: preflight.Workflow + "-close", Run: projectID + "/" + slug}, func() error {
+		md, err := run.Load(root, projectID, slug)
+		if err != nil {
+			return err
+		}
+		if !dash.IsCapture(md.Workflow) || md.Status != run.StatusInProgress {
+			return ErrNotCapture
+		}
+		if err := session.RequireUnreserved(root, projectID, slug); err != nil {
+			return err
+		}
+		dirty, err := run.WorkingTreeDirty(root)
+		if err != nil {
+			return err
+		}
+		if dirty {
+			return errors.New("working tree has uncommitted changes; commit or stash first")
+		}
+		rel := filepath.Join(run.Dir(projectID, slug), "run.json")
+		msg := fmt.Sprintf("Close %s %s/%s\n\n", md.Workflow, projectID, slug) + trailers.Block{Run: slug, Project: projectID, Workflow: md.Workflow}.String()
 		md.Status = run.StatusClosed
 		if err := run.Save(root, md); err != nil {
 			return err
 		}
-		return run.StageAndCommit(root, msg, runJSONRel)
+		return run.StageAndCommit(root, msg, rel)
 	})
 }
 

@@ -218,6 +218,7 @@ func openCodeRecoverySession(md *run.Metadata, recovery string, headless bool, k
 // not manufacture one.
 func openRecoveryStageSession(md *run.Metadata, document, override string, headless bool, kickoff string, stdout, stderr io.Writer) int {
 	return runStageSession(md.Project, md.ID, document, stageSessionOpts{
+		ValidateEntry:     sdlcSessionEntry,
 		NeedsSandbox:      true,
 		Headless:          headless,
 		InitialPrompt:     kickoff,
