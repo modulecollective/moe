@@ -49,6 +49,13 @@ commits in place; anything bigger blocks the gate and kicks the run back.
 by default, a fast-forward merge where `moe project ship <id> merge` says
 so — and `--pr` / `--merge` override it for one invocation.
 
+Closing a run and marking a stage advanced both refuse while any session branch
+remains for that run, even after its claimant dies. This applies to terminal
+commands, automatic closes and stale web requests; the web returns a conflict
+without changing the run. Finish or recover the session before retrying. See
+[Cleanup And Recovery](reference.md#cleanup-and-recovery) for interrupted turns
+and the conditions for resuming one.
+
 A run whose work landed entirely as bureaucracy commits — project hooks,
 chores, knowledge topics, the bureaucracy's own docs — can declare `ship: none`
 on its test gate, and `push` then closes the run rather than refusing an empty

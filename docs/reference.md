@@ -530,6 +530,25 @@ from the session worktree (or use the corresponding diagnostic path).
   dir, argv, duration, error — to stderr. First tool to reach for when a
   stage open or sync stalls inside git.
 
+A session branch reserves its entire run across documents and backends. Close
+and advance refuse while any such branch remains, including interrupted or
+orphaned sessions. Another run is unaffected. Quota waiting holds a reservation;
+a refused quota admission removes only a fresh untouched reservation and retains
+resumed work with its claim.
+
+To resume an interrupted turn, the claim must match its branch and prove that
+its previous owner is gone: same host and PID namespace, dead process, and a
+heartbeat older than ten minutes. A fresh crash can therefore delay ordinary
+resume. Live, missing, unreadable, mismatched or foreign claims refuse takeover.
+Finish a running turn normally. For interrupted work, inspect and preserve it,
+then rerun its stage or use `moe session resolve <branch>`. Use
+`moe session abandon <branch>` only after stopping the owner and deciding to
+discard the session. Do not delete claim files to bypass ownership checks.
+
+Stop active invocations of older MoE binaries when adopting this admission
+policy. Coordination covers processes sharing one bureaucracy root and its
+repository lock; independent clones do not share a distributed lease.
+
 If a stage reports `session: incomplete setup`, its session checkout never
 finished and cannot resume. After addressing the underlying setup failure, run
 `moe session abandon <branch>` with the exact branch printed in the error, then
