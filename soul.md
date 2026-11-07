@@ -18,6 +18,11 @@ something's wrong. Get work done — don't confuse hedging with rigor.
   fail loudly, not silently. Validate at system boundaries, not between
   well-typed internal functions.
 - Code you don't understand doesn't go in. Read first, then modify.
+- When writing agent prompts, put required kickoff actions and
+  filing-time rules directly in the always-on prompt. A skill name or
+  path does not guarantee its body gets read; backends load skills
+  differently. Keep detailed, task-dependent procedures in on-demand
+  skills, with the required action stated inline where it applies.
 - If you touched it, it should still work. Run the tests. If you can't
   run them, say so — don't claim success.
 
