@@ -43,10 +43,8 @@ func splitID(id string) (project, slug string, err error) {
 	return project, slug, nil
 }
 
-// runVM backs the per-run page (GET /run/{project}/{slug}). It is a
-// static panel — no PTY tail, no chain-prompt buttons, no
-// remote-controlled end-agent affordance — so the same shape covers
-// both the live-parented and read-only render paths.
+// runVM backs the per-run page (GET /run/{project}/{slug}) from
+// journal and disk state.
 type runVM struct {
 	ID      string
 	Project string
@@ -55,21 +53,16 @@ type runVM struct {
 	// this run, computed the same way the dash computes them. Empty
 	// strings when the row gathered as "no row" (e.g. the run classified
 	// into BucketNone, or no GatherRunRow callback wired) — template
-	// falls back to the Started / Status line in that case.
+	// falls back to the run status in that case.
 	RowNote template.HTML
 	RowWhen string
 	// NextStage is the run's bare next-stage name (row.Stage), or "" when
-	// there's no next stage / no row. The cascade trio keys off it,
-	// rendering only when the next stage is spawnable (see
+	// there's no next stage / no row. The advance mark keys off it,
+	// rendering only when the next stage is markable (see
 	// composeRunActions).
 	NextStage string
-	// Started / Status are the fallback meta line shown when the
-	// dash-row lookup didn't return a row. Started is empty on the
-	// read-only path; Status is "live" / "exited: …" / "exited
-	// cleanly" / run.Status.
-	Started     string
+	// Status is the fallback meta line when the dash-row lookup has no row.
 	Status      string
-	Live        bool
 	CanvasLinks []canvasLink
 	// ChainMembers is the live batch hanging off a chain head, head→tail;
 	// empty for every other workflow. The head's canvas is the operator's
@@ -372,11 +365,7 @@ func (s *Server) handleRunPage(w http.ResponseWriter, r *http.Request) {
 	slug := r.PathValue("slug")
 	id := projectID + "/" + slug
 
-	if c, ok := s.children.get(id); ok {
-		s.render(w, r, "run.html", s.buildRunVM(c, projectID, slug, id))
-		return
-	}
-	vm, err := s.buildReadOnlyRunVM(projectID, slug, id)
+	vm, err := s.buildRunVM(projectID, slug, id)
 	if err != nil {
 		if errors.Is(err, run.ErrRunNotFound) {
 			http.Error(w, "no such run: "+id, http.StatusNotFound)
@@ -430,26 +419,13 @@ func (s *Server) closeCaptureRun(w http.ResponseWriter, r *http.Request, project
 	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
 }
 
-// closeWorkflowRun closes an in-progress non-capture run through the
-// CloseRun callback, which dispatches the registered close pipeline by
-// the run's workflow. serve's registry is the only place that knows
-// whether a run has a live child, so the one guard it applies itself
-// is the live-child refusal: closing while the agent is mid-turn would
-// yank the sandbox clone out from under it. Every other guard (pushed,
-// terminal, canvas-empty, no registered close) lives on the cli side
-// and surfaces through the callback's error.
+// closeWorkflowRun delegates non-capture close validation to CloseRun's
+// registered workflow pipeline. State refusals and other failures surface
+// through the callback's error; this route does not check session occupancy.
 func (s *Server) closeWorkflowRun(w http.ResponseWriter, r *http.Request, projectID, slug, id string) {
 	if s.opts.CloseRun == nil {
 		http.Error(w, "close not configured (Options.CloseRun is nil)", http.StatusInternalServerError)
 		return
-	}
-	if c, ok := s.children.get(id); ok {
-		if exited, _ := c.snapshot(); !exited {
-			http.Error(w,
-				"run "+id+" has a live agent mid-turn — wait for it to finish, then close",
-				http.StatusConflict)
-			return
-		}
 	}
 	if err := s.opts.CloseRun(projectID, slug); err != nil {
 		if _, ok := errors.AsType[*runopen.NotClosableError](err); ok {
@@ -460,9 +436,6 @@ func (s *Server) closeWorkflowRun(w http.ResponseWriter, r *http.Request, projec
 		http.Error(w, "close: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	// The run is gone; drop any lingering exited-child entry so the dash
-	// and run page stop marking it parented.
-	s.children.remove(id)
 	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
 }
 
@@ -571,17 +544,6 @@ func (s *Server) handleAdvance(w http.ResponseWriter, r *http.Request) {
 	md, ok := s.loadRunOr404(w, projectID, slug, "advance")
 	if !ok {
 		return
-	}
-	// A live agent mid-turn is about to land its own work turn, which
-	// would out-date a marker written now. Mirror the close route's
-	// live-child refusal.
-	if c, ok := s.children.get(id); ok {
-		if exited, _ := c.snapshot(); !exited {
-			http.Error(w,
-				"run "+id+" has a live agent mid-turn — wait for it to finish, then advance",
-				http.StatusConflict)
-			return
-		}
 	}
 	stage, ok := s.markableStage(w, projectID, slug, md)
 	if !ok {
@@ -716,11 +678,8 @@ func (s *Server) stageGateOK(projectID, slug, stage string, md *run.Metadata) bo
 	return ok
 }
 
-// buildReadOnlyRunVM constructs a runVM from on-disk state for a run
-// not currently parented by this serve. For in-progress idea runs,
-// the page surfaces edit/promote affordances; for sdlc runs, just the
-// dash-row meta and canvas links.
-func (s *Server) buildReadOnlyRunVM(projectID, slug, id string) (runVM, error) {
+// buildRunVM constructs the per-run page from journal and disk state.
+func (s *Server) buildRunVM(projectID, slug, id string) (runVM, error) {
 	md, err := run.Load(s.opts.Root, projectID, slug)
 	if err != nil {
 		return runVM{}, err
@@ -739,10 +698,7 @@ func (s *Server) buildReadOnlyRunVM(projectID, slug, id string) (runVM, error) {
 	s.fillRunRow(&vm, projectID, slug, now)
 	vm.Provenance = s.gatherProvenance(projectID, slug)
 	vm.ChainMembers = s.gatherChainMembers(md, projectID, slug, now)
-	// No live child on the read-only path (this serve isn't parenting the
-	// run), so the chips gate on live=false. fillRunRow ran first so
-	// vm.NextStage is populated.
-	vm.Actions = s.composeRunActions(projectID, slug, vm.NextStage, md, false)
+	vm.Actions = s.composeRunActions(projectID, slug, vm.NextStage, md)
 	return vm, nil
 }
 
@@ -755,19 +711,12 @@ func (s *Server) buildReadOnlyRunVM(projectID, slug, id string) (runVM, error) {
 // idea has no stage ladder to derive from). Staged workflows get the
 // advance mark, keyed off the re-derived next stage and its declared
 // stage set (Options.WorkflowUI). Workflows with a close pipeline get a
-// close-run chip when close is the routine idle-page next move;
-// perpetual workflows keep close off the idle page but still expose it
-// while a child is live. A chain head gets nothing: it has no stages to
-// mark, and kicking one is a terminal act (`moe chain kick`) because a
-// hand-staged head is a deliberate staging fence.
+// close-run chip on non-perpetual pages. A chain head gets nothing: it
+// has no stages to mark, and kicking one is a terminal act (`moe chain
+// kick`) because a hand-staged head is a deliberate staging fence.
 //
-// nextStage is the bare next-stage name re-derived from the dash row;
-// live is true when an agent is mid-turn. The advance mark drops while
-// live — that agent is about to land a work turn that would out-date the
-// marker. Close chips stay for non-perpetual workflows, and for live
-// perpetual pages; the close route's own live-child refusal guards the
-// click.
-func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Metadata, live bool) []runAction {
+// nextStage is the bare next-stage name re-derived from the dash row.
+func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Metadata) []runAction {
 	base := "/run/" + projectID + "/" + slug
 	if md.Workflow == dash.ChainWorkflow {
 		return nil
@@ -808,7 +757,7 @@ func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Me
 	// A "" or excluded next stage (sdlc's push) yields no stage chips:
 	// push stays terminal/CLI-only — the bang vocabulary collapses there
 	// — so a run parked right before push shows only the close chip.
-	markable := !live && slices.Contains(ui.Stages, nextStage)
+	markable := slices.Contains(ui.Stages, nextStage)
 	// The advance mark is journal-only — an empty marker commit a later
 	// tick rides — so it stays on an unarmed serve, beside the idea
 	// chips. It renders only where the mark would mean something:
@@ -821,7 +770,7 @@ func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Me
 		s.stageGateOK(projectID, slug, nextStage, md) {
 		out = append(out, runAction{Label: "advance past " + nextStage, Href: base + "/advance", Method: "POST"})
 	}
-	if ui.Close && (!ui.Perpetual || live) {
+	if ui.Close && !ui.Perpetual {
 		out = append(out, runAction{Label: "close run", Href: base + "/close", Method: "POST"})
 	}
 	return out
@@ -829,8 +778,8 @@ func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Me
 
 // fillRunRow populates RowNote / RowWhen from the dash-row lookup.
 // Errors are swallowed (logged) so a row-gather hiccup never breaks
-// the per-run page; the template falls back to the Started / Status
-// meta line when the row note is empty.
+// the per-run page; the template falls back to the run status when the
+// row note is empty.
 func (s *Server) fillRunRow(vm *runVM, projectID, slug string, now time.Time) {
 	if s.opts.GatherRunRow == nil {
 		return
@@ -885,49 +834,6 @@ func ideaTagActions(base string, md *run.Metadata, workflows []string) []runActi
 		out = append(out, runAction{Label: "untag", Href: base + "/untag", Method: "POST"})
 	}
 	return out
-}
-
-// buildRunVM assembles the per-run page from the live child's state
-// and the on-disk canvas listing.
-func (s *Server) buildRunVM(c *child, projectID, slug, id string) runVM {
-	exited, exitErr := c.snapshot()
-	now := time.Now()
-	vm := runVM{
-		ID:      id,
-		Project: projectID,
-		Slug:    slug,
-		Started: dash.HumanAgo(now, c.started),
-		Live:    !exited,
-	}
-	switch {
-	case !exited:
-		vm.Status = "live"
-	case exitErr != nil:
-		vm.Status = "exited: " + exitErr.Error()
-	default:
-		vm.Status = "exited cleanly"
-	}
-	vm.CanvasLinks = s.canvasLinks(projectID, slug, now)
-	vm.Traces = s.gatherRunTraces(projectID, slug)
-	s.fillRunRow(&vm, projectID, slug, now)
-	vm.Provenance = s.gatherProvenance(projectID, slug)
-	// A live-parented run is usually sdlc, but opening a chore can spawn
-	// any configured workflow (e.g. a chore's own workflow), so don't
-	// assume the workflow here — gate the action chips on the on-disk
-	// metadata (composeRunActions keys off the workflow's declaration).
-	// A load failure just drops the chips.
-	if md, err := run.Load(s.opts.Root, projectID, slug); err != nil {
-		s.logf("run page %s: load for actions: %v", id, err)
-	} else {
-		vm.Inputs = s.gatherRunInputs(projectID, slug, md)
-		vm.Reaped = reapedNotice(md, now)
-		vm.ChainMembers = s.gatherChainMembers(md, projectID, slug, now)
-		// !exited == an agent mid-turn; composeRunActions drops the
-		// advance mark in that case. fillRunRow above populated
-		// vm.NextStage.
-		vm.Actions = s.composeRunActions(projectID, slug, vm.NextStage, md, !exited)
-	}
-	return vm
 }
 
 // canvasLinks enumerates the run's stage canvas files (rendered in

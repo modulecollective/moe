@@ -59,13 +59,9 @@ var heartbeatInterval = 20 * time.Minute
 // back on its own once the vendor does.
 const heartbeatBackoffCap = 6
 
-// heartbeatChildPrefix namespaces heartbeat children in the child
-// registry. The colon is what keeps them from colliding with a run id:
-// ids there are "<project>/<slug>" and both halves are slugs, so no run
-// can ever be spelled this way. Riding the same registry is what gets
-// the heartbeat serve's notify hook for free, and on the local host its
-// shutdown wind-down (two Ctrl-Cs, then hangup). The id is also the Rex
-// block label, which is how a restarted serve finds its jobs.
+// heartbeatChildPrefix labels project sweep jobs in the child registry
+// and Rex. A restarted serve uses the same label to reconcile its jobs;
+// the registry supplies single-flight, notifications and local shutdown.
 const heartbeatChildPrefix = "heartbeat:"
 
 // HeartbeatDecision is one project's verdict for one tick: whether to

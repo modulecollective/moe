@@ -641,57 +641,6 @@ func TestDashRendersConnectorClasses(t *testing.T) {
 	}
 }
 
-// TestDashLiveBadgeReflectsExitState: an active-bucket row whose
-// child is still in the registry but has exited (done closed) must
-// not render the "live" badge — registry presence alone overstates
-// the state, since natural exit leaves the *child behind.
-func TestDashLiveBadgeReflectsExitState(t *testing.T) {
-	now := time.Now().UTC()
-	gather := func(string) ([]dash.Row, int, int, []int, error) {
-		return []dash.Row{
-			{Project: "p", Run: "running", Note: "sdlc:code", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Hour)},
-			{Project: "p", Run: "exited", Note: "sdlc:code", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Hour)},
-		}, 1, 1, nil, nil
-	}
-	s := newTestServer(t, Options{
-		Addr:       "127.0.0.1:0",
-		Root:       t.TempDir(),
-		GatherDash: gather,
-	})
-
-	running := &child{id: "p/running", started: now, done: make(chan struct{})}
-	exited := &child{id: "p/exited", started: now, done: make(chan struct{})}
-	close(exited.done)
-	s.children.all["p/running"] = running
-	s.children.all["p/exited"] = exited
-
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/", nil))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
-	}
-	body := rr.Body.String()
-
-	// One live badge — for p/running, anchored at p/exited's row breaks.
-	// Anchor on the row hrefs to read presence per-row.
-	runningIdx := strings.Index(body, `/run/p/running`)
-	exitedIdx := strings.Index(body, `/run/p/exited`)
-	if runningIdx < 0 || exitedIdx < 0 {
-		t.Fatalf("both row anchors must render; body=%s", body)
-	}
-	// Find the next "live" badge anchored after each row label.
-	if got := strings.Count(body, `class="badge live"`); got != 1 {
-		t.Fatalf("want exactly one live badge, got %d\n%s", got, body)
-	}
-	// The single live badge must belong to the running row (i.e. appear
-	// after the running anchor and before the exited anchor, since
-	// active rows render in order).
-	badgeIdx := strings.Index(body, `class="badge live"`)
-	if !(runningIdx < badgeIdx && badgeIdx < exitedIdx) {
-		t.Errorf("live badge not anchored to running row: running=%d badge=%d exited=%d", runningIdx, badgeIdx, exitedIdx)
-	}
-}
-
 func TestDashRouteNotFoundForUnknownPath(t *testing.T) {
 	s := newTestServer(t, Options{
 		Addr: "127.0.0.1:0",
@@ -956,12 +905,9 @@ func TestNewIdeaSubmitUnknownProject(t *testing.T) {
 	}
 }
 
-// TestRunPageReadOnlyForNonParented: a run that exists on disk but
-// isn't currently parented by this serve must render the per-run
-// page (no 404) with canvas links pointing at the canvas route.
-// This is the "view canvases from a phone for an SSH-launched run"
-// path the design names.
-func TestRunPageReadOnlyForNonParented(t *testing.T) {
+// TestRunPageRendersDiskCanvases: the run page renders disk-backed
+// status and canvases, with links to each standalone canvas route.
+func TestRunPageRendersDiskCanvases(t *testing.T) {
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "fix-it", "sdlc")
 	writeCanvas(t, root, "alpha", "fix-it", "design", "# design body\n")
@@ -1266,31 +1212,8 @@ func TestSDLCPageHidesCloseChipForTerminalRun(t *testing.T) {
 	}
 }
 
-// TestLiveParentedSDLCRunShowsCloseChip: even on the live-parented
-// render path (an exited child still in the registry), the per-run page
-// gates the close-run chip on the on-disk metadata rather than assuming
-// "parented ⇒ no actions".
-func TestLiveParentedSDLCRunShowsCloseChip(t *testing.T) {
-	root := t.TempDir()
-	seedRun(t, root, "alpha", "fix-it", "sdlc")
-	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
-	exited := &child{id: "alpha/fix-it", started: time.Now(), done: make(chan struct{})}
-	close(exited.done)
-	s.children.all["alpha/fix-it"] = exited
-
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/fix-it", nil))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
-	}
-	if !strings.Contains(rr.Body.String(), `>close run</button>`) {
-		t.Errorf("live-parented sdlc page should show the close-run chip:\n%s", rr.Body.String())
-	}
-}
-
 // TestCloseRouteClosesSDLCRunAndRedirects: an in-progress sdlc run
-// closes through the CloseRun callback and redirects, dropping the
-// lingering exited-child registry entry so the dash badge clears.
+// closes through the CloseRun callback and redirects.
 func TestCloseRouteClosesSDLCRunAndRedirects(t *testing.T) {
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "fix-it", "sdlc")
@@ -1306,12 +1229,6 @@ func TestCloseRouteClosesSDLCRunAndRedirects(t *testing.T) {
 			return nil
 		},
 	})
-	// An exited child sitting idle in the registry — the common
-	// grooming state. Close must drop it on success.
-	exited := &child{id: "alpha/fix-it", started: time.Now(), done: make(chan struct{})}
-	close(exited.done)
-	s.children.all["alpha/fix-it"] = exited
-
 	req := httptest.NewRequest("POST", "/run/alpha/fix-it/close", strings.NewReader(""))
 	rr := httptest.NewRecorder()
 	s.Handler().ServeHTTP(rr, req)
@@ -1324,9 +1241,6 @@ func TestCloseRouteClosesSDLCRunAndRedirects(t *testing.T) {
 	}
 	if called != 1 || gotProject != "alpha" || gotRun != "fix-it" {
 		t.Fatalf("CloseRun called=%d project=%q run=%q", called, gotProject, gotRun)
-	}
-	if _, ok := s.children.get("alpha/fix-it"); ok {
-		t.Errorf("exited child entry should be dropped after a successful close")
 	}
 }
 
@@ -1353,39 +1267,6 @@ func TestCloseRouteRefusesPushedSDLCRun(t *testing.T) {
 	}
 	if !strings.Contains(rr.Body.String(), "moe sync") {
 		t.Errorf("409 body should carry the steering message, got: %s", rr.Body.String())
-	}
-}
-
-// TestCloseRouteRefusesLiveChild: a live PTY child means the agent is
-// mid-turn; close refuses with 409 and never reaches the callback, and
-// the registry entry survives.
-func TestCloseRouteRefusesLiveChild(t *testing.T) {
-	root := t.TempDir()
-	seedRun(t, root, "alpha", "fix-it", "sdlc")
-	called := false
-	s := newTestServer(t, Options{
-		Addr: "127.0.0.1:0",
-		Root: root,
-		CloseRun: func(project, runID string) error {
-			called = true
-			return nil
-		},
-	})
-	live := &child{id: "alpha/fix-it", started: time.Now(), done: make(chan struct{})} // done open → live
-	s.children.all["alpha/fix-it"] = live
-
-	req := httptest.NewRequest("POST", "/run/alpha/fix-it/close", strings.NewReader(""))
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("want 409, got %d body=%s", rr.Code, rr.Body.String())
-	}
-	if called {
-		t.Errorf("CloseRun must not run while a live child exists")
-	}
-	if _, ok := s.children.get("alpha/fix-it"); !ok {
-		t.Errorf("live child entry must survive a refused close")
 	}
 }
 
@@ -1627,42 +1508,6 @@ func TestRunPageHidesAdvanceChipsBeforePush(t *testing.T) {
 	}
 }
 
-// TestRunPageHidesAdvanceChipsForLiveChild: while an agent is mid-turn
-// (a live child in the registry), the advance/ship chips drop even with
-// an advanceable next stage — you can't advance past a stage whose agent
-// is still running.
-func TestRunPageHidesAdvanceChipsForLiveChild(t *testing.T) {
-	root := t.TempDir()
-	seedRun(t, root, "alpha", "fix-it", "sdlc")
-	now := time.Now().UTC()
-	s := newTestServer(t, Options{
-		Addr: "127.0.0.1:0",
-		Root: root,
-		GatherRunRow: func(p, slug string) (dash.Row, bool, error) {
-			return dash.Row{Project: p, Run: slug, Stage: "code",
-				Bucket: dash.BucketActiveRuns, When: now}, true, nil
-		},
-	})
-	live := &child{id: "alpha/fix-it", started: time.Now(), done: make(chan struct{})} // done open → live
-	s.children.all["alpha/fix-it"] = live
-
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/fix-it", nil))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
-	}
-	body := rr.Body.String()
-	for _, banned := range []string{
-		`/run/alpha/fix-it/advance`,
-		`/run/alpha/fix-it/ship`,
-		`/run/alpha/fix-it/chain`,
-	} {
-		if strings.Contains(body, banned) {
-			t.Errorf("live-child page must not render %q\n%s", banned, body)
-		}
-	}
-}
-
 // TestAdvanceRefusesNonSDLC: POST /advance on an idea run is the wrong
 // surface — 409, no spawn.
 func TestAdvanceRefusesNonSDLC(t *testing.T) {
@@ -1799,33 +1644,6 @@ func TestAdvanceConsultsTheStageGate(t *testing.T) {
 	}
 }
 
-// TestAdvanceRefusesLiveChild: a live agent mid-turn blocks advance with
-// 409 — the same guard the close route applies — and never spawns.
-func TestAdvanceRefusesLiveChild(t *testing.T) {
-	root := t.TempDir()
-	seedRun(t, root, "alpha", "fix-it", "sdlc")
-	now := time.Now().UTC()
-	s := newTestServer(t, Options{
-		Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/echo",
-		GatherRunRow: func(p, slug string) (dash.Row, bool, error) {
-			return dash.Row{Project: p, Run: slug, Stage: "code",
-				Bucket: dash.BucketActiveRuns, When: now}, true, nil
-		},
-	})
-	live := &child{id: "alpha/fix-it", started: time.Now(), done: make(chan struct{})} // done open → live
-	s.children.all["alpha/fix-it"] = live
-
-	req := httptest.NewRequest("POST", "/run/alpha/fix-it/advance", strings.NewReader(""))
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, req)
-	if rr.Code != http.StatusConflict {
-		t.Fatalf("want 409, got %d body=%s", rr.Code, rr.Body.String())
-	}
-	if len(s.children.all) != 1 {
-		t.Errorf("live-child advance must not spawn a second child; registry has %d", len(s.children.all))
-	}
-}
-
 // TestAdvanceRefusesMissingRun: an unknown slug 404s at the load step.
 func TestAdvanceRefusesMissingRun(t *testing.T) {
 	root := t.TempDir()
@@ -1920,8 +1738,7 @@ func TestRunPageRendersDashRowMeta(t *testing.T) {
 }
 
 // TestRunPageFallbackMetaWhenNoRow: when GatherRunRow is unset (or
-// returns ok=false), the per-run page falls back to the older
-// "started Xm ago · status" line so it still renders something useful.
+// returns ok=false), the per-run page falls back to the run status.
 func TestRunPageFallbackMetaWhenNoRow(t *testing.T) {
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "fix-it", "sdlc")

@@ -10,10 +10,9 @@
   <p class="meta">
     <span class="note">{{.RowNote}}</span>
     <span class="when">{{.RowWhen}}</span>
-    {{if .Live}}<span class="badge live">live</span>{{end}}
   </p>
   {{else}}
-  <p class="meta">{{if .Started}}started {{.Started}} · {{end}}<span class="status {{if .Live}}live{{else}}exited{{end}}">{{.Status}}</span></p>
+  <p class="meta"><span class="status exited">{{.Status}}</span></p>
   {{end}}
 
   {{if .Actions}}

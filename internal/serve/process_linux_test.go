@@ -156,44 +156,6 @@ func TestSpawnRefusesDuplicateLiveID(t *testing.T) {
 	}
 }
 
-func TestRunPageRendersForExitedChild(t *testing.T) {
-	root := t.TempDir()
-	cs := newChildren()
-	if _, err := cs.spawn("p/r", "/bin/echo", []string{"-n", "marker"}, root, io.Discard); err != nil {
-		t.Fatalf("spawn: %v", err)
-	}
-	c, _ := cs.get("p/r")
-	<-c.done
-
-	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
-	// Swap in our pre-populated children registry so the test
-	// doesn't need to re-spawn.
-	s.children = cs
-
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/p/r", nil))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
-	}
-	body := rr.Body.String()
-	for _, want := range []string{"p/r", "exited"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("body missing %q\n%s", want, body)
-		}
-	}
-	// The collapsed per-run page renders no PTY tail, no chain
-	// prompt, no end-agent button. Asserting absence keeps the
-	// trim honest.
-	for _, banned := range []string{
-		"marker", "End Agent", "chain prompt", "activity",
-		"/key", "/end-agent",
-	} {
-		if strings.Contains(body, banned) {
-			t.Errorf("collapsed page must not contain %q\n%s", banned, body)
-		}
-	}
-}
-
 func TestRunPage404ForUnknownRun(t *testing.T) {
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir()})
 	rr := httptest.NewRecorder()

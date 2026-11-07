@@ -278,10 +278,8 @@ func TestHeartbeatSingleFlightsItsOwnChild(t *testing.T) {
 	}
 }
 
-// TestHeartbeatChildIdCannotCollideWithARun: the registry is keyed by
-// run id, and a heartbeat child rides it to inherit shutdown and notify.
-// The colon is what keeps the two namespaces apart — run ids are
-// "<project>/<slug>" and both halves are slugs.
+// TestHeartbeatChildIdCannotCollideWithARun: the heartbeat/Rex label
+// identifies a project job and cannot be mistaken for a run id.
 func TestHeartbeatChildIdCannotCollideWithARun(t *testing.T) {
 	id := heartbeatChildPrefix + "alpha"
 	if !strings.Contains(id, ":") || strings.Contains(id, "/") {

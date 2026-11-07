@@ -616,19 +616,6 @@ func (s *Server) handleDash(w http.ResponseWriter, r *http.Request) {
 	// round trip through its own snapshot would only add a beat of lag.
 	vm.Serve = s.activity.panel(now)
 	vm.InputCount = s.openPingCount("")
-	// Mark which active rows are currently parented by serve so the
-	// dash can render a "live" badge. Registry presence isn't enough:
-	// natural exit leaves *child in cs.all (only the respawn path
-	// deletes), so c.snapshot() gates on the exited flag the same way
-	// buildRunVM does for the per-run page.
-	for i := range vm.Active {
-		id := vm.Active[i].Project + "/" + vm.Active[i].Run
-		if c, ok := s.children.get(id); ok {
-			if exited, _ := c.snapshot(); !exited {
-				vm.Active[i].Live = true
-			}
-		}
-	}
 	s.render(w, r, "dash.html", vm)
 }
 

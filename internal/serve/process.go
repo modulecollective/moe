@@ -102,16 +102,6 @@ func (cs *children) get(id string) (*child, bool) {
 	return c, ok
 }
 
-// remove drops id from the registry. Idempotent — a no-op when id isn't
-// present. Called after a successful sdlc close so a lingering exited
-// child stops marking the now-gone run as parented on the dash and the
-// per-run page.
-func (cs *children) remove(id string) {
-	cs.mu.Lock()
-	delete(cs.all, id)
-	cs.mu.Unlock()
-}
-
 // shutdown suppresses notifications before invoking the host's stop policy.
 func (cs *children) shutdown(ctx context.Context, logger io.Writer) {
 	cs.mu.Lock()

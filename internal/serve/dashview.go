@@ -65,10 +65,6 @@ type dashRowVM struct {
 	// section renders both kinds, so it links through this rather than
 	// building the path itself.
 	URL string
-	// Live is true when the row's run is currently parented by this
-	// serve process — the per-run page has buttons. Only meaningful
-	// for active rows; backlog/completed always render Live=false.
-	Live bool
 	// Depth is how many levels the row renders nested under a parent —
 	// 0 top-level, 1 for a completed spawned run (a tailed pulse), 2+ for
 	// deeper spawn lineage. The template draws a "↳" connector for
