@@ -87,6 +87,7 @@ type activityProject struct {
 	started   time.Time // current sweep's start; zero when none is running
 	sweptAt   time.Time
 	clean     bool
+	deferred  bool
 	fails     int
 	coolTicks int
 }
@@ -218,7 +219,16 @@ func (a *activity) recordSweepEnd(projectID string, at time.Time, clean bool, fa
 	p := a.project(projectID)
 	p.started = time.Time{}
 	p.sweptAt, p.clean = at, clean
+	p.deferred = false
 	p.fails, p.coolTicks = fails, coolTicks
+}
+
+func (a *activity) recordQuotaDeferral(projectID, reason string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	p := a.project(projectID)
+	p.deferred = true
+	p.decision, p.sweep = reason, false
 }
 
 // setHost records where jobs run, and why not when the host is
@@ -246,11 +256,15 @@ func (a *activity) recordChildExit(id string, at time.Time, exitErr error, tail,
 	if exitErr != nil {
 		detail = "exited: " + exitErr.Error()
 	}
+	deferred := heartbeatProject(id) != "" && quotaDeferred(exitErr)
+	if deferred {
+		detail = "deferred for quota"
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.push(activityEvent{
 		At: at, Kind: "exit", Subject: id,
-		Detail: detail, Failed: exitErr != nil, Tail: tail, Run: runID,
+		Detail: detail, Failed: exitErr != nil && !deferred, Tail: tail, Run: runID,
 	})
 }
 
@@ -364,11 +378,12 @@ type ActivityProject struct {
 	Sweep bool `json:"sweep,omitempty"`
 	// SweepStarted dates a sweep that is running right now; zero when
 	// none is.
-	SweepStarted time.Time `json:"sweep_started,omitzero"`
-	SweptAt      time.Time `json:"swept_at,omitzero"`
-	SweepClean   bool      `json:"sweep_clean,omitempty"`
-	Fails        int       `json:"fails,omitempty"`
-	CoolTicks    int       `json:"cool_ticks,omitempty"`
+	SweepStarted  time.Time `json:"sweep_started,omitzero"`
+	SweptAt       time.Time `json:"swept_at,omitzero"`
+	SweepClean    bool      `json:"sweep_clean,omitempty"`
+	SweepDeferred bool      `json:"sweep_deferred,omitempty"`
+	Fails         int       `json:"fails,omitempty"`
+	CoolTicks     int       `json:"cool_ticks,omitempty"`
 }
 
 // Sweeping reports whether a sweep child is live for this project.
@@ -379,7 +394,9 @@ func (p ActivityProject) Cooling() bool { return p.CoolTicks > 0 }
 
 // Failed reports that the last finished sweep died. Only meaningful once
 // a sweep has finished at all.
-func (p ActivityProject) Failed() bool { return !p.SweptAt.IsZero() && !p.SweepClean }
+func (p ActivityProject) Failed() bool {
+	return !p.SweptAt.IsZero() && !p.SweepClean && !p.SweepDeferred
+}
 
 // snapshot renders the record as the on-disk shape. Projects come out in
 // id order so a diff of two writes reads as a change of state rather
@@ -412,14 +429,15 @@ func (a *activity) snapshot(now time.Time) ActivitySnapshot {
 	for _, id := range slices.Sorted(maps.Keys(a.projects)) {
 		p := a.projects[id]
 		snap.Projects = append(snap.Projects, ActivityProject{
-			Project:      id,
-			Decision:     p.decision,
-			Sweep:        p.sweep,
-			SweepStarted: p.started,
-			SweptAt:      p.sweptAt,
-			SweepClean:   p.clean,
-			Fails:        p.fails,
-			CoolTicks:    p.coolTicks,
+			Project:       id,
+			Decision:      p.decision,
+			Sweep:         p.sweep,
+			SweepStarted:  p.started,
+			SweptAt:       p.sweptAt,
+			SweepClean:    p.clean,
+			SweepDeferred: p.deferred,
+			Fails:         p.fails,
+			CoolTicks:     p.coolTicks,
 		})
 	}
 	return snap

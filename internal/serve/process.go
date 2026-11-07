@@ -135,9 +135,13 @@ func (c *child) finish(cs *children, exitErr error, logger io.Writer) {
 	c.exitErr = exitErr
 	close(c.done)
 	if logger != nil {
-		fmt.Fprintf(logger, "serve: child %s exited: %v\n", c.id, c.exitErr)
+		if heartbeatProject(c.id) != "" && quotaDeferred(c.exitErr) {
+			fmt.Fprintf(logger, "serve: child %s deferred for quota\n", c.id)
+		} else {
+			fmt.Fprintf(logger, "serve: child %s exited: %v\n", c.id, c.exitErr)
+		}
 	}
-	if notify := cs.exitNotifier(); notify != nil {
+	if notify := cs.exitNotifier(); notify != nil && !(heartbeatProject(c.id) != "" && quotaDeferred(c.exitErr)) {
 		notify(c.id, c.exitErr)
 	}
 	if cs.onExit != nil {

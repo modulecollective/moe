@@ -138,12 +138,28 @@ func init() {
 // minted, so the operator knows the skip window is live from the start.
 // The second return is whether the operator interrupted the sweep.
 func runPulse(root, projectID, emitRun string, stdout, stderr io.Writer) (int, bool) {
+	if clockInvoked {
+		q, err := newPulseQuotaRetries(root, projectID)
+		if err != nil {
+			moePrintf(stderr, "pulse: read quota retries: %v\n", err)
+			return 1, false
+		}
+		prior := clockQuota
+		clockQuota = q
+		defer func() { clockQuota = prior }()
+	}
 	pi := installPulseInterrupt()
 	defer pi.Close()
 	moePrintf(stderr, "pulse: scanning %s — Ctrl-C to skip\n", projectID)
 	autoOpenDueChores(root, projectID, pi, stderr)
 	reconcileAtPulse(root, projectID, pi, stdout, stderr)
 	code := runPulseSurvey(root, projectID, emitRun, pi, stdout, stderr)
+	if code == 0 && !pi.interrupted() && clockInvoked && clockQuota != nil {
+		if err := clockQuota.finish(); err != nil {
+			moePrintf(stderr, "pulse: resolve quota retries: %v\n", err)
+			code = 1
+		}
+	}
 	return code, pi.interrupted()
 }
 
@@ -280,6 +296,9 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 			moePrintf(stderr, "pulse: emit run for %s: %v\n", projectID, err)
 		}
 	}
+	if clockQuota != nil {
+		clockQuota.pulse = md.ID
+	}
 
 	// Checkpoint: a Ctrl-C landed while the run was being minted — dispose
 	// the just-minted skeleton run so it doesn't linger on the dash with
@@ -308,6 +327,15 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 		pi.mark()
 	}
 	switch {
+	case !pi.interrupted() && !survey.agentStarted && survey.code == exitQuotaDeferred:
+		// Admission already released the reservation and atomically
+		// closed the untouched pulse with its retry event.
+		return exitQuotaDeferred
+	case !pi.interrupted() && !survey.agentStarted && survey.code == exitNotStarted:
+		if err := disposePulseRunReason(root, projectID, md.ID, "quota admission unavailable; retry with ordinary failure backoff", stderr); err != nil {
+			moePrintf(stderr, "pulse: skip-close: %v\n", err)
+		}
+		return 1
 	case pi.interrupted() && !survey.agentStarted:
 		// The latch is set and the agent never started: a Ctrl-C in a
 		// millisecond gap between setup children tripped the pre-executor
@@ -379,6 +407,8 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 	// leaves the run open, mirroring the pulse's warn-only posture
 	// throughout: the report and filings are already durable on disk, so
 	// a failed auto-close is a close-by-hand-later, not a lost sweep.
+	// It fails the invocation and stops the kick: retry accounting needs
+	// a durable closed survey before it may discharge observed tokens.
 	//
 	// A dynamic sweep also stamps the kick order it is about to walk onto
 	// its own canvas, riding the close's cleanup so the section and the
@@ -396,6 +426,10 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 	}
 	if err := closePulseRunStamped(root, projectID, md.ID, "kick section", kickSection, stderr); err != nil {
 		moePrintf(stderr, "pulse: auto-close %s/%s: %v\n", projectID, md.ID, err)
+		return 1
+	}
+	if clockQuota != nil {
+		clockQuota.survey = false
 	}
 
 	// The kick is last, and deliberately *outside* the pulse's skip
@@ -450,7 +484,7 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 // on its way out, this only rewrites files this process itself
 // half-wrote, and the index-lock retry in internal/git covers the
 // git-level race.
-func closePulseRunStamped(root, projectID, runID, name string, rewrite func(body []byte) []byte, stderr io.Writer) error {
+func closePulseRunStamped(root, projectID, runID, name string, rewrite func(body []byte) []byte, stderr io.Writer, extraTrailers ...trailers.Block) error {
 	reg, ok := lookupCloseRegistration(pulseWorkflow)
 	if !ok {
 		return fmt.Errorf("no close registration for %q", pulseWorkflow)
@@ -475,7 +509,7 @@ func closePulseRunStamped(root, projectID, runID, name string, rewrite func(body
 		}
 	}
 	err := closeRunInProcess(root, pulseWorkflow, reg.subject, stamp,
-		projectID, runID, true /*skipEdit*/, stderr)
+		projectID, runID, true /*skipEdit*/, stderr, extraTrailers...)
 	if err != nil && rewrite != nil {
 		if before != nil {
 			_ = os.WriteFile(canvas, before, 0o644)
@@ -500,27 +534,16 @@ func closePulseRunStamped(root, projectID, runID, name string, rewrite func(body
 // operator's own Ctrl-C, and a decoy report has cost three diagnosis
 // cycles.
 func disposePulseRun(root, projectID, runID string, stderr io.Writer) {
-	skipNote := func([]byte) []byte { return []byte(pulseSkipNote) }
-	if err := closePulseRunStamped(root, projectID, runID, "skip note", skipNote, stderr); err != nil {
+	if err := disposePulseRunReason(root, projectID, runID, "the operator interrupted the pulse before the survey started", stderr); err != nil {
 		moePrintf(stderr, "pulse: skip-close %s/%s: %v — leaving run open\n", projectID, runID, err)
 		return
 	}
 	moePrintf(stderr, "pulse: skipped — closed %s/%s\n", projectID, runID)
 }
 
-// pulseSkipNote replaces the untouched skeleton on a disposed run's
-// canvas. Closed with the skeleton, the run is indistinguishable on disk
-// from a crashed no-op sweep — which is what the `## Gate` check exists
-// to leave open — so the next survey reads it as a live bug and files
-// against it. (That misread has already cost an idea, a promotion and a
-// design turn.) The note says what happened, so the artifact stops being
-// a decoy and the "read the previous pulse report" baseline knows to
-// fall back a report.
-const pulseSkipNote = `# Pulse
-
-Sweep skipped — the operator interrupted the pulse before the survey
-started. No report; the previous pulse's report remains the baseline.
-`
+func disposePulseRunReason(root, projectID, runID, reason string, stderr io.Writer) error {
+	return closePulseRunStamped(root, projectID, runID, "skip note", func([]byte) []byte { return []byte(pulseSkipNote(reason)) }, stderr)
+}
 
 // errPulseSkipped is the sentinel openPulse's prompt builder returns
 // when the operator's Ctrl-C latched between the post-Open checkpoint

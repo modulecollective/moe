@@ -530,6 +530,8 @@ func serveProjectLine(now time.Time, id string, p *activityProject) serveProject
 		line.Detail = "(" + dash.Plural(p.coolTicks, "tick") + " left)"
 		line.Reason = fmt.Sprintf("last sweep failed %s", dash.HumanAgo(now, p.sweptAt))
 		line.Run = p.runID
+	case p.deferred:
+		line.State, line.Run = "deferred", p.runID
 	case !p.sweptAt.IsZero() && !p.clean:
 		line.State, line.Failed = "failed", true
 		line.Detail = "(" + dash.HumanAgo(now, p.sweptAt) + ")"

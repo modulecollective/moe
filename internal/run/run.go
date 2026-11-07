@@ -844,6 +844,8 @@ type JournalIndex struct {
 	PRURL map[string]string
 	// CIRepairAttempts retains every claimed attempt, including workers that died.
 	CIRepairAttempts map[string][]CIRepairAttempt
+	// QuotaRetries holds outstanding clock obligations by originating pulse.
+	QuotaRetries map[string]QuotaRetry
 	// WorkTurnTime maps (project, run, doc) → committer time of the
 	// most recent `work: update <doc>` commit scoped to that run.
 	// Same contract as LatestWorkTurnSHA's `when` return — zero
@@ -1069,6 +1071,7 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 		"--grep", "^MoE-Run: ",
 		"--grep", "^MoE-Chore",
 		"--grep", "^MoE-Chained-To",
+		"--grep", "^MoE-Quota-Retry:",
 		"--format=%ct%x00%B%x1e",
 	)
 	if err != nil {
@@ -1080,6 +1083,7 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 		PromotedTo:           make(map[string]string),
 		PRURL:                make(map[string]string),
 		CIRepairAttempts:     make(map[string][]CIRepairAttempt),
+		QuotaRetries:         make(map[string]QuotaRetry),
 		WorkTurnTime:         make(map[WorkTurnKey]time.Time),
 		AdvanceTime:          make(map[WorkTurnKey]time.Time),
 		ReopenedFrom:         make(map[string]string),
@@ -1103,6 +1107,8 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 	// tally) and folded to the two DailyRunCount maps at the end — storing
 	// the counts, not the sets, keeps the index small.
 	dailyProjSlugs := make(map[string]map[string]map[string]struct{})
+	quotaSeen := make(map[string]bool)
+	quotaResolved := make(map[string]string)
 	for record := range strings.SplitSeq(out, "\x1e") {
 		record = strings.TrimLeft(record, "\n")
 		if record == "" {
@@ -1125,6 +1131,7 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 		var promotedTo, prURL, projectID, docID, reopenOf, spawnedBy, chore, choreSkipped, consent, fromRun string
 		var choreTouched []string
 		var ciRepair *CIRepairAttempt
+		var quotaRetry *QuotaRetry
 		// Per-commit chain verdicts. addByParent wins over
 		// removeByParent for the same parent within one commit (an edit
 		// save pairs a remove of the prior edge with an add of the new
@@ -1139,6 +1146,20 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 		var chainEndpoints []string
 		for line := range strings.SplitSeq(body, "\n") {
 			line = strings.TrimSpace(line)
+			if v, ok := strings.CutPrefix(line, "MoE-Quota-Retry:"); ok {
+				var r QuotaRetry
+				if err := json.Unmarshal([]byte(strings.TrimSpace(v)), &r); err != nil || r.Project == "" ||
+					(r.Token == "" && len(r.Resolves) == 0) || (r.Token != "" && (r.NotBefore.IsZero() || len(r.Targets) == 0 || !strings.HasPrefix(r.Token, r.Project+"/"))) {
+					return nil, fmt.Errorf("run: malformed MoE-Quota-Retry trailer: %s", v)
+				}
+				for token, fingerprint := range r.Resolves {
+					if !strings.HasPrefix(token, r.Project+"/") || token == r.Token || fingerprint == "" {
+						return nil, fmt.Errorf("run: invalid quota retry resolution: %s", token)
+					}
+				}
+				quotaRetry = &r
+				continue
+			}
 			if v, ok := strings.CutPrefix(line, "MoE-Run:"); ok {
 				if slug == "" {
 					slug = strings.TrimSpace(v)
@@ -1299,6 +1320,22 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 		if choreSkipped != "" {
 			if _, ok := idx.ChoreSkipped[choreSkipped]; !ok {
 				idx.ChoreSkipped[choreSkipped] = time.Unix(epoch, 0).UTC()
+			}
+		}
+		if quotaRetry != nil {
+			// History is newest first. A resolution consumes only the
+			// observed version; an aggregate updated concurrently survives.
+			// Pin the newest event even when resolved, preventing resurrection.
+			for token, fingerprint := range quotaRetry.Resolves {
+				if _, seen := quotaResolved[token]; !seen {
+					quotaResolved[token] = fingerprint
+				}
+			}
+			if token := quotaRetry.Token; token != "" && !quotaSeen[token] {
+				if quotaResolved[token] != quotaRetry.Fingerprint() {
+					idx.QuotaRetries[token] = *quotaRetry
+				}
+				quotaSeen[token] = true
 			}
 		}
 		if slug == "" {

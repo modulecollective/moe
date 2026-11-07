@@ -2,6 +2,7 @@ package serve
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -274,15 +275,43 @@ func (s *Server) heartbeatTick() {
 // acknowledgement.
 func (s *Server) completeHeartbeat(projectID string, c *child, dispatched bool) {
 	failed := c.exitErr != nil
+	deferred := quotaDeferred(c.exitErr)
 	if dispatched {
 		s.opts.Heartbeat.Swept(projectID, !failed)
 	}
-	fails, skip := s.heartbeat.record(projectID, failed)
-	if skip > 0 {
+	var fails, skip int
+	if deferred {
+		// Preserve failure history without charging ordinary quota pacing
+		// as a failure or acknowledging the board as clean.
+		s.heartbeat.mu.Lock()
+		fails, skip = s.heartbeat.fails[projectID], s.heartbeat.skip[projectID]
+		s.heartbeat.mu.Unlock()
+	} else {
+		fails, skip = s.heartbeat.record(projectID, failed)
+	}
+	if skip > 0 && !deferred {
 		s.logf("heartbeat: %s failed (%v) — skipping %d tick(s)", projectID, c.exitErr, skip)
 	}
 	s.activity.recordSweepEnd(projectID, time.Now(), !failed, fails, skip)
+	if deferred {
+		s.activity.recordQuotaDeferral(projectID, s.quotaDeferralReason(projectID))
+	}
 	s.saveActivity()
+}
+
+func quotaDeferred(err error) bool {
+	var exited interface{ ExitCode() int }
+	return errors.As(err, &exited) && exited.ExitCode() == run.ExitQuotaDeferred
+}
+
+func (s *Server) quotaDeferralReason(projectID string) string {
+	reason := "deferred for quota"
+	if idx, err := run.BuildJournalIndex(s.opts.Root); err == nil {
+		if next := idx.NextQuotaRetry(projectID); !next.IsZero() {
+			reason += " until " + next.Local().Format("2006-01-02 15:04:05 MST")
+		}
+	}
+	return reason
 }
 
 // sweepRunPath is where the sweep child for projectID writes its run —
@@ -386,6 +415,10 @@ func (s *Server) logSweepExit(project string, exitErr error, tail, runID string)
 		// The clean line is what makes the log a ledger: "what became of
 		// run X" is a grep for the slug either way it ended.
 		s.logf("heartbeat: %s swept clean, %s", project, minted)
+		return
+	}
+	if quotaDeferred(exitErr) {
+		s.logf("heartbeat: %s %s, %s", project, s.quotaDeferralReason(project), minted)
 		return
 	}
 	var b strings.Builder

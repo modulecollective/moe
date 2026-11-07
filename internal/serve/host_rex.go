@@ -158,7 +158,7 @@ func (h *rexHost) watch(c *child, block string, logger io.Writer) {
 	if ackErr != nil || !present {
 		return
 	}
-	if exitErr == nil {
+	if exitErr == nil || quotaDeferred(exitErr) {
 		if err := h.closeBlock(block); err != nil {
 			h.logf("rex: close block %s: %v", block, err)
 		}

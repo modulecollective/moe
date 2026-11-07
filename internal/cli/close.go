@@ -144,7 +144,7 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 // canvas-empty gate and any IO/commit failure come back as plain errors
 // (serve answers 500). skipEdit threads to enterTerminal's harvest
 // pre-flight: serve always passes true since it can't host $EDITOR.
-func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, projectID, runID string, skipEdit bool, stderr io.Writer) error {
+func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, projectID, runID string, skipEdit bool, stderr io.Writer, extraTrailers ...trailers.Block) error {
 	if err := requireProject(root, projectID); err != nil {
 		return err
 	}
@@ -244,6 +244,9 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 			Workflow: workflow,
 			Consent:  walkConsent(),
 		}.String()
+	for _, block := range extraTrailers {
+		msg += block.String()
+	}
 	if err := repolock.With(root, repolock.Options{
 		Purpose: workflow + "-close",
 		Run:     projectID + "/" + runID,

@@ -132,8 +132,9 @@ func TestPulseSurveySkipDuringSetupDisposesRun(t *testing.T) {
 	// is indistinguishable from a crashed no-op sweep, and the next
 	// survey reads it as a live bug.
 	canvas := readPulseCanvas(t, root, "moe", closed[0])
-	if canvas != pulseSkipNote {
-		t.Errorf("disposed canvas =\n%q\nwant the skip note:\n%q", canvas, pulseSkipNote)
+	wantNote := pulseSkipNote("the operator interrupted the pulse before the survey started")
+	if canvas != wantNote {
+		t.Errorf("disposed canvas =\n%q\nwant the skip note:\n%q", canvas, wantNote)
 	}
 	if dirty, err := dirtyOutsidePaths(root); err != nil || dirty {
 		t.Errorf("tree dirty after disposal (dirty=%v, err=%v); the stamp must be committed", dirty, err)

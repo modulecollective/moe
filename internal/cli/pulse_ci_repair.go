@@ -14,6 +14,7 @@ import (
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
@@ -29,6 +30,10 @@ func repairEvidence(prs []ownedPRChecks, key string) (ownedPRChecks, bool) {
 // This predicate is shared by the survey's evidence, kick plan and locked
 // claim. It does not authorize execution without a live GitHub recheck.
 func ciRepairEligibility(sc *pulseScan, p ownedPRChecks) ([]int, string) {
+	return ciRepairEligibilityExcept(sc, p, "")
+}
+
+func ciRepairEligibilityExcept(sc *pulseScan, p ownedPRChecks, ownBranch string) ([]int, string) {
 	md := sc.byKey[p.Run]
 	if md == nil || md.Workflow != sdlcWorkflow || md.Status != run.StatusPushed || sc.idx.PRURL[p.Run] != p.PR {
 		return nil, "run is no longer a pushed sdlc run with this recorded PR"
@@ -85,13 +90,17 @@ func ciRepairEligibility(sc *pulseScan, p ownedPRChecks) ([]int, string) {
 	if hold := reapHeldThread(graph.Root(p.Run), byKey, graph, sc.idx); hold != "" {
 		return nil, hold
 	}
-	if stage := openSessionStage(sc.root, md); stage != "" {
+	if stage := openSessionStageExcept(sc.root, md, ownBranch); stage != "" {
 		return nil, "run has an open session at " + stage
 	}
 	return fresh, ""
 }
 
-func claimCIRepair(root string, observed ownedPRChecks) (*run.Metadata, error) {
+func claimCIRepair(root string, observed ownedPRChecks, reserved ...*session.Session) (*run.Metadata, error) {
+	ownBranch := ""
+	if len(reserved) != 0 {
+		ownBranch = reserved[0].Branch
+	}
 	// Network is outside the short journal lock. The locked half validates
 	// everything local against the new snapshot, including competing claims.
 	current := gatherPRChecks(observed.Run, observed.PR)
@@ -107,7 +116,7 @@ func claimCIRepair(root string, observed ownedPRChecks) (*run.Metadata, error) {
 		if !ok {
 			return errors.New("could not read current run state")
 		}
-		ids, hold := ciRepairEligibility(sc, current)
+		ids, hold := ciRepairEligibilityExcept(sc, current, ownBranch)
 		if hold != "" {
 			return errors.New(hold)
 		}
@@ -121,7 +130,7 @@ func claimCIRepair(root string, observed ownedPRChecks) (*run.Metadata, error) {
 			}
 		}
 		md = sc.byKey[current.Run]
-		if openSessionProjects(root, time.Now())[md.Project] {
+		if openSessionProjects(root, time.Now(), ownBranch)[md.Project] {
 			return errors.New("somebody is already inside the project")
 		}
 		payload, _ := json.Marshal(run.CIRepairAttempt{PR: current.PR, Head: current.Head, InputIDs: ids})
@@ -139,15 +148,19 @@ func kickCIRepair(root, key string, groomed groomResult, stdout, stderr io.Write
 		moePrintf(stderr, "pulse: CI repair %s skipped — no actionable survey evidence\n", key)
 		return 0
 	}
-	md, err := claimCIRepair(root, observed)
+	projectID, runID, err := splitProjectRun(key)
+	if err != nil {
+		moePrintf(stderr, "pulse: CI repair: %v\n", err)
+		return 1
+	}
+	md, err := run.Load(root, projectID, runID)
 	if err != nil {
 		moePrintf(stderr, "pulse: CI repair %s skipped — %v\n", key, err)
 		return 0
 	}
-	moePrintf(stderr, "pulse: CI repair %s claimed for head %s\n", key, observed.Head)
 	code := driveCIRepair(root, md, observed, stdout, stderr)
 	if code != 0 {
-		moePrintf(stderr, "pulse: CI repair %s exited %d; attempt remains spent\n", key, code)
+		moePrintf(stderr, "pulse: CI repair %s exited %d\n", key, code)
 	} else {
 		moePrintf(stderr, "pulse: CI repair %s updated existing PR %s\n", key, observed.PR)
 	}
@@ -157,7 +170,20 @@ func kickCIRepair(root, key string, groomed groomResult, stdout, stderr io.Write
 // A repair is one bounded same-run continuation. Ordinary cascade terminal
 // guards stay intact. Registered dispatch and gate checks still own test
 // and review; neither old passes nor a push recovery can skip those turns.
-func driveCIRepair(root string, md *run.Metadata, p ownedPRChecks, stdout, stderr io.Writer) int {
+func driveCIRepair(root string, md *run.Metadata, p ownedPRChecks, stdout, stderr io.Writer) (code int) {
+	claimed := false
+	if clockQuota != nil {
+		previous := clockQuota.repairClaimed
+		defer func() { clockQuota.repairClaimed = previous }()
+	}
+	defer func() {
+		if claimed && code == exitQuotaDeferred {
+			moePrintln(stderr, "CI repair: stopped for quota after claim; attempt remains spent and requires operator recovery or fresh input")
+			code = 1
+		} else if claimed && code != 0 {
+			moePrintln(stderr, "CI repair: stopped; attempt remains spent")
+		}
+	}()
 	clone, err := sandboxClonePath(root, md)
 	if err != nil {
 		moePrintf(stderr, "CI repair: %v\n", err)
@@ -176,7 +202,20 @@ func driveCIRepair(root string, md *run.Metadata, p ownedPRChecks, stdout, stder
 		}
 	}
 	kickoff.WriteString("\nInvestigate the linked failures, fix and commit. Fresh test and review turns follow, then this PR is updated. Operator input is delivered through the normal run input channel.\n")
-	if code := openRecoveryStageSession(md, "code", "test", true, kickoff.String(), stdout, stderr); code != 0 {
+	if code := runStageSession(md.Project, md.ID, "code", stageSessionOpts{
+		NeedsSandbox: true, Headless: true, InitialPrompt: kickoff.String(), NextStageOverride: "test",
+		AfterAdmission: func(sess *session.Session) error {
+			if _, err := claimCIRepair(root, p, sess); err != nil {
+				return err
+			}
+			claimed = true
+			if clockQuota != nil {
+				clockQuota.repairClaimed = true
+			}
+			moePrintf(stderr, "pulse: CI repair %s claimed for head %s\n", p.Run, p.Head)
+			return repolock.With(root, repolock.Options{Purpose: "ci-repair-refresh", Run: p.Run}, func() error { return session.Reconcile(sess) })
+		},
+	}, stdout, stderr); code != 0 {
 		return code
 	}
 	after, err := git.RevParse(clone, "refs/heads/"+branchPrefix+md.ID)
@@ -201,7 +240,7 @@ func driveCIRepair(root string, md *run.Metadata, p ownedPRChecks, stdout, stder
 	// Force the PR route even if the project's default changed during the
 	// ride. The push revalidates the recorded PR again after hooks, before
 	// moving the remote, and cannot fall back to creating a replacement PR.
-	code, err := pushFromCascade(md.Workflow, []string{"--pr", md.Project + "/" + md.ID}, pushRunOptions{
+	code, err = pushFromCascade(md.Workflow, []string{"--pr", md.Project + "/" + md.ID}, pushRunOptions{
 		HeadlessRecovery: true, SkipTerminalEdit: true, RepairPR: p.PR, RepairHead: p.Head,
 	}, stdout, stderr)
 	if err != nil {

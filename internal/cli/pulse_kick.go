@@ -168,9 +168,7 @@ func pulseSelfKick(root string, groomed groomResult, stdout, stderr io.Writer) i
 			if code == exitInterrupted {
 				return code
 			}
-			if code != 0 && firstFailure == 0 {
-				firstFailure = code
-			}
+			firstFailure = combinePulseExit(firstFailure, code)
 			continue
 		}
 		if hold := kickFloorHold(root, step.Root, groomed); hold != "" {
@@ -187,9 +185,7 @@ func pulseSelfKick(root string, groomed groomResult, stdout, stderr io.Writer) i
 			if code == exitInterrupted {
 				return code
 			}
-			if firstFailure == 0 {
-				firstFailure = code
-			}
+			firstFailure = combinePulseExit(firstFailure, code)
 		}
 	}
 	return firstFailure
@@ -818,12 +814,17 @@ func designOnlyRide(root, threadRoot string, groomed groomResult) bool {
 // one skip line per sweep, until the session is resumed or abandoned.
 // Conservative on purpose; the line is the recovery signpost.
 func openSessionStage(root string, md *run.Metadata) string {
+	return openSessionStageExcept(root, md, "")
+}
+
+func openSessionStageExcept(root string, md *run.Metadata, ownBranch string) string {
 	w, err := LookupWorkflow(md.Workflow)
 	if err != nil {
 		return ""
 	}
 	for _, stage := range w.Stages() {
-		if git.HasRef(root, "refs/heads/"+session.BranchName(md.Project, md.ID, stage)) {
+		branch := session.BranchName(md.Project, md.ID, stage)
+		if branch != ownBranch && git.HasRef(root, "refs/heads/"+branch) {
 			return stage
 		}
 	}

@@ -92,6 +92,7 @@ func newRexHost(bin, root string, logger io.Writer) *rexHost {
 type rexExit int
 
 func (e rexExit) Error() string { return fmt.Sprintf("exit status %d", int(e)) }
+func (e rexExit) ExitCode() int { return int(e) }
 
 // errRexBlockGone is a block that vanished before reporting an exit —
 // closed by hand, or lost with its server.

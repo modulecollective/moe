@@ -302,6 +302,8 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 	}
 	g.mu.Unlock()
 	moved := known && seen != tip
+	retryAt := sc.idx.NextQuotaRetry(projectID)
+	retryDue := !retryAt.IsZero() && !retryAt.After(now)
 	unswept := false
 	parked := ""
 	choreReason := ""
@@ -318,7 +320,7 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 		// the sweep kicks passes safe on its own terms.
 		choreReason = choreClockReason(sc, projectID, now)
 	}
-	if !moved && choreReason == "" && !prChanged {
+	if !moved && choreReason == "" && !prChanged && !retryDue {
 		// A clean sweep already surveyed this exact board. Whatever is
 		// parked on it, the survey saw and left parked on purpose, so
 		// offering it again is re-asking a question the machine has
@@ -326,6 +328,9 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 		// forever. Any change to a thread's kickability is a journal
 		// commit, which the moved leg above catches.
 		if surveyed {
+			if !retryAt.IsZero() {
+				return false, false, "deferred for quota until " + retryAt.Local().Format("2006-01-02 15:04:05 MST")
+			}
 			return false, false, "a sweep already surveyed the current tip"
 		}
 		// Work landed that no survey has seen. The moved leg is
@@ -358,6 +363,9 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 			unswept = true
 		}
 		if !unswept {
+			if !retryAt.IsZero() {
+				return false, false, "deferred for quota until " + retryAt.Local().Format("2006-01-02 15:04:05 MST")
+			}
 			// Under safe the leg offers only what the kick could actually
 			// start, so a board with plenty parked and nothing marked spends
 			// no agent turn discovering that every twenty minutes. The moved
@@ -425,6 +433,9 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 	}
 	if choreReason != "" {
 		return true, false, choreReason
+	}
+	if retryDue {
+		return true, false, "quota retry is due — survey the current board"
 	}
 	if md := sc.byKey[parked]; md != nil && md.Workflow == dash.IdeaWorkflow {
 		// Display only, like every reason here — but this is the operator's
@@ -1037,7 +1048,7 @@ func parkedKickableThread(root string, sc *pulseScan, projectID string, markedOn
 // hold, the wrong direction for an ambiguous shape. A read failure
 // reports every project occupied — standing down on an unreadable ref
 // list is the answer that loses nothing.
-func openSessionProjects(root string, now time.Time) map[string]bool {
+func openSessionProjects(root string, now time.Time, excluded ...string) map[string]bool {
 	out, err := git.Output(root, "for-each-ref", "--format=%(refname:short)", "refs/heads/session/")
 	if err != nil {
 		return allProjectsOccupied(root)
@@ -1045,6 +1056,9 @@ func openSessionProjects(root string, now time.Time) map[string]bool {
 	occupied := map[string]bool{}
 	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
 		branch := strings.TrimSpace(line)
+		if len(excluded) != 0 && branch == excluded[0] {
+			continue
+		}
 		rest, ok := strings.CutPrefix(branch, "session/")
 		if !ok {
 			continue

@@ -110,6 +110,9 @@ type stageSessionOpts struct {
 	// OnAgentStart, when non-nil, fires immediately before the executor
 	// is dispatched. See stageTurnSpec.OnAgentStart.
 	OnAgentStart func()
+	// AfterAdmission runs once quota has admitted the reserved session,
+	// before any stage writes. CI repair spends its claim at this boundary.
+	AfterAdmission func(*session.Session) error
 	// Headless drives the stage as a one-turn `claude -p` call instead
 	// of an interactive REPL. Output streams to the operator's
 	// terminal (no stdin), the workflow's oneshot.md fragment is
@@ -724,6 +727,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		},
 	}
 
+	var deferred *quotaDeferral
 	in.Admit = func(sess *session.Session) int {
 		fresh, err := run.Load(sess.WorktreePath, projectID, runID)
 		if err == nil {
@@ -765,10 +769,26 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				return run.Load(sess.WorktreePath, projectID, runID)
 			}, stderr)
 		in.Agent = agentName
+		if code == exitQuotaDeferred {
+			deferred = g.deferred
+			deferred.target.Project, deferred.target.Run, deferred.target.Stage = projectID, runID, docID
+		}
+		if code == 0 && opts.AfterAdmission != nil {
+			if err := opts.AfterAdmission(sess); err != nil {
+				moePrintf(stderr, "after quota admission: %v\n", err)
+				return 1
+			}
+		}
 		return code
 	}
 
 	code := runStageTurn(root, in, stdout, stderr)
+	if code == exitQuotaDeferred && deferred != nil && clockQuota != nil {
+		if err := clockQuota.record(*deferred, stderr); err != nil {
+			moePrintf(stderr, "pulse: record quota retry: %v\n", err)
+			return 1
+		}
+	}
 	if code != 0 {
 		// Error exit — skip the footer. Pairing every error with a
 		// "complete" footer would be worse than the asymmetry, and the
@@ -1032,6 +1052,7 @@ func runStageTurn(root string, in stageTurnInputs, stdout, stderr io.Writer) int
 		if code := in.Admit(sess); code != 0 {
 			if err := cancelReservation(); err != nil {
 				moePrintf(stderr, "%v\n", err)
+				return 1
 			}
 			return code
 		}

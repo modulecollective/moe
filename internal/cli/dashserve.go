@@ -296,6 +296,8 @@ func serveProjectState(now time.Time, p serve.ActivityProject) (state, detail st
 			dash.Plural(p.CoolTicks, "tick"), dash.HumanAgo(now, p.SweptAt))
 	case p.Failed():
 		return "failed", fmt.Sprintf("(%s) — %s", dash.HumanAgo(now, p.SweptAt), p.Decision)
+	case p.SweepDeferred:
+		return "deferred", p.Decision
 	}
 	return "", ""
 }

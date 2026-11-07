@@ -54,6 +54,13 @@ const (
 // "not started". 75 is EX_TEMPFAIL — try again later.
 const exitNotStarted = 75
 
+const exitQuotaDeferred = run.ExitQuotaDeferred
+
+type quotaDeferral struct {
+	target  run.QuotaTarget
+	retryAt time.Time
+}
+
 // cooldownSkipped is the invocation-wide bypass: set by --no-cooldown at
 // launch or by `a` at a waiting prompt, and never reset — "skip checks
 // for the rest of this invocation" means the MoE process, including
@@ -134,6 +141,7 @@ type cooldownGate struct {
 	refreshChanged bool
 	start          time.Time
 	bypassed       bool
+	deferred       *quotaDeferral
 }
 
 var newCooldownGate = func(resume string, stderr io.Writer) *cooldownGate {
@@ -197,12 +205,10 @@ func (g *cooldownGate) check(ctx context.Context, agentName, model string) (outc
 			status = fmt.Sprintf("%s quota check failed (%v); retrying in %s", agentName, err, pause)
 		} else {
 			failures = 0
-			for _, w := range q.Unresolved {
-				if w.UsedPercent >= cooldownThreshold {
-					return g.stop(fmt.Sprintf("%s %s %.0f%%: cannot identify which model this limit applies to", agentName, w.ID, w.UsedPercent)), waited
-				}
+			blocking, until, poll, err := quotaDecision(q, agentName, g.now())
+			if err != nil {
+				return g.stop(err.Error()), waited
 			}
-			blocking, until, poll := quotaBlock(q, g.now())
 			if len(blocking) == 0 && !q.Denied {
 				if waited {
 					moePrintf(g.stderr, "cooldown: %s quota recovered; starting\n", agentName)
@@ -247,6 +253,50 @@ func (g *cooldownGate) check(ctx context.Context, agentName, model string) (outc
 			waited = true
 		}
 	}
+}
+
+// yield reads once without opening controls or entering the wait budget.
+// Unknown quota is an admission error; only known exhaustion is deferred.
+func (g *cooldownGate) yield(ctx context.Context, agentName, model string) cooldownOutcome {
+	if ctx.Err() != nil {
+		return cooldownCancel
+	}
+	if cooldownSkipped.Load() || g.bypassed {
+		return cooldownAdmit
+	}
+	q, _, err := g.readOnce(ctx, agentName, model, nil)
+	if ctx.Err() != nil {
+		return cooldownCancel
+	}
+	if err != nil {
+		return g.stop(fmt.Sprintf("%s quota check failed: %v", agentName, err))
+	}
+	blocking, until, poll, err := quotaDecision(q, agentName, g.now())
+	if err != nil {
+		return g.stop(err.Error())
+	}
+	if len(blocking) == 0 && !q.Denied {
+		return cooldownAdmit
+	}
+	retryAt := g.now()
+	if !poll {
+		retryAt = until.Add(cooldownResetSlack)
+	}
+	g.deferred = &quotaDeferral{
+		target:  run.QuotaTarget{Backend: agentName, Model: model, Reason: describeQuotaBlock(agentName, blocking, q)},
+		retryAt: retryAt.UTC(),
+	}
+	return cooldownStop
+}
+
+func quotaDecision(q agent.Quota, agentName string, now time.Time) ([]agent.QuotaWindow, time.Time, bool, error) {
+	for _, w := range q.Unresolved {
+		if w.UsedPercent >= cooldownThreshold {
+			return nil, time.Time{}, false, fmt.Errorf("%s %s %.0f%%: cannot identify which model this limit applies to", agentName, w.ID, w.UsedPercent)
+		}
+	}
+	blocking, until, poll := quotaBlock(q, now)
+	return blocking, until, poll, nil
 }
 
 // readOnce runs one quota read while still answering Ctrl-C and the
@@ -353,6 +403,19 @@ func formatCap(d time.Duration) string {
 func stageCooldown(g *cooldownGate, agentName, model *string, resolve func(*run.Metadata) (string, string, error), reconcile func() (*run.Metadata, error), stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+	if clockInvoked {
+		switch g.yield(ctx, *agentName, *model) {
+		case cooldownCancel:
+			return exitInterrupted
+		case cooldownStop:
+			if g.deferred != nil {
+				return exitQuotaDeferred
+			}
+			return exitNotStarted
+		default:
+			return 0
+		}
+	}
 	for {
 		outcome, waited := g.check(ctx, *agentName, *model)
 		switch outcome {
