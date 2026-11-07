@@ -362,6 +362,15 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 		if last := lastPulseAt(sc, projectID, ""); !last.IsZero() && tipAt.After(last) {
 			unswept = true
 		}
+		if !unswept && !known && !retryAt.IsZero() {
+			// On restart, second-resolution timestamps can tie an operator
+			// edit to the deferral immediately before it. A future quota
+			// date must not hide that fresh work until a weekly reset.
+			pulseTip, err := git.Output(g.root, "log", "-1", "--format=%H", "--grep", "^MoE-Workflow: pulse$", "--", "projects/"+projectID)
+			if err == nil && strings.TrimSpace(pulseTip) != "" && strings.TrimSpace(pulseTip) != tip {
+				unswept = true
+			}
+		}
 		if !unswept {
 			if !retryAt.IsZero() {
 				return false, false, "deferred for quota until " + retryAt.Local().Format("2006-01-02 15:04:05 MST")
