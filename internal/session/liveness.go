@@ -158,22 +158,22 @@ func clearClaim(s *Session) {
 }
 
 // Reapable reports whether s is an orphan a machine may abandon: a
-// machine-marked claim whose process is provably gone. Every other
-// shape — no claim, an operator claim, a claim owned by another host, a
-// live pid, a fresh heartbeat — returns false, and those sessions are
+// machine-marked claim for this branch whose process is provably gone.
+// Every other shape — no matching claim, an operator claim, another host,
+// a live pid, a fresh heartbeat — returns false. Those sessions are
 // surfaced rather than touched.
 func Reapable(s *Session, now time.Time) bool {
 	c, ok := ReadClaim(s.Root, s.Project, s.Run, s.Doc)
-	if !ok || !c.Machine {
+	if !ok || c.Branch != s.Branch || !c.Machine {
 		return false
 	}
 	return claimDead(c, now)
 }
 
 // Dead reports whether a session's claimant is provably gone, whoever it
-// was. Exactly Reapable without the machine bit — and the distinction is
-// the point: a dead *operator* session may never be touched, but it has
-// also stopped meaning "somebody is inside this project", which is the
+// was. It tests claim death without authorizing teardown: a dead
+// *operator* session may never be touched, but it has also stopped
+// meaning "somebody is inside this project", which is the
 // only thing the heartbeat's stand-down asks it.
 //
 // Without that split, a Ctrl-C'd `moe pulse new` — or any operator stage

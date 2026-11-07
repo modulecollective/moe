@@ -104,6 +104,19 @@ func TestReapableOnlyForProvablyDeadMachineSessions(t *testing.T) {
 			want:  true,
 		},
 		{
+			name: "claim names another branch",
+			setup: func(t *testing.T, s *Session) {
+				deadClaim(t, s, true, 2*StaleAfter)
+				c, ok := ReadClaim(s.Root, s.Project, s.Run, s.Doc)
+				if !ok {
+					t.Fatal("missing fixture claim")
+				}
+				c.Branch += "-other"
+				writeClaimOrFail(t, s, c)
+			},
+			want: false,
+		},
+		{
 			name:  "dead operator session",
 			setup: func(t *testing.T, s *Session) { deadClaim(t, s, false, 2*StaleAfter) },
 			want:  false,

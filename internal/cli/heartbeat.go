@@ -68,6 +68,8 @@ import (
 // each child. Neither failed fetches nor a re-read at exit can move it.
 type heartbeatGate struct {
 	root string
+	// beforeReapLock lets tests pause between candidate selection and locking.
+	beforeReapLock func()
 
 	mu         sync.Mutex
 	tips       map[string]string
@@ -571,18 +573,42 @@ func (g *heartbeatGate) reap(log io.Writer) {
 		if !session.Reapable(s, now) {
 			continue
 		}
+		if g.beforeReapLock != nil {
+			g.beforeReapLock()
+		}
 		landed := false
+		completed := false
 		tip := ""
 		err := repolock.With(g.root, repolock.Options{
 			Purpose:   "heartbeat-reap",
 			Run:       s.Project + "/" + s.Run,
 			Heartbeat: true,
 		}, func() error {
+			// Admission may have resumed or replaced this candidate since
+			// selection. Only the current registered worktree and claim
+			// can authorize destruction while we hold the same lock.
+			current, err := session.List(g.root)
+			if err != nil {
+				return err
+			}
+			var matched *session.Session
+			for _, candidate := range current {
+				if candidate.Branch == s.Branch && candidate.WorktreePath == s.WorktreePath {
+					matched = candidate
+					break
+				}
+			}
+			now := time.Now()
+			if matched == nil || !session.Reapable(matched, now) {
+				return nil
+			}
+			s = matched
 			closeErr := session.Close(s)
 			var unchanged *session.CanvasUnchangedError
 			switch {
 			case closeErr == nil:
 				landed = true
+				completed = true
 				return nil
 			case errors.As(closeErr, &unchanged):
 				// Ordering rule: the note lands before the evidence is
@@ -595,7 +621,11 @@ func (g *heartbeatGate) reap(log io.Writer) {
 				if tip, err = tombstoneReap(g.root, s, now); err != nil {
 					return err
 				}
-				return session.Abandon(s)
+				if err := session.Abandon(s); err != nil {
+					return err
+				}
+				completed = true
+				return nil
 			default:
 				return closeErr
 			}
@@ -604,6 +634,9 @@ func (g *heartbeatGate) reap(log io.Writer) {
 			fmt.Fprintf(log, "heartbeat: reap %s: %v\n", s.Branch, err)
 			fmt.Fprintf(log, "heartbeat: left %s in place — `moe session resolve %s` or `moe session abandon %s`\n",
 				s.Branch, s.Branch, s.Branch)
+			continue
+		}
+		if !completed {
 			continue
 		}
 		// The abandon ending writes a tombstone of its own; Close's
