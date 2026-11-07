@@ -40,9 +40,13 @@ func TestQuotaDeferralCompletionAcrossHosts(t *testing.T) {
 			}
 			var notifications atomic.Int32
 			s.children.notify = func(string, error) { notifications.Add(1) }
-			// A deferral must neither erase nor increase failure history.
-			s.heartbeat.record("alpha", true)
-			s.heartbeat.record("alpha", true)
+			// Exercise both ordinary pacing and pre-existing failure history.
+			wantHistory := 0
+			if host != "local" {
+				s.heartbeat.record("alpha", true)
+				s.heartbeat.record("alpha", true)
+				wantHistory = 2
+			}
 			if host == "adopted rex" {
 				if err := testRex(s.children).adopt(); err != nil {
 					t.Fatal(err)
@@ -63,7 +67,7 @@ func TestQuotaDeferralCompletionAcrossHosts(t *testing.T) {
 			if !quotaDeferred(c.exitErr) || notifications.Load() != 0 {
 				t.Fatalf("exit=%v notifications=%d", c.exitErr, notifications.Load())
 			}
-			if s.heartbeat.fails["alpha"] != 2 || s.heartbeat.skip["alpha"] != 2 {
+			if s.heartbeat.fails["alpha"] != wantHistory || s.heartbeat.skip["alpha"] != wantHistory {
 				t.Fatalf("failure history changed: %v %v", s.heartbeat.fails, s.heartbeat.skip)
 			}
 			if host == "adopted rex" {
@@ -78,6 +82,9 @@ func TestQuotaDeferralCompletionAcrossHosts(t *testing.T) {
 				t.Fatalf("activity=%+v", p)
 			}
 			panel := s.activity.panel(time.Now())
+			if host == "local" && (len(panel.Projects) != 1 || panel.Projects[0].State != "deferred" || panel.Projects[0].Failed) {
+				t.Fatalf("deferral rendered as a failure or disappeared: %+v", panel.Projects)
+			}
 			for _, ev := range panel.Events {
 				if ev.Kind == "exit" && (ev.Failed || !strings.Contains(ev.Text, "deferred for quota")) {
 					t.Fatalf("exit event=%+v", ev)
