@@ -389,8 +389,8 @@ type ActivityProject struct {
 // Sweeping reports whether a sweep child is live for this project.
 func (p ActivityProject) Sweeping() bool { return !p.SweepStarted.IsZero() }
 
-// Cooling reports whether the project is serving out a failure cool-off.
-func (p ActivityProject) Cooling() bool { return p.CoolTicks > 0 }
+// Cooling reports a failure cool-off unless the latest sweep deferred.
+func (p ActivityProject) Cooling() bool { return p.CoolTicks > 0 && !p.SweepDeferred }
 
 // Failed reports that the last finished sweep died. Only meaningful once
 // a sweep has finished at all.

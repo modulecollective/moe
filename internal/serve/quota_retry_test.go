@@ -78,11 +78,11 @@ func TestQuotaDeferralCompletionAcrossHosts(t *testing.T) {
 				t.Fatalf("deferred survey acknowledged: %v", clean)
 			}
 			p := s.activity.snapshot(time.Now()).Projects[0]
-			if !p.SweepDeferred || p.SweepClean || p.Failed() || !strings.Contains(p.Decision, "deferred for quota until") {
+			if !p.SweepDeferred || p.SweepClean || p.Failed() || p.Cooling() || !strings.Contains(p.Decision, "deferred for quota until") {
 				t.Fatalf("activity=%+v", p)
 			}
 			panel := s.activity.panel(time.Now())
-			if host == "local" && (len(panel.Projects) != 1 || panel.Projects[0].State != "deferred" || panel.Projects[0].Failed) {
+			if len(panel.Projects) != 1 || panel.Projects[0].State != "deferred" || panel.Projects[0].Failed {
 				t.Fatalf("deferral rendered as a failure or disappeared: %+v", panel.Projects)
 			}
 			for _, ev := range panel.Events {

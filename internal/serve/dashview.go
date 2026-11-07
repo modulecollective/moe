@@ -512,7 +512,7 @@ func projectModes(root string) map[string]project.Mode {
 
 // serveProjectLine turns one project's record into its line. State
 // precedence is what the operator needs first: a live sweep, then a
-// cool-off holding the project back, then a dead last sweep, then a
+// quota deferral, then a failure cool-off or dead last sweep, then a
 // sweep the gate held, then quiet.
 //
 // held comes last of the earned states on purpose: it is this tick's
@@ -525,13 +525,13 @@ func serveProjectLine(now time.Time, id string, p *activityProject) serveProject
 		line.State = "sweeping"
 		line.Detail = "(" + dash.HumanDuration(now.Sub(p.started)) + ")"
 		line.Run = p.runID
+	case p.deferred:
+		line.State, line.Run = "deferred", p.runID
 	case p.coolTicks > 0:
 		line.State, line.Failed = "cooling", true
 		line.Detail = "(" + dash.Plural(p.coolTicks, "tick") + " left)"
 		line.Reason = fmt.Sprintf("last sweep failed %s", dash.HumanAgo(now, p.sweptAt))
 		line.Run = p.runID
-	case p.deferred:
-		line.State, line.Run = "deferred", p.runID
 	case !p.sweptAt.IsZero() && !p.clean:
 		line.State, line.Failed = "failed", true
 		line.Detail = "(" + dash.HumanAgo(now, p.sweptAt) + ")"

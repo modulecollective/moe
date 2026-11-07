@@ -56,6 +56,20 @@ func serveLines(t *testing.T, root string, now time.Time) string {
 	return buf.String()
 }
 
+func TestQuotaDeferralDashRetainsFailureHistory(t *testing.T) {
+	p := serve.ActivityProject{
+		Project: "tele", SweptAt: time.Now(), SweepDeferred: true,
+		Fails: 2, CoolTicks: 2, Decision: "deferred for quota until tomorrow",
+	}
+	if state, detail := serveProjectState(time.Now(), p); state != "deferred" || detail != p.Decision {
+		t.Fatalf("state=%q detail=%q", state, detail)
+	}
+	st := serveState{ok: true, live: serveAlive, snap: serve.ActivitySnapshot{Projects: []serve.ActivityProject{p}}}
+	if health := reportSlot(dashStatusReports(DashSnapshot{}, nil, st, DashFilter{}), "health"); health.State != "" {
+		t.Fatalf("quota pacing reported as a failure: %+v", health)
+	}
+}
+
 // TestDashSaysNothingWithoutAServe is the line budget's floor: an operator
 // who doesn't run serve sees the dash they saw before this change —
 // nothing below the banner and nothing in its tail.
