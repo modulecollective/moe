@@ -242,14 +242,18 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   `moe serve --dynamic` calls this with its own marker, and reads the exit
   status — which describes the whole invocation, including the rides the sweep
   started. `moe pulse new` exits non-zero when the sweep died, concluded
-  nothing, or a kicked ride stalled, which drives the failure backoff. A skip
-  exits 130, not a failure. It also passes `--emit-run <path>`: the sweep writes
-  the run it opens there, so /serve can link a sweep to the pulse run it minted
-  rather than leaving the operator to hunt the dash for a matching `pulse-*`
-  slug. It also passes its exact owned-PR observation through the internal
-  `--pr-checks` argument, so a successful sweep acknowledges what its survey
-  saw. New actionable failures on recorded pushed PRs can wake a sweep without a
-  journal change. A survey may nominate same-run CI repair with
+  nothing, or a kicked ride stalled, which drives the failure backoff. A clock
+  pulse with only quota deferrals exits 76: it neither increases the failure
+  streak nor clears previous failure history. Real failures take precedence
+  in mixed outcomes; interruption exits 130. See
+  [Subscription quota cooldown](workflows.md#subscription-quota-cooldown) for
+  the quota policy. The heartbeat also passes `--emit-run <path>`: the sweep
+  writes the run it opens there, so /serve can link a sweep to the pulse run it
+  minted rather than leaving the operator to hunt the dash for a matching
+  `pulse-*` slug. It also passes its exact owned-PR observation through the
+  internal `--pr-checks` argument, so a successful sweep acknowledges what its
+  survey saw. New actionable failures on recorded pushed PRs can wake a sweep
+  without a journal change. A survey may nominate same-run CI repair with
   `{"run":"<slug>","repair":"ci"}` in a singleton thread group. Dynamic consent
   and safe-mode operator marks still apply; a fresh run note licenses retry
   after the one-attempt-per-head journal claim is spent.

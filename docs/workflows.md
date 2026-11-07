@@ -770,27 +770,37 @@ run rather than letting one failed sweep wedge the project. In a mixed
 outcome, real failures take precedence over quota deferral; failure backoff
 and any recorded quota retry both apply.
 
-The heartbeat also reaps: a session branch whose machine walk died — same host,
-pid gone, heartbeat stale — is abandoned so the run re-parks. A robot half-turn
-is regenerable. Before the branch goes, the reap stamps a tombstone on the
-run — which stage died, when, and the abandoned branch tip — so a run whose turn
+The heartbeat also recovers machine sessions whose matching claim proves the
+owner dead — same host and PID namespace, process gone, heartbeat stale. It
+checks ownership again before acting and leaves a session resumed meanwhile
+alone. Recovery first tries normal session close: if that succeeds, committed
+work lands in the bureaucracy journal. The run stays open at its stage;
+recovery itself neither advances nor ships it, and leaves no reap tombstone.
+
+If close refuses because there is no committed canvas change, recovery stamps
+a tombstone before abandoning the session so the run re-parks. The tombstone
+names which stage died, when, and the abandoned branch tip, so a run whose turn
 was dropped stops reading like one the loop never reached; `moe dash` marks the
 row `· died` and the run page names the sha the transcript is still readable at.
+Other close failures leave the session in place for inspection and recovery;
+the log names `moe session resolve` and `moe session abandon`.
 
-The tombstone is a brake as well as a record, and that is what keeps one refusal
-from costing a stage turn every sweep: a headless stage that refuses because the
-work needs you exits with nothing written, so with no brake the next sweep kicks
-the same stage again. While the note stands the kick floor holds the whole
-thread and the heartbeat's pre-ask skips it. Any touch of your own on the
-thread — a `moe input` note, an advance, a `moe chain edit` or `moe chain clear`
-that names one of its runs, anything landing a journal commit the machine
-didn't stamp — releases it for one retry, and opening a stage there clears it
-outright. If that retry refuses too, its fresh tombstone re-arms the hold: each
-thing you do buys one attempt and no more.
+For an abandoned session, the tombstone is a brake as well as a record, and that
+is what keeps one refusal from costing a stage turn every sweep: a headless
+stage that refuses because the work needs you can leave no committed canvas
+change, so with no brake the next sweep kicks the same stage again. While the
+note stands the kick floor holds the whole thread and the heartbeat's pre-ask
+skips it. Any touch of your own on the thread — a `moe input` note, an advance,
+a `moe chain edit` or `moe chain clear` that names one of its runs, anything
+landing a journal commit the machine didn't stamp — releases it for one retry,
+and opening a stage there clears it outright. If that retry refuses too, its
+fresh tombstone re-arms the hold: each thing you do buys one attempt and no more.
 
-Sessions you started, sessions whose claimant might still be alive, and
-sessions with no record at all are never touched; they surface on the dash's
-ACTIVE row and `moe session resolve` / `moe session abandon` are still yours.
+Sessions you started, sessions whose claimant might still be alive, and sessions
+with no record at all are never touched; they surface on the dash's ACTIVE row
+and `moe session resolve` / `moe session abandon` are still yours. See
+[Cleanup And Recovery](reference.md#cleanup-and-recovery) for manual recovery
+conditions.
 
 ## Twin
 
