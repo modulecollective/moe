@@ -533,16 +533,19 @@ Current checks on recorded PRs belonging to pushed sdlc runs appear in a
 separate block, including the head, check URLs and prior repair claims. A
 survey can nominate `{"run":"<exact-slug>","repair":"ci"}` as the only
 entry in a `threads[].runs` group, with no `onto` or `head`; `park` can
-withhold it. Under dynamic consent the harness rechecks the current PR,
-claims an attempt in the journal, and continues the same run through code,
-fresh test and review, then updates that PR without merging or riding other
-chain members. Safe-mode heartbeats still need an operator mark; add a note
-with `moe input add <project>/<run>` to authorize repair. One automatic
-attempt is allowed per head across restarts. A fresh note can authorize a
-retry on the same head, and each note can license only one claim. Unavailable
-checks are unknown, and successful, pending or cancelled checks do not
-nominate repair. The survey judges whether failure warrants a repair or a
-concrete hold; the heartbeat never starts code directly.
+withhold it. Under dynamic consent, code first passes quota admission; the
+harness then rechecks the current PR and claims an attempt in the journal
+before executing code. Fresh test and review follow, then that PR is updated
+without merging or riding other chain members. Safe-mode heartbeats still
+need an operator mark; add a note with `moe input add <project>/<run>` to
+authorize repair. One automatic attempt is allowed per head across restarts.
+A fresh note can authorize a retry on the same head, and each note can license
+only one claim. Quota deferral before the claim spends no attempt. Deferral
+after the claim stops the repair, keeps the claim spent, and requires operator
+recovery or fresh input; it creates no automatic repair continuation.
+Unavailable checks are unknown, and successful, pending or cancelled checks
+do not nominate repair. The survey judges whether failure warrants a repair
+or a concrete hold; the heartbeat never starts code directly.
 
 ### Proposed work and grooming
 
@@ -740,12 +743,25 @@ to that survey; failures arriving during its rides remain visible to the next
 tick. Healthy and pending changes alone spend no turn. No recorded pushed PR
 means no added network read.
 
+Known quota exhaustion yields the session and records a retry in the journal.
+The first ordinary heartbeat at or after its date can commission a fresh
+survey, even after restart and with nothing parked. The survey rejudges the
+current board; it never resumes an old kick plan. Future retries alone cost
+no run or agent call and do not block new journal, chore or PR work. Paused
+mode, the operator quiet window and live occupancy still hold a due retry.
+Stopping or unarming serve leaves its dates inert. Pure quota deferral neither
+acknowledges the board or PR checks as fully surveyed nor increases the
+failure streak, and sends no routine exit webhook. Existing failure history
+stays until a fully clean sweep. Other eligible roots still get their turn.
+
 Failure cools itself off: consecutive failed sweeps back a project's tick off
-exponentially, so a night of exhausted plan limits leaves a couple of open
-pulse runs on the dash rather than a pile. The first failure's run, sitting on
-ACTIVE, is the tell — a sweep that died leaves it open forever, and the
-heartbeat deliberately sweeps straight past it rather than letting one dead
-vendor night wedge the project until you notice.
+exponentially, so a dead network or unavailable quota interface does not mint
+a pile of pulse runs. Quota admission refused before any survey agent starts
+closes the untouched pulse with a skip note. An agent that started and died
+leaves its real artifact open on ACTIVE; the heartbeat sweeps past that open
+run rather than letting one failed sweep wedge the project. In a mixed
+outcome, real failures take precedence over quota deferral; failure backoff
+and any recorded quota retry both apply.
 
 The heartbeat also reaps: a session branch whose machine walk died — same host,
 pid gone, heartbeat stale — is abandoned so the run re-parks. A robot half-turn
@@ -818,11 +834,20 @@ per-project dev secrets are covered in
 
 Before each top-level agent stage, including the first stage of a ride,
 MoE checks the selected backend's subscription usage without running a
-model turn. At 95% used it waits for all applicable blocking windows to
-reset, then reads usage again. The wait has a six-hour total budget per
-stage; a reset beyond that budget stops immediately. Unsupported quota
-interfaces and malformed readings stop clearly. Transport errors retry
-twice, one minute apart. No backend or billing setting changes.
+model turn. At 95% used, operator-invoked stages and rides wait for all
+applicable blocking windows to reset, then read usage again. The wait has a
+six-hour total budget per stage; a reset beyond that budget stops immediately.
+Unsupported quota interfaces and malformed readings stop clearly. Transport
+errors retry twice, one minute apart. No backend or billing setting changes.
+
+Heartbeat-invoked stages instead read once and yield immediately when blocked.
+The pulse journals the earliest retry among its deferred roots, using each
+stage's latest blocking reset plus five seconds. If any blocking reset is
+missing or past, the next ordinary tick can retry. Weekly resets may defer
+for days without retaining a process. Unavailable quota, including unresolved
+high model scope, refuses without transport sleeps and uses failure backoff.
+Every later stage admission reads fresh quota; a retry date never admits work
+on its own. Typed dynamic pulses keep the ordinary wait policy.
 
 At an interactive stage's attached terminal, `c` + Enter continues that
 stage now, `a` + Enter skips checks for the rest of this invocation, and
@@ -835,11 +860,12 @@ and chain ride. For example:
 moe sdlc code --no-cooldown --chain myproject/my-run
 ```
 
-A quota refusal returns 75 and leaves the stage unstarted; Ctrl-C returns
-130. Re-run the printed stage command to resume. Existing resumed work
-is preserved. Five percent headroom cannot reserve quota or guarantee
-that a stage finishes. Bypassing may consume paid credits if the agent's
-existing account settings allow it; MoE does not enable overage.
+A quota refusal returns 75 and leaves the stage unstarted; a clock pulse with
+only quota deferrals returns 76; Ctrl-C returns 130. Re-run the printed stage
+command to resume an operator-invoked stage. Existing resumed work is
+preserved. Five percent headroom cannot reserve quota or guarantee that a
+stage finishes. Bypassing may consume paid credits if the agent's existing
+account settings allow it; MoE does not enable overage.
 
 The adapters target Claude Code 2.1.316's experimental `get_usage`
 control interface and Codex CLI 0.167.0's app-server
