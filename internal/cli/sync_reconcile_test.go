@@ -281,6 +281,9 @@ func TestReconcileTransitionsMerged(t *testing.T) {
 	if !strings.Contains(body, "MoE-Merged: abc1234deadbeef") {
 		t.Fatalf("merge trailer missing:\n%s", body)
 	}
+	if strings.Contains(body, "MoE-Consent:") {
+		t.Fatalf("manual reconciliation stamped machine consent:\n%s", body)
+	}
 	want := "fix-it: pushed -> merged (abc1234)\n"
 	if stdout.String() != want {
 		t.Fatalf("stdout: want %q, got %q", want, stdout.String())

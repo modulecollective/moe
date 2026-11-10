@@ -279,8 +279,8 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 	surveyed := g.surveyed[projectID] == tip
 	g.mu.Unlock()
 
-	// Poll before the journal-tip short circuit. An external check result
-	// does not move the journal. Failed reads do not overwrite observations.
+	// Poll before the journal-tip short circuit. External PR state and
+	// check results do not move the journal. Failed reads are unknown.
 	log := g.log
 	if log == nil {
 		log = io.Discard
@@ -291,9 +291,16 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 	}
 	g.mu.Lock()
 	prChanged := false
+	prFinished := false
 	for _, p := range prs {
 		if p.Error != "" {
 			continue
+		}
+		if p.State == "MERGED" || p.State == "CLOSED" {
+			// Reconcile is warn-only. Keep offering this fact until the
+			// journal transition removes the run from the pushed set,
+			// even if a survey succeeds after reconciliation failed.
+			prFinished = true
 		}
 		snapshot := prFailureSnapshot([]ownedPRChecks{p})
 		if snapshot == "" {
@@ -322,7 +329,7 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 		// the sweep kicks passes safe on its own terms.
 		choreReason = choreClockReason(sc, projectID, now)
 	}
-	if !moved && choreReason == "" && !prChanged && !retryDue {
+	if !moved && choreReason == "" && !prChanged && !prFinished && !retryDue {
 		// A clean sweep already surveyed this exact board. Whatever is
 		// parked on it, the survey saw and left parked on purpose, so
 		// offering it again is re-asking a question the machine has
@@ -433,6 +440,9 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 	}
 	g.mu.Unlock()
 
+	if prFinished {
+		return true, false, "an owned PR finished; reconciliation pending"
+	}
 	if prChanged {
 		return true, false, "new failing checks on an owned PR"
 	}

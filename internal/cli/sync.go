@@ -338,6 +338,7 @@ func finalizePushedRun(root, projectID, runID, status string, extra trailers.Blo
 		extra.Run = runID
 		extra.Project = projectID
 		extra.Document = "push"
+		extra.Consent = walkConsent()
 		msg := fmt.Sprintf("sync: %s/%s %s\n\n", projectID, runID, strings.ToLower(status)) +
 			extra.String()
 		if err := commitTerminal(root, md, priorStatus, msg, paths); err != nil {
