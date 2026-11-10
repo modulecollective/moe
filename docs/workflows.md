@@ -743,12 +743,16 @@ batch, since staging one by hand is the point. The heartbeat stands down while
 anything is live in the project — a ride mid-hop, you sitting in a stage, a
 survey mid-turn — and for one full tick after anything you did by hand. A quiet
 board costs no agent turn, run or journal line. Recorded pushed PRs are polled
-at this cadence outside the journal lock. A new actionable failure can wake a
-survey even when the journal has not moved. Stable failure observations are
-acknowledged only after a successful sweep, against the exact snapshot handed
-to that survey; failures arriving during its rides remain visible to the next
-tick. Healthy and pending changes alone spend no turn. No recorded pushed PR
-means no added network read.
+at this cadence outside the journal lock. A merged or closed owned PR wakes a
+pulse to reconcile its still-pushed run before the survey reads the board. It
+keeps waking eligible ticks until reconciliation succeeds, including after a
+restart. This follows the twenty-minute cadence and existing holds and failure
+backoff; it is not an immediate refresh. Run `moe sync` for immediate
+reconciliation. A new actionable failure can also wake a survey even when the
+journal has not moved. Stable failure observations are acknowledged only after a
+successful sweep, against the exact snapshot handed to that survey; failures
+arriving during its rides remain visible to the next tick. Healthy and pending
+changes alone spend no turn. No recorded pushed PR means no added network read.
 
 Known quota exhaustion yields the session and records a retry in the journal.
 The first ordinary heartbeat at or after its date can commission a fresh
