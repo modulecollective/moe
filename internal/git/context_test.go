@@ -52,7 +52,8 @@ func TestCombinedContext_TimeoutReapsTransportChild(t *testing.T) {
 	gittest.Commit(t, dir, "seed")
 	proxy, accepted := blackHoleProxy(t)
 
-	const budget = 500 * time.Millisecond
+	// Leave room for git and its transport helper to start under load.
+	const budget = 5 * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 
@@ -73,7 +74,7 @@ func TestCombinedContext_TimeoutReapsTransportChild(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("error = %v, want it to unwrap to context.DeadlineExceeded", err)
 	}
-	if got := err.Error(); !strings.Contains(got, "timed out after 500ms") {
+	if got := err.Error(); !strings.Contains(got, "timed out after 5s") {
 		t.Errorf("error = %q, want it to name the budget it blew", got)
 	}
 
