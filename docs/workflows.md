@@ -122,6 +122,55 @@ back, or close the run just because you walked away from it. Both keys decline
 at `moe init`'s "commit now?" prompt too, leaving the scaffold staged. Text
 typed before the Ctrl-D still counts as the answer.
 
+**Inspecting work in Rex.** Interactive sdlc chain prompts in a direct Rex
+terminal offer `v` (view the displayed canvas) and, after code, `f` (source
+diff). Each opens a focused temporary Rex window; exit the viewer to return
+to the same decision. Inspection starts no stage and changes no advancement
+mark. Outside direct Rex, in tmux/screen, with redirected input/output, or
+under `--park` or headless execution, use the printed canvas and ordinary
+shell tools.
+
+Both viewers independently default to `less` (scroll, search, `q` to exit).
+Set `MOE_MARKDOWN_PAGER` for canvases and `MOE_DIFF_VIEWER` for patches:
+
+```sh
+export MOE_MARKDOWN_PAGER='less -M'
+export MOE_DIFF_VIEWER='hunk patch'
+```
+
+Unset or whitespace-only settings use the default; generic `PAGER`,
+`GIT_PAGER` and editor settings are not consulted. An explicit setting is a
+single foreground command with arguments, parsed by `/bin/sh`, with one
+absolute snapshot filename appended as its final argument. Flags and quoted
+executable paths work. For adaptation, use a wrapper ending in `exec`;
+pipelines, backgrounding and commands that exit before their viewer are
+outside the contract. The child runs in a private scratch directory, with
+the invoking `PATH`, `LESSSECURE=1`, and empty `LESS`, `LESSOPEN` and
+`LESSCLOSE`. MoE provides no repository directory or Git refs to the viewer.
+Configured-command failures name the setting and return to the decision
+without substituting another viewer.
+
+The canvas snapshot contains the displayed bytes with a run/stage header.
+The source diff contains only the unified patch for all committed changes
+on `moe/<run>` against its merge base with the project's local default
+branch. The parent terminal prints repository, branch, commit IDs and
+diffstat, and reports excluded uncommitted files or unknown working-tree
+state. Local refs may lag origin: inspection never fetches, checks out,
+rebases or creates a workspace. Bureaucracy edits are outside this source
+comparison. An empty diff reports no committed source changes and opens
+nothing; missing refs are errors.
+
+Inspection requires local `rex`, preview.13/API revision 10 or newer, and a
+same-account Unix server sharing the filesystem. The built-in viewer also
+requires local `less`; configured viewers require `/bin/sh`. Options with
+missing local prerequisites are omitted. MoE creates a private snapshot,
+waits for the viewer, closes only its own block and restores the originating
+block's focus if it still exists. A failed or ambiguous Rex operation is
+reported at the decision. If reader lifetime remains unknown, the error
+names the retained snapshot directory and any known viewer block; MoE does
+not retry creation and removes inspection choices from that decision.
+Ctrl-C at the parent exits the prompt and attempts to close its known viewer.
+
 **Blocked gates.** When a `test` or `review` session closes blocked, the gate
 kicks the run back rather than parking. Interactively the chain prompt becomes a
 kickback offer `[Y/n/d/x]`: `Y` (default) reopens `code` seeded with the

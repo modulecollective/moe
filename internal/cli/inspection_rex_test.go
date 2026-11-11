@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 const (
@@ -85,7 +86,18 @@ func TestInspectionRexProcess(t *testing.T) {
 			break
 		}
 		fmt.Printf(`{"block_ids":[%q]}`, inspectionBlock)
+		if mode == "run-failed-reply" {
+			os.Exit(1)
+		}
 	case "wait":
+		if mode == "interrupt" {
+			parent, err := os.FindProcess(os.Getppid())
+			fail(err)
+			fail(parent.Signal(os.Interrupt))
+			// The parent must cancel and join this wait process.
+			<-time.After(30 * time.Second)
+			os.Exit(95)
+		}
 		if mode == "wait-unknown" || mode == "fast-exit" {
 			os.Exit(1)
 		}
@@ -104,7 +116,7 @@ func TestInspectionRexProcess(t *testing.T) {
 			}
 			fmt.Printf(`{"blocks":[{"block_id":%q}]}`, inspectionOrigin)
 		case slices.Contains(args, "process"):
-			if mode == "fast-exit" {
+			if mode == "fast-exit" || mode == "run-failed-reply" {
 				fmt.Print(`{"last_exit":{"exit_code":0}}`)
 			} else {
 				fmt.Print(`{"last_exit":null}`)
@@ -139,6 +151,7 @@ func fakeInspectionRex(t *testing.T, mode string) (rexInspectionLocation, string
 	t.Setenv("MOE_INSPECTION_FAKE", "1")
 	t.Setenv("MOE_INSPECTION_MODE", mode)
 	t.Setenv("MOE_INSPECTION_LOG", log)
+	t.Setenv("GORACE", os.Getenv("GORACE")+" atexit_sleep_ms=0")
 	t.Setenv("REX_SESSION", inspectionSession)
 	t.Setenv("REX_BLOCK", inspectionOrigin)
 	return rexInspectionLocation{bin: path, session: inspectionSession, origin: inspectionOrigin}, log
@@ -167,7 +180,7 @@ func inspectionRexRecords(t *testing.T, log string) []inspectionRexRecord {
 }
 
 func TestInspectionRexLifecycle(t *testing.T) {
-	for _, mode := range []string{"ok", "viewer-fail", "fast-exit", "wait-unknown", "lost-run", "invalid-id", "origin-id", "close-fail", "focus-fail", "remote", "old", "listing-fail"} {
+	for _, mode := range []string{"ok", "viewer-fail", "fast-exit", "run-failed-reply", "wait-unknown", "lost-run", "invalid-id", "origin-id", "close-fail", "focus-fail", "remote", "old", "listing-fail"} {
 		t.Run(mode, func(t *testing.T) {
 			r, log := fakeInspectionRex(t, mode)
 			a := inspectionArtifact{kind: inspectDiff, title: `demo/run source diff '$;`, body: "diff --git a/file b/file\n"}

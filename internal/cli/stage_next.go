@@ -387,13 +387,14 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 			priorCanvas = "test"
 		}
 	}
-	body := readPrintableCanvas(root, md, priorCanvas)
+	body := ""
 	if priorCanvas != "" {
-		if body != "" {
-			fmt.Fprint(stdout, body)
-			if !strings.HasSuffix(body, "\n") {
-				fmt.Fprintln(stdout)
-			}
+		body = readPrintableCanvas(root, md, priorCanvas)
+	}
+	if body != "" {
+		fmt.Fprint(stdout, body)
+		if !strings.HasSuffix(body, "\n") {
+			fmt.Fprintln(stdout)
 		}
 	}
 	opts := []promptOption{
@@ -446,7 +447,9 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 		extra = "  !<stage> = cascade to gate · !! = ship this run · !!! = ship + ride the chain"
 	}
 	inspect := newPromptInspection(root, md, priorCanvas, body, next.Name == "test" || next.Name == "review", stdout)
-	line, interrupted, err := readInspectionDecision(inspect, opts, "next: "+hint+" — run now?", extra, stdout, stderr)
+	sig, stopSig := installSigint()
+	defer stopSig()
+	line, interrupted, err := readInspectionDecision(inspect, opts, "next: "+hint+" — run now?", extra, sig, stdout, stderr)
 	if interrupted {
 		// Cooked-mode Ctrl-C used to trap the runtime. Treat it as
 		// "decline" — safer default than guessing — and exit cleanly
@@ -562,7 +565,9 @@ func promptKickback(g *CommandGroup, scuttle *Command, root string, md *run.Meta
 		opts = append(opts, promptOption{key: 'x', hint: "scuttle (close)"})
 	}
 	inspect := newPromptInspection(root, md, blockedStage, canvas, true, stdout)
-	line, interrupted, err := readInspectionDecision(inspect, opts, blockedStage+" blocked — kick back to fix?", "", stdout, stderr)
+	sig, stopSig := installSigint()
+	defer stopSig()
+	line, interrupted, err := readInspectionDecision(inspect, opts, blockedStage+" blocked — kick back to fix?", "", sig, stdout, stderr)
 	if interrupted {
 		moePrintln(stdout, "^C")
 		return 0
@@ -697,7 +702,9 @@ func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root 
 		extra = fmt.Sprintf("  !! = ship this run (%s) · !!! = ship + ride the chain", project.ReadShip(root, md.Project))
 	}
 	inspect := newPromptInspection(root, md, canvasStage, body, true, stdout)
-	line, interrupted, err := readInspectionDecision(inspect, opts, "next: "+hint+" — run now?", extra, stdout, stderr)
+	sig, stopSig := installSigint()
+	defer stopSig()
+	line, interrupted, err := readInspectionDecision(inspect, opts, "next: "+hint+" — run now?", extra, sig, stdout, stderr)
 	if interrupted {
 		// N is already the default here; SIGINT collapses to the same
 		// safe sentinel and avoids the runtime trap.

@@ -18,6 +18,14 @@ type rexInspectionLocation struct {
 	bin, endpoint, session, origin string
 }
 
+type inspectionLifetimeUnknown struct {
+	block, snapshot string
+}
+
+func (e *inspectionLifetimeUnknown) Error() string {
+	return fmt.Sprintf("viewer lifetime unknown (block %q); snapshot retained at %s; further inspection disabled at this decision", e.block, e.snapshot)
+}
+
 // Full IDs avoid Rex's label/suffix/focus resolution, including on cleanup.
 func inspectionRexID(id, kind string) bool {
 	value, ok := strings.CutPrefix(id, kind+":")
@@ -171,7 +179,7 @@ func presentRexArtifact(ctx context.Context, r rexInspectionLocation, a inspecti
 	block := ""
 	defer func() {
 		if retain {
-			result = errors.Join(result, fmt.Errorf("viewer lifetime unknown (block %q); snapshot retained at %s", block, dir))
+			result = errors.Join(result, &inspectionLifetimeUnknown{block, dir})
 		} else {
 			result = errors.Join(result, os.RemoveAll(dir))
 		}

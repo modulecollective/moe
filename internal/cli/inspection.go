@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -223,24 +224,25 @@ func (p *promptInspection) inspect(answer string, sig <-chan os.Signal, out, err
 	interrupted = <-done
 	if err != nil {
 		fmt.Fprintf(errOut, "inspection: %v\n", err)
+		if _, unknown := errors.AsType[*inspectionLifetimeUnknown](err); unknown {
+			clear(p.viewers)
+		}
 	}
 	return true, interrupted
 }
 
 // Only completed stdin reads can enter inspection. An interrupted read exits
 // immediately, because its goroutine may still own the shared reader.
-func readInspectionDecision(p *promptInspection, opts []promptOption, question, extra string, out, errOut io.Writer) (string, bool, error) {
-	opts = p.options(opts)
-	sig, stop := installSigint()
-	defer stop()
+func readInspectionDecision(p *promptInspection, opts []promptOption, question, extra string, sig <-chan os.Signal, out, errOut io.Writer) (string, bool, error) {
 	for {
 		select {
 		case <-sig:
 			return "", true, nil
 		default:
 		}
-		moePrintf(out, "%s %s\n", question, renderPromptLabel(opts))
-		moePrintln(out, renderPromptLegend(opts))
+		available := p.options(opts)
+		moePrintf(out, "%s %s\n", question, renderPromptLabel(available))
+		moePrintln(out, renderPromptLegend(available))
 		if extra != "" {
 			moePrintln(out, extra)
 		}
