@@ -614,6 +614,7 @@ func (g *heartbeatGate) reap(log io.Writer) {
 			}
 			s = matched
 			closeErr := session.Close(s)
+			printSessionRecovery(s, log)
 			var unchanged *session.CanvasUnchangedError
 			switch {
 			case closeErr == nil:
