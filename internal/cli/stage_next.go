@@ -160,7 +160,7 @@ func promptNextStageOverride(root string, md *run.Metadata, justFinished, overri
 						wf.Name, md.Project, md.ID, justFinished)
 					return 0
 				}
-				return promptKickback(g, scuttle, md, justFinished, canvas, stdout, stderr)
+				return promptKickback(g, scuttle, root, md, justFinished, canvas, stdout, stderr)
 			}
 		}
 	}
@@ -387,8 +387,9 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 			priorCanvas = "test"
 		}
 	}
+	body := readPrintableCanvas(root, md, priorCanvas)
 	if priorCanvas != "" {
-		if body := readPrintableCanvas(root, md, priorCanvas); body != "" {
+		if body != "" {
 			fmt.Fprint(stdout, body)
 			if !strings.HasSuffix(body, "\n") {
 				fmt.Fprintln(stdout)
@@ -440,15 +441,12 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 		// line below only covers the genuinely multi-character forms.
 		opts = append(opts, promptOption{key: '!', hint: "cascade one stage"})
 	}
-	label := renderPromptLabel(opts)
-	moePrintf(stdout, "next: %s — run now? %s\n", hint, label)
-	moePrintln(stdout, renderPromptLegend(opts))
+	extra := ""
 	if dispatcher != nil {
-		moePrintln(stdout, "  !<stage> = cascade to gate · !! = ship this run · !!! = ship + ride the chain")
+		extra = "  !<stage> = cascade to gate · !! = ship this run · !!! = ship + ride the chain"
 	}
-	sig, stopSig := installSigint()
-	defer stopSig()
-	line, interrupted, err := readLineWithSignal(stdinSharedReader(), sig)
+	inspect := newPromptInspection(root, md, priorCanvas, body, next.Name == "test" || next.Name == "review", stdout)
+	line, interrupted, err := readInspectionDecision(inspect, opts, "next: "+hint+" — run now?", extra, stdout, stderr)
 	if interrupted {
 		// Cooked-mode Ctrl-C used to trap the runtime. Treat it as
 		// "decline" — safer default than guessing — and exit cleanly
@@ -547,7 +545,7 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 // Caller responsibility: gate on stdinIsTerminal() before invoking
 // (promptNextStageOverride does, falling back to a back-pointing nudge
 // for non-TTY callers).
-func promptKickback(g *CommandGroup, scuttle *Command, md *run.Metadata, blockedStage, canvas string, stdout, stderr io.Writer) int {
+func promptKickback(g *CommandGroup, scuttle *Command, root string, md *run.Metadata, blockedStage, canvas string, stdout, stderr io.Writer) int {
 	fmt.Fprint(stdout, canvas)
 	if !strings.HasSuffix(canvas, "\n") {
 		fmt.Fprintln(stdout)
@@ -563,12 +561,8 @@ func promptKickback(g *CommandGroup, scuttle *Command, md *run.Metadata, blocked
 	if scuttle != nil {
 		opts = append(opts, promptOption{key: 'x', hint: "scuttle (close)"})
 	}
-	label := renderPromptLabel(opts)
-	moePrintf(stdout, "%s blocked — kick back to fix? %s\n", blockedStage, label)
-	moePrintln(stdout, renderPromptLegend(opts))
-	sig, stopSig := installSigint()
-	defer stopSig()
-	line, interrupted, err := readLineWithSignal(stdinSharedReader(), sig)
+	inspect := newPromptInspection(root, md, blockedStage, canvas, true, stdout)
+	line, interrupted, err := readInspectionDecision(inspect, opts, blockedStage+" blocked — kick back to fix?", "", stdout, stderr)
 	if interrupted {
 		moePrintln(stdout, "^C")
 		return 0
@@ -671,9 +665,10 @@ func runKickbackSession(md *run.Metadata, document, blockedStage, canvas string,
 // be left over from a prior push attempt — stale relative to whatever
 // the operator's about to do. Review → test → code is the live story.
 func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root string, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
-	body := ""
+	body, canvasStage := "", ""
 	for _, stage := range []string{"review", "test", "code"} {
 		if body = readPrintableCanvas(root, md, stage); body != "" {
+			canvasStage = stage
 			break
 		}
 	}
@@ -696,19 +691,13 @@ func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root 
 	if len(back) > 0 {
 		opts = append(opts, promptOption{key: 'b', hint: backHint(back)})
 	}
-	label := renderPromptLabel(opts)
-	moePrintf(stdout, "next: %s — run now? %s\n", hint, label)
-	moePrintln(stdout, renderPromptLegend(opts))
+	extra := ""
 	if md.Workflow == "sdlc" {
-		// The bangs take the project's ship route, and `!!` is one
-		// keystroke from a reflex Enter — name the route it takes so the
-		// operator reads it before typing it. m/p are already explicit.
-		moePrintf(stdout, "  !! = ship this run (%s) · !!! = ship + ride the chain\n",
-			project.ReadShip(root, md.Project))
+		// Name the standing route before the operator types a bang.
+		extra = fmt.Sprintf("  !! = ship this run (%s) · !!! = ship + ride the chain", project.ReadShip(root, md.Project))
 	}
-	sig, stopSig := installSigint()
-	defer stopSig()
-	line, interrupted, err := readLineWithSignal(stdinSharedReader(), sig)
+	inspect := newPromptInspection(root, md, canvasStage, body, true, stdout)
+	line, interrupted, err := readInspectionDecision(inspect, opts, "next: "+hint+" — run now?", extra, stdout, stderr)
 	if interrupted {
 		// N is already the default here; SIGINT collapses to the same
 		// safe sentinel and avoids the runtime trap.

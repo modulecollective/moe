@@ -84,7 +84,7 @@ func TestPromptKickbackDefaultsToCode(t *testing.T) {
 			feedStdin(t, tc.input)
 			md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 			var stdout, stderr bytes.Buffer
-			if code := promptKickback(sdlcGroup(t), nil, md, "review", blockedReviewCanvas, &stdout, &stderr); code != 0 {
+			if code := promptKickback(sdlcGroup(t), nil, t.TempDir(), md, "review", blockedReviewCanvas, &stdout, &stderr); code != 0 {
 				t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 			}
 			if !*ran {
@@ -104,7 +104,7 @@ func TestPromptKickbackDToDesign(t *testing.T) {
 	feedStdin(t, "d")
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 	var stdout, stderr bytes.Buffer
-	if code := promptKickback(sdlcGroup(t), nil, md, "test", blockedReviewCanvas, &stdout, &stderr); code != 0 {
+	if code := promptKickback(sdlcGroup(t), nil, t.TempDir(), md, "test", blockedReviewCanvas, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	if !*ran || *doc != "design" {
@@ -119,7 +119,7 @@ func TestPromptKickbackNParks(t *testing.T) {
 	feedStdin(t, "n")
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 	var stdout, stderr bytes.Buffer
-	if code := promptKickback(sdlcGroup(t), nil, md, "review", blockedReviewCanvas, &stdout, &stderr); code != 0 {
+	if code := promptKickback(sdlcGroup(t), nil, t.TempDir(), md, "review", blockedReviewCanvas, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	if *ran {
@@ -144,7 +144,7 @@ func TestPromptKickbackScuttle(t *testing.T) {
 	feedStdin(t, "x")
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 	var stdout, stderr bytes.Buffer
-	if code := promptKickback(sdlcGroup(t), scuttle, md, "review", blockedReviewCanvas, &stdout, &stderr); code != 0 {
+	if code := promptKickback(sdlcGroup(t), scuttle, t.TempDir(), md, "review", blockedReviewCanvas, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	if *ran {
@@ -167,7 +167,7 @@ func TestPromptKickbackPrintsCanvasAndLabel(t *testing.T) {
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 	scuttle := &Command{Name: "close", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
 	var stdout, stderr bytes.Buffer
-	if code := promptKickback(sdlcGroup(t), scuttle, md, "review", blockedReviewCanvas, &stdout, &stderr); code != 0 {
+	if code := promptKickback(sdlcGroup(t), scuttle, t.TempDir(), md, "review", blockedReviewCanvas, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -196,7 +196,7 @@ func TestPromptKickbackNoDesignDropsD(t *testing.T) {
 	feedStdin(t, "d")
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 	var stdout, stderr bytes.Buffer
-	if code := promptKickback(g, nil, md, "review", blockedReviewCanvas, &stdout, &stderr); code != 0 {
+	if code := promptKickback(g, nil, t.TempDir(), md, "review", blockedReviewCanvas, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -315,7 +315,7 @@ func TestPromptKickbackEOFParks(t *testing.T) {
 	withStdinLine(t, "")
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 	var stdout, stderr bytes.Buffer
-	if code := promptKickback(sdlcGroup(t), nil, md, "review", blockedReviewCanvas, &stdout, &stderr); code != 0 {
+	if code := promptKickback(sdlcGroup(t), nil, t.TempDir(), md, "review", blockedReviewCanvas, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	if *ran {
