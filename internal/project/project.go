@@ -38,7 +38,7 @@ type Metadata struct {
 	// default.
 	Mode string `json:"mode,omitempty"`
 	// Ship is how a finished run lands here — see ship.go. Absent means
-	// pr, so it is omitted rather than written out at the default.
+	// pr; new registrations explicitly store merge.
 	Ship          string `json:"ship,omitempty"`
 	Submodule     string `json:"submodule"`
 	Remote        string `json:"remote"`
@@ -104,6 +104,7 @@ func Register(root, url string, opts Options) (*Metadata, error) {
 	}
 	md := &Metadata{
 		ID:            id,
+		Ship:          string(ShipMerge),
 		Submodule:     submodulePath,
 		Remote:        normalizeRemote(url),
 		DefaultBranch: branch,

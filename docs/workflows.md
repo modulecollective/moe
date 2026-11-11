@@ -45,9 +45,10 @@ and records what was run. `review` is the last judgment before push: an
 independent pass over the diff *and* the test evidence, ending in a ship
 verdict — trivial zero-risk findings (a typo, comment drift) it fixes and
 commits in place; anything bigger blocks the gate and kicks the run back.
-`push` ships the branch by the project's ship route — a PR
-by default, a fast-forward merge where `moe project ship <id> merge` says
-so — and `--pr` / `--merge` override it for one invocation.
+`push` ships the branch by the project's ship route. New registrations use a
+fast-forward merge; existing projects keep their settings, with an absent ship
+field still meaning PR. `moe project ship <id> pr` selects PRs, and `--pr` /
+`--merge` override the route for one invocation.
 
 Closing a run and marking a stage advanced both refuse while any session branch
 remains for that run, even after its claimant dies. This applies to terminal
@@ -686,14 +687,16 @@ the session, checking the host, and reading failed blocks. An unarmed
 `moe serve` is a reader with a capture door.
 
 Per project, `moe project ship <id> pr|merge` picks how a finished run lands
-there. `pr` is the default: every unflagged ship — bare `moe sdlc push`, `!!`
-and `!!!`, `moe chain kick`, and the heartbeat's rides — pushes the branch and
-opens a PR, leaving the run `pushed` with its sandbox until the PR merges (the
-pulse's reconcile then flips it to merged or closed). `merge` is the exception
-you opt a project into: fast-forward the default branch, delete the remote
-branch, drop the sandbox. `--pr` / `--merge` on push, and `m` / `p` at the
-chain prompt, override the setting for one ship. The project hub carries the
-switch beside mode's.
+there. New registrations store `merge`: fast-forward the default branch,
+delete the remote branch, drop the sandbox. Existing projects keep their
+settings; an absent ship field still means `pr`. To select PRs, run
+`moe project ship <id> pr`. The PR route pushes the branch and opens a PR,
+leaving the run `pushed` with its sandbox until the PR merges (the pulse's
+reconcile then flips it to merged or closed). Every unflagged ship — bare
+`moe sdlc push`, `!!` and `!!!`, `moe chain kick`, and the heartbeat's rides —
+follows the project setting. `--pr` / `--merge` on push, and `m` / `p` at the
+chain prompt, override it for one ship. The project hub carries the switch
+beside mode's.
 
 Per project, `moe project mode <id> paused|safe|auto` caps what that clock may
 do. `paused` means the heartbeat never sweeps the project at all. `safe` means

@@ -13,24 +13,22 @@ import (
 // Orthogonal to mode. Mode caps what the clock may *start*; ship picks
 // how a finished run *lands*, whoever started it. A safe project the
 // operator cascades by hand still ships by its ship setting; an auto
-// project's heartbeat rides land as PRs unless ship says merge.
+// project's heartbeat rides follow the same ship setting.
 //
-// Stored as one field in project.json, absent meaning pr. That is
-// deliberately *not* mode's "absent means today's behaviour" property:
-// bare push and every machine-driven ship used to merge, so adopting
-// this flips them to PR for every project that has never heard of the
-// setting. That flip is the point — straight-to-merge becomes the
-// exception you opt into.
+// New registrations explicitly store merge in project.json. Existing
+// settings stay unchanged: an absent field still means pr, and setting
+// pr removes the field.
 
 // ShipMode is how a project's finished runs reach its default branch.
 type ShipMode string
 
 const (
 	// ShipPR: push the branch and open (or re-use) a PR, leaving the run
-	// `pushed` and its sandbox in place until the PR merges. The default.
+	// `pushed` and its sandbox in place until the PR merges. The fallback
+	// for absent or invalid settings.
 	ShipPR ShipMode = "pr"
 	// ShipMerge: fast-forward the default branch, delete the remote
-	// branch, drop the sandbox.
+	// branch, drop the sandbox. The default for new registrations.
 	ShipMerge ShipMode = "merge"
 )
 
@@ -65,7 +63,7 @@ func ShipOf(md *Metadata) ShipMode {
 
 // ReadShip loads one project's ship route from disk, for the callers
 // that arrive with only an id. A project.json that won't load reads as
-// the default rather than failing the caller: every one of these sites
+// pr rather than failing the caller: every one of these sites
 // is about to hit a louder error of its own if the project is really
 // broken.
 func ReadShip(root, id string) ShipMode {
@@ -80,7 +78,7 @@ func ReadShip(root, id string) ShipMode {
 //
 // Same shape as SetMode, and for the same reasons: no machine trailers
 // (this is an operator act, and it reads as one to every journal
-// consumer), and the default is written as the absent field so the two
+// consumer), and pr is written as the absent field so the two
 // spellings can't drift apart on surfaces that read project.json
 // directly.
 //

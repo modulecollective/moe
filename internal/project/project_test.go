@@ -116,6 +116,9 @@ func TestRegisterHappyPath(t *testing.T) {
 	if md.Submodule != "projects/remote/src" {
 		t.Errorf("submodule=%q want projects/remote/src", md.Submodule)
 	}
+	if md.Ship != string(ShipMerge) {
+		t.Errorf("ship=%q want merge for a new registration", md.Ship)
+	}
 
 	// project.json on disk matches.
 	b, err := os.ReadFile(filepath.Join(root, "projects/remote/project.json"))
@@ -129,6 +132,12 @@ func TestRegisterHappyPath(t *testing.T) {
 	if roundTrip.ID != "remote" || roundTrip.Submodule != "projects/remote/src" {
 		t.Errorf("bad round-trip: %+v", roundTrip)
 	}
+	if roundTrip.Ship != string(ShipMerge) {
+		t.Errorf("persisted ship=%q want merge", roundTrip.Ship)
+	}
+	if got := ReadShip(root, md.ID); got != ShipMerge {
+		t.Errorf("ReadShip=%q want merge", got)
+	}
 
 	// Submodule checkout exists at projects/remote/src, not directly at
 	// projects/remote — that's what leaves room for project.json and
@@ -141,6 +150,14 @@ func TestRegisterHappyPath(t *testing.T) {
 	log := gitOutput(t, root, "log", "--format=%s")
 	if !strings.Contains(log, "Register project remote") {
 		t.Errorf("commit missing from log: %q", log)
+	}
+	committed := gitOutput(t, root, "show", "HEAD:projects/remote/project.json")
+	var committedMD Metadata
+	if err := json.Unmarshal([]byte(committed), &committedMD); err != nil {
+		t.Fatal(err)
+	}
+	if committedMD.Ship != string(ShipMerge) {
+		t.Errorf("committed ship=%q want merge", committedMD.Ship)
 	}
 }
 

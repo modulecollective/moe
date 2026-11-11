@@ -113,7 +113,7 @@ func runPushSynthesisSession(projectID, runID string, headless bool, stdout, std
 
 // runPushTyped ships the sandbox branch by one of two routes, chosen
 // by `--pr` / `--merge` or, with neither, by the project's ship setting
-// (`moe project ship`, defaulting to pr).
+// (`moe project ship`: merge for new registrations, pr if absent).
 //
 // The PR route pushes the branch, opens (or re-uses) a PR, marks the run
 // `pushed` and keeps the sandbox; a pushed run later reconciles to
