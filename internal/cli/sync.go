@@ -217,11 +217,12 @@ func reconcilePushedRuns(root, projectID string, stdout, stderr io.Writer) (int,
 // actually moved — a still-open PR, a skipped run, or a deferred
 // harvest all report false.
 //
-// This is phase one, and it holds no lock: the trailer walk, the `gh
-// pr view`, the merge-commit chore fetch and the remote branch delete
-// all happen here. Only the disk mutation of an actual transition
-// takes the lock, in finalizePushedRun. Everything that ends in
-// warn-and-skip returns before the lock is ever reached.
+// This is phase one, and it holds no repository lock: the trailer walk,
+// the `gh pr view`, the merge-commit chore fetch and the remote branch
+// delete all happen here, the delete under the run's owner guard. Only
+// the disk mutation of an actual transition takes the repository lock,
+// in finalizePushedRun. Everything that ends in warn-and-skip returns
+// before either is reached.
 func reconcileOnePushedRun(root string, md *run.Metadata, stdout, stderr io.Writer) (bool, error) {
 	prURL := push.TrailerValue(root, md.Project, md.ID, "MoE-PR")
 	if prURL == "" {
