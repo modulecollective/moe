@@ -86,8 +86,7 @@ type RebaseFailureError struct {
 }
 
 // CanvasUnchangedError is the typed error Close returns when the
-// session branch's canvas blob matches main's — i.e. this session
-// never wrote to its own canvas. The branch and worktree stay
+// session branch's canvas blob matches main's. The branch and worktree stay
 // intact so the operator can either reopen and write the canvas
 // or `moe session abandon` explicitly. The previous behaviour
 // (silent Abandon on zero-commit sessions, fast-forward on stub-
@@ -110,8 +109,8 @@ func (e *CanvasUnchangedError) Error() string {
 		"session close: %s canvas at %s tip is unchanged from main\n"+
 			"  run:      %s/%s\n"+
 			"  worktree: %s\n"+
-			"  the agent never wrote to the canvas. either reopen and write,\n"+
-			"  or drop the session: moe session abandon %s",
+			"  reopen and update the canvas, or use moe session resolve for a landed turn.\n"+
+			"  to discard it: moe session abandon %s",
 		e.CanvasPath, e.Branch, e.Project, e.Run, e.WorktreePath, e.Branch)
 }
 
@@ -160,6 +159,10 @@ type Session struct {
 	WorktreePath string
 	// freshReservation is true only for the Open that created this branch.
 	freshReservation bool
+	claim            *Claim
+	stopHeartbeat    func()
+	// RecoveryPaths names retained residual files outside the session-GC tree.
+	RecoveryPaths []string
 }
 
 // BranchName returns the branch name for a (project, run, doc) tuple.
@@ -441,26 +444,21 @@ func rebaseOntoMain(s *Session, op string) error {
 // are left intact, and the error names both so the operator can
 // resolve by hand or run `moe session abandon`.
 func Close(s *Session) error {
-	// Refuse to land a session whose canvas at the branch tip is
-	// identical to main's — the agent had a conversation but never
-	// wrote to the canvas. This single check covers two cases:
-	//
-	//   1. Zero commits past main: branch is literally at main, so
-	//      the blob comparison trivially matches. (Was a silent
-	//      Abandon; that path is the cascade footgun this run
-	//      closes.)
-	//   2. Commits exist but none touched the canvas: the kickoff
-	//      stub committed at `Open run` is still the blob at branch
-	//      tip and at main. Close used to fast-forward on this; a
-	//      downstream `!!` / `!!!` cascade would then dispatch the next
-	//      stage against the stub.
-	//
-	// We compare blob OIDs at <branch>:<canvas> to <main>:<canvas>.
-	// Equal blob OIDs mean equal content, which is exactly the
-	// "this session never wrote to the canvas" predicate. The
-	// branch and worktree stay intact so the operator can reopen
-	// and write, or abandon explicitly.
-	//
+	if done, err := finishPending(s); done || err != nil {
+		return err
+	}
+	if s.WorktreePath == "" {
+		return fmt.Errorf("session close: %s has no worktree; restore it or use moe session resolve for landed work", s.Branch)
+	}
+	if readable, err := readableWorktree(s, true); err != nil {
+		return err
+	} else if !readable {
+		return fmt.Errorf("session close: %s has no usable Git link; restore its worktree before retrying, or use moe session resolve for landed work", s.Branch)
+	}
+	// Each new turn must change its canvas. Ancestry alone cannot distinguish
+	// a freshly reserved no-op session from a close that already landed; only
+	// the validated receipt above permits cleanup without this comparison.
+	// Refusal keeps the branch and files for explicit recovery or another turn.
 	canvasRel := run.ContentPath(s.Project, s.Run, s.Doc)
 	branchBlob, branchErr := git.RevParse(s.WorktreePath, s.Branch+":"+canvasRel)
 	mainBlob, mainErr := git.RevParse(s.Root, "main:"+canvasRel)
@@ -497,6 +495,18 @@ func Close(s *Session) error {
 		return err
 	}
 
+	tip, err := git.RevParse(s.Root, s.Branch)
+	if err != nil {
+		return err
+	}
+	main, err := git.RevParse(s.Root, "main")
+	if err != nil {
+		return err
+	}
+	if err := writeClose(s, tip, main); err != nil {
+		return fmt.Errorf("session close: record pending close: %w", err)
+	}
+
 	// Fast-forward main from the canonical root, not via `update-ref`.
 	// `update-ref` would move the ref but leave the canonical root's
 	// working tree and index at the old main, so downstream commands
@@ -509,59 +519,11 @@ func Close(s *Session) error {
 			s.Branch, err, strings.TrimSpace(out))
 	}
 
-	// Remove worktree and delete branch. Order matters: `git branch -d`
-	// refuses while a worktree has the branch checked out.
-	//
-	// --force is required when the superproject has submodules: plain
-	// `git worktree remove` refuses with "working trees containing
-	// submodules cannot be moved or removed". By this point the rebase
-	// and fast-forward have succeeded, so there's no unsaved state the
-	// safety check would protect.
-	if out, err := git.Combined(s.Root, "worktree", "remove", "--force", s.WorktreePath); err != nil {
-		return fmt.Errorf("session close: remove worktree %s: %w (%s)",
-			s.WorktreePath, err, strings.TrimSpace(out))
-	}
-	if out, err := git.Combined(s.Root, "branch", "-D", s.Branch); err != nil {
-		return fmt.Errorf("session close: delete branch %s: %w (%s)",
-			s.Branch, err, strings.TrimSpace(out))
-	}
-	// A clean ending, so the liveness record has nothing left to vouch
-	// for. Dropped last: a record that outlives its branch is harmless
-	// (nothing reads it without a live branch beside it), while a branch
-	// that outlives its record would read as an unclaimed orphan.
-	clearClaim(s)
-	return nil
+	return teardown(s, false, tip)
 }
 
-// Abandon drops the worktree and the session branch without landing
-// any of its commits. Used by `moe session abandon` to clean up a
-// session the operator no longer wants. Caller must hold the repo lock.
-func Abandon(s *Session) error {
-	// -f so a mid-rebase or mid-edit worktree still goes.
-	if out, err := git.Combined(s.Root, "worktree", "remove", "--force", s.WorktreePath); err != nil {
-		// Tolerate "not a working tree" — someone may have manually
-		// deleted the directory. Proceed to branch deletion regardless.
-		if !strings.Contains(strings.ToLower(out), "not a working tree") {
-			return fmt.Errorf("session abandon: remove worktree: %w (%s)", err, strings.TrimSpace(out))
-		}
-		// Best-effort directory cleanup.
-		_ = os.RemoveAll(s.WorktreePath)
-	}
-	if branchExists(s.Root, s.Branch) {
-		if out, err := git.Combined(s.Root, "branch", "-D", s.Branch); err != nil {
-			return fmt.Errorf("session abandon: delete branch: %w (%s)", err, strings.TrimSpace(out))
-		}
-	}
-	if s.WorktreePath != "" {
-		if err := os.Remove(s.WorktreePath + ".setup-pending"); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("session abandon: clear setup marker: %w", err)
-		}
-	}
-	// The other clean ending — including the heartbeat's own reap, which
-	// routes through here. See Close.
-	clearClaim(s)
-	return nil
-}
+// Abandon explicitly discards the named session. Caller holds repolock.
+func Abandon(s *Session) error { return teardown(s, true, "") }
 
 // List returns every currently-registered session worktree under
 // <root>/.moe/worktrees/. Caller may read without holding the repo
@@ -615,6 +577,17 @@ func FindByBranch(root, branch string) (*Session, error) {
 		if s.Branch == branch {
 			return s, nil
 		}
+	}
+	project, run, doc, ok := ParseBranch(branch)
+	if !ok {
+		return nil, fmt.Errorf("session: unparseable branch name %q", branch)
+	}
+	pending := &Session{Root: root, Project: project, Run: run, Doc: doc, Branch: branch}
+	if p, err := readClose(pending); err != nil {
+		return nil, err
+	} else if p != nil {
+		pending.WorktreePath = p.Worktree
+		return pending, nil
 	}
 	// Branch may exist as an orphan (no worktree). Surface as a
 	// synthetic session so Abandon can still delete the branch.

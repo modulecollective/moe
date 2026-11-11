@@ -64,17 +64,27 @@ func Reserve(root, projectID, runID, docID string, machine bool) (*Session, func
 	}
 	if len(branches) != 0 {
 		c, ok := ReadClaim(root, projectID, runID, docID)
-		if len(branches) != 1 || branches[0] != BranchName(projectID, runID, docID) || !ok || c.Branch != branches[0] || !claimDead(c, time.Now()) {
+		if len(branches) != 1 || branches[0] != BranchName(projectID, runID, docID) || !ok || c.Branch != branches[0] || !(releasedClaim(c) || claimDead(c, time.Now())) {
 			return nil, nil, &UnresolvedError{Project: projectID, Run: runID, Branches: branches}
 		}
 	}
-	s, err := Open(root, projectID, runID, docID)
-	if err != nil {
+	pending := &Session{Root: root, Project: projectID, Run: runID, Doc: docID, Branch: BranchName(projectID, runID, docID)}
+	if _, err := finishPending(pending); err != nil {
 		return nil, nil, err
 	}
+	// A validated but unlanded intent belongs to the prior close attempt.
+	// Reconciliation and the next turn may change the branch tip.
+	if err := removeIfPresent(closePath(pending)); err != nil {
+		return nil, nil, err
+	}
+	s, err := Open(root, projectID, runID, docID)
+	if err != nil {
+		return nil, nil, recoveryError(pending, err)
+	}
+	s.RecoveryPaths = pending.RecoveryPaths
 	release, err := Hold(s, machine)
 	if err != nil {
-		return nil, nil, errors.Join(fmt.Errorf("claim session %s: %w", s.Branch, err), CancelReservation(s))
+		return nil, nil, recoveryError(s, errors.Join(fmt.Errorf("claim session %s: %w", s.Branch, err), CancelReservation(s)))
 	}
 	return s, release, nil
 }

@@ -65,6 +65,7 @@ type Claim struct {
 	PidNS       string    `json:"pid_ns,omitempty"`
 	StartedAt   time.Time `json:"started_at"`
 	HeartbeatAt time.Time `json:"heartbeat_at"`
+	ReleasedAt  time.Time `json:"released_at,omitzero"`
 }
 
 // ClaimPath is where a session's record lives. Under <root>/.moe, which
@@ -107,6 +108,7 @@ func Hold(s *Session, machine bool) (release func(), err error) {
 	if err := writeClaim(path, c); err != nil {
 		return func() {}, err
 	}
+	s.claim = &c
 	stop := make(chan struct{})
 	done := make(chan struct{})
 	go func() {
@@ -118,22 +120,79 @@ func Hold(s *Session, machine bool) (release func(), err error) {
 			case <-stop:
 				return
 			case <-t.C:
-				c.HeartbeatAt = time.Now().UTC()
-				// A failed beat is silent: the record only ages, and an aged
-				// record on a live pid still reads as alive.
-				_ = writeClaim(path, c)
+				// A failed beat only ages the record; a live PID still holds it.
+				_ = beatClaim(s, c)
 			}
 		}
 	}()
 	var once bool
-	return func() {
+	stopBeat := func() {
 		if once {
 			return
 		}
 		once = true
 		close(stop)
 		<-done
-	}, nil
+	}
+	s.stopHeartbeat = stopBeat
+	return stopBeat, nil
+}
+
+func beatClaim(s *Session, owner Claim) error {
+	return repolock.With(s.Root, repolock.Options{Purpose: "session-beat", Budget: time.Second}, func() error {
+		current, ok := ReadClaim(s.Root, s.Project, s.Run, s.Doc)
+		if !ok || !sameOwner(current, owner) || !current.ReleasedAt.IsZero() {
+			return nil
+		}
+		current.HeartbeatAt = time.Now().UTC()
+		return writeClaim(ClaimPath(s.Root, s.Project, s.Run, s.Doc), current)
+	})
+}
+
+// StopHeartbeat joins the heartbeat before final mutation or release.
+func (s *Session) StopHeartbeat() {
+	if s.stopHeartbeat != nil {
+		s.stopHeartbeat()
+	}
+}
+
+func sameOwner(a, b Claim) bool {
+	return a.Branch == b.Branch && a.Owner == b.Owner && a.PidNS == b.PidNS && a.StartedAt.Equal(b.StartedAt)
+}
+
+// ReleaseOwnership publishes graceful relinquishment after all session mutation.
+// Caller has stopped the agent and heartbeat and holds repolock. Never recreates
+// a deleted claim or overwrites a replacement generation.
+func ReleaseOwnership(s *Session) error {
+	if s.claim == nil {
+		return nil
+	}
+	path := ClaimPath(s.Root, s.Project, s.Run, s.Doc)
+	body, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var c Claim
+	if err := json.Unmarshal(body, &c); err != nil {
+		return err
+	}
+	if !sameOwner(c, *s.claim) {
+		return fmt.Errorf("session: claim owner changed before release of %s", s.Branch)
+	}
+	c.ReleasedAt = time.Now().UTC()
+	return writeClaim(path, c)
+}
+
+// releasedClaim is admission permission for this document, never reap authority.
+func releasedClaim(c Claim) bool {
+	host, err := os.Hostname()
+	owner, _, ok := repolock.ParseOwner(c.Owner)
+	return err == nil && ok && owner == host && repolock.SamePidNS(c.PidNS) &&
+		!c.StartedAt.IsZero() && !c.HeartbeatAt.IsZero() && !c.ReleasedAt.IsZero() &&
+		!c.ReleasedAt.Before(c.StartedAt) && !c.ReleasedAt.Before(c.HeartbeatAt)
 }
 
 // ReadClaim returns the record for a session, or ok=false when there is
@@ -153,8 +212,8 @@ func ReadClaim(root, projectID, runID, docID string) (Claim, bool) {
 
 // clearClaim removes a session's record. Called by the clean endings;
 // a missing file is success.
-func clearClaim(s *Session) {
-	_ = os.Remove(ClaimPath(s.Root, s.Project, s.Run, s.Doc))
+func clearClaim(s *Session) error {
+	return removeIfPresent(ClaimPath(s.Root, s.Project, s.Run, s.Doc))
 }
 
 // Reapable reports whether s is an orphan a machine may abandon: a
