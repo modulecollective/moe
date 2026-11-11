@@ -541,6 +541,13 @@ orphaned sessions. Another run is unaffected. Quota waiting holds a reservation;
 a refused quota admission removes only a fresh untouched reservation and retains
 resumed work with its claim.
 
+Run ownership is separate from the session reservation. The invocation that
+opens a stage locks `.moe/run-owners/<project>/<run>.lock` until its post-turn
+prompt and the continuation chosen there return. Kicks skip an owned run; other
+invocations' stage verbs, close, advance and push refuse it, and sync defers it.
+Process exit releases the lock, which never overrides a surviving session
+branch. Older moe binaries do not take it.
+
 The first Ctrl-C stops forward work and unwinds through commit and cleanup,
 then releases ownership and exits 130 without cascading. A second Ctrl-C may
 force exit. Rerunning the same stage can immediately resume a matching released

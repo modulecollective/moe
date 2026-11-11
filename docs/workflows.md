@@ -57,6 +57,17 @@ without changing the run. Finish or recover the session before retrying. See
 [Cleanup And Recovery](reference.md#cleanup-and-recovery) for interrupted turns
 and the conditions for resuming one.
 
+A session branch lasts only as long as its stage turn. The invocation that ran
+the turn keeps its own hold on the run from admission through the next-stage
+prompt and whichever choice you make there. While it is held, a dynamic pulse
+or heartbeat skips the run, and close, advance, push and sync from anywhere
+else refuse or wait: the web returns a conflict, and sync leaves the run
+`pushed` for its next pass. Declining, Ctrl-D, Ctrl-C or exiting releases the
+hold, so ordinary automatic pickup applies again. A crashed invocation releases
+it at once, though any session branch it left still blocks as above. A prompt
+whose run finished elsewhere in the meantime reports the run's current status
+and launches nothing.
+
 A run whose work landed entirely as bureaucracy commits — project hooks,
 chores, knowledge topics, the bureaucracy's own docs — can declare `ship: none`
 on its test gate, and `push` then closes the run rather than refusing an empty
