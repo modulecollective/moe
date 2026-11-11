@@ -458,12 +458,15 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 	inspect := newPromptInspection(root, md, priorCanvas, body, next.Name == "test" || next.Name == "review", stdout)
 	sig, stopSig := installSigint()
 	defer stopSig()
-	line, interrupted, err := readInspectionDecision(inspect, opts, "next: "+hint+" — run now?", extra, sig, stdout, stderr)
+	line, interrupted, err := readInspectionDecision(inspect, root, md, opts, "next: "+hint+" — run now?", extra, sig, stdout, stderr)
 	if interrupted {
 		// Cooked-mode Ctrl-C used to trap the runtime. Treat it as
 		// "decline" — safer default than guessing — and exit cleanly
 		// so the chain can unwind.
 		moePrintln(stdout, "^C")
+		return 0
+	}
+	if errors.Is(err, errStaleDecision) {
 		return 0
 	}
 	if err != nil && err != io.EOF {
@@ -576,9 +579,12 @@ func promptKickback(g *CommandGroup, scuttle *Command, root string, md *run.Meta
 	inspect := newPromptInspection(root, md, blockedStage, canvas, true, stdout)
 	sig, stopSig := installSigint()
 	defer stopSig()
-	line, interrupted, err := readInspectionDecision(inspect, opts, blockedStage+" blocked — kick back to fix?", "", sig, stdout, stderr)
+	line, interrupted, err := readInspectionDecision(inspect, root, md, opts, blockedStage+" blocked — kick back to fix?", "", sig, stdout, stderr)
 	if interrupted {
 		moePrintln(stdout, "^C")
+		return 0
+	}
+	if errors.Is(err, errStaleDecision) {
 		return 0
 	}
 	if err != nil && err != io.EOF {
@@ -713,11 +719,14 @@ func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root 
 	inspect := newPromptInspection(root, md, canvasStage, body, true, stdout)
 	sig, stopSig := installSigint()
 	defer stopSig()
-	line, interrupted, err := readInspectionDecision(inspect, opts, "next: "+hint+" — run now?", extra, sig, stdout, stderr)
+	line, interrupted, err := readInspectionDecision(inspect, root, md, opts, "next: "+hint+" — run now?", extra, sig, stdout, stderr)
 	if interrupted {
 		// N is already the default here; SIGINT collapses to the same
 		// safe sentinel and avoids the runtime trap.
 		moePrintln(stdout, "^C")
+		return 0
+	}
+	if errors.Is(err, errStaleDecision) {
 		return 0
 	}
 	if err != nil && err != io.EOF {

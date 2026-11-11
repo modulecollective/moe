@@ -36,22 +36,29 @@ func canvasArtifact(md *run.Metadata, stage, body string) inspectionArtifact {
 
 // Deliberately avoid resolveRunWorkspacePath: its sandbox.Ensure can create
 // a clone and rewrite excludes. Inspection may only read an existing tree.
-func inspectionWorkspace(root string, md *run.Metadata) string {
+//
+// A failure names the path tried and the real stat cause, so a missing
+// clone and an unreadable one stop reading alike.
+func inspectionWorkspace(root string, md *run.Metadata) (string, error) {
 	path := sandbox.Path(root, md.Project, md.ID)
 	if md.Workspace != "" {
 		path = workspace.Path(root, md.Project, md.Workspace)
 	}
-	if info, err := os.Stat(path); err == nil && info.IsDir() {
-		return path
+	info, err := os.Stat(path)
+	if err != nil {
+		return "", fmt.Errorf("source workspace: %w", err)
 	}
-	return ""
+	if !info.IsDir() {
+		return "", fmt.Errorf("source workspace %s: not a directory", path)
+	}
+	return path, nil
 }
 
 func sourceDiffArtifact(root string, md *run.Metadata, out io.Writer) (inspectionArtifact, error) {
 	a := inspectionArtifact{kind: inspectDiff, title: md.Project + "/" + md.ID + " source diff"}
-	repo := inspectionWorkspace(root, md)
-	if repo == "" {
-		return a, fmt.Errorf("source workspace no longer exists")
+	repo, err := inspectionWorkspace(root, md)
+	if err != nil {
+		return a, err
 	}
 	branch, err := defaultBranchForProject(root, md.Project)
 	if err != nil {
@@ -164,7 +171,7 @@ func newPromptInspection(root string, md *run.Metadata, stage, body string, offe
 			p.viewers[inspectCanvas] = v
 		}
 	}
-	if offerDiff && inspectionWorkspace(root, md) != "" {
+	if _, err := inspectionWorkspace(root, md); offerDiff && err == nil {
 		if v, ok := selectInspectionViewer(inspectDiff); ok {
 			p.viewers[inspectDiff] = v
 		}
@@ -231,9 +238,39 @@ func (p *promptInspection) inspect(answer string, sig <-chan os.Signal, out, err
 	return true, interrupted
 }
 
+// errStaleDecision is readInspectionDecision's answer when the run left
+// in_progress while its prompt waited. The run guard keeps cooperating
+// invocations out, but not an older binary or another clone; acting on
+// the answer then would re-enter a finished run.
+var errStaleDecision = errors.New("stale decision")
+
+// staleDecision reloads the run and reports whether an answer to its
+// prompt can no longer be acted on. A reload failure counts as stale:
+// launching against a run we can no longer read is the unsafe direction.
+// A run with no run.json at all is left to the chosen verb, whose own load
+// refuses it — moe never deletes a run to finish it, so absence is not
+// the terminal case this check exists for.
+func staleDecision(root string, md *run.Metadata, out io.Writer) bool {
+	fresh, err := run.Load(root, md.Project, md.ID)
+	if errors.Is(err, run.ErrRunNotFound) {
+		return false
+	}
+	if err != nil {
+		moePrintf(out, "%s/%s: cannot reload run state (%v) — nothing launched\n", md.Project, md.ID, err)
+		return true
+	}
+	if fresh.Status != run.StatusInProgress {
+		moePrintf(out, "%s/%s is now %s — nothing launched\n", md.Project, md.ID, fresh.Status)
+		return true
+	}
+	return false
+}
+
 // Only completed stdin reads can enter inspection. An interrupted read exits
-// immediately, because its goroutine may still own the shared reader.
-func readInspectionDecision(p *promptInspection, opts []promptOption, question, extra string, sig <-chan os.Signal, out, errOut io.Writer) (string, bool, error) {
+// immediately, because its goroutine may still own the shared reader. Every
+// completed answer — inspection included — first re-checks the run, and a
+// run that has left in_progress ends the prompt with errStaleDecision.
+func readInspectionDecision(p *promptInspection, root string, md *run.Metadata, opts []promptOption, question, extra string, sig <-chan os.Signal, out, errOut io.Writer) (string, bool, error) {
 	for {
 		select {
 		case <-sig:
@@ -249,6 +286,9 @@ func readInspectionDecision(p *promptInspection, opts []promptOption, question, 
 		line, interrupted, err := readLineWithSignal(stdinSharedReader(), sig)
 		if interrupted || (err != nil && err != io.EOF) || (err == io.EOF && line == "") {
 			return line, interrupted, err
+		}
+		if staleDecision(root, md, out) {
+			return "", false, errStaleDecision
 		}
 		handled, interrupted := p.inspect(strings.ToLower(strings.TrimSpace(line)), sig, out, errOut)
 		if interrupted {
