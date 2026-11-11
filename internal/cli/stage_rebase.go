@@ -17,9 +17,13 @@ import (
 // back to today's `moe session resolve` / `moe session abandon` path.
 // Other error types pass through unchanged.
 func closeWithAutoResolve(closeSess func() error, stdout, stderr io.Writer) error {
+	return closeWithAutoResolveUnlessInterrupted(closeSess, stdout, stderr, func() bool { return false })
+}
+
+func closeWithAutoResolveUnlessInterrupted(closeSess func() error, stdout, stderr io.Writer, interrupted func() bool) error {
 	err := closeSess()
 	var rebaseFail *session.RebaseFailureError
-	if !errors.As(err, &rebaseFail) {
+	if !errors.As(err, &rebaseFail) || interrupted() {
 		return err
 	}
 	// Bare %v: every error out of closeSess self-describes (session

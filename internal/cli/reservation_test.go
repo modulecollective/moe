@@ -271,3 +271,30 @@ func TestAdmissionRevalidatesAfterAutoPull(t *testing.T) {
 		})
 	}
 }
+
+func TestTwoAdmissionsOfReleasedSessionHaveOneOwner(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "work", "sdlc", run.StatusInProgress)
+	s, stop, err := session.Reserve(root, "tele", "work", "design", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop()
+	if err := session.ReleaseOwnership(s); err != nil {
+		t.Fatal(err)
+	}
+	first := startReservationProcess(t, root, "design", true)
+	line, err := first.lines.ReadString('\n')
+	if err != nil || line != "locked\n" {
+		t.Fatalf("winner barrier %q %v", line, err)
+	}
+	second := startReservationProcess(t, root, "design", false)
+	if _, err := first.input.Write([]byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	if result := first.finish(t); !strings.Contains(result, "admitted") {
+		t.Fatal(result)
+	}
+	if result := second.finish(t); !strings.Contains(result, "refused:") || strings.Contains(result, "admitted") {
+		t.Fatal(result)
+	}
+}

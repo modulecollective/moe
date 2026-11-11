@@ -1046,11 +1046,33 @@ func closeBootstrapFailedSession(closeSess func() error, stderr io.Writer) {
 // (run.json, EnsureDocument, sandbox, promptNextStage) layer on top
 // in runStageSession, its only caller. Returns the exit code to
 // bubble up.
-func runStageTurn(root string, in stageTurnInputs, stdout, stderr io.Writer) int {
+func runStageTurn(root string, in stageTurnInputs, stdout, stderr io.Writer) (code int) {
+	interrupt := watchStageInterrupt()
+	defer func() {
+		interrupt.stop()
+		if interrupt.interrupted.Load() {
+			code = exitInterrupted
+		}
+	}()
 	sess, closeSess, cancelReservation, err := openStageSession(root, in, stdout, stderr)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
+	}
+	defer func() {
+		sess.StopHeartbeat()
+		if err := repolock.With(root, stageLockOptions(in, "release"), func() error {
+			return session.ReleaseOwnership(sess)
+		}); err != nil {
+			moePrintf(stderr, "session ownership release failed: %v\n", err)
+			code = 1
+		}
+	}()
+	if interrupt.interrupted.Load() {
+		if err := cancelReservation(); err != nil {
+			moePrintf(stderr, "%v\n", err)
+		}
+		return exitInterrupted
 	}
 	if in.Admit != nil {
 		if code := in.Admit(sess); code != 0 {
@@ -1122,6 +1144,10 @@ func runStageTurn(root string, in stageTurnInputs, stdout, stderr io.Writer) int
 	}
 	var runErr error
 	var returnedSid string
+	if interrupt.interrupted.Load() {
+		closeBootstrapFailedSession(closeSess, stderr)
+		return exitInterrupted
+	}
 	if spec.OnAgentStart != nil {
 		spec.OnAgentStart()
 	}
@@ -1235,7 +1261,12 @@ func runStageTurn(root string, in stageTurnInputs, stdout, stderr io.Writer) int
 	// resolve, then retries close once. Falls through to today's
 	// "resolve by hand / moe session abandon" message if the agent
 	// can't take.
-	closeErr := closeWithAutoResolve(closeSess, stdout, stderr)
+	closeErr := closeWithAutoResolveUnlessInterrupted(closeSess, stdout, stderr, func() bool {
+		return interrupt.interrupted.Load() || errors.Is(runErr, agent.ErrInterrupted)
+	})
+	if interrupt.interrupted.Load() {
+		runErr = errors.Join(runErr, agent.ErrInterrupted)
+	}
 
 	return reportStageTurnExit(in, runErr, commitErr, closeErr, stdout, stderr)
 }
@@ -1283,11 +1314,14 @@ func openStageSession(root string, in stageTurnInputs, stdout, stderr io.Writer)
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	printSessionRecovery(sess, stderr)
 	closeSess := func() error {
 		release()
-		return repolock.With(root, stageLockOptions(in, "close"), func() error {
+		err := repolock.With(root, stageLockOptions(in, "close"), func() error {
 			return session.Close(sess)
 		})
+		printSessionRecovery(sess, stderr)
+		return err
 	}
 	cancelReservation := func() error {
 		release()

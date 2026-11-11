@@ -540,14 +540,24 @@ orphaned sessions. Another run is unaffected. Quota waiting holds a reservation;
 a refused quota admission removes only a fresh untouched reservation and retains
 resumed work with its claim.
 
-To resume an interrupted turn, the claim must match its branch and prove that
-its previous owner is gone: same host and PID namespace, dead process, and a
-heartbeat older than ten minutes. A fresh crash can therefore delay ordinary
-resume. Live, missing, unreadable, mismatched or foreign claims refuse takeover.
-Finish a running turn normally. For interrupted work, inspect and preserve it,
-then rerun its stage or use `moe session resolve <branch>`. Use
-`moe session abandon <branch>` only after stopping the owner and deciding to
-discard the session. Do not delete claim files to bypass ownership checks.
+The first Ctrl-C stops forward work and unwinds through commit and cleanup,
+then releases ownership and exits 130 without cascading. A second Ctrl-C may
+force exit. Rerunning the same stage can immediately resume a matching released
+claim. A crash without release still requires proof that the previous owner is
+gone: same host and PID namespace, dead process, and a heartbeat older than ten
+minutes. Fresh crashes wait; live unreleased, missing, unreadable, mismatched
+or foreign claims refuse takeover. Do not delete claims to bypass these checks.
+
+An interrupted close records its validated tip before merging. Retry finishes
+cleanup if that exact tip already landed, even if main has advanced. For older
+sessions without a close receipt, `moe session resolve <branch>` can explicitly
+clean up a branch whose entire tip is contained in main. It starts no agent or
+next stage. Readable trees with additional tracked edits refuse cleanup;
+unreadable residual trees are retained at a printed path under
+`.moe/session-recovery/` before cleanup continues. Those backups are never
+automatically collected. Inspect and preserve unfinished work, then rerun its
+stage or resolve it. Use `moe session abandon <branch>` only after stopping the
+owner and deciding to discard the session.
 
 Stop active invocations of older MoE binaries when adopting this admission
 policy. Coordination covers processes sharing one bureaucracy root and its

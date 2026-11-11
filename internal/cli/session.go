@@ -123,10 +123,9 @@ func runSessionResolve(args []string, stdout, stderr io.Writer) int {
 		if s == nil {
 			return fmt.Errorf("no session found for branch %q", branch)
 		}
-		if s.WorktreePath == "" {
-			return fmt.Errorf("branch %q has no worktree; use `moe session abandon %s` to drop the branch", branch, branch)
-		}
-		return session.Close(s)
+		err = session.Resolve(s)
+		printSessionRecovery(s, stderr)
+		return err
 	})
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
@@ -134,6 +133,13 @@ func runSessionResolve(args []string, stdout, stderr io.Writer) int {
 	}
 	moePrintf(stdout, "resolved %s\n", branch)
 	return 0
+}
+
+func printSessionRecovery(s *session.Session, stderr io.Writer) {
+	for _, path := range s.RecoveryPaths {
+		moePrintf(stderr, "session: residual files preserved at %s\n", path)
+	}
+	s.RecoveryPaths = nil
 }
 
 // runSessionGC reaps every stray stage-session object under
