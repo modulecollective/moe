@@ -9,6 +9,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/runowner"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
@@ -134,5 +135,32 @@ func TestMarkAdvancedRefusesAnEmptyStage(t *testing.T) {
 	err := MarkAdvanced(root, "alpha", "fix-it", "")
 	if !errors.Is(err, ErrNotAdvanceable) {
 		t.Fatalf("want ErrNotAdvanceable, got %v", err)
+	}
+}
+
+// TestMarkAdvancedRespectsTheRunGuard: an external caller (the web chip)
+// cannot advance a run another invocation owns; the owning invocation
+// passes its own handle and lands the mark without contending with
+// itself; a handle for a different run authorises nothing here.
+func TestMarkAdvancedRespectsTheRunGuard(t *testing.T) {
+	root := stagedRunFixture(t, true)
+	h, err := runowner.Acquire(root, "alpha", "fix-it")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Release()
+	if err := MarkAdvanced(root, "alpha", "fix-it", "design"); !runowner.IsBusy(err) {
+		t.Fatalf("external advance of an owned run = %v, want busy", err)
+	}
+	other, err := runowner.Acquire(root, "alpha", "other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer other.Release()
+	if err := MarkAdvanced(root, "alpha", "fix-it", "design", AdvanceOptions{Owner: other}); err == nil {
+		t.Fatal("a handle for another run advanced this one")
+	}
+	if err := MarkAdvanced(root, "alpha", "fix-it", "design", AdvanceOptions{Owner: h}); err != nil {
+		t.Fatalf("owner's own advance: %v", err)
 	}
 }

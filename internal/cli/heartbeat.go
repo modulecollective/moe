@@ -1018,7 +1018,7 @@ func parkedKickableThread(root string, sc *pulseScan, projectID string, markedOn
 			// through, and a note at a parked run wakes the tick through
 			// its own leg anyway.
 			if rootMd.DesignOnly && !turnClosed {
-				if openSessionStage(root, rootMd) == "" && admits(rootMd) {
+				if openSessionStage(root, rootMd) == "" && runOwnerHold(root, rootMd) == "" && admits(rootMd) {
 					return rootKey
 				}
 				continue
@@ -1034,7 +1034,7 @@ func parkedKickableThread(root string, sc *pulseScan, projectID string, markedOn
 				if settled, _ := rootDesignSettled(root, memberMd, sc.idx); !settled {
 					continue
 				}
-				if openSessionStage(root, memberMd) != "" {
+				if openSessionStage(root, memberMd) != "" || runOwnerHold(root, memberMd) != "" {
 					continue
 				}
 				if !admits(memberMd) {
@@ -1044,7 +1044,7 @@ func parkedKickableThread(root string, sc *pulseScan, projectID string, markedOn
 			}
 			continue
 		}
-		if openSessionStage(root, rootMd) != "" {
+		if openSessionStage(root, rootMd) != "" || runOwnerHold(root, rootMd) != "" {
 			continue
 		}
 		if !admits(rootMd) {

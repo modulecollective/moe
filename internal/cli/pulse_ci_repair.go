@@ -14,6 +14,7 @@ import (
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/runowner"
 	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/trailers"
 )
@@ -93,6 +94,9 @@ func ciRepairEligibilityExcept(sc *pulseScan, p ownedPRChecks, ownBranch string)
 	if stage := openSessionStageExcept(sc.root, md, ownBranch); stage != "" {
 		return nil, "run has an open session at " + stage
 	}
+	if hold := runOwnerHold(sc.root, md); hold != "" {
+		return nil, "run " + hold
+	}
 	return fresh, ""
 }
 
@@ -153,6 +157,22 @@ func kickCIRepair(root, key string, groomed groomResult, stdout, stderr io.Write
 		moePrintf(stderr, "pulse: CI repair: %v\n", err)
 		return 1
 	}
+	// Taken before the reload and held through the repair's push, so the
+	// planner's busy read cannot be overtaken between scan and start.
+	h, err := ownRun(root, projectID, runID)
+	if runowner.IsBusy(err) {
+		moePrintf(stderr, "pulse: CI repair %s skipped — %v\n", key, err)
+		return 0
+	}
+	if err != nil {
+		moePrintf(stderr, "pulse: CI repair: %v\n", err)
+		return 1
+	}
+	defer func() {
+		if err := h(); err != nil {
+			moePrintf(stderr, "pulse: CI repair: %v\n", err)
+		}
+	}()
 	md, err := run.Load(root, projectID, runID)
 	if err != nil {
 		moePrintf(stderr, "pulse: CI repair %s skipped — %v\n", key, err)

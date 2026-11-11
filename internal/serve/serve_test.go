@@ -24,6 +24,7 @@ import (
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
+	"github.com/modulecollective/moe/internal/runowner"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
@@ -1583,6 +1584,7 @@ func TestAdvanceRefusesPushStage(t *testing.T) {
 func TestAdvanceConsultsTheStageGate(t *testing.T) {
 	cases := []struct {
 		name     string
+		held     bool
 		gate     func(*run.Metadata, string) (bool, error)
 		wantCode int
 		wantBody string
@@ -1599,6 +1601,16 @@ func TestAdvanceConsultsTheStageGate(t *testing.T) {
 			gate:     func(*run.Metadata, string) (bool, error) { return false, nil },
 			wantCode: http.StatusConflict,
 			wantBody: "run alpha/fix-it: stage test gate not satisfied",
+		},
+		{
+			// A CLI invocation still deciding about the run (an open stage
+			// or an unanswered prompt) owns it; the web cannot advance it
+			// out from under that decision.
+			name:     "owned run refuses",
+			held:     true,
+			gate:     func(*run.Metadata, string) (bool, error) { return true, nil },
+			wantCode: http.StatusConflict,
+			wantBody: "owned by another moe invocation",
 		},
 		{
 			name:     "gate read error is a server error",
@@ -1623,6 +1635,13 @@ func TestAdvanceConsultsTheStageGate(t *testing.T) {
 				},
 				CheckStageGate: tc.gate,
 			})
+			if tc.held {
+				h, err := runowner.Acquire(root, "alpha", "fix-it")
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer h.Release()
+			}
 
 			rr := httptest.NewRecorder()
 			s.Handler().ServeHTTP(rr,

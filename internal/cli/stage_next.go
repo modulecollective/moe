@@ -72,6 +72,15 @@ func promptNextStageParked(root string, md *run.Metadata, stdout, stderr io.Writ
 // passes true; every other caller passes false and keeps the tty-gated
 // prompt.
 func promptNextStageOverride(root string, md *run.Metadata, justFinished, override string, park bool, stdout, stderr io.Writer) int {
+	// The decision below and the continuation it picks run under this
+	// invocation's guard on the run. After a stage turn this borrows
+	// runStageSession's guard; from a mint/reopen tail it takes one. Either
+	// way it is released only once the chosen continuation returns.
+	releaseRun, ok := ownRunForVerb(root, md.Project, md.ID, stderr)
+	if !ok {
+		return 1
+	}
+	defer releaseRun()
 	wf, err := LookupWorkflow(md.Workflow)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)

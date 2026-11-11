@@ -22,6 +22,7 @@ import (
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
+	"github.com/modulecollective/moe/internal/runowner"
 	"github.com/modulecollective/moe/internal/session"
 )
 
@@ -600,9 +601,12 @@ func (s *Server) markableStage(projectID, slug string, md *run.Metadata) (string
 	return stage, nil
 }
 
+// isSessionConflict reports an occupied run: an unresolved session, or a
+// live invocation holding the run guard (an open stage or an unanswered
+// prompt). Both are 409s — the run is fine, someone is inside it.
 func isSessionConflict(err error) bool {
 	_, ok := errors.AsType[*session.UnresolvedError](err)
-	return ok
+	return ok || runowner.IsBusy(err)
 }
 
 // nextStage re-derives a run's bare next-stage name through the

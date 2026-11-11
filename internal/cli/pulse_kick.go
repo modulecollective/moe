@@ -343,6 +343,11 @@ func kickFloorHold(root, threadRoot string, groomed groomResult) string {
 	if stage := openSessionStage(root, md); stage != "" {
 		return "has a live session at " + stage + " — skipping"
 	}
+	// The other half of occupancy: a settled session no longer has a
+	// branch, but the invocation that ran it may still be at its prompt.
+	if hold := runOwnerHold(root, md); hold != "" {
+		return hold
+	}
 	return ""
 }
 

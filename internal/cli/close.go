@@ -124,6 +124,14 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 		return 1
 	}
 
+	// Borrowed when this is the owning prompt's `x`; refused while another
+	// invocation sits in the run.
+	releaseRun, ok := ownRunForVerb(root, projectID, runID, stderr)
+	if !ok {
+		return 1
+	}
+	defer releaseRun()
+
 	if err := closeRunInProcess(root, workflow, subject, cleanup, projectID, runID, *noEdit, stderr); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1

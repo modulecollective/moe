@@ -33,6 +33,7 @@ import (
 	"github.com/modulecollective/moe/internal/input"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/runowner"
 	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/trailers"
 )
@@ -358,17 +359,33 @@ func advanceMarker(root string, md *run.Metadata, docID, consent string) error {
 // AdvanceOptions carries caller-specific, read-only eligibility validation.
 // Validate runs under the lock against fresh metadata and selects the stage;
 // it must neither write nor acquire a lock. Consent is absent for web callers.
+//
+// Owner is the calling invocation's own guard on this run (see
+// internal/runowner) — the CLI prompt's `a` passes it. Nil means an
+// external caller, and MarkAdvanced takes the guard itself, so a run
+// another invocation is deciding about refuses with *runowner.BusyError.
 type AdvanceOptions struct {
 	Consent  string
 	Validate func(*run.Metadata) (string, error)
+	Owner    *runowner.Handle
 }
 
 // MarkAdvanced shares one lock-owning writer between the CLI and web. A
 // validator may rederive the nominated stage and gate while holding the lock.
-func MarkAdvanced(root, projectID, slug, docID string, options ...AdvanceOptions) error {
+func MarkAdvanced(root, projectID, slug, docID string, options ...AdvanceOptions) (err error) {
 	var opts AdvanceOptions
 	if len(options) != 0 {
 		opts = options[0]
+	}
+	// The guard before the repository lock, never the other way round.
+	if opts.Owner == nil {
+		h, err := runowner.Acquire(root, projectID, slug)
+		if err != nil {
+			return err
+		}
+		defer func() { err = errors.Join(err, h.Release()) }()
+	} else if !opts.Owner.Owns(root, projectID, slug) {
+		return fmt.Errorf("runopen: advance %s/%s: owner handle is for a different run", projectID, slug)
 	}
 	return repolock.With(root, repolock.Options{Purpose: "stage-advance", Run: projectID + "/" + slug}, func() error {
 		md, err := run.Load(root, projectID, slug)

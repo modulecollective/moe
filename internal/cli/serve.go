@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -14,6 +15,7 @@ import (
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
+	"github.com/modulecollective/moe/internal/runowner"
 	"github.com/modulecollective/moe/internal/serve"
 )
 
@@ -178,7 +180,15 @@ func serveOptions(root string, stderr io.Writer) serve.Options {
 		// a canvas that claimed a followup it never filed — is a
 		// dropped thread. A close from the web must not be the quiet
 		// one, so the writer goes to the log, not to io.Discard.
-		CloseRun: func(project, runID string) error {
+		CloseRun: func(project, runID string) (err error) {
+			// A direct acquisition, never a borrow from the CLI's
+			// invocation table: two requests in this one process must
+			// conflict like two processes. Busy surfaces as a 409.
+			h, err := runowner.Acquire(root, project, runID)
+			if err != nil {
+				return err
+			}
+			defer func() { err = errors.Join(err, h.Release()) }()
 			md, err := run.Load(root, project, runID)
 			if err != nil {
 				return err

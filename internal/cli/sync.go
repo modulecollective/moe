@@ -13,6 +13,7 @@ import (
 	"github.com/modulecollective/moe/internal/push"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/runowner"
 	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/trailers"
 )
@@ -269,6 +270,25 @@ func reconcileOnePushedRun(root string, md *run.Metadata, stdout, stderr io.Writ
 	// reconcile still sees MERGED, and the second delete is a no-op.
 	// The alternative keeps half a second of network inside the lock on
 	// every transition.
+	//
+	// The run guard comes first, and is held through finalisation: an
+	// invocation still deciding about this run (or pushing it) keeps its
+	// clone and its status, and the run stays `pushed` for the next sync.
+	// A direct acquisition, not the CLI's borrow table — sync also runs
+	// from long-lived processes, where a borrow would let it in.
+	owner, err := runowner.Acquire(root, md.Project, md.ID)
+	if runowner.IsBusy(err) {
+		moePrintf(stderr, "moe sync: %s/%s: %v; retry next sync\n", md.Project, md.ID, err)
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	defer func() {
+		if err := owner.Release(); err != nil {
+			moePrintf(stderr, "moe sync: %v\n", err)
+		}
+	}()
 	if err := deleteRemoteBranchForRun(root, md); err != nil {
 		moePrintf(stderr, "warning: %s/%s: %v\n", md.Project, md.ID, err)
 	}

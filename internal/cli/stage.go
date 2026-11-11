@@ -338,6 +338,18 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		return 1
 	}
 
+	// Own the run for this whole invocation: admission, the turn, session
+	// settlement, the post-turn prompt and whatever the operator picks
+	// there. Session teardown ends the session reservation but not this —
+	// without it a dynamic pulse could ride the run while its prompt is
+	// still waiting. Taken before admission so the repolock is never held
+	// while this is contended; a same-run nested entry borrows it.
+	releaseRun, ok := ownRunForVerb(root, projectID, runID, stderr)
+	if !ok {
+		return 1
+	}
+	defer releaseRun()
+
 	// Materialize the project's submodule before anything else. Every
 	// stage either reads source directly, drives
 	// a sandbox clone (code/review/test), or kicks off an agent whose first

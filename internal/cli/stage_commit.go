@@ -48,6 +48,7 @@ func commitSessionStart(root string, md *run.Metadata, docID, sessionID string) 
 func commitAdvance(root string, md *run.Metadata, docID string) error {
 	return runopen.MarkAdvanced(root, md.Project, md.ID, docID, runopen.AdvanceOptions{
 		Consent: walkConsent(),
+		Owner:   heldRun(root, md.Project, md.ID),
 		Validate: func(fresh *run.Metadata) (string, error) {
 			wf, err := LookupWorkflow(fresh.Workflow)
 			if err != nil {

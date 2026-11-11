@@ -190,6 +190,15 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 		return 1, nil
 	}
 
+	// Own the run before any source, ref or remote mutation and keep it
+	// through cleanup: a check at cleanup alone would come after the
+	// remote ship. Borrowed when the push is the owning prompt's choice.
+	releaseRun, ok := ownRunForVerb(root, projectID, runID, stderr)
+	if !ok {
+		return 1, nil
+	}
+	defer releaseRun()
+
 	md, err := run.Load(root, projectID, runID)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)

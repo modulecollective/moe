@@ -244,6 +244,15 @@ func chainKickRun(root, projectID, runID string, mode rideMode, oneStage bool, s
 		moePrintf(stderr, "chain kick: %v\n", err)
 		return 1
 	}
+	// Admission's authoritative half of the floor's busy read: take the
+	// head's guard before reloading it and hold it through the ride, so an
+	// operator prompt that opened after the plan was stamped still wins.
+	// Each child the ride reaches takes its own guard as its stage opens.
+	releaseRun, ok := ownRunForVerb(root, projectID, runID, stderr)
+	if !ok {
+		return 1
+	}
+	defer releaseRun()
 	md, err := run.Load(root, projectID, runID)
 	if err != nil {
 		moePrintf(stderr, "chain kick: %v\n", err)
