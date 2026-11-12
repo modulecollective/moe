@@ -236,6 +236,61 @@ promotion and reopen trailers where it can. In an interactive shell it can ask
 whether you meant the current descendant; in non-interactive use it prints a
 hint.
 
+### Seeing and steering a running run
+
+Every invocation that runs workflow work — a stage, the next-stage prompt, a
+kick, a CI repair, a push — serves a small live endpoint for its run while it
+owns it. `moe dash` (and `--watch`) appends what that owner reports to the
+run's row, in brackets: `[agent running code 4m]`, `[waiting for operator]`,
+`[pause pending]`, `[handed off]`, `[owned · no live status]`. `moe control
+show <project>/<run>` prints the long form: owner and generation, phase and
+since when, why it is waiting, its continuation (`prompt`, `!`, `!!`, `!!!`),
+where it came from (a terminal, serve's local pty, Rex; the parent sweep), its
+Rex block, any hold, the request log, and the exact command that resumes the
+last conversation. A reply proves the owner is alive, not that the agent is
+making progress, and an owner that does not answer is shown as unreachable —
+never as idle, and never as leave to start a replacement.
+
+Four controls steer a stageful run (SDLC today), from the terminal or the
+run's web page:
+
+```
+moe control pause   moe/change-auth   # hold it once its current work settles
+moe control handoff moe/change-auth   # the same hold, for you to pick up
+moe control park    moe/change-auth   # have its current owner yield, once
+moe control finish  moe/change-auth   # ship it (!!) from its next boundary
+moe control resume  moe/change-auth   # release a hold; starts nothing
+```
+
+None of them interrupts an agent. The owner finishes the turn it is on —
+commit, transcript, input stamps, any recovery that turn needs — and acts at
+its next boundary: before the next stage, a gate kickback, a ship attempt, a
+nominated close, the chain ride, or while it waits for quota or at the
+next-stage prompt (both wake on a control). A yield exits 77, which a sweep
+reads as the operator's decision: no failure backoff, and unrelated threads
+carry on.
+
+**Pause and handoff hold the run** from the moment they are accepted until
+an explicit resume — across sweeps, restarts and disconnects, and against
+CI repair on a pushed run. Handoff prints the stage command for the last
+conversation that actually ran, e.g. `moe sdlc code moe/change-auth --agent
+codex`. Two ways out: `moe control resume` (or the web's resume) releases the
+hold for a later eligible sweep and starts nothing; typing that stage command
+at a terminal resumes the conversation now, and clears the hold once it is
+admitted. Headless, machine and nested entries never clear a hold, and a
+resume that loses to another owner or an unresolved session leaves it in
+place.
+
+**Park** asks only the current owner to yield, holds nothing, and is retired
+if that owner is gone before it reaches a boundary. **Finish** is `!!` for
+this run alone: through the same gates and ship route, then no chain ride. It
+applies at the next-stage prompt, at the next kick (widening a `!`, narrowing a
+`!!!`), or on an open CI repair's existing PR; it does not start an idle run.
+A hold wins over finish, and an applied finish whose owner died is reconciled
+— shipped, or "recovery required" until a resume, never replayed.
+
+Notes stay notes. `moe input add` neither pauses nor resumes anything.
+
 ## Chat
 
 Half the value of an agent is thinking, not editing. Chat exists for the half
