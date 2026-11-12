@@ -262,6 +262,24 @@ func reconcileFinishes(root string, md *run.Metadata, f runcontrol.File) (settle
 	if heldRun(root, md.Project, md.ID) == nil {
 		return false, nil
 	}
+	// Receipts an earlier owner knew but could not commit come first:
+	// they are what actually happened, so they settle before anything is
+	// guessed about an applied finish.
+	owed, err := runcontrol.Unrecorded(root, md.Project, md.ID)
+	if err != nil {
+		return false, err
+	}
+	for id, s := range owed {
+		if err := runcontrol.Settle(root, md.Project, md.ID, id, s, walkConsent()); err != nil {
+			return settled, fmt.Errorf("record %s's owed receipt: %w", id, err)
+		}
+		settled = true
+	}
+	if settled {
+		if f, err = runcontrol.Load(root, md.Project, md.ID); err != nil {
+			return settled, err
+		}
+	}
 	for _, r := range f.Requests {
 		if r.Kind != runcontrol.KindFinish || r.State != runcontrol.StateApplied {
 			continue
@@ -295,8 +313,21 @@ func openFinish(root string, md *run.Metadata) (runcontrol.Request, bool) {
 	if err != nil {
 		return runcontrol.Request{}, false
 	}
+	return acceptedFinish(root, md, f)
+}
+
+// acceptedFinish is f's finish still waiting to be applied. One whose
+// outcome an owner knew but could not commit (runcontrol.KeepUnrecorded)
+// is not waiting: it reads as accepted only because its receipt is owed,
+// and must never widen a later walk. An unreadable owed-receipt store
+// grants nothing either.
+func acceptedFinish(root string, md *run.Metadata, f runcontrol.File) (runcontrol.Request, bool) {
+	owed, err := runcontrol.Unrecorded(root, md.Project, md.ID)
+	if err != nil {
+		return runcontrol.Request{}, false
+	}
 	for _, r := range f.Open(runcontrol.KindFinish) {
-		if r.State == runcontrol.StateAccepted {
+		if _, ok := owed[r.ID]; r.State == runcontrol.StateAccepted && !ok {
 			return r, true
 		}
 	}
@@ -355,9 +386,9 @@ func finishGateBlocked(root string, md *run.Metadata, stage string, stderr io.Wr
 
 // finishWalkStopped completes an open finish whose run's walk just
 // stopped with a failure: that stop is the finish's outcome, recorded as
-// failed, so it can't widen a later invocation. Every walk that carries
-// a finish's run through cascadeFromGate settles here — a kick, the
-// operator's typed cascade, and each run a chain ride reaches. A yield
+// failed, so it can't widen a later invocation. Every walk settles here
+// at its own stop — a kick, the operator's typed cascade, each run a
+// chain ride reaches, a stage entered on its own, and a CI repair. A yield
 // leaves the finish to the hold or park that caused it, a quota deferral
 // to the ride that retries, and a shipped run completed it at the ship
 // seam (finishAtShip). Reports whether it settled one.
@@ -401,12 +432,21 @@ func finishAtShip(md *run.Metadata, stderr io.Writer) bool {
 }
 
 // settleControl records a receipt, warning rather than failing the walk:
-// the act has already happened, and an unrecorded receipt stays visible
-// as a request still open.
+// the act has already happened. A final receipt that cannot be committed
+// is kept locally (runcontrol.KeepUnrecorded), so the request it settles
+// grants nothing, and the next guard holder retries the commit before it
+// admits work (reconcileFinishes).
 func settleControl(root string, md *run.Metadata, id string, s runcontrol.Settlement, stderr io.Writer) {
-	if err := runcontrol.Settle(root, md.Project, md.ID, id, s, walkConsent()); err != nil {
-		moePrintf(stderr, "control: record %s %s on %s/%s: %v\n", id, s.State, md.Project, md.ID, err)
+	err := runcontrol.Settle(root, md.Project, md.ID, id, s, walkConsent())
+	if err == nil {
+		return
 	}
+	moePrintf(stderr, "control: record %s %s on %s/%s: %v\n", id, s.State, md.Project, md.ID, err)
+	if kerr := runcontrol.KeepUnrecorded(root, md.Project, md.ID, id, s); kerr != nil {
+		moePrintf(stderr, "control: keep %s's receipt locally: %v\n", id, kerr)
+		return
+	}
+	moePrintf(stderr, "control: %s's receipt kept locally; the next owner of %s/%s records it before starting work\n", id, md.Project, md.ID)
 }
 
 // watchControl wakes a wait when the run gains something a boundary
@@ -452,11 +492,8 @@ func controlWants(root string, md *run.Metadata, withFinish bool) bool {
 		return true
 	}
 	if withFinish {
-		for _, r := range f.Open(runcontrol.KindFinish) {
-			if r.State == runcontrol.StateAccepted {
-				return true
-			}
-		}
+		_, ok := acceptedFinish(root, md, f)
+		return ok
 	}
 	return false
 }

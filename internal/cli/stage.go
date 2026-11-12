@@ -327,7 +327,7 @@ func resolveAgentName(explicit, runDefault, stylesheet string) string {
 // Declared as a var so the chain-back closures (hooks.go,
 // push.go) can be exercised end-to-end in tests without spinning a
 // real session worktree. Production callers see no difference.
-var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts, stdout, stderr io.Writer) int {
+var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts, stdout, stderr io.Writer) (exit int) {
 	cwd, err := os.Getwd()
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
@@ -379,6 +379,15 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
+	}
+	// A stage entered on its own is the whole walk: when it stops with a
+	// failure, a finish the operator asked for meanwhile has that as its
+	// outcome, and no outer cascade is left to record it. A borrowed
+	// entry leaves that to the walk it runs inside.
+	if freshOwner {
+		defer func() {
+			finishWalkStopped(root, md, cascadeResult{ran: []cascadeStepResult{{stage: docID}}}, exit, stderr)
+		}()
 	}
 	// Operator controls: a hold refuses every entry but an explicit
 	// interactive one, which resumes the run once quota admits it.

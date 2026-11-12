@@ -2,7 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
+	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runcontrol"
@@ -399,5 +401,178 @@ func TestFinishDuringFailedChildRideSettles(t *testing.T) {
 	}
 	if len(*push) != 0 {
 		t.Fatalf("failed child shipped: pushes=%d", len(*push))
+	}
+}
+
+// failingAgent runs a real turn (canvas written, session settled) and
+// then reports failure, as a backend that crashed after its edits would.
+type failingAgent struct{ *fakeAgent }
+
+func (f *failingAgent) Execute(r agent.Request) (string, error) {
+	id, err := f.fakeAgent.Execute(r)
+	if err != nil {
+		return id, err
+	}
+	return id, errors.New("agent failed after its turn")
+}
+
+// A finish asked during a stage entered on its own has that stage's
+// failure as its outcome: no outer walk is left to record it, and a later
+// one-stage kick must not ship under it.
+func TestFinishDuringFailedStandaloneStageSettles(t *testing.T) {
+	root, fake := setupResumeFixture(t, "failing")
+	t.Chdir(root)
+	t.Setenv("MOE_SERVE_AGENT", "")
+	t.Setenv("MOE_SERVE_DYNAMIC", "")
+	agent.Unregister("failing")
+	agent.Register("failing", &failingAgent{fake})
+	var errs bytes.Buffer
+	code := runStageSession("tele", "fix-it", "design", stageSessionOpts{
+		Agent: "failing", OnAgentStart: func() {
+			if _, err := runcontrol.Submit(root, "tele", "fix-it", runcontrol.Request{ID: "during-stage", Kind: runcontrol.KindFinish}); err != nil {
+				t.Fatal(err)
+			}
+		},
+	}, io.Discard, &errs)
+	if code != 1 || len(fake.execCalls) != 1 {
+		t.Fatalf("want one real failed turn: code=%d calls=%d stderr=%s", code, len(fake.execCalls), errs.String())
+	}
+	rec, err := runcontrol.Load(root, "tele", "fix-it")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := rec.Find("during-stage"); r.State != runcontrol.StateFailed || !strings.Contains(r.Outcome, "design stopped") {
+		t.Fatalf("failed standalone stage left the finish open: %+v", r)
+	}
+	stubOpenSdlcStage(t, nil)
+	push := stubPushFromCascade(t, 0, nil)
+	chainKickRun(root, "tele", "fix-it", rideDynamic, true, io.Discard, &errs)
+	if len(*push) != 0 {
+		t.Fatalf("later one-stage kick shipped under a failed finish: pushes=%d", len(*push))
+	}
+}
+
+// A finish asked during a CI repair that stops before its push has that
+// stop as its outcome, and a later pickup finds nothing to widen.
+func TestFinishDuringFailedCIRepairSettles(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		code  int // the repair's code stage
+		stage string
+	}{
+		{"code fails", 1, "code"},
+		{"test gate blocks", 0, "test"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPushFixture(t)
+			md, err := run.Load(f.root, f.projectID, f.runID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			md.Status = run.StatusPushed
+			if err := run.Save(f.root, md); err != nil {
+				t.Fatal(err)
+			}
+			gittest.Run(t, f.root, "add", run.Dir(md.Project, md.ID))
+			gittest.Run(t, f.root, "commit", "-m", "push: prior shipment\n\nMoE-Run: "+md.ID+"\nMoE-Project: "+md.Project+"\nMoE-Status: pushed")
+			rel, err := ownRun(f.root, md.Project, md.ID, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rel()
+			old := runStageSession
+			t.Cleanup(func() { runStageSession = old })
+			runStageSession = func(p, r, d string, opts stageSessionOpts, o, e io.Writer) int {
+				if _, err := runcontrol.Submit(f.root, p, r, runcontrol.Request{ID: "during-repair", Kind: runcontrol.KindFinish}); err != nil {
+					t.Fatal(err)
+				}
+				if tc.code == 0 {
+					gittest.Run(t, f.clonePath, "commit", "--allow-empty", "-m", "repair")
+				}
+				return tc.code
+			}
+			stubOpenSdlcStage(t, nil)
+			priorGate := checkCascadeStageGate
+			t.Cleanup(func() { checkCascadeStageGate = priorGate })
+			checkCascadeStageGate = func(_ *Workflow, _ *run.Metadata, stage string, _ io.Writer) (bool, int) { return stage != "test", 1 }
+			push := stubPushFromCascade(t, 0, nil)
+			if code := driveCIRepair(f.root, md, redPR(md.Project+"/"+md.ID, "observed-head"), io.Discard, io.Discard); code == 0 {
+				t.Fatal("repair succeeded; want a stop")
+			}
+			rec, err := runcontrol.Load(f.root, md.Project, md.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r, _ := rec.Find("during-repair"); r.State != runcontrol.StateFailed || !strings.Contains(r.Outcome, tc.stage+" stopped") {
+				t.Fatalf("failed repair left the finish open: %+v", r)
+			}
+			if _, ok := openFinish(f.root, md); ok || len(*push) != 0 {
+				t.Fatalf("failed repair left a finish to widen later pickup (pushes=%d)", len(*push))
+			}
+		})
+	}
+}
+
+// A failed finish whose receipt cannot be committed grants nothing: the
+// receipt is kept locally, the next owner records it before admitting
+// work — or refuses while it still cannot — and never ships under it.
+func TestFinishFailedReceiptCannotReplay(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		hookStays bool
+	}{
+		{"commit recovers", false},
+		{"commit still refused", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, md := controlFixture(t)
+			exits := map[string]int{"code": 1}
+			stubOpenSdlcStage(t, exits)
+			push := stubPushFromCascade(t, 0, nil)
+			hooks := t.TempDir()
+			if err := os.WriteFile(filepath.Join(hooks, "commit-msg"), []byte("#!/bin/sh\ncase \"$(head -n 1 \"$1\")\" in 'control: failed '*) exit 1;; esac\nexit 0\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			gittest.Run(t, root, "config", "core.hooksPath", hooks)
+			inner := openSdlcStage
+			openSdlcStage = func(s, p, r string, h bool, o, e io.Writer) int {
+				if s == "design" {
+					submitControl(t, root, runcontrol.KindFinish, "failure-receipt")
+				}
+				return inner(s, p, r, h, o, e)
+			}
+			var errs bytes.Buffer
+			if code := dispatchCascade("!!", "design", root, md, io.Discard, &errs); code != 1 {
+				t.Fatalf("want code's failure, got %d", code)
+			}
+			if r, _ := controlRecord(t, root).Find("failure-receipt"); r.State != runcontrol.StateAccepted {
+				t.Fatalf("fixture: the hook should have refused the receipt: %+v", r)
+			}
+			if _, ok := openFinish(root, md); ok {
+				t.Fatal("a finish whose failure is known but unrecorded reads as open")
+			}
+			if !tc.hookStays {
+				gittest.Run(t, root, "config", "--unset", "core.hooksPath")
+			}
+			delete(exits, "code")
+			later := chainKickRun(root, md.Project, md.ID, rideDynamic, true, io.Discard, &errs)
+			if len(*push) != 0 {
+				t.Fatalf("later kick shipped under the stale grant: pushes=%d stderr=%s", len(*push), errs.String())
+			}
+			r, _ := controlRecord(t, root).Find("failure-receipt")
+			owed, err := runcontrol.Unrecorded(root, md.Project, md.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.hookStays {
+				if later != exitYielded || len(owed) != 1 {
+					t.Fatalf("want the later kick to refuse while the receipt is owed: exit=%d owed=%v", later, owed)
+				}
+				return
+			}
+			if r.State != runcontrol.StateFailed || !strings.Contains(r.Outcome, "code stopped") || len(owed) != 0 {
+				t.Fatalf("later owner did not record the owed receipt: %+v owed=%v", r, owed)
+			}
+		})
 	}
 }

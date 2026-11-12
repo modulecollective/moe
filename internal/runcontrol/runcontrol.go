@@ -415,7 +415,7 @@ func Settle(root, projectID, runID, id string, s Settlement, consent string) err
 	default:
 		return fmt.Errorf("runcontrol: cannot settle to %q", s.State)
 	}
-	return commit(root, projectID, runID, "control-settle", func(f *File) (string, error) {
+	err := commit(root, projectID, runID, "control-settle", func(f *File) (string, error) {
 		r := f.find(id)
 		if r == nil {
 			return "", fmt.Errorf("runcontrol: %s/%s has no request %q", projectID, runID, id)
@@ -437,6 +437,12 @@ func Settle(root, projectID, runID, id string, s Settlement, consent string) err
 		}
 		return message(projectID, runID, workflowOf(root, projectID, runID), string(s.State)+" "+id, consent), nil
 	})
+	if err != nil || s.State == StateApplied {
+		return err
+	}
+	// The record now carries id settled (here, or already): any copy kept
+	// while its commit was failing is spent.
+	return dropUnrecorded(root, projectID, runID, id)
 }
 
 // Resume clears a hold and retires an unknown-outcome recovery. owner

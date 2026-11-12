@@ -198,6 +198,9 @@ func kickCIRepair(root, key string, groomed groomResult, stdout, stderr io.Write
 // and review; neither old passes nor a push recovery can skip those turns.
 func driveCIRepair(root string, md *run.Metadata, p ownedPRChecks, stdout, stderr io.Writer) (code int) {
 	claimed := false
+	// stopped is the repair step under way: a stop is the outcome of a
+	// finish the operator asked for during the repair.
+	stopped := "code"
 	if clockQuota != nil {
 		previous := clockQuota.repairClaimed
 		defer func() { clockQuota.repairClaimed = previous }()
@@ -209,6 +212,7 @@ func driveCIRepair(root string, md *run.Metadata, p ownedPRChecks, stdout, stder
 		} else if claimed && code != 0 {
 			moePrintln(stderr, "CI repair: stopped; attempt remains spent")
 		}
+		finishWalkStopped(root, md, cascadeResult{ran: []cascadeStepResult{{stage: stopped}}}, code, stderr)
 	}()
 	clone, err := sandboxClonePath(root, md)
 	if err != nil {
@@ -253,6 +257,7 @@ func driveCIRepair(root string, md *run.Metadata, p ownedPRChecks, stdout, stder
 	wf, _ := LookupWorkflow(md.Workflow)
 	dispatcher := lookupCascadeDispatcher(md.Workflow)
 	for _, stage := range []string{"test", "review"} {
+		stopped = stage
 		if code := dispatcher(stage, md.Project, md.ID, true, stdout, stderr); code != 0 {
 			return code
 		}
@@ -264,6 +269,7 @@ func driveCIRepair(root string, md *run.Metadata, p ownedPRChecks, stdout, stder
 			return 1
 		}
 	}
+	stopped = "push"
 	if cc := controlCheckpoint(root, md, "push", stderr); cc != 0 {
 		return cc
 	}

@@ -448,3 +448,29 @@ func TestAppliedFinishRecordsRunStatus(t *testing.T) {
 		t.Fatal("a finish applied to a pushed run proved a ship by status alone")
 	}
 }
+
+// An owed receipt is kept until the record carries the request settled,
+// and a non-final state is never kept.
+func TestUnrecordedReceiptIsSpentBySettle(t *testing.T) {
+	root := seedRoot(t)
+	submit(t, root, Request{ID: "f1", Kind: KindFinish})
+	if err := KeepUnrecorded(root, "moe", "r1", "f1", Settlement{State: StateApplied}); err == nil {
+		t.Fatal("kept an applied state as an owed receipt")
+	}
+	s := Settlement{State: StateFailed, Outcome: "code stopped (exit 1)"}
+	if err := KeepUnrecorded(root, "moe", "r1", "f1", s); err != nil {
+		t.Fatal(err)
+	}
+	if owed, err := Unrecorded(root, "moe", "r1"); err != nil || owed["f1"] != s {
+		t.Fatalf("owed = %v, %v", owed, err)
+	}
+	if err := Settle(root, "moe", "r1", "f1", s, ""); err != nil {
+		t.Fatal(err)
+	}
+	if owed, err := Unrecorded(root, "moe", "r1"); err != nil || len(owed) != 0 {
+		t.Fatalf("settled receipt still owed: %v, %v", owed, err)
+	}
+	if _, err := os.Stat(unrecordedPath(root, "moe", "r1")); !os.IsNotExist(err) {
+		t.Fatalf("empty owed-receipt file left behind: %v", err)
+	}
+}
