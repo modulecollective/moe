@@ -35,6 +35,25 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   reseeds current state. Nested tmux/screen terminals and serve children do
   not emit reports. These are current observations, not an event feed or a
   complete account of stage failures.
+- `moe ui [--project <id>] [--workflow <name>]` is the dashboard as a console:
+  the whole board, every completed run included, above the selected item's
+  details. Arrows or `j`/`k` select, `Tab` switches to scrolling the details,
+  `?` lists the keys. `n` writes a note to the selected run or idea, `a`
+  answers its open question, `e` edits an open idea or intent, and `t` reveals
+  the run's existing Rex terminal. `:` opens a closed command line —
+  `pause|handoff|park|finish|resume` for the selected run, `new idea|intent
+  <project>/<slug>`, `edit`, `close`, `tag sdlc|design`, `untag` — never a
+  shell. These go through the same writers as `moe input`, `moe control` and
+  `moe idea|intent`, so they mean the same thing: a note reaches the run's next
+  prompt, resume and tagging start nothing, and only a fully typed `finish`
+  ships. Text is edited inline (`Ctrl-S` saves, `Esc` keeps the draft,
+  `Ctrl-X` discards); saving an idea offers save only, save and tag sdlc, or
+  save and tag design-only. An edit refuses to overwrite a canvas someone else
+  changed meanwhile. Runs update as their owners publish, not only on the 3s
+  refresh; a lost owner's facts stay, labelled stale. It needs a terminal on
+  stdout (Linux or macOS) and restores it on every exit; quitting mid-save
+  waits for and prints that save's outcome. In a Rex terminal it reports the
+  same OSC 7501 status as `dash --watch`.
 - `moe serve [--addr <host[:port]>] [--port <n>] [--dynamic]` runs the moe
   server: the web UI, journal pushing, and an optional heartbeat. It binds to
   `127.0.0.1:4242` by default; `--port` is ignored when `--addr` includes a

@@ -262,6 +262,11 @@ moe control finish  moe/change-auth   # ship it (!!) from its next boundary
 moe control resume  moe/change-auth   # release a hold; starts nothing
 ```
 
+`moe ui` puts all of this on one screen: the board with a selection, the
+selected run's `control show` facts below it, updated as the owner publishes,
+and the same controls as `:pause`, `:finish` and so on, alongside notes,
+answers and the run's Rex terminal (`t`).
+
 None of them interrupts an agent. The owner finishes the turn it is on —
 commit, transcript, input stamps, any recovery that turn needs — and acts at
 its next boundary: before the next stage, a gate kickback, a ship attempt, a
