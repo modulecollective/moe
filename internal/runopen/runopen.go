@@ -325,7 +325,7 @@ func TagIdea(root, projectID, slug, workflow string, designOnly bool) error {
 		if md.Status != run.StatusInProgress {
 			return fmt.Errorf("%w: idea %s/%s is %s, not in progress", ErrNotTaggableIdea, projectID, slug, md.Status)
 		}
-		prev, err := os.ReadFile(filepath.Join(root, runJSONRel))
+		prev, err := snapFile(root, runJSONRel)
 		if err != nil {
 			return err
 		}
@@ -338,7 +338,7 @@ func TagIdea(root, projectID, slug, workflow string, designOnly bool) error {
 		// StageAndCommit reports ErrNothingToCommit rather than minting
 		// an empty journal entry.
 		if err := run.StageAndCommit(root, msg, runJSONRel); err != nil {
-			return restoreFile(root, runJSONRel, prev, true, err)
+			return prev.restore(root, err)
 		}
 		return nil
 	})
@@ -456,7 +456,7 @@ func CloseCapture(root, projectID, slug string) error {
 		}
 		rel := filepath.Join(run.Dir(projectID, slug), "run.json")
 		msg := fmt.Sprintf("Close %s %s/%s\n\n", md.Workflow, projectID, slug) + trailers.Block{Run: slug, Project: projectID, Workflow: md.Workflow}.String()
-		prev, err := os.ReadFile(filepath.Join(root, rel))
+		prev, err := snapFile(root, rel)
 		if err != nil {
 			return err
 		}
@@ -465,7 +465,7 @@ func CloseCapture(root, projectID, slug string) error {
 			return err
 		}
 		if err := run.StageAndCommit(root, msg, rel); err != nil {
-			return restoreFile(root, rel, prev, true, err)
+			return prev.restore(root, err)
 		}
 		return nil
 	})
@@ -628,16 +628,15 @@ func editCapture(root, projectID, slug string, expected *string, body string) er
 		}
 		canvasRel := run.ContentPath(projectID, slug, docID)
 		abs := filepath.Join(root, canvasRel)
-		prev, err := os.ReadFile(abs)
-		existed := err == nil
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("runopen: read canvas: %w", err)
+		prev, err := snapFile(root, canvasRel)
+		if err != nil {
+			return err
 		}
 		if expected != nil {
 			if err := session.RequireUnreserved(root, projectID, slug); err != nil {
 				return err
 			}
-			if string(prev) != *expected {
+			if string(prev.bytes) != *expected {
 				return ErrCaptureChanged
 			}
 		}
@@ -655,30 +654,56 @@ func editCapture(root, projectID, slug string, expected *string, body string) er
 				Document: docID,
 			}.String()
 		if err := run.StageAndCommit(root, msg, canvasRel); err != nil {
-			return restoreFile(root, canvasRel, prev, existed, err)
+			return prev.restore(root, err)
 		}
 		return nil
 	})
 }
 
-// restoreFile undoes one writer's change to rel after a failed commit —
-// its index entry and its bytes — touching nothing else in the tree.
-func restoreFile(root, rel string, prev []byte, existed bool, cause error) error {
+// fileSnap is one path as a writer found it: its bytes and its index
+// entry, which may hold staged content that matches neither HEAD nor
+// the working file.
+type fileSnap struct {
+	rel     string
+	bytes   []byte
+	existed bool
+	index   string // `git ls-files -s` line; "" when the path is not in the index
+}
+
+func snapFile(root, rel string) (fileSnap, error) {
+	s := fileSnap{rel: rel}
+	b, err := os.ReadFile(filepath.Join(root, rel))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return s, fmt.Errorf("runopen: read %s: %w", rel, err)
+	}
+	s.bytes, s.existed = b, err == nil
+	if s.index, err = git.Output(root, "ls-files", "-s", "--", rel); err != nil {
+		return s, fmt.Errorf("runopen: read index entry for %s: %w", rel, err)
+	}
+	return s, nil
+}
+
+// restore undoes one writer's change to the path after a failed commit —
+// its index entry and its bytes, as snapped — touching nothing else in
+// the tree.
+func (s fileSnap) restore(root string, cause error) error {
 	if errors.Is(cause, run.ErrNothingToCommit) {
 		return cause
 	}
-	abs := filepath.Join(root, rel)
 	var errs []error
-	if err := git.Run(root, "reset", "-q", "--", rel); err != nil {
-		errs = append(errs, err)
+	if f := strings.Fields(s.index); len(f) >= 2 {
+		errs = append(errs, git.Run(root, "update-index", "--add", "--cacheinfo", f[0]+","+f[1]+","+s.rel))
+	} else {
+		errs = append(errs, git.Run(root, "update-index", "--force-remove", "--", s.rel))
 	}
-	if existed {
-		errs = append(errs, os.WriteFile(abs, prev, 0o644))
+	abs := filepath.Join(root, s.rel)
+	if s.existed {
+		errs = append(errs, os.WriteFile(abs, s.bytes, 0o644))
 	} else if err := os.Remove(abs); err != nil && !errors.Is(err, os.ErrNotExist) {
 		errs = append(errs, err)
 	}
 	if err := errors.Join(errs...); err != nil {
-		return fmt.Errorf("runopen: commit failed (%w); restoring %s also failed: %v", cause, rel, err)
+		return fmt.Errorf("runopen: commit failed (%w); restoring %s also failed: %v", cause, s.rel, err)
 	}
 	return fmt.Errorf("runopen: commit failed, nothing recorded: %w", cause)
 }

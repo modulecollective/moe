@@ -135,3 +135,60 @@ func TestTagIdeaCommitFailureRestoresAndRefusesPromoted(t *testing.T) {
 	}
 	gittest.Run(t, root, "config", "core.hooksPath", t.TempDir()) // cleanup's --unset needs a value
 }
+
+// The operator may have a staged version of the very file a writer
+// touches, and a different unstaged one on top. A failed commit must
+// hand both back, not reset the index entry to HEAD.
+func TestCaptureCommitFailureRestoresStagedAndUnstaged(t *testing.T) {
+	cases := []struct {
+		name  string
+		want  string // the refusal; close checks a clean tree before writing
+		rel   string
+		write func(root string) error
+	}{
+		{"edit", "nothing recorded", run.ContentPath("alpha", "my-idea", "idea"), func(root string) error {
+			return EditCapture(root, "alpha", "my-idea", "# mine\n")
+		}},
+		{"tag", "nothing recorded", filepath.Join(run.Dir("alpha", "my-idea"), "run.json"), func(root string) error {
+			return TagIdea(root, "alpha", "my-idea", "sdlc", false)
+		}},
+		{"close", "uncommitted changes", filepath.Join(run.Dir("alpha", "my-idea"), "run.json"), func(root string) error {
+			return CloseCapture(root, "alpha", "my-idea")
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := newIdeaBureaucracy(t, "alpha", "my-idea", "# one\n")
+			abs := filepath.Join(root, c.rel)
+			orig, err := os.ReadFile(abs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Staged and working versions both differ from HEAD and from
+			// each other; each stays parseable for the writers that read it.
+			staged, working := string(orig)+"\n", string(orig)+"\n\n"
+			if err := os.WriteFile(abs, []byte(staged), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			gittest.Run(t, root, "add", "--", c.rel)
+			stagedBlob := gittest.Output(t, root, "rev-parse", ":"+c.rel)
+			if err := os.WriteFile(abs, []byte(working), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			head := gittest.Output(t, root, "rev-parse", "HEAD")
+			failCommits(t, root)
+			if err := c.write(root); err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("failed commit = %v", err)
+			}
+			if got := gittest.Output(t, root, "rev-parse", ":"+c.rel); got != stagedBlob {
+				t.Fatalf("index after rollback = %s, want the staged blob %s", got, stagedBlob)
+			}
+			if b, _ := os.ReadFile(abs); string(b) != working {
+				t.Fatalf("working file after rollback = %q, want %q", b, working)
+			}
+			if gittest.Output(t, root, "rev-parse", "HEAD") != head {
+				t.Fatal("failed commit moved HEAD")
+			}
+		})
+	}
+}
