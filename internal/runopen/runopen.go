@@ -293,17 +293,6 @@ func TagIdea(root, projectID, slug, workflow string, designOnly bool) error {
 	if designOnly && workflow == "" {
 		return fmt.Errorf("%w: cannot untag %s/%s design-only — design-only narrows a tag, it is not one", ErrNotTaggableIdea, projectID, slug)
 	}
-	md, err := run.Load(root, projectID, slug)
-	if err != nil {
-		return err
-	}
-	if md.Workflow != dash.IdeaWorkflow {
-		return fmt.Errorf("%w: run %s/%s is a %s run, not an idea", ErrNotTaggableIdea, projectID, slug, md.Workflow)
-	}
-	if md.Status != run.StatusInProgress {
-		return fmt.Errorf("%w: idea %s/%s is %s, not in progress", ErrNotTaggableIdea, projectID, slug, md.Status)
-	}
-
 	subject := fmt.Sprintf("Tag idea %s/%s (%s)", projectID, slug, workflow)
 	if designOnly {
 		subject = fmt.Sprintf("Tag idea %s/%s (%s, design only)", projectID, slug, workflow)
@@ -320,10 +309,26 @@ func TagIdea(root, projectID, slug, workflow string, designOnly bool) error {
 			Workflow: dash.IdeaWorkflow,
 		}.String()
 	runJSONRel := filepath.Join(run.Dir(projectID, slug), "run.json")
+	// Read and check inside the lock: an idea promoted or closed while
+	// the caller waited must refuse, not have its old status saved back.
 	return repolock.With(root, repolock.Options{
 		Purpose: purpose,
 		Run:     projectID + "/" + slug,
 	}, func() error {
+		md, err := run.Load(root, projectID, slug)
+		if err != nil {
+			return err
+		}
+		if md.Workflow != dash.IdeaWorkflow {
+			return fmt.Errorf("%w: run %s/%s is a %s run, not an idea", ErrNotTaggableIdea, projectID, slug, md.Workflow)
+		}
+		if md.Status != run.StatusInProgress {
+			return fmt.Errorf("%w: idea %s/%s is %s, not in progress", ErrNotTaggableIdea, projectID, slug, md.Status)
+		}
+		prev, err := os.ReadFile(filepath.Join(root, runJSONRel))
+		if err != nil {
+			return err
+		}
 		md.PromoteTo = workflow
 		md.DesignOnly = designOnly
 		if err := run.Save(root, md); err != nil {
@@ -332,7 +337,10 @@ func TagIdea(root, projectID, slug, workflow string, designOnly bool) error {
 		// A re-tag to the same state leaves run.json byte-identical, so
 		// StageAndCommit reports ErrNothingToCommit rather than minting
 		// an empty journal entry.
-		return run.StageAndCommit(root, msg, runJSONRel)
+		if err := run.StageAndCommit(root, msg, runJSONRel); err != nil {
+			return restoreFile(root, runJSONRel, prev, true, err)
+		}
+		return nil
 	})
 }
 
@@ -448,11 +456,18 @@ func CloseCapture(root, projectID, slug string) error {
 		}
 		rel := filepath.Join(run.Dir(projectID, slug), "run.json")
 		msg := fmt.Sprintf("Close %s %s/%s\n\n", md.Workflow, projectID, slug) + trailers.Block{Run: slug, Project: projectID, Workflow: md.Workflow}.String()
+		prev, err := os.ReadFile(filepath.Join(root, rel))
+		if err != nil {
+			return err
+		}
 		md.Status = run.StatusClosed
 		if err := run.Save(root, md); err != nil {
 			return err
 		}
-		return run.StageAndCommit(root, msg, rel)
+		if err := run.StageAndCommit(root, msg, rel); err != nil {
+			return restoreFile(root, rel, prev, true, err)
+		}
+		return nil
 	})
 }
 
@@ -556,6 +571,11 @@ func splitPromotedTo(v string) (projectID, slug string, ok bool) {
 	return projectID, slug, true
 }
 
+// ErrCaptureChanged refuses a checked edit whose canvas no longer reads
+// what the editor opened: someone else saved in between. The caller
+// keeps its draft and offers to reload or discard it.
+var ErrCaptureChanged = errors.New("runopen: capture changed since it was opened")
+
 // EditCapture overwrites a capture run's canvas (idea or intent) with
 // body and commits the change under that workflow's edit trailer
 // block. Body is taken verbatim — CRLF normalisation is the caller's
@@ -573,35 +593,92 @@ func splitPromotedTo(v string) (projectID, slug string, ok bool) {
 // API doesn't fit cleanly. The trailer block is the same shape
 // (work: update <doc>, MoE-Run / MoE-Project / MoE-Workflow / MoE-Document).
 func EditCapture(root, projectID, slug, body string) error {
-	md, err := run.Load(root, projectID, slug)
+	return editCapture(root, projectID, slug, nil, body)
+}
+
+// EditCaptureChecked is EditCapture for an editor held open a while (moe
+// ui): it writes only if the canvas still reads expected, the body the
+// editor started from, and no session holds the capture. Otherwise it
+// returns ErrCaptureChanged, ErrNotCapture or the reservation error and
+// writes nothing.
+func EditCaptureChecked(root, projectID, slug, expected, body string) error {
+	return editCapture(root, projectID, slug, &expected, body)
+}
+
+// editCapture is the one writer behind both: read, validate, write and
+// commit inside the repository lock, so a close, promotion or another
+// save cannot land between the check and the write. A failed commit
+// puts the canvas and its index entry back as they were.
+func editCapture(root, projectID, slug string, expected *string, body string) error {
+	preflight, err := run.Load(root, projectID, slug)
 	if err != nil {
 		return err
 	}
-	docID, ok := dash.CaptureDocID(md.Workflow)
-	if !ok || md.Status != run.StatusInProgress {
-		return ErrNotCapture
-	}
-
-	canvasRel := run.ContentPath(projectID, slug, docID)
-	docDir := run.DocDir(projectID, slug, docID)
-	if err := os.MkdirAll(filepath.Join(root, docDir), 0o755); err != nil {
-		return fmt.Errorf("runopen: mkdir doc dir: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(root, canvasRel), []byte(body), 0o644); err != nil {
-		return fmt.Errorf("runopen: write canvas: %w", err)
-	}
-
-	msg := fmt.Sprintf("work: update %s\n\n", docID) +
-		trailers.Block{
-			Run:      slug,
-			Project:  projectID,
-			Workflow: md.Workflow,
-			Document: docID,
-		}.String()
 	return repolock.With(root, repolock.Options{
-		Purpose: md.Workflow + "-edit",
+		Purpose: preflight.Workflow + "-edit",
 		Run:     projectID + "/" + slug,
 	}, func() error {
-		return run.StageAndCommit(root, msg, docDir)
+		md, err := run.Load(root, projectID, slug)
+		if err != nil {
+			return err
+		}
+		docID, ok := dash.CaptureDocID(md.Workflow)
+		if !ok || md.Status != run.StatusInProgress {
+			return ErrNotCapture
+		}
+		canvasRel := run.ContentPath(projectID, slug, docID)
+		abs := filepath.Join(root, canvasRel)
+		prev, err := os.ReadFile(abs)
+		existed := err == nil
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("runopen: read canvas: %w", err)
+		}
+		if expected != nil {
+			if err := session.RequireUnreserved(root, projectID, slug); err != nil {
+				return err
+			}
+			if string(prev) != *expected {
+				return ErrCaptureChanged
+			}
+		}
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			return fmt.Errorf("runopen: mkdir doc dir: %w", err)
+		}
+		if err := os.WriteFile(abs, []byte(body), 0o644); err != nil {
+			return fmt.Errorf("runopen: write canvas: %w", err)
+		}
+		msg := fmt.Sprintf("work: update %s\n\n", docID) +
+			trailers.Block{
+				Run:      slug,
+				Project:  projectID,
+				Workflow: md.Workflow,
+				Document: docID,
+			}.String()
+		if err := run.StageAndCommit(root, msg, canvasRel); err != nil {
+			return restoreFile(root, canvasRel, prev, existed, err)
+		}
+		return nil
 	})
+}
+
+// restoreFile undoes one writer's change to rel after a failed commit —
+// its index entry and its bytes — touching nothing else in the tree.
+func restoreFile(root, rel string, prev []byte, existed bool, cause error) error {
+	if errors.Is(cause, run.ErrNothingToCommit) {
+		return cause
+	}
+	abs := filepath.Join(root, rel)
+	var errs []error
+	if err := git.Run(root, "reset", "-q", "--", rel); err != nil {
+		errs = append(errs, err)
+	}
+	if existed {
+		errs = append(errs, os.WriteFile(abs, prev, 0o644))
+	} else if err := os.Remove(abs); err != nil && !errors.Is(err, os.ErrNotExist) {
+		errs = append(errs, err)
+	}
+	if err := errors.Join(errs...); err != nil {
+		return fmt.Errorf("runopen: commit failed (%w); restoring %s also failed: %v", cause, rel, err)
+	}
+	return fmt.Errorf("runopen: commit failed, nothing recorded: %w", cause)
 }
