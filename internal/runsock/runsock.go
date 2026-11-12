@@ -16,10 +16,12 @@
 // successor's listener. A missing listener means no live owner — not
 // that the run finished, and never permission to start a replacement.
 //
-// The wire is one bounded newline-terminated JSON request and one JSON
-// reply per connection. Status is a full snapshot; polling it is the
-// whole observation protocol. Durable state (control.json, trailers) is
-// what correctness rests on; this is the live overlay.
+// The wire is newline-terminated JSON frames of at most 64 KiB. status
+// and control are one request and one reply per connection; watch is one
+// request and then a stream of full snapshots (watch.go). Every reply is
+// checked for the protocol version and the identity it describes.
+// Durable state (control.json, trailers) is what correctness rests on;
+// this is the live overlay.
 package runsock
 
 import (
@@ -178,6 +180,8 @@ type Server struct {
 	mu     sync.Mutex
 	status Status
 	conns  map[net.Conn]struct{}
+	subs   map[*subscriber]struct{}
+	done   chan struct{} // closed by Close; wakes idle watchers
 	closed bool
 	wg     sync.WaitGroup
 }
@@ -214,7 +218,7 @@ func Listen(dir string, id Identity, initial Status) (*Server, error) {
 	if st.PhaseSince.IsZero() {
 		st.PhaseSince = now
 	}
-	s := &Server{id: id, path: p, ln: ln, conns: map[net.Conn]struct{}{}, status: st}
+	s := &Server{id: id, path: p, ln: ln, conns: map[net.Conn]struct{}{}, subs: map[*subscriber]struct{}{}, done: make(chan struct{}), status: st}
 	s.wg.Add(1)
 	go s.accept()
 	return s, nil
@@ -239,6 +243,7 @@ func (s *Server) Update(change func(*Status)) {
 	}
 	s.status.Revision++
 	s.status.UpdatedAt = now
+	s.notifyLocked()
 }
 
 // Checkpoint runs fn under the dispatch lock. fn reads the control
@@ -272,6 +277,7 @@ func (s *Server) Close() error {
 		return nil
 	}
 	s.closed = true
+	close(s.done)
 	for c := range s.conns {
 		c.Close()
 	}
@@ -337,6 +343,8 @@ func (s *Server) handle(c net.Conn) {
 	case "status":
 		snap := s.Snapshot()
 		answer(reply{OK: true, Status: &snap})
+	case "watch":
+		s.serveWatch(c)
 	case "control":
 		if f.Control == nil || s.Submit == nil {
 			answer(reply{Error: "no control request"})
@@ -415,6 +423,9 @@ func roundTrip(ctx context.Context, dir string, id Identity, f frame) (reply, er
 	var r reply
 	if err := json.Unmarshal(line, &r); err != nil {
 		return reply{}, fmt.Errorf("runsock: reply from %s: %w", id, err)
+	}
+	if err := checkReply(id, r); err != nil {
+		return reply{}, err
 	}
 	if !r.OK {
 		return r, &RefusedError{Run: id.String(), Reason: r.Error}
