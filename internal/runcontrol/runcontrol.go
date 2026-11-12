@@ -116,8 +116,8 @@ type Request struct {
 	Kind       Kind      `json:"kind"`
 	AcceptedAt time.Time `json:"accepted_at"`
 	// Owner binds a park to the owner generation the requester saw, so
-	// it retires rather than parking a successor. Empty binds to
-	// whichever owner reaches a boundary first.
+	// it retires rather than parking a successor. Submit refuses a new
+	// park without one.
 	Owner string `json:"owner,omitempty"`
 	// Revision is the hold revision a resume was rendered against; zero
 	// accepts whatever hold is current.
@@ -127,6 +127,10 @@ type Request struct {
 	Stage string `json:"stage,omitempty"`
 	Agent string `json:"agent,omitempty"`
 	State State  `json:"state"`
+	// AppliedStatus is the run's status when a finish was applied. A
+	// run that was already pushed then (a CI repair) cannot prove by
+	// its status alone that this finish shipped anything.
+	AppliedStatus string `json:"applied_status,omitempty"`
 	// Boundary names where an owner acted on the request ("stage code",
 	// "push", "chain ride", …).
 	Boundary string `json:"boundary,omitempty"`
@@ -137,10 +141,21 @@ type Request struct {
 // Settled reports whether nothing more will happen to r.
 func (r Request) Settled() bool { return r.State == StateCompleted || r.State == StateFailed }
 
+// ShippedBy reports whether a run now at status has shipped since the
+// finish r was applied: it was in progress then and is pushed or merged
+// now. A finish applied to an already-pushed run (a CI repair) has no
+// such evidence, so this says no.
+func (r Request) ShippedBy(status string) bool {
+	return r.AppliedStatus == run.StatusInProgress &&
+		(status == run.StatusPushed || status == run.StatusMerged)
+}
+
 // sameIntent reports whether b, offered under a's id, asks for what a
-// asked for. State and receipts are a's own history, not intent.
+// asked for. State and receipts are a's own history, not intent. A
+// retry that names no owner generation (it no longer knows which owner
+// it addressed) reads back the recorded park.
 func (a Request) sameIntent(b Request) bool {
-	return a.Kind == b.Kind && a.Owner == b.Owner && a.Revision == b.Revision
+	return a.Kind == b.Kind && (a.Owner == b.Owner || b.Owner == "") && a.Revision == b.Revision
 }
 
 // Hold is a pause or handoff in force.
@@ -345,6 +360,9 @@ func Submit(root, projectID, runID string, req Request) (Request, error) {
 				r.State, r.Outcome = StateCompleted, "held; no owner was running"
 			}
 		case KindPark:
+			if req.Owner == "" {
+				return "", fmt.Errorf("%w: a park must name the owner generation it addresses", ErrNoOwner)
+			}
 			if !busy {
 				return "", fmt.Errorf("%w: %s/%s has no owner to park", ErrNoOwner, projectID, runID)
 			}
@@ -383,7 +401,8 @@ type Settlement struct {
 	Recovery bool
 }
 
-// Settle records an owner's progress on a request. Moving a request to
+// Settle records an owner's progress on a request; applying one also
+// stamps the run's status at that moment. Moving a request to
 // the state it already has, or touching one already settled, is a no-op
 // with no commit — boundaries that re-read the record call it on every
 // pass. Completing a pause/handoff leaves its hold in force; only
@@ -405,6 +424,13 @@ func Settle(root, projectID, runID, id string, s Settlement, consent string) err
 			return "", run.ErrNothingToCommit
 		}
 		r.State, r.Boundary, r.Outcome = s.State, s.Boundary, s.Outcome
+		if s.State == StateApplied {
+			md, err := run.Load(root, projectID, runID)
+			if err != nil {
+				return "", err
+			}
+			r.AppliedStatus = md.Status
+		}
 		if s.Recovery {
 			f.Recovery = &Recovery{Request: id, Reason: s.Outcome}
 			f.Revision++

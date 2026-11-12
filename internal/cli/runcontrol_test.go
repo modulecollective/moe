@@ -36,7 +36,11 @@ func controlRecord(t *testing.T, root string) runcontrol.File {
 
 func submitControl(t *testing.T, root string, kind runcontrol.Kind, id string) {
 	t.Helper()
-	if _, err := runcontrol.Submit(root, "moe", "change-auth", runcontrol.Request{ID: id, Kind: kind}); err != nil {
+	req := runcontrol.Request{ID: id, Kind: kind}
+	if kind == runcontrol.KindPark {
+		req.Owner = ownerGeneration(root, "moe", "change-auth") // a park addresses the live owner
+	}
+	if _, err := runcontrol.Submit(root, "moe", "change-auth", req); err != nil {
 		t.Fatalf("submit %s: %v", kind, err)
 	}
 }

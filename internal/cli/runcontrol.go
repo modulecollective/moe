@@ -9,11 +9,14 @@ package cli
 // decide.
 //
 // Boundaries read the record without the repository lock. Writers
-// replace it atomically, so a read sees a whole receipt from before or
-// after any write: a request accepted after the read applies at the
-// following boundary. The one grant — finish — is applied through
-// runcontrol.Settle, which re-reads under the lock before anything is
-// dispatched, so it can never act on an unacknowledged request.
+// replace it atomically, so a read sees a whole record — but possibly
+// one whose commit has not landed and may yet roll back. That read is
+// only ever used to stop: a hold or park it sees costs at most one
+// spurious yield. Nothing that grants or acknowledges reads it that
+// way. The one grant — finish — is applied through runcontrol.Settle,
+// which re-reads under the lock before anything is dispatched, and a
+// client confirming a request it lost the answer to goes through
+// runcontrol.Submit, which reads under the lock too.
 //
 // Workflow code still owns gates, recovery and shipping. This file only
 // decides whether the next transition may start, and finish only picks
@@ -21,6 +24,7 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"strconv"
 	"sync"
@@ -65,6 +69,9 @@ func controlCheckpoint(root string, md *run.Metadata, boundary string, stderr io
 	}, func(s *runsock.Status) {
 		s.Phase, s.Waiting = phase, ""
 		if stage != "" {
+			if s.Stage != stage {
+				s.Agent = ""
+			}
 			s.Stage = stage
 		}
 	})
@@ -78,7 +85,12 @@ func checkControl(root string, md *run.Metadata, boundary string, stderr io.Writ
 		moePrintf(stderr, "control: %v — stopping before %s\n", err, boundary)
 		return exitYielded
 	}
-	if reconcileFinishes(root, md, f, stderr) {
+	settled, err := reconcileFinishes(root, md, f)
+	if err != nil {
+		moePrintf(stderr, "control: %v — stopping before %s\n", err, boundary)
+		return exitYielded
+	}
+	if settled {
 		if f, err = runcontrol.Load(root, md.Project, md.ID); err != nil {
 			moePrintf(stderr, "control: %v — stopping before %s\n", err, boundary)
 			return exitYielded
@@ -238,12 +250,17 @@ func markFinishInFlight(id string, on bool) {
 
 // reconcileFinishes settles finishes some earlier owner applied and
 // never completed. Only a guard holder may: otherwise the applier may
-// still be running. A run that has since shipped completes them; any
-// other outcome is unknown and raises recovery — never a replay.
-// Reports whether it settled anything.
-func reconcileFinishes(root string, md *run.Metadata, f runcontrol.File, stderr io.Writer) (settled bool) {
+// still be running. A run that has shipped since the finish was applied
+// completes it; any other outcome is unknown and raises recovery —
+// never a replay. A run already pushed at application (a CI repair)
+// proves nothing by still being pushed, so it raises recovery too.
+//
+// Reports whether it settled anything. An error means a receipt could
+// not be recorded: the caller must not admit work on a record that
+// still reads as if nothing were uncertain.
+func reconcileFinishes(root string, md *run.Metadata, f runcontrol.File) (settled bool, err error) {
 	if heldRun(root, md.Project, md.ID) == nil {
-		return false
+		return false, nil
 	}
 	for _, r := range f.Requests {
 		if r.Kind != runcontrol.KindFinish || r.State != runcontrol.StateApplied {
@@ -257,15 +274,16 @@ func reconcileFinishes(root string, md *run.Metadata, f runcontrol.File, stderr 
 		}
 		s := runcontrol.Settlement{State: runcontrol.StateFailed, Boundary: r.Boundary,
 			Outcome: "the owner that applied it exited; outcome unknown", Recovery: true}
-		if fresh, err := run.Load(root, md.Project, md.ID); err == nil &&
-			(fresh.Status == run.StatusPushed || fresh.Status == run.StatusMerged) {
+		if fresh, err := run.Load(root, md.Project, md.ID); err == nil && r.ShippedBy(fresh.Status) {
 			s = runcontrol.Settlement{State: runcontrol.StateCompleted, Boundary: r.Boundary,
 				Outcome: "shipped (reconciled after its owner exited)"}
 		}
-		settleControl(root, md, r.ID, s, stderr)
+		if err := runcontrol.Settle(root, md.Project, md.ID, r.ID, s, walkConsent()); err != nil {
+			return settled, fmt.Errorf("reconcile finish %s: %w", r.ID, err)
+		}
 		settled = true
 	}
-	return settled
+	return settled, nil
 }
 
 // openFinish returns the run's accepted finish, if any.
@@ -302,15 +320,26 @@ func applyFinish(root string, md *run.Metadata, r runcontrol.Request, boundary s
 	moePrintf(stdout, "control: finishing %s/%s at the operator's request (!! from %s)\n", md.Project, md.ID, boundary)
 	code := walk()
 	s := runcontrol.Settlement{State: runcontrol.StateFailed, Boundary: boundary, Outcome: "stopped (exit " + strconv.Itoa(code) + ")"}
-	fresh, err := run.Load(root, md.Project, md.ID)
 	switch {
-	case err == nil && (fresh.Status == run.StatusPushed || fresh.Status == run.StatusMerged):
+	case finishShipped(root, md, r.ID):
 		s.State, s.Outcome = runcontrol.StateCompleted, "shipped"
 	case code == exitYielded:
 		s.State, s.Outcome = runcontrol.StateCompleted, "superseded by a later hold or park"
 	}
 	settleControl(root, md, r.ID, s, stderr)
 	return code
+}
+
+// finishShipped reports whether the run has shipped since the finish id
+// was applied (runcontrol.Request.ShippedBy).
+func finishShipped(root string, md *run.Metadata, id string) bool {
+	f, err := runcontrol.Load(root, md.Project, md.ID)
+	if err != nil {
+		return false
+	}
+	r, ok := f.Find(id)
+	fresh, err := run.Load(root, md.Project, md.ID)
+	return ok && err == nil && r.ShippedBy(fresh.Status)
 }
 
 // finishGateBlocked completes an open finish that met a blocked gate:

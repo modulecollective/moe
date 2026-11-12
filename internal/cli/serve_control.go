@@ -33,7 +33,7 @@ func serveRunControl(root, projectID, runID string) (serve.RunControlView, bool,
 		return v, true, nil
 	}
 	f := o.Control
-	stage, agent := conversationAddress(md)
+	stage, agent := conversationAddress(md, o.Live)
 	if f.Hold != nil {
 		r, _ := f.Find(f.Hold.Request)
 		v.Lines = append(v.Lines, fmt.Sprintf("hold: %s %s — %s", f.Hold.Kind, f.Hold.Request, holdPhase(r)))
@@ -126,9 +126,6 @@ func serveSubmitControl(root, projectID, runID, action, id string, revision int)
 		return r.Outcome, nil
 	}
 	req := runcontrol.Request{ID: id, Kind: kind}
-	if kind == runcontrol.KindHandoff {
-		req.Stage, req.Agent = conversationAddress(md)
-	}
 	r, note, err := deliverControl(root, md, req)
 	if err != nil {
 		return "", refusedOr(err)

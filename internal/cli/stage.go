@@ -811,7 +811,9 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				return c
 			}
 			if code == 0 {
-				publishPhase(root, md, runsock.PhaseRunning, docID, "")
+				publishRun(root, md.Project, md.ID, func(s *runsock.Status) {
+					s.Phase, s.Waiting, s.Stage, s.Agent = runsock.PhaseRunning, "", docID, agentName
+				})
 			}
 		}
 		in.Agent = agentName

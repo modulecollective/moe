@@ -245,6 +245,15 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 		return 0, nil
 	}
 
+	// Ship admission: every route into a ship — the bare verb, a
+	// cascade, a finish, a CI repair — passes here, so a hold or park
+	// stops it before any sandbox, hook or remote work. The owed record
+	// commits above are past this on purpose: their remote update has
+	// already happened, and settling it is not further work.
+	if code := controlCheckpoint(root, md, "push", stderr); code != 0 {
+		return code, nil
+	}
+
 	pj, err := project.Load(root, md.Project)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
@@ -344,6 +353,13 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 	// forever; the DefaultAdvanced probe gates each retry to the one cause
 	// a retry can fix.
 	for attempt := 1; ; attempt++ {
+		// A retry is another ship attempt: nothing reached the remote on
+		// the rejected one, so a control that arrived meanwhile stops it.
+		if attempt > 1 {
+			if code := controlCheckpoint(root, md, "push retry", stderr); code != 0 {
+				return code, nil
+			}
+		}
 		if err := runHooks(root, hookEventPrePush, hooks, stdout, stderr); err != nil {
 			if conflict, ok := errors.AsType[*push.RebaseConflictError](err); ok {
 				moePrintf(stderr, "%v\n", conflict)

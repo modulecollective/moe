@@ -125,6 +125,9 @@ func publishPhase(root string, md *run.Metadata, phase, stage, waiting string) {
 	publishRun(root, md.Project, md.ID, func(s *runsock.Status) {
 		s.Phase, s.Waiting = phase, waiting
 		if stage != "" {
+			if s.Stage != stage {
+				s.Agent = "" // a new stage has not launched its agent yet
+			}
 			s.Stage = stage
 		}
 	})
@@ -145,7 +148,7 @@ func (nopWriter) Write(p []byte) (int, error) { return len(p), nil }
 // boundaryPhase is the phase an admitted boundary moves the owner to.
 func boundaryPhase(boundary string) (phase, stage string) {
 	switch {
-	case boundary == "push":
+	case boundary == "push", boundary == "push retry":
 		return runsock.PhaseShipping, ""
 	case boundary == "the next-stage decision":
 		return runsock.PhaseDeciding, ""

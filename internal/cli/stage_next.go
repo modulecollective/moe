@@ -1304,10 +1304,8 @@ func closeNominatedRun(md *run.Metadata, stage string, stdout, stderr io.Writer)
 func cascadeShipStep(workflow string, md *run.Metadata, rideChain bool, stdout, stderr io.Writer) (steps []cascadeStepResult, shipped bool, code int) {
 	retries := 0
 	for {
-		if cc := cascadeCheckpoint(md, "push", stderr); cc != 0 {
-			steps = append(steps, cascadeStepResult{stage: "push", code: cc})
-			return steps, false, cc
-		}
+		// The push entry itself is the ship's control checkpoint, on the
+		// first attempt and on the retry after recovery alike.
 		ship, err := pushFromCascade(workflow, []string{md.Project + "/" + md.ID}, pushRunOptions{
 			HeadlessRecovery: true,
 			SkipTerminalEdit: true,

@@ -117,6 +117,7 @@ func commitTurn(root string, md *run.Metadata, docID, backend string, timedOut t
 		return &canvasRefusalError{Path: canvas, Reason: "empty"}
 	}
 
+	md.LastTurn = &run.Turn{Stage: docID, Agent: backend}
 	if err := run.Save(root, md); err != nil {
 		return err
 	}

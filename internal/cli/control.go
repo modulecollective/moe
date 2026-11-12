@@ -76,9 +76,6 @@ func runControlSubmit(kind runcontrol.Kind, args []string, stdout, stderr io.Wri
 	if req.ID == "" {
 		req.ID = runcontrol.NewID()
 	}
-	if kind == runcontrol.KindHandoff {
-		req.Stage, req.Agent = conversationAddress(md)
-	}
 	r, note, err := deliverControl(root, md, req)
 	if err != nil {
 		moePrintf(stderr, "%s: %v\n", verb, err)
@@ -94,7 +91,7 @@ func runControlSubmit(kind runcontrol.Kind, args []string, stdout, stderr io.Wri
 		moePrintf(stdout, "%s %s on %s: %s\n", r.Kind, r.ID, key, describeRequest(r))
 	}
 	if kind == runcontrol.KindHandoff {
-		if cmd := conversationCommand(md, req.Stage, req.Agent); cmd != "" {
+		if cmd := conversationCommand(md, r.Stage, r.Agent); cmd != "" {
 			moePrintf(stdout, "continue the conversation: %s\n", cmd)
 		}
 	}
@@ -165,7 +162,7 @@ func runControlShow(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	f := o.Control
-	stage, agent := conversationAddress(md)
+	stage, agent := conversationAddress(md, o.Live)
 	switch {
 	case f.Hold != nil:
 		r, _ := f.Find(f.Hold.Request)
@@ -251,11 +248,30 @@ func holdPhase(r runcontrol.Request) string {
 	return "held, current turn settling"
 }
 
-// conversationAddress is the last stage that actually ran and the
-// backend that ran it — not the next pending stage. With several
-// backends on that stage it prefers the run's sticky agent, and
-// otherwise names none, leaving the stage verb's normal resolution.
-func conversationAddress(md *run.Metadata) (stage, agent string) {
+// conversationAddress is the conversation a human picks up: the stage
+// actually running or last run, and its backend — not the next pending
+// stage, and not the furthest stage with a session (a review→code
+// kickback leaves review's session behind code's newer turn).
+//
+// In order: the live owner's own stage and backend, when it reports a
+// stage that has a conversation; the run's last settled turn
+// (run.Metadata.LastTurn); and, for runs that settled no turn since that
+// was recorded, the furthest stage in workflow order with a session.
+// When the backend is not known it prefers the run's sticky agent among
+// the stage's sessions, and otherwise names none, leaving the stage
+// verb's normal resolution.
+func conversationAddress(md *run.Metadata, live *runsock.Status) (stage, agent string) {
+	if live != nil && live.Stage != "" {
+		if doc := md.Documents[live.Stage]; doc != nil && doc.HasSession() {
+			if live.Agent != "" {
+				return live.Stage, live.Agent
+			}
+			return live.Stage, stageAgent(md, live.Stage)
+		}
+	}
+	if t := md.LastTurn; t != nil && t.Stage != "" {
+		return t.Stage, t.Agent
+	}
 	wf, err := LookupWorkflow(md.Workflow)
 	if err != nil {
 		return "", ""
@@ -263,26 +279,30 @@ func conversationAddress(md *run.Metadata) (stage, agent string) {
 	stages := wf.Stages()
 	slices.Reverse(stages)
 	for _, s := range stages {
-		doc := md.Documents[s]
-		if doc == nil || !doc.HasSession() {
-			continue
+		if doc := md.Documents[s]; doc != nil && doc.HasSession() {
+			return s, stageAgent(md, s)
 		}
-		var agents []string
-		for a, id := range doc.Sessions {
-			if id != "" {
-				agents = append(agents, a)
-			}
-		}
-		sort.Strings(agents)
-		switch {
-		case len(agents) == 1:
-			return s, agents[0]
-		case slices.Contains(agents, md.Agent):
-			return s, md.Agent
-		}
-		return s, ""
 	}
 	return "", ""
+}
+
+// stageAgent is the backend of stage's conversation when the run says
+// which: its only session, or the sticky agent among several.
+func stageAgent(md *run.Metadata, stage string) string {
+	var agents []string
+	for a, id := range md.Documents[stage].Sessions {
+		if id != "" {
+			agents = append(agents, a)
+		}
+	}
+	sort.Strings(agents)
+	switch {
+	case len(agents) == 1:
+		return agents[0]
+	case slices.Contains(agents, md.Agent):
+		return md.Agent
+	}
+	return ""
 }
 
 // conversationCommand is the stage verb that resumes a conversation
@@ -293,7 +313,7 @@ func conversationCommand(md *run.Metadata, stage, agent string) string {
 		return ""
 	}
 	if stage == "" {
-		stage, agent = conversationAddress(md)
+		stage, agent = conversationAddress(md, nil)
 	}
 	if stage == "" {
 		return ""
@@ -310,43 +330,58 @@ var controlDialTimeout = 3 * time.Second
 
 // deliverControl records req. With a live owner answering, the request
 // goes through its endpoint so the receipt is serialised with the
-// owner's transitions; a park is bound to that owner's generation. The
-// owner's refusal is definite. A send whose answer was lost is read back
-// by id, and if it never landed is committed directly under the same id
-// — never resent under a new one. With no owner answering, the request
-// is committed directly and the owner (if one exists) reads it at its
-// next boundary. note says which happened when it is not the plain case.
+// owner's transitions; a park is bound to that owner's generation, and
+// a handoff to the conversation that owner is actually running. The
+// owner's refusal is definite. A send whose answer was lost is retried
+// directly under the same id: Submit reads the record under the
+// repository lock, so it returns the request only once the owner's
+// commit has landed, records it if that commit failed, and reports an
+// error — never a success — while the outcome is still unknown. With no
+// owner answering, a pause or handoff is committed directly and the
+// owner (if one exists) reads it at its next boundary; a park, which
+// only means something to the owner it addresses, is refused. note
+// says which happened when it is not the plain case.
 func deliverControl(root string, md *run.Metadata, req runcontrol.Request) (runcontrol.Request, string, error) {
 	id := runsock.Identity{Root: root, Project: md.Project, Run: md.ID}
 	ctx, cancel := context.WithTimeout(context.Background(), controlDialTimeout)
 	defer cancel()
 	st, err := runsock.ReadStatus(ctx, runsock.RuntimeDir(), id)
+	var live *runsock.Status
 	if err == nil {
-		gen := ""
-		if req.Kind == runcontrol.KindPark {
-			gen, req.Owner = st.Generation, st.Generation
+		live = &st
+	}
+	if req.Kind == runcontrol.KindHandoff && req.Stage == "" {
+		req.Stage, req.Agent = conversationAddress(md, live)
+	}
+	if live == nil {
+		// A park with no generation is refused by Submit unless its id
+		// is already recorded, which reads that request back.
+		r, serr := runcontrol.Submit(root, md.Project, md.ID, req)
+		if serr != nil && req.Kind == runcontrol.KindPark && errors.Is(serr, runcontrol.ErrNoOwner) {
+			return runcontrol.Request{}, "", fmt.Errorf("%w; no owner of %s/%s answered (%v)", serr, md.Project, md.ID, err)
 		}
-		r, _, err := runsock.SendControl(ctx, runsock.RuntimeDir(), id, gen, req)
-		if err == nil {
-			return r, "", nil
-		}
-		if _, refused := errors.AsType[*runsock.RefusedError](err); refused {
+		if err := serr; err != nil {
 			return runcontrol.Request{}, "", err
 		}
-		f, lerr := runcontrol.Load(root, md.Project, md.ID)
-		if lerr != nil {
-			return runcontrol.Request{}, "", fmt.Errorf("owner acknowledgement lost (%v) and readback failed (%v); retry with --id %s", err, lerr, req.ID)
+		if busy, _ := runowner.Busy(root, md.Project, md.ID); busy && !r.Settled() {
+			return r, "saved; owner acknowledgement unavailable — it applies at the owner's next boundary", nil
 		}
-		if r, ok := f.Find(req.ID); ok {
-			return r, "saved; the owner's acknowledgement was lost", nil
-		}
+		return r, "", nil
 	}
-	r, err := runcontrol.Submit(root, md.Project, md.ID, req)
-	if err != nil {
+	gen := ""
+	if req.Kind == runcontrol.KindPark {
+		gen, req.Owner = st.Generation, st.Generation
+	}
+	r, _, err := runsock.SendControl(ctx, runsock.RuntimeDir(), id, gen, req)
+	if err == nil {
+		return r, "", nil
+	}
+	if _, refused := errors.AsType[*runsock.RefusedError](err); refused {
 		return runcontrol.Request{}, "", err
 	}
-	if busy, _ := runowner.Busy(root, md.Project, md.ID); busy && !r.Settled() {
-		return r, "saved; owner acknowledgement unavailable — it applies at the owner's next boundary", nil
+	r, serr := runcontrol.Submit(root, md.Project, md.ID, req)
+	if serr != nil {
+		return runcontrol.Request{}, "", fmt.Errorf("owner acknowledgement lost (%v) and it could not be confirmed (%v); retry with --id %s", err, serr, req.ID)
 	}
-	return r, "", nil
+	return r, "saved; the owner's acknowledgement was lost — it applies at the owner's next boundary", nil
 }

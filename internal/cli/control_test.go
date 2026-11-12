@@ -124,7 +124,7 @@ func TestControlRefusals(t *testing.T) {
 		t.Fatalf("finish on a pulse = %d: %s", code, errs)
 	}
 	code, _, errs = runControl(t, "park", "moe/change-auth")
-	if code == 0 || !strings.Contains(errs, "no owner to park") {
+	if code == 0 || !strings.Contains(errs, "no owner of moe/change-auth answered") {
 		t.Fatalf("park with no owner = %d: %s", code, errs)
 	}
 	runControl(t, "pause", "moe/change-auth")

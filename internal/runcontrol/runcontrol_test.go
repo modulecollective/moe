@@ -173,6 +173,14 @@ func TestParkNeedsAnOwner(t *testing.T) {
 	if r.State != StateAccepted || r.Owner != "gen-7" || load(t, root).Held() {
 		t.Fatalf("park = %+v (held %v), want accepted, bound to gen-7, nothing held", r, load(t, root).Held())
 	}
+	// With an owner but no generation named, a new park is still refused;
+	// a retry of a recorded one reads it back.
+	if _, err := Submit(root, "moe", "r1", Request{ID: "k3", Kind: KindPark}); !errors.Is(err, ErrNoOwner) {
+		t.Fatalf("unbound park: err = %v, want ErrNoOwner", err)
+	}
+	if again := submit(t, root, Request{ID: "k2", Kind: KindPark}); again.Owner != "gen-7" {
+		t.Fatalf("readback = %+v, want the recorded park", again)
+	}
 }
 
 // A hold wins over finish: finish is refused while held, and a hold
@@ -399,7 +407,7 @@ func TestFailedCommitRestores(t *testing.T) {
 func TestWritesReadInsideTheLock(t *testing.T) {
 	root := seedRoot(t)
 	own(t, root)
-	submit(t, root, Request{ID: "k1", Kind: KindPark})
+	submit(t, root, Request{ID: "k1", Kind: KindPark, Owner: "gen-1"})
 	testLocked = func() {
 		testLocked = nil
 		// Stand in for another process's write between our read and lock.
@@ -416,5 +424,27 @@ func TestWritesReadInsideTheLock(t *testing.T) {
 		if _, ok := f.Find(id); !ok {
 			t.Fatalf("request %s lost; record = %+v", id, f)
 		}
+	}
+}
+
+// Applying a finish stamps the run's status then; only a run that was
+// in progress at application can prove by its later status that the
+// finish shipped.
+func TestAppliedFinishRecordsRunStatus(t *testing.T) {
+	root := seedRoot(t)
+	submit(t, root, Request{ID: "f1", Kind: KindFinish})
+	if err := Settle(root, "moe", "r1", "f1", Settlement{State: StateApplied, Boundary: "stage code"}, ""); err != nil {
+		t.Fatal(err)
+	}
+	f1, _ := load(t, root).Find("f1")
+	if f1.AppliedStatus != run.StatusInProgress {
+		t.Fatalf("applied status = %q, want %q", f1.AppliedStatus, run.StatusInProgress)
+	}
+	if !f1.ShippedBy(run.StatusPushed) || f1.ShippedBy(run.StatusInProgress) {
+		t.Fatalf("ShippedBy wrong for a finish applied in progress: %+v", f1)
+	}
+	repair := Request{Kind: KindFinish, State: StateApplied, AppliedStatus: run.StatusPushed}
+	if repair.ShippedBy(run.StatusPushed) {
+		t.Fatal("a finish applied to a pushed run proved a ship by status alone")
 	}
 }

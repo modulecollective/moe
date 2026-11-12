@@ -108,6 +108,8 @@ type Status struct {
 	Workflow string `json:"workflow,omitempty"`
 	// Stage is the stage actually running or last run, not the next.
 	Stage string `json:"stage,omitempty"`
+	// Agent is the backend running Stage, once its turn has launched.
+	Agent string `json:"agent,omitempty"`
 	// Interactive is true for an attended owner (a person at its
 	// terminal), false for a headless walk.
 	Interactive bool `json:"interactive"`

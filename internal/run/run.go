@@ -139,8 +139,20 @@ type Metadata struct {
 	// Without it a reaped run is byte-identical on disk to one the loop
 	// never reached, and the only copy of the dead turn's transcript
 	// goes with the branch.
-	Reaped    *ReapNote            `json:"reaped,omitempty"`
+	Reaped *ReapNote `json:"reaped,omitempty"`
+	// LastTurn is the stage and backend of the last agent turn that
+	// settled on this run, written with that turn's commit. It is the
+	// conversation a human handoff resumes: after a review→code
+	// kickback the last conversation is code's, even though review sits
+	// later in workflow order.
+	LastTurn  *Turn                `json:"last_turn,omitempty"`
 	Documents map[string]*Document `json:"documents"`
+}
+
+// Turn names one agent conversation on a run: its stage and backend.
+type Turn struct {
+	Stage string `json:"stage"`
+	Agent string `json:"agent"`
 }
 
 // ReapNote is the tombstone Metadata.Reaped carries. Scalars only: the

@@ -13,6 +13,7 @@ import (
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/runcontrol"
 	"github.com/modulecollective/moe/internal/runopen"
 	"github.com/modulecollective/moe/internal/trailers"
 )
@@ -323,6 +324,9 @@ func chainKickRun(root, projectID, runID string, mode rideMode, oneStage bool, s
 		if summary := renderCascadeSummary(projectID+"/"+runID, res); summary != "" {
 			moePrintln(stdout, summary)
 		}
+		if oneStage {
+			return finishAfterOneStage(root, md, code, stdout, stderr)
+		}
 		return code
 	}
 
@@ -496,4 +500,45 @@ func mintChainRun(root, projectID, base, spawnedBy, note string) (*run.Metadata,
 		opts.Trailers = trailers.Block{SpawnedBy: spawnedBy, Consent: spawnConsent(spawnedBy)}
 	}
 	return runopen.Open(root, projectID, opts)
+}
+
+// finishAfterOneStage acts on a finish the operator asked for while a
+// one-stage kick's turn ran: the boundary that turn settled at is the
+// next one, so the finish applies there — this run's `!!` from the next
+// pending stage — rather than waiting for another sweep. A kick that
+// stopped (a blocked gate, a failure) is the finish's outcome; a yield
+// leaves it to the hold or park that caused it.
+func finishAfterOneStage(root string, md *run.Metadata, code int, stdout, stderr io.Writer) int {
+	r, ok := openFinish(root, md)
+	if !ok || code == exitYielded {
+		return code
+	}
+	if code != 0 {
+		settleControl(root, md, r.ID, runcontrol.Settlement{
+			State: runcontrol.StateFailed, Outcome: fmt.Sprintf("the kick's stage stopped (exit %d)", code),
+		}, stderr)
+		return code
+	}
+	fresh, err := run.Load(root, md.Project, md.ID)
+	if err != nil {
+		moePrintf(stderr, "chain kick: %v\n", err)
+		return 1
+	}
+	wf, err := LookupWorkflow(fresh.Workflow)
+	if err != nil {
+		moePrintf(stderr, "chain kick: %v\n", err)
+		return 1
+	}
+	next, kind, err := wf.Next(root, fresh)
+	if err != nil {
+		moePrintf(stderr, "chain kick: next stage: %v\n", err)
+		return 1
+	}
+	if kind != NextKindStage || next == "" {
+		return code // nothing left to finish; the next boundary settles it
+	}
+	if cc := controlCheckpoint(root, fresh, "stage "+next, stderr); cc != 0 {
+		return cc
+	}
+	return applyFinish(root, fresh, r, "stage "+next, stdout, stderr, finishWalk(root, fresh, next, stdout, stderr))
 }

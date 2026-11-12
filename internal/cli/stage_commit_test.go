@@ -228,6 +228,11 @@ func TestCommitTurnCarriesSdlcChoreEdit(t *testing.T) {
 	if !strings.Contains(names, contentRel) {
 		t.Errorf("turn commit missing canvas %q in:\n%s", contentRel, names)
 	}
+	// The settled turn is the conversation a handoff resumes.
+	if saved, err := run.Load(root, md.Project, md.ID); err != nil || saved.LastTurn == nil ||
+		*saved.LastTurn != (run.Turn{Stage: "code", Agent: "claude"}) {
+		t.Errorf("last turn = %+v (%v), want code/claude", saved, err)
+	}
 }
 
 // TestCommitTurnStampsTimedOut: a turn killed by the headless cap
