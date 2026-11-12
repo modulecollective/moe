@@ -282,10 +282,11 @@ resume that loses to another owner or an unresolved session leaves it in
 place.
 
 **Park** asks only the current owner to yield, holds nothing, and is retired
-if that owner is gone before it reaches a boundary. **Finish** is `!!` for
+if that owner is gone before it reaches a boundary. It is refused when no
+owner answers, since there is nothing to address. **Finish** is `!!` for
 this run alone: through the same gates and ship route, then no chain ride. It
 applies at the next-stage prompt, at the next kick (widening a `!`, narrowing a
-`!!!`), or on an open CI repair's existing PR; it does not start an idle run.
+`!!!`), after the stage a running `!` kick is on, or on an open CI repair's existing PR; it does not start an idle run.
 A hold wins over finish, and an applied finish whose owner died is reconciled
 — shipped, or "recovery required" until a resume, never replayed.
 
