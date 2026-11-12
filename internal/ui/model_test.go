@@ -541,3 +541,115 @@ func TestDetailWrapsLongLines(t *testing.T) {
 		}
 	}
 }
+
+// paintedDetail scrolls the details from the top to the bottom and
+// returns every painted row in order, joined without separators so a
+// wrapped line reads whole.
+func paintedDetail(t *testing.T, m *model) string {
+	t.Helper()
+	m.focus, m.detailTop = paneDetail, 0
+	seen := map[int]string{}
+	for range 200 {
+		f := m.view()
+		for i := range m.detailHeight() {
+			r := f.rows[1+m.boardHeight()+1+i]
+			if w := textWidth(r); w > m.width-1 {
+				t.Fatalf("row %q is %d cells wide", r, w)
+			}
+			seen[m.detailTop+i] = r
+		}
+		press(m, Key{Code: KeyDown})
+	}
+	var all []string
+	for i := range len(seen) {
+		all = append(all, seen[i])
+	}
+	return strings.Join(all, "")
+}
+
+// An outcome — a refusal with its recovery, or a save whose tag failed —
+// is marked in the title at any supported width, with the real board
+// header present, and its whole text is in the target's details.
+func TestOutcomeReachable(t *testing.T) {
+	const refusal = "the canvas changed since you opened it; nothing saved — Ctrl-X discards your draft, then e opens the current text"
+	for _, cols := range []int{40, 80, 100} {
+		m, q := testModel(t)
+		m.resize(14, cols)
+		b := board(1, idea("p", "i", 1))
+		b.Header = "all projects · gathered 15:04:05 · 0 live"
+		m.setBoard(b)
+		press(m, Key{Code: KeyRune, Rune: 'e'})
+		typed(m, "more")
+		press(m, Key{Code: KeyCtrlS}, Key{Code: KeyRune, Rune: 's'})
+		m.finished(jobResult{job: <-q, results: []Result{{Changed: true, Message: refusal}}})
+		if title := m.view().rows[0]; !strings.HasPrefix(title, " MoE ui · ! the") {
+			t.Fatalf("%d cols: title %q does not show the failure", cols, title)
+		}
+		if got := paintedDetail(t, m); !strings.Contains(got, refusal) {
+			t.Fatalf("%d cols: refusal not reachable in details:\n%s", cols, got)
+		}
+		// Back in the editor, the refusal heads the draft.
+		press(m, Key{Code: KeyRune, Rune: 'e'})
+		if head := strings.Join(m.detailLinesForTest()[:3], ""); !strings.Contains(head, "! the canvas changed") {
+			t.Fatalf("%d cols: editor head %q", cols, head)
+		}
+		press(m, Key{Code: KeyCtrlS}, Key{Code: KeyRune, Rune: 'g'})
+		m.finished(jobResult{job: <-q, results: []Result{{OK: true, Message: "saved p/i"}, {Message: "tag: idea p/i is promoted, not in progress"}}})
+		if title := m.view().rows[0]; !strings.HasPrefix(title, " MoE ui · ! saved") {
+			t.Fatalf("%d cols: partial title %q", cols, title)
+		}
+		got := paintedDetail(t, m)
+		for _, want := range []string{"saved p/i", "tag: idea p/i is promoted, not in progress", "retry with :tag sdlc"} {
+			if !strings.Contains(got, want) {
+				t.Fatalf("%d cols: %q not reachable in details:\n%s", cols, want, got)
+			}
+		}
+	}
+}
+
+// An answer kept from a question that closed or was replaced comes back
+// under a, still bound to its own question, says so, and can be
+// discarded; then a reaches the open question, if there is one.
+func TestStaleAnswerRecoverable(t *testing.T) {
+	for _, replaced := range []bool{true, false} {
+		m, q := testModel(t)
+		a := run("p", "a")
+		a.Question = &Question{ID: 1, Text: "which?"}
+		m.setBoard(board(1, a))
+		press(m, Key{Code: KeyRune, Rune: 'a'})
+		typed(m, "precious operator answer")
+		a.Question = nil
+		if replaced {
+			a.Question = &Question{ID: 2, Text: "and now?"}
+		}
+		m.setBoard(board(2, a))
+		press(m, Key{Code: KeyCtrlS})
+		j := <-q
+		if j.steps[0].QuestionID != 1 {
+			t.Fatalf("submitted against #%d", j.steps[0].QuestionID)
+		}
+		m.finished(jobResult{job: j, results: []Result{{Message: "question #1 is no longer open"}}})
+		if row, _ := m.footerRow(200); !strings.Contains(row, "a answer") {
+			t.Fatalf("footer = %q", row)
+		}
+		press(m, Key{Code: KeyRune, Rune: 'a'})
+		if m.mode != modeEdit || m.active.key.question != 1 || m.active.ed.String() != "precious operator answer" {
+			t.Fatalf("replaced=%v: reopened %+v", replaced, m.active)
+		}
+		if head := strings.Join(m.detailLinesForTest(), "\n"); !strings.Contains(head, "question #1 is no longer open: saving will be refused") {
+			t.Fatalf("head = %s", head)
+		}
+		press(m, Key{Code: KeyCtrlX}, Key{Code: KeyRune, Rune: 'y'})
+		if m.dirtyDrafts() != 0 {
+			t.Fatal("discard kept the answer")
+		}
+		press(m, Key{Code: KeyRune, Rune: 'a'})
+		if replaced {
+			if m.mode != modeEdit || m.active.key.question != 2 || m.active.ed.String() != "" {
+				t.Fatalf("after discard: %+v", m.active)
+			}
+		} else if m.mode == modeEdit {
+			t.Fatal("opened an answer with no open question")
+		}
+	}
+}

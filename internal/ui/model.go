@@ -48,6 +48,9 @@ type draft struct {
 	// uncertain holds the evidence of a save whose outcome is unknown;
 	// the next submit must be confirmed.
 	uncertain []string
+	// refused is why the last save of this draft was turned down, kept
+	// with the draft until it is resubmitted.
+	refused   []string
 	confirmed bool
 }
 
@@ -421,7 +424,18 @@ func (m *model) startNote() {
 
 func (m *model) startAnswer() {
 	it, ok := m.selected()
-	if !ok || it.Question == nil {
+	if !ok {
+		m.message = "answer: the selected run has no open question"
+		return
+	}
+	// An answer kept from a question since answered or replaced comes
+	// back first, still bound to its own question: it is never moved to
+	// another. Discarding it lets a reach the open one.
+	if d := m.staleAnswer(it); d != nil {
+		m.openDraft(d.key, "")
+		return
+	}
+	if it.Question == nil {
 		m.message = "answer: the selected run has no open question"
 		return
 	}
@@ -477,7 +491,7 @@ func draftWhat(k draftKey) string {
 	case "note":
 		return "note for " + k.project + "/" + k.run
 	case "answer":
-		return "answer for " + k.project + "/" + k.run
+		return fmt.Sprintf("answer to question #%d on %s/%s", k.question, k.project, k.run)
 	case "body":
 		return "edit of " + k.project + "/" + k.run
 	case "new-idea":
@@ -562,7 +576,7 @@ func (m *model) runDraft(d *draft, tag string, designOnly bool) {
 		j.steps = append(j.steps, Action{Kind: ActTag, Project: k.project, Run: k.run, Workflow: tag, DesignOnly: designOnly})
 		j.label += " + " + tagLabel(tag, designOnly)
 	}
-	d.uncertain, d.confirmed = nil, false
+	d.uncertain, d.refused, d.confirmed = nil, nil, false
 	m.active, m.mode = nil, modeNormal
 	m.start(j)
 }
@@ -623,8 +637,14 @@ func (m *model) finished(r jobResult) {
 		t := j.steps[1]
 		msgs = append(msgs, "retry with :"+strings.TrimPrefix(tagCommand(t.Workflow, t.DesignOnly), ":"))
 	}
-	m.message = strings.Join(slices.DeleteFunc(msgs, func(s string) bool { return s == "" }), " · ")
-	m.lastResult[j.target.project+"/"+j.target.run] = lines
+	msgs = slices.DeleteFunc(msgs, func(s string) bool { return s == "" })
+	m.message = strings.Join(msgs, " · ")
+	if last := r.results[len(r.results)-1]; !last.OK {
+		// Marked so a failure reads as one even when the title clips it;
+		// the whole text is in the target's details.
+		m.message = "! " + m.message
+	}
+	m.lastResult[j.target.project+"/"+j.target.run] = append(msgs, lines...)
 }
 
 func tagCommand(workflow string, designOnly bool) string {
@@ -647,8 +667,8 @@ func (m *model) settleDraft(k draftKey, res Result) {
 		delete(m.drafts, k)
 	case res.Uncertain:
 		d.uncertain = append([]string{res.Message}, res.Lines...)
-	case res.Changed:
-		d.uncertain = nil
+	default:
+		d.uncertain, d.refused = nil, append([]string{res.Message}, res.Lines...)
 	}
 }
 
@@ -874,4 +894,35 @@ func plural(n int, noun string) string {
 		return "1 " + noun
 	}
 	return fmt.Sprintf("%d %ss", n, noun)
+}
+
+// staleAnswer is a kept answer draft for it whose question is no longer
+// the open one, the oldest question first.
+func (m *model) staleAnswer(it Item) *draft {
+	var best *draft
+	for _, d := range m.drafts {
+		k := d.key
+		if k.project != it.Project || k.run != it.Run || k.purpose != "answer" ||
+			it.Question != nil && k.question == it.Question.ID {
+			continue
+		}
+		if best == nil || k.question < best.key.question {
+			best = d
+		}
+	}
+	return best
+}
+
+// answerClosed reports whether k is an answer to a question its run no
+// longer has open.
+func (m *model) answerClosed(k draftKey) bool {
+	if k.purpose != "answer" {
+		return false
+	}
+	for _, it := range m.board.Items {
+		if it.Project == k.project && it.Run == k.run {
+			return it.Question == nil || it.Question.ID != k.question
+		}
+	}
+	return false
 }

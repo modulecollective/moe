@@ -93,18 +93,20 @@ func (m *model) view() frame {
 }
 
 func (m *model) titleRow(w int) string {
+	// The newest outcome first: the board header is the part to lose
+	// when the row is narrow.
 	s := " MoE ui"
-	if m.board.Header != "" {
-		s += " · " + m.board.Header
+	if m.message != "" {
+		s += " · " + m.message
 	}
 	if m.busy != nil {
 		s += " · working: " + m.busy.label
 	}
-	if m.message != "" {
-		s += " · " + m.message
-	}
 	if n := m.dirtyDrafts(); n > 0 {
 		s += " · " + plural(n, "unsaved draft")
+	}
+	if m.board.Header != "" {
+		s += " · " + m.board.Header
 	}
 	return plain(s, w)
 }
@@ -141,10 +143,13 @@ func (m *model) detailLines(sel Item, ok bool, w, h int) ([]string, *cell) {
 		if m.mode == modeSave {
 			d = m.saveDraft
 		}
-		head := []string{"editing " + draftWhat(d.key) + " — Ctrl-S save · Esc back (kept) · Ctrl-X discard"}
-		for _, l := range d.uncertain {
-			head = append(head, "! "+l)
+		var head []string
+		for _, l := range m.draftNotes(d) {
+			head = append(head, wrapRows(l, w)...)
 		}
+		// At most half the pane: the text being edited keeps the rest,
+		// and the details (Esc) carry every line.
+		head = head[:min(len(head), max(h/2, 1))]
 		rows, cr, cc := d.ed.layout(max(w, 1))
 		visible := h - len(head)
 		top := 0
@@ -152,9 +157,7 @@ func (m *model) detailLines(sel Item, ok bool, w, h int) ([]string, *cell) {
 			top = cr - visible + 1
 		}
 		var out []string
-		for _, l := range head {
-			out = append(out, plain(l, w))
-		}
+		out = append(out, head...)
 		for i := top; i < len(rows) && len(out) < h; i++ {
 			out = append(out, rows[i]) // layout already made it safe and fit
 		}
@@ -203,9 +206,7 @@ func (m *model) itemDetail(it Item, ok bool) []string {
 		if d.dirty() {
 			out = append(out, "unsaved "+draftWhat(d.key)+" — "+reopenKey(d.key.purpose)+" to continue it")
 		}
-		for _, l := range d.uncertain {
-			out = append(out, "! "+l)
-		}
+		out = append(out, m.draftNotes(d)[1:]...)
 	}
 	if r := m.lastResult[it.Label()]; len(r) > 0 {
 		out = append(out, "", "last action:")
@@ -271,7 +272,7 @@ func (m *model) footerRow(w int) (string, int) {
 		if it.Notes {
 			keys = append(keys, "n note")
 		}
-		if it.Question != nil {
+		if it.Question != nil || m.staleAnswer(it) != nil {
 			keys = append(keys, "a answer")
 		}
 		if it.Editable {
@@ -362,4 +363,21 @@ func (f frame) paint() []byte {
 	}
 	b.WriteString("\x1b[?2026l")
 	return b.Bytes()
+}
+
+// draftNotes is what the editor says above a draft: what it is and the
+// keys, then why its last save failed or may not have landed, and
+// whether its question has closed.
+func (m *model) draftNotes(d *draft) []string {
+	out := []string{"editing " + draftWhat(d.key) + " — Ctrl-S save · Esc back (kept) · Ctrl-X discard"}
+	if m.answerClosed(d.key) {
+		out = append(out, fmt.Sprintf("! question #%d is no longer open: saving will be refused; Ctrl-X discards this answer", d.key.question))
+	}
+	for _, l := range d.refused {
+		out = append(out, "! "+l)
+	}
+	for _, l := range d.uncertain {
+		out = append(out, "! "+l)
+	}
+	return out
 }
