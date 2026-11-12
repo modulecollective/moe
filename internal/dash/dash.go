@@ -11,6 +11,7 @@
 package dash
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"math/rand"
@@ -1338,6 +1339,27 @@ func rowPrefix(r Row) string {
 // serves) and get their terminal colour here, behind the same TTY /
 // NO_COLOR gate cliout.Printf uses — see style.go.
 func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectCount, activeCount int, showAll bool, state FactoryState, r *rand.Rand) {
+	RenderIndexed(w, now, histogram, rows, projectCount, activeCount, showAll, state, r)
+}
+
+// RenderIndexed is Render that also says where each row landed: lines[i]
+// is the zero-based output line rows[i] was printed on, or -1 when the
+// row is not shown (BucketNone, or a completed row past the cap). Every
+// row renders as exactly one line, so a caller can select rows on the
+// painted board without reading them back out of the text.
+func RenderIndexed(w io.Writer, now time.Time, histogram []string, rows []Row, projectCount, activeCount int, showAll bool, state FactoryState, r *rand.Rand) (lines []int) {
+	lw := &lineWriter{w: w}
+	w = lw
+	lines = make([]int, len(rows))
+	for i := range lines {
+		lines[i] = -1
+	}
+	// place records that the next len(at) lines are those rows.
+	place := func(at []int) {
+		for k, i := range at {
+			lines[i] = lw.n + k
+		}
+	}
 	art := BuildFactoryArt(state, ArtWidth, r)
 	if cliout.Enabled(w) {
 		histogram = styleHistogramANSI(histogram)
@@ -1355,19 +1377,20 @@ func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectC
 	fmt.Fprintln(w)
 
 	var active, intents, backlog, completed []Row
-	for _, r := range rows {
+	var activeAt, intentsAt, backlogAt, completedAt []int // each row's index in rows
+	for i, r := range rows {
 		switch r.Bucket {
 		case BucketActiveRuns:
-			active = append(active, r)
+			active, activeAt = append(active, r), append(activeAt, i)
 		case BucketIntents:
-			intents = append(intents, r)
+			intents, intentsAt = append(intents, r), append(intentsAt, i)
 		case BucketChores, BucketBacklog:
 			// Chores head the backlog rather than holding a section of
 			// their own. BuildRows already splices them ahead of the idea
 			// rows, so appending in row order is the whole ordering.
-			backlog = append(backlog, r)
+			backlog, backlogAt = append(backlog, r), append(backlogAt, i)
 		case BucketCompletedRuns:
-			completed = append(completed, r)
+			completed, completedAt = append(completed, r), append(completedAt, i)
 		}
 	}
 
@@ -1375,6 +1398,7 @@ func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectC
 	if len(active) == 0 {
 		fmt.Fprintln(w, "  (none)")
 	} else {
+		place(activeAt)
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, r := range active {
 			slug := rowPrefix(r) + r.Project + "/" + r.Run
@@ -1392,6 +1416,7 @@ func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectC
 	if len(intents) == 0 {
 		fmt.Fprintln(w, "  (none)")
 	} else {
+		place(intentsAt)
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, r := range intents {
 			fmt.Fprintf(tw, "  %s/%s\t%s\n", r.Project, r.Run, r.Note)
@@ -1404,6 +1429,7 @@ func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectC
 	if len(backlog) == 0 {
 		fmt.Fprintln(w, "  (none)")
 	} else {
+		place(backlogAt)
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, r := range backlog {
 			fmt.Fprintf(tw, "  %s/%s\t%s\t%s\n", r.Project, r.Run, HumanAgo(now, r.When), r.Note)
@@ -1427,6 +1453,7 @@ func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectC
 	if len(shown) == 0 {
 		fmt.Fprintln(w, "  (none)")
 	} else {
+		place(completedAt[:len(shown)])
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, r := range shown {
 			slug := rowPrefix(r) + r.Project + "/" + r.Run
@@ -1437,6 +1464,7 @@ func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectC
 	fmt.Fprintln(w)
 
 	cliout.Printf(w, "%d project(s) registered · %d with active runs\n", projectCount, activeCount)
+	return lines
 }
 
 // Keep the control before the note so a narrow watch viewport preserves
@@ -1450,3 +1478,18 @@ func noteWithControl(r Row) string {
 	}
 	return "[" + r.Control + "]  " + r.Note
 }
+
+// lineWriter counts the lines written through it. Unwrap keeps the
+// colour gates seeing the terminal behind it.
+type lineWriter struct {
+	w io.Writer
+	n int
+}
+
+func (l *lineWriter) Write(p []byte) (int, error) {
+	n, err := l.w.Write(p)
+	l.n += bytes.Count(p[:n], []byte{'\n'})
+	return n, err
+}
+
+func (l *lineWriter) Unwrap() io.Writer { return l.w }

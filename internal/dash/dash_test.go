@@ -2,6 +2,7 @@ package dash
 
 import (
 	"bytes"
+	"fmt"
 	"math/rand"
 	"strings"
 	"testing"
@@ -876,5 +877,39 @@ func TestBuildRowsMarksAReapedRun(t *testing.T) {
 	}
 	if !strings.Contains(rows[0].Note, "· died") {
 		t.Fatalf("note = %q, want the death hint", rows[0].Note)
+	}
+}
+
+// RenderIndexed places every shown row on the line that carries it, and
+// says -1 for rows the board does not show.
+func TestRenderIndexedPlacesRows(t *testing.T) {
+	now := time.Date(2026, 11, 12, 12, 0, 0, 0, time.UTC)
+	rows := []Row{
+		{Project: "p", Run: "act", Bucket: BucketActiveRuns, When: now, Note: "code"},
+		{Project: "p", Run: "goal", Bucket: BucketIntents, Note: "Aim"},
+		{Project: "p", Run: "chore", Bucket: BucketChores, When: now},
+		{Project: "p", Run: "idea", Bucket: BucketBacklog, When: now, Note: "An idea"},
+		{Project: "p", Run: "none", Bucket: BucketNone},
+	}
+	for i := range CompletedCap + 2 {
+		rows = append(rows, Row{Project: "p", Run: fmt.Sprintf("done-%d", i), Bucket: BucketCompletedRuns, When: now})
+	}
+	var buf bytes.Buffer
+	lines := RenderIndexed(&buf, now, nil, rows, 1, 1, false, FactoryState{}, rand.New(rand.NewSource(1)))
+	out := strings.Split(buf.String(), "\n")
+	for i, r := range rows {
+		switch {
+		case r.Bucket == BucketNone || r.Bucket == BucketCompletedRuns && i >= len(rows)-2:
+			if lines[i] != -1 {
+				t.Errorf("%s placed at %d, want unshown", r.Run, lines[i])
+			}
+		case lines[i] < 0 || !strings.Contains(out[lines[i]], "p/"+r.Run):
+			t.Errorf("%s placed at %d: %q", r.Run, lines[i], out[max(lines[i], 0)])
+		}
+	}
+	var plain bytes.Buffer
+	Render(&plain, now, nil, rows, 1, 1, false, FactoryState{}, rand.New(rand.NewSource(1)))
+	if plain.String() != buf.String() {
+		t.Fatal("RenderIndexed output differs from Render")
 	}
 }
