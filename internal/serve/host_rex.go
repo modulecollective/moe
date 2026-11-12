@@ -249,7 +249,7 @@ const rexDashLabel = "dash"
 // openDash puts `moe dash --watch --all` in the session's "dash" block, so
 // the session exists the moment serve starts and the dash reports to the Rex
 // picker (OSC 7501) without the operator starting a watch. `--all` lifts the
-// ten-run completed cap; the watch viewport still clips what doesn't fit.
+// completed-run cap; the watch viewport still clips what doesn't fit.
 //
 // A dash block a previous serve left is closed, not adopted: the update
 // watcher restarts serve on every reinstall, and an adopted dash would

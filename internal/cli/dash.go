@@ -66,7 +66,7 @@ func init() {
 func runDash(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("dash", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	all := fs.Bool("all", false, "show every completed run, not just the newest 10")
+	all := fs.Bool("all", false, "show every completed run")
 	project := fs.String("project", "", "show only rows whose run belongs to this project")
 	workflow := fs.String("workflow", "", "show only rows whose run uses this workflow")
 	watch := fs.Bool("watch", false, "redraw the dashboard every 3s until Ctrl-C (terminal only)")
