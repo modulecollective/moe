@@ -455,10 +455,9 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 	if dispatcher != nil {
 		extra = "  !<stage> = cascade to gate · !! = ship this run · !!! = ship + ride the chain"
 	}
-	inspect := newPromptInspection(root, md, priorCanvas, body, next.Name == "test" || next.Name == "review", stdout)
 	sig, stopSig := installSigint()
 	defer stopSig()
-	line, interrupted, err := readInspectionDecision(inspect, root, md, opts, "next: "+hint+" — run now?", extra, sig, stdout, stderr)
+	line, interrupted, err := readStageDecision(root, md, opts, "next: "+hint+" — run now?", extra, sig, stdout)
 	if interrupted {
 		// Cooked-mode Ctrl-C used to trap the runtime. Treat it as
 		// "decline" — safer default than guessing — and exit cleanly
@@ -576,10 +575,9 @@ func promptKickback(g *CommandGroup, scuttle *Command, root string, md *run.Meta
 	if scuttle != nil {
 		opts = append(opts, promptOption{key: 'x', hint: "scuttle (close)"})
 	}
-	inspect := newPromptInspection(root, md, blockedStage, canvas, true, stdout)
 	sig, stopSig := installSigint()
 	defer stopSig()
-	line, interrupted, err := readInspectionDecision(inspect, root, md, opts, blockedStage+" blocked — kick back to fix?", "", sig, stdout, stderr)
+	line, interrupted, err := readStageDecision(root, md, opts, blockedStage+" blocked — kick back to fix?", "", sig, stdout)
 	if interrupted {
 		moePrintln(stdout, "^C")
 		return 0
@@ -685,10 +683,9 @@ func runKickbackSession(md *run.Metadata, document, blockedStage, canvas string,
 // be left over from a prior push attempt — stale relative to whatever
 // the operator's about to do. Review → test → code is the live story.
 func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root string, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
-	body, canvasStage := "", ""
+	body := ""
 	for _, stage := range []string{"review", "test", "code"} {
 		if body = readPrintableCanvas(root, md, stage); body != "" {
-			canvasStage = stage
 			break
 		}
 	}
@@ -716,10 +713,9 @@ func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root 
 		// Name the standing route before the operator types a bang.
 		extra = fmt.Sprintf("  !! = ship this run (%s) · !!! = ship + ride the chain", project.ReadShip(root, md.Project))
 	}
-	inspect := newPromptInspection(root, md, canvasStage, body, true, stdout)
 	sig, stopSig := installSigint()
 	defer stopSig()
-	line, interrupted, err := readInspectionDecision(inspect, root, md, opts, "next: "+hint+" — run now?", extra, sig, stdout, stderr)
+	line, interrupted, err := readStageDecision(root, md, opts, "next: "+hint+" — run now?", extra, sig, stdout)
 	if interrupted {
 		// N is already the default here; SIGINT collapses to the same
 		// safe sentinel and avoids the runtime trap.
@@ -1537,4 +1533,54 @@ func registerCascadeDispatcher(workflow string, d cascadeDispatcher) {
 // the cascade refuses to walk.
 func lookupCascadeDispatcher(workflow string) cascadeDispatcher {
 	return cascadeDispatchers[workflow]
+}
+
+// errStaleDecision is readStageDecision's answer when the run left
+// in_progress while its prompt waited. The run guard keeps cooperating
+// invocations out, but not an older binary or another clone; acting on
+// the answer then would re-enter a finished run.
+var errStaleDecision = errors.New("stale decision")
+
+// staleDecision reloads the run and reports whether an answer to its
+// prompt can no longer be acted on. A reload failure counts as stale:
+// launching against a run we can no longer read is the unsafe direction.
+// A run with no run.json at all is left to the chosen verb, whose own load
+// refuses it — moe never deletes a run to finish it, so absence is not
+// the terminal case this check exists for.
+func staleDecision(root string, md *run.Metadata, out io.Writer) bool {
+	fresh, err := run.Load(root, md.Project, md.ID)
+	if errors.Is(err, run.ErrRunNotFound) {
+		return false
+	}
+	if err != nil {
+		moePrintf(out, "%s/%s: cannot reload run state (%v) — nothing launched\n", md.Project, md.ID, err)
+		return true
+	}
+	if fresh.Status != run.StatusInProgress {
+		moePrintf(out, "%s/%s is now %s — nothing launched\n", md.Project, md.ID, fresh.Status)
+		return true
+	}
+	return false
+}
+
+// readStageDecision prints a chain prompt and reads one answer. An
+// interrupted, failed or empty-EOF read returns as-is for the caller's
+// decline path; the interrupted read's goroutine may still own the shared
+// reader, so nothing reads again. Every completed answer first re-checks
+// the run, and a run that has left in_progress ends the prompt with
+// errStaleDecision.
+func readStageDecision(root string, md *run.Metadata, opts []promptOption, question, extra string, sig <-chan os.Signal, out io.Writer) (string, bool, error) {
+	moePrintf(out, "%s %s\n", question, renderPromptLabel(opts))
+	moePrintln(out, renderPromptLegend(opts))
+	if extra != "" {
+		moePrintln(out, extra)
+	}
+	line, interrupted, err := readLineWithSignal(stdinSharedReader(), sig)
+	if interrupted || (err != nil && err != io.EOF) || (err == io.EOF && line == "") {
+		return line, interrupted, err
+	}
+	if staleDecision(root, md, out) {
+		return "", false, errStaleDecision
+	}
+	return line, false, err
 }
