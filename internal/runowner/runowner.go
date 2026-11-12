@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/modulecollective/moe/internal/repolock"
 )
@@ -56,8 +57,19 @@ func Path(root, projectID, runID string) string {
 	return filepath.Join(root, ".moe", "run-owners", projectID, runID+".lock")
 }
 
-// Acquire takes the run's guard without waiting. Contention returns a
-// *BusyError — including a second Acquire of the same run inside this
+// Acquisition retries contention a few times, briefly: a Busy probe
+// holds a shared lock for a few syscalls, and an owner that lost its only
+// attempt to one would refuse an unowned run. Each attempt is still a
+// nonblocking flock that grants nothing on failure; exhaustion refuses.
+const (
+	acquireAttempts = 5
+	acquireWait     = 10 * time.Millisecond
+)
+
+// Acquire takes the run's guard, retrying brief contention (at most
+// acquireAttempts nonblocking tries, acquireWait apart) but never
+// blocking on a held lock. Contention that outlasts the retries returns
+// a *BusyError — including a second Acquire of the same run inside this
 // process, because flock binds to the open file description, not the
 // PID. The descriptor is close-on-exec (os.OpenFile's default), so
 // agents and viewers spawned while it is held never inherit ownership.
@@ -73,7 +85,7 @@ func Acquire(root, projectID, runID string) (*Handle, error) {
 	if err != nil {
 		return nil, fmt.Errorf("runowner: %w", err)
 	}
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := lockExclusive(int(f.Fd()), time.Sleep); err != nil {
 		f.Close()
 		if errors.Is(err, syscall.EWOULDBLOCK) {
 			return nil, &BusyError{Project: projectID, Run: runID}
@@ -81,6 +93,19 @@ func Acquire(root, projectID, runID string) (*Handle, error) {
 		return nil, fmt.Errorf("runowner: flock %s: %w", p, err)
 	}
 	return &Handle{Root: root, Project: projectID, Run: runID, f: f}, nil
+}
+
+// lockExclusive is Acquire's retry loop over one descriptor. Only
+// contention is retried, and nothing sleeps after the last attempt;
+// sleep is a parameter so tests can act at the retry boundary.
+func lockExclusive(fd int, sleep func(time.Duration)) error {
+	for attempt := 1; ; attempt++ {
+		err := syscall.Flock(fd, syscall.LOCK_EX|syscall.LOCK_NB)
+		if err == nil || !errors.Is(err, syscall.EWOULDBLOCK) || attempt == acquireAttempts {
+			return err
+		}
+		sleep(acquireWait)
+	}
 }
 
 // Release closes the descriptor, which drops the lock. Idempotent; the
@@ -105,7 +130,9 @@ func (h *Handle) Owns(root, projectID, runID string) bool {
 // Busy is the read-side probe planners use to skip a run without trying
 // to start it. A missing guard file is unowned; contention is owned; any
 // other failure is returned, never read as "unowned". The answer is a
-// snapshot — admission still has to Acquire.
+// snapshot — admission still has to Acquire. The probe's lock is shared,
+// so concurrent probes never read each other as owners; an acquisition
+// that collides with one rides it out in its retries.
 func Busy(root, projectID, runID string) (bool, error) {
 	p := Path(root, projectID, runID)
 	f, err := os.Open(p)
@@ -116,7 +143,7 @@ func Busy(root, projectID, runID string) (bool, error) {
 		return false, fmt.Errorf("runowner: %w", err)
 	}
 	defer f.Close()
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_SH|syscall.LOCK_NB); err != nil {
 		if errors.Is(err, syscall.EWOULDBLOCK) {
 			return true, nil
 		}
