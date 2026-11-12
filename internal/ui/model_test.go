@@ -442,3 +442,32 @@ func TestIdeaSaveDialogueKeepsState(t *testing.T) {
 		t.Fatalf("save = %+v", j.steps[0])
 	}
 }
+
+// A draft whose save is pending cannot be reopened, so the save's
+// acknowledgement never clears text it did not carry.
+func TestPendingSaveLocksItsDraft(t *testing.T) {
+	m, q := testModel(t)
+	m.setBoard(board(1, run("p", "a"), idea("p", "i", 1)))
+	press(m, Key{Code: KeyRune, Rune: 'n'})
+	typed(m, "first")
+	press(m, Key{Code: KeyCtrlS})
+	j := <-q
+	press(m, Key{Code: KeyRune, Rune: 'n'})
+	if m.mode != modeEdit {
+		typed(m, " second") // lands nowhere: normal mode ignores it
+	}
+	if m.mode == modeEdit || !strings.Contains(m.message, "wait for its outcome") {
+		t.Fatalf("reopened a pending draft: mode %d, %q", m.mode, m.message)
+	}
+	// Other drafts stay open to edit.
+	press(m, Key{Code: KeyDown}, Key{Code: KeyRune, Rune: 'e'})
+	if m.mode != modeEdit {
+		t.Fatal("an unrelated draft was locked")
+	}
+	press(m, Key{Code: KeyEsc}, Key{Code: KeyUp})
+	m.finished(jobResult{job: j, results: []Result{{OK: true}}})
+	press(m, Key{Code: KeyRune, Rune: 'n'})
+	if m.mode != modeEdit || m.active.ed.String() != "" {
+		t.Fatalf("after the save: mode %d, text %q", m.mode, m.active.ed.String())
+	}
+}

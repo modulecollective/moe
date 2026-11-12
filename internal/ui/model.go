@@ -396,6 +396,12 @@ func (m *model) confirmKey(k Key) effect {
 // --- drafts ---
 
 func (m *model) openDraft(key draftKey, seed string) {
+	// The save's outcome settles the draft it submitted; text added
+	// while it is pending would be cleared by its acknowledgement.
+	if m.busy != nil && m.busy.draft != nil && *m.busy.draft == key {
+		m.message = "saving this " + draftWhat(key) + " — wait for its outcome"
+		return
+	}
 	d, ok := m.drafts[key]
 	if !ok {
 		d = &draft{key: key, ed: newEditor(seed, false), base: seed}
