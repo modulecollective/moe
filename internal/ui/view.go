@@ -165,13 +165,33 @@ func (m *model) detailLines(sel Item, ok bool, w, h int) ([]string, *cell) {
 	default:
 		src = m.itemDetail(sel, ok)
 	}
-	top := min(m.detailTop, max(len(src)-h, 0))
-	m.detailTop = top
-	var out []string
-	for i := top; i < len(src) && len(out) < h; i++ {
-		out = append(out, plain(src[i], w))
+	// Wrapped, not clipped: every character of a long line is reachable
+	// by scrolling.
+	var rows []string
+	for _, l := range src {
+		rows = append(rows, wrapRows(l, w)...)
 	}
-	return out, nil
+	top := min(m.detailTop, max(len(rows)-h, 0))
+	m.detailTop = top
+	return rows[top:min(top+h, len(rows))], nil
+}
+
+// wrapRows makes s safe to paint and breaks it into rows of at most w
+// cells.
+func wrapRows(s string, w int) []string {
+	p := []byte(sanitize(s))
+	var rows []string
+	start, cells := 0, 0
+	for i := 0; i < len(p); {
+		size, cw := cliout.TextUnit(p[i:])
+		if cells+cw > w && i > start {
+			rows = append(rows, string(p[start:i]))
+			start, cells = i, 0
+		}
+		cells += cw
+		i += size
+	}
+	return append(rows, string(p[start:]))
 }
 
 func (m *model) itemDetail(it Item, ok bool) []string {

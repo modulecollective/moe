@@ -506,3 +506,38 @@ func TestUncertainControlRetriesOriginal(t *testing.T) {
 		}
 	}
 }
+
+// A long logical line wraps in the details, so every character of a
+// capture is reachable by scrolling — closed captures too, which have no
+// editor to fall back on — and no row is wider than the pane.
+func TestDetailWrapsLongLines(t *testing.T) {
+	long := strings.Repeat("x", 150) + "END_OF_CAPTURE"
+	for _, cols := range []int{100, 40} {
+		m, _ := testModel(t)
+		m.resize(14, cols)
+		closed := idea("p", "i", 1)
+		closed.Editable = false
+		closed.Body = "# i\n" + strings.Repeat("filler\n", 20) + long + "\n"
+		m.setBoard(board(1, closed))
+		press(m, Key{Code: KeyTab})
+		seen := map[int]string{} // painted detail rows by absolute row
+		for range 60 {
+			f := m.view()
+			for i := range m.detailHeight() {
+				r := f.rows[1+m.boardHeight()+1+i]
+				if w := textWidth(r); w > cols-1 {
+					t.Fatalf("%d cols: row %q is %d cells", cols, r, w)
+				}
+				seen[m.detailTop+i] = r
+			}
+			press(m, Key{Code: KeyDown})
+		}
+		var all []string
+		for i := range len(seen) {
+			all = append(all, seen[i])
+		}
+		if !strings.Contains(strings.Join(all, ""), long) {
+			t.Fatalf("%d cols: %q never painted whole:\n%s", cols, long, strings.Join(all, "\n"))
+		}
+	}
+}
