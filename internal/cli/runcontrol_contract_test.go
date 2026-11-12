@@ -529,11 +529,7 @@ func TestFinishFailedReceiptCannotReplay(t *testing.T) {
 			exits := map[string]int{"code": 1}
 			stubOpenSdlcStage(t, exits)
 			push := stubPushFromCascade(t, 0, nil)
-			hooks := t.TempDir()
-			if err := os.WriteFile(filepath.Join(hooks, "commit-msg"), []byte("#!/bin/sh\ncase \"$(head -n 1 \"$1\")\" in 'control: failed '*) exit 1;; esac\nexit 0\n"), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			gittest.Run(t, root, "config", "core.hooksPath", hooks)
+			refuseFailedReceipts(t, root)
 			inner := openSdlcStage
 			openSdlcStage = func(s, p, r string, h bool, o, e io.Writer) int {
 				if s == "design" {

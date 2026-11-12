@@ -36,7 +36,7 @@ func serveRunControl(root, projectID, runID string) (serve.RunControlView, bool,
 	stage, agent := conversationAddress(md, o.Live)
 	if f.Hold != nil {
 		r, _ := f.Find(f.Hold.Request)
-		v.Lines = append(v.Lines, fmt.Sprintf("hold: %s %s — %s", f.Hold.Kind, f.Hold.Request, holdPhase(r)))
+		v.Lines = append(v.Lines, fmt.Sprintf("hold: %s %s — %s", f.Hold.Kind, f.Hold.Request, holdPhase(o, r)))
 		if f.Hold.Stage != "" {
 			stage, agent = f.Hold.Stage, f.Hold.Agent
 		}
@@ -44,10 +44,11 @@ func serveRunControl(root, projectID, runID string) (serve.RunControlView, bool,
 	if f.Recovery != nil {
 		v.Lines = append(v.Lines, "recovery required: "+f.Recovery.Reason)
 	}
+	v.Lines = append(v.Lines, o.localLines()...)
 	v.Conversation = conversationCommand(md, stage, agent)
 	v.Actions = controlActions(md, o)
 	for _, r := range f.Requests {
-		v.Requests = append(v.Requests, fmt.Sprintf("%s %s %s — %s", r.AcceptedAt.Local().Format("Jan 2 15:04"), r.Kind, r.ID, describeRequest(r)))
+		v.Requests = append(v.Requests, fmt.Sprintf("%s %s %s — %s", r.AcceptedAt.Local().Format("Jan 2 15:04"), r.Kind, r.ID, o.describe(r)))
 	}
 	return v, true, nil
 }
@@ -55,8 +56,11 @@ func serveRunControl(root, projectID, runID string) (serve.RunControlView, bool,
 // controlActions are the controls valid on a run right now. A held or
 // recovering run offers only resume; otherwise pause and handoff always,
 // park only with an owner to yield, finish only where it could ship.
+// They follow the record, not local evidence: a finish whose outcome is
+// owed still blocks a fresh one until its receipt is recorded. With
+// either read incomplete, none is offered.
 func controlActions(md *run.Metadata, o RunObservation) []string {
-	if o.ControlErr != nil {
+	if o.ControlErr != nil || o.UnrecordedErr != nil {
 		return nil
 	}
 	f := o.Control
@@ -130,10 +134,14 @@ func serveSubmitControl(root, projectID, runID, action, id string, revision int)
 	if err != nil {
 		return "", refusedOr(err)
 	}
-	if note != "" {
-		return note, nil
+	rb, err := readBack(root, md, r, note)
+	if err != nil {
+		return "", err
 	}
-	return describeRequest(r), nil
+	if rb.note != "" {
+		return rb.note, nil
+	}
+	return rb.desc, nil
 }
 
 // refusedOr marks the record's own refusals as such; anything else is a

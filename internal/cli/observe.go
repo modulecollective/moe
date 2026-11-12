@@ -12,6 +12,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -40,6 +42,13 @@ type RunObservation struct {
 	// read, which refuses motion and must never render as "no hold".
 	Control    runcontrol.File
 	ControlErr error
+	// Unrecorded are final receipts an owner knew but could not commit,
+	// by request id (runcontrol.KeepUnrecorded). They explain what
+	// happened to a request the record still reads as open; they never
+	// change what the record grants. UnrecordedErr means the local store
+	// could not be read.
+	Unrecorded    map[string]runcontrol.Settlement
+	UnrecordedErr error
 	// Owned is the run guard; OwnerErr means the probe itself failed.
 	Owned    bool
 	OwnerErr error
@@ -62,6 +71,7 @@ func ObserveRuns(root string, mds []*run.Metadata, now time.Time) map[string]Run
 	for _, md := range mds {
 		o := RunObservation{Project: md.Project, Run: md.ID, Workflow: md.Workflow, Status: md.Status, ObservedAt: now}
 		o.Control, o.ControlErr = runcontrol.Load(root, md.Project, md.ID)
+		o.Unrecorded, o.UnrecordedErr = runcontrol.Unrecorded(root, md.Project, md.ID)
 		o.Owned, o.OwnerErr = runowner.Busy(root, md.Project, md.ID)
 		out[o.key()] = o
 		if o.Owned {
@@ -116,6 +126,9 @@ func (o RunObservation) Summary(now time.Time) string {
 	if o.ControlErr != nil {
 		parts = append(parts, "control record unreadable")
 	}
+	if o.UnrecordedErr != nil {
+		parts = append(parts, "local receipts unreadable")
+	}
 	f := o.Control
 	if f.Recovery != nil {
 		parts = append(parts, "recovery required")
@@ -125,21 +138,26 @@ func (o RunObservation) Summary(now time.Time) string {
 		if f.Hold.Kind == runcontrol.KindHandoff {
 			what = "handed off"
 		}
+		// A hold whose settling turn ended reads as held, whether or not
+		// its receipt made the journal.
 		if r, ok := f.Find(f.Hold.Request); ok && !r.Settled() && o.Owned {
-			what = string(f.Hold.Kind) + " pending"
+			if _, owed := o.owedReceipt(r); owed {
+				what += " · receipt not recorded"
+			} else if !o.outcomeUnknown(r) {
+				what = string(f.Hold.Kind) + " pending"
+			}
 		}
 		parts = append(parts, what)
 	}
-	for _, r := range f.Open(runcontrol.KindFinish) {
-		if r.State == runcontrol.StateApplied {
-			parts = append(parts, "finishing")
-		} else {
-			parts = append(parts, "finish pending")
+	if open := f.Open(runcontrol.KindFinish); len(open) > 0 {
+		pending := "finish pending"
+		if open[0].State == runcontrol.StateApplied {
+			pending = "finishing"
 		}
-		break
+		parts = append(parts, o.openPhrase(open[0], pending))
 	}
-	if len(f.Open(runcontrol.KindPark)) > 0 {
-		parts = append(parts, "park pending")
+	if open := f.Open(runcontrol.KindPark); len(open) > 0 {
+		parts = append(parts, o.openPhrase(open[0], "park pending"))
 	}
 	switch {
 	case o.OwnerErr != nil:
@@ -152,6 +170,96 @@ func (o RunObservation) Summary(now time.Time) string {
 		parts = append(parts, "owner unreachable")
 	}
 	return strings.Join(parts, " · ")
+}
+
+// owedReceipt is the final receipt an owner kept locally for r because
+// it could not commit it, while the record still carries r unsettled. A
+// final receipt in the record wins over any copy left behind.
+func (o RunObservation) owedReceipt(r runcontrol.Request) (runcontrol.Settlement, bool) {
+	s, ok := o.Unrecorded[r.ID]
+	if !ok || r.Settled() || !finalState(s.State) {
+		return runcontrol.Settlement{}, false
+	}
+	return s, true
+}
+
+// outcomeUnknown reports that local evidence about an unsettled r cannot
+// be read or makes no sense, so nothing may call it pending: an owner
+// may already have ended it.
+func (o RunObservation) outcomeUnknown(r runcontrol.Request) bool {
+	if r.Settled() {
+		return false
+	}
+	s, ok := o.Unrecorded[r.ID]
+	return o.UnrecordedErr != nil || (ok && !finalState(s.State))
+}
+
+func finalState(s runcontrol.State) bool {
+	return s == runcontrol.StateCompleted || s == runcontrol.StateFailed
+}
+
+// openPhrase is the row word for an unsettled request: pending as the
+// record has it, or the outcome an owner kept locally.
+func (o RunObservation) openPhrase(r runcontrol.Request, pending string) string {
+	if s, ok := o.owedReceipt(r); ok {
+		return string(r.Kind) + " " + string(s.State) + " · receipt not recorded"
+	}
+	if o.outcomeUnknown(r) {
+		return string(r.Kind) + " outcome unknown"
+	}
+	return pending
+}
+
+// describe is describeRequest with local evidence overlaid: an owed
+// outcome reads as what happened, labelled unrecorded, with the error
+// that kept it out of the journal when one was saved.
+func (o RunObservation) describe(r runcontrol.Request) string {
+	if s, ok := o.owedReceipt(r); ok {
+		r.State, r.Boundary, r.Outcome = s.State, s.Boundary, s.Outcome
+		d := describeRequest(r) + " — receipt not recorded"
+		if s.RecordingError != "" {
+			// One line: a git error quotes the whole commit message.
+			d += " (recording failed when kept: " + strings.Join(strings.Fields(s.RecordingError), " ") + ")"
+		}
+		return d
+	}
+	if o.outcomeUnknown(r) {
+		why := "local receipts unreadable"
+		if o.UnrecordedErr == nil {
+			why = "its local receipt is invalid"
+		}
+		return string(r.State) + " in the record; outcome unknown — " + why
+	}
+	return describeRequest(r)
+}
+
+// localLines are the detail lines about local receipts: the store's
+// read error, local evidence that matches nothing, and — once — what
+// happens to an owed receipt.
+func (o RunObservation) localLines() []string {
+	if o.UnrecordedErr != nil {
+		return []string{"local receipts: unreadable — " + o.UnrecordedErr.Error()}
+	}
+	var out []string
+	owed := false
+	for _, id := range slices.Sorted(maps.Keys(o.Unrecorded)) {
+		s := o.Unrecorded[id]
+		r, ok := o.Control.Find(id)
+		switch {
+		case !ok:
+			out = append(out, "local receipt "+id+": names no recorded request; ignored")
+		case r.Settled():
+			// The record has it; the copy is spent.
+		case !finalState(s.State):
+			out = append(out, fmt.Sprintf("local receipt %s: %q is not a final outcome; ignored", id, s.State))
+		default:
+			owed = true
+		}
+	}
+	if owed {
+		out = append(out, "receipt not recorded: the next owner of this run records it before starting work")
+	}
+	return out
 }
 
 func livePhrase(st runsock.Status, now time.Time) string {

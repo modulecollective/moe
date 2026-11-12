@@ -81,14 +81,23 @@ func runControlSubmit(kind runcontrol.Kind, args []string, stdout, stderr io.Wri
 		moePrintf(stderr, "%s: %v\n", verb, err)
 		return 1
 	}
-	if note != "" {
-		moePrintf(stderr, "%s: %s\n", verb, note)
+	rb, err := readBack(root, md, r, note)
+	if err != nil {
+		moePrintf(stderr, "%s: %v\n", verb, err)
+		return 1
 	}
+	if rb.note != "" {
+		moePrintf(stderr, "%s: %s\n", verb, rb.note)
+	}
+	r = rb.req
 	key := md.Project + "/" + md.ID
-	if r.ID != req.ID {
-		moePrintf(stdout, "%s: already satisfied by %s %s — %s\n", key, r.Kind, r.ID, describeRequest(r))
-	} else {
-		moePrintf(stdout, "%s %s on %s: %s\n", r.Kind, r.ID, key, describeRequest(r))
+	switch {
+	case rb.owed:
+		moePrintf(stdout, "%s: existing request %s %s — %s\n", key, r.Kind, r.ID, rb.desc)
+	case r.ID != req.ID:
+		moePrintf(stdout, "%s: already satisfied by %s %s — %s\n", key, r.Kind, r.ID, rb.desc)
+	default:
+		moePrintf(stdout, "%s %s on %s: %s\n", r.Kind, r.ID, key, rb.desc)
 	}
 	if kind == runcontrol.KindHandoff {
 		if cmd := conversationCommand(md, r.Stage, r.Agent); cmd != "" {
@@ -166,7 +175,7 @@ func runControlShow(args []string, stdout, stderr io.Writer) int {
 	switch {
 	case f.Hold != nil:
 		r, _ := f.Find(f.Hold.Request)
-		moePrintf(stdout, "  hold: %s %s — %s\n", f.Hold.Kind, f.Hold.Request, holdPhase(r))
+		moePrintf(stdout, "  hold: %s %s — %s\n", f.Hold.Kind, f.Hold.Request, holdPhase(o, r))
 		if f.Hold.Stage != "" {
 			stage, agent = f.Hold.Stage, f.Hold.Agent
 		}
@@ -179,11 +188,17 @@ func runControlShow(args []string, stdout, stderr io.Writer) int {
 	if f.Hold != nil || f.Recovery != nil {
 		moePrintf(stdout, "  release: moe control resume %s\n", key)
 	}
+	for _, line := range o.localLines() {
+		moePrintf(stdout, "  %s\n", line)
+	}
 	if cmd := conversationCommand(md, stage, agent); cmd != "" {
 		moePrintf(stdout, "  conversation: %s\n", cmd)
 	}
 	for _, r := range f.Requests {
-		moePrintf(stdout, "  %s %s %s — %s\n", r.AcceptedAt.Format("2006-01-02 15:04"), r.Kind, r.ID, describeRequest(r))
+		moePrintf(stdout, "  %s %s %s — %s\n", r.AcceptedAt.Format("2006-01-02 15:04"), r.Kind, r.ID, o.describe(r))
+	}
+	if o.UnrecordedErr != nil {
+		return 1 // what the requests read as is incomplete
 	}
 	return 0
 }
@@ -238,11 +253,44 @@ func describeRequest(r runcontrol.Request) string {
 	return s
 }
 
+// readback is a delivered request as status surfaces now describe it.
+type readback struct {
+	req  runcontrol.Request // as the record now carries it
+	desc string             // with local evidence overlaid
+	owed bool               // its outcome is known only locally
+	note string             // delivery's aside
+}
+
+// readBack re-reads the request delivery returned — which may be another
+// request (a finish coalesced onto the open one) or one settled since —
+// with the local receipts, so a reply never calls an outcome its owner
+// already knows pending. note only promises the owner's next boundary
+// while nothing says the request has ended. Delivery has succeeded by
+// now: a failed read names the id to retry with rather than implying
+// nothing was recorded.
+func readBack(root string, md *run.Metadata, r runcontrol.Request, note string) (readback, error) {
+	f, err := runcontrol.Load(root, md.Project, md.ID)
+	cur, ok := f.Find(r.ID)
+	if err == nil && !ok {
+		err = fmt.Errorf("the record has no request %s", r.ID)
+	}
+	if err != nil {
+		return readback{}, fmt.Errorf("%s %s was returned, but reading it back failed (%v); retry with the same id (%s) to read it", r.Kind, r.ID, err, r.ID)
+	}
+	o := RunObservation{Control: f}
+	o.Unrecorded, o.UnrecordedErr = runcontrol.Unrecorded(root, md.Project, md.ID)
+	_, owed := o.owedReceipt(cur)
+	if note != "" && !cur.Settled() && !owed && !o.outcomeUnknown(cur) {
+		note += " — it applies at the owner's next boundary"
+	}
+	return readback{req: cur, desc: o.describe(cur), owed: owed, note: note}, nil
+}
+
 // holdPhase distinguishes a hold whose owner is still settling from one
 // that is ready to resume. The receipt alone does not prove ownership
 // was released; `show` prints the guard alongside it.
-func holdPhase(r runcontrol.Request) string {
-	if r.Settled() {
+func holdPhase(o RunObservation, r runcontrol.Request) string {
+	if _, owed := o.owedReceipt(r); owed || r.Settled() {
 		return "held, ready to resume"
 	}
 	return "held, current turn settling"
@@ -367,7 +415,7 @@ func deliverControl(root string, md *run.Metadata, req runcontrol.Request) (runc
 			return runcontrol.Request{}, "", err
 		}
 		if busy, _ := runowner.Busy(root, md.Project, md.ID); busy && !r.Settled() {
-			return r, "saved; owner acknowledgement unavailable — it applies at the owner's next boundary", nil
+			return r, "saved; owner acknowledgement unavailable", nil
 		}
 		return r, "", nil
 	}
@@ -398,5 +446,5 @@ func deliverControl(root string, md *run.Metadata, req runcontrol.Request) (runc
 	if serr != nil {
 		return runcontrol.Request{}, "", fmt.Errorf("owner acknowledgement lost (%v) and it could not be confirmed (%v); retry with --id %s", err, serr, req.ID)
 	}
-	return r, "saved; the owner's acknowledgement was lost — it applies at the owner's next boundary", nil
+	return r, "saved; the owner's acknowledgement was lost", nil
 }
