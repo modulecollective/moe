@@ -163,7 +163,7 @@ func kickCIRepair(root, key string, groomed groomResult, stdout, stderr io.Write
 	}
 	// Taken before the reload and held through the repair's push, so the
 	// planner's busy read cannot be overtaken between scan and start.
-	h, err := ownRun(root, projectID, runID)
+	h, err := ownRun(root, projectID, runID, true)
 	if runowner.IsBusy(err) {
 		moePrintf(stderr, "pulse: CI repair %s skipped — %v\n", key, err)
 		return 0

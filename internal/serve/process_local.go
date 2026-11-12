@@ -77,6 +77,7 @@ func (h *localHost) spawn(id, moeBin string, args []string, root string, logger 
 	// grandchildren too, which the args-level suppression does not.
 	env := append([]string{}, os.Environ()...)
 	env = append(env, "TERM=xterm-256color", "MOE_SERVE_AGENT=1", "MOE_HOME="+root)
+	env = append(env, launchOriginEnv("local-pty", id)...)
 	cmd.Env = env
 
 	p, err := pty.Start(cmd)

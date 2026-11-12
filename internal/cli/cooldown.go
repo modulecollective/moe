@@ -137,7 +137,9 @@ type cooldownGate struct {
 	// openHold, when set, watches for an operator control that must stop
 	// the wait (a hold, a park); its channel closes when one appears.
 	openHold func() (<-chan struct{}, func())
-	stderr   io.Writer
+	// onWait, when set, hears each new reason the gate is waiting.
+	onWait func(status string)
+	stderr io.Writer
 	// resume is the ordinary invocation that re-runs this stage, printed
 	// when the gate stops it.
 	resume string
@@ -252,6 +254,9 @@ func (g *cooldownGate) check(ctx context.Context, agentName, model string) (outc
 				hint = "c⏎ start now · a⏎ skip checks for this invocation · q⏎ or Ctrl-C cancel"
 			}
 			moePrintf(g.stderr, "cooldown: %s\n  %s\n", status, hint)
+			if g.onWait != nil {
+				g.onWait(status)
+			}
 			lastStatus = status
 		}
 		waited = true

@@ -29,11 +29,11 @@ func holdElsewhere(t *testing.T, root, projectID, runID string) *runowner.Handle
 
 func TestOwnRunBorrowsTheSameRunAndAcquiresOthers(t *testing.T) {
 	root := t.TempDir()
-	outer, err := ownRun(root, "p", "r")
+	outer, err := ownRun(root, "p", "r", true)
 	if err != nil {
 		t.Fatal(err)
 	}
-	inner, err := ownRun(root, "p", "r")
+	inner, err := ownRun(root, "p", "r", true)
 	if err != nil {
 		t.Fatalf("a same-run nested entry must borrow: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestOwnRunBorrowsTheSameRunAndAcquiresOthers(t *testing.T) {
 	if busy, _ := runowner.Busy(root, "p", "r"); !busy || heldRun(root, "p", "r") == nil {
 		t.Fatal("releasing a borrow dropped the outer guard")
 	}
-	other, err := ownRun(root, "p", "other")
+	other, err := ownRun(root, "p", "other", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestOwnRunBorrowsTheSameRunAndAcquiresOthers(t *testing.T) {
 	}
 	// A guard held outside the table is another owner, never a borrow.
 	holdElsewhere(t, root, "p", "r")
-	if _, err := ownRun(root, "p", "r"); !runowner.IsBusy(err) {
+	if _, err := ownRun(root, "p", "r", true); !runowner.IsBusy(err) {
 		t.Fatalf("ownRun against another holder = %v, want busy", err)
 	}
 }

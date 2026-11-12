@@ -126,7 +126,7 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 
 	// Borrowed when this is the owning prompt's `x`; refused while another
 	// invocation sits in the run.
-	releaseRun, ok := ownRunForVerb(root, projectID, runID, stderr)
+	releaseRun, ok := ownRunForMutation(root, projectID, runID, stderr)
 	if !ok {
 		return 1
 	}

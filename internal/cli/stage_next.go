@@ -10,6 +10,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/runsock"
 )
 
 // promptNextStage prints the next incomplete stage's exact invocation
@@ -1007,6 +1008,16 @@ func cascadeFromGate(startStage, destination string, oneStep bool, rideChain boo
 		moePrintf(stderr, "cascade: workflow %q has no cascade dispatcher\n", md.Workflow)
 		return res, 1
 	}
+	continuation := "!!"
+	switch {
+	case oneStep:
+		continuation = "!"
+	case !yolo:
+		continuation = "!" + destination
+	case rideChain:
+		continuation = "!!!"
+	}
+	cascadePublish(md, func(s *runsock.Status) { s.Continuation = continuation })
 	for i := startIdx; i < endIdx; i++ {
 		stage := stages[i]
 		// The ship step checkpoints itself, once per push attempt.
@@ -1643,6 +1654,7 @@ func readStageDecision(root string, md *run.Metadata, opts []promptOption, quest
 	// never read. A line that did arrive is re-checked against the record
 	// below, so an answer and a control serialize: a hold that landed
 	// first wins, and a buffered Enter cannot advance past it.
+	publishPhase(root, md, runsock.PhaseDeciding, "", "the operator's answer at the terminal: "+question)
 	wake, stopWake := watchControl(root, md, true)
 	line, interrupted, woke, err := readLineWithWake(stdinSharedReader(), sig, wake)
 	stopWake()

@@ -7,6 +7,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runowner"
+	"github.com/modulecollective/moe/internal/runsock"
 )
 
 // This invocation's held run guards (see internal/runowner), keyed by
@@ -24,6 +25,10 @@ import (
 var (
 	invocationRunsMu sync.Mutex
 	invocationRuns   = map[string]*runowner.Handle{}
+	// invocationEndpoints is each execution-owned run's live endpoint
+	// (internal/runsock), keyed like invocationRuns. Mutation-only guard
+	// holders serve none.
+	invocationEndpoints = map[string]*runsock.Server{}
 )
 
 func invocationRunKey(root, projectID, runID string) string {
@@ -34,7 +39,13 @@ func invocationRunKey(root, projectID, runID string) string {
 // invocation's guard on one run. The returned release is a no-op for a
 // borrow; the outermost holder's release drops the lock. Contention
 // comes back as a *runowner.BusyError.
-func ownRun(root, projectID, runID string) (release func() error, err error) {
+//
+// execute marks an owner that may run workflow work (a stage, a walk, a
+// ship): it must serve the run's live endpoint, and an endpoint that
+// cannot be bound refuses ownership — an owner nobody can observe or
+// address is not allowed to run. A short mutation-only holder (close,
+// resume) serves none.
+func ownRun(root, projectID, runID string, execute bool) (release func() error, err error) {
 	key := invocationRunKey(root, projectID, runID)
 	invocationRunsMu.Lock()
 	defer invocationRunsMu.Unlock()
@@ -45,10 +56,24 @@ func ownRun(root, projectID, runID string) (release func() error, err error) {
 	if err != nil {
 		return nil, err
 	}
+	var srv *runsock.Server
+	if execute {
+		if srv, err = startRunEndpoint(root, projectID, runID); err != nil {
+			h.Release()
+			return nil, err
+		}
+	}
 	invocationRuns[key] = h
+	invocationEndpoints[key] = srv
 	return func() error {
 		invocationRunsMu.Lock()
 		defer invocationRunsMu.Unlock()
+		// Stop serving, and join the handlers, before giving up the guard:
+		// once it is free a successor may bind the same path.
+		if s := invocationEndpoints[key]; s != nil {
+			s.Close()
+		}
+		delete(invocationEndpoints, key)
 		if invocationRuns[key] == h {
 			delete(invocationRuns, key)
 		}
@@ -69,7 +94,17 @@ func heldRun(root, projectID, runID string) *runowner.Handle {
 // reason and the release reports its own close error, so callers are a
 // two-liner.
 func ownRunForVerb(root, projectID, runID string, stderr io.Writer) (release func(), ok bool) {
-	rel, err := ownRun(root, projectID, runID)
+	return ownRunVerb(root, projectID, runID, true, stderr)
+}
+
+// ownRunForMutation is ownRunForVerb for a short mutation-only holder,
+// which serves no endpoint.
+func ownRunForMutation(root, projectID, runID string, stderr io.Writer) (release func(), ok bool) {
+	return ownRunVerb(root, projectID, runID, false, stderr)
+}
+
+func ownRunVerb(root, projectID, runID string, execute bool, stderr io.Writer) (release func(), ok bool) {
+	rel, err := ownRun(root, projectID, runID, execute)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return nil, false

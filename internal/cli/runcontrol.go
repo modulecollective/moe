@@ -28,6 +28,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runcontrol"
+	"github.com/modulecollective/moe/internal/runsock"
 )
 
 // exitYielded is the exit code of an owner that stopped because the
@@ -43,10 +44,34 @@ var controlPollInterval = 2 * time.Second
 // controlCheckpoint returns 0 when the owner may start boundary, or
 // exitYielded after honouring a hold, a recovery block or a park. An
 // unreadable record yields rather than reading as "no hold".
+//
+// With a live endpoint the read runs under its dispatch lock and an
+// admitted boundary is published before the lock is released, so a
+// request arriving over the socket lands either before this read or
+// after the transition is visibly under way — never in between.
 func controlCheckpoint(root string, md *run.Metadata, boundary string, stderr io.Writer) int {
 	if !operatorCascades(md.Workflow) {
 		return 0
 	}
+	srv := runEndpoint(root, md.Project, md.ID)
+	if srv == nil {
+		return checkControl(root, md, boundary, stderr)
+	}
+	code := 0
+	phase, stage := boundaryPhase(boundary)
+	srv.Checkpoint(func() bool {
+		code = checkControl(root, md, boundary, stderr)
+		return code == 0
+	}, func(s *runsock.Status) {
+		s.Phase, s.Waiting = phase, ""
+		if stage != "" {
+			s.Stage = stage
+		}
+	})
+	return code
+}
+
+func checkControl(root string, md *run.Metadata, boundary string, stderr io.Writer) int {
 	key := md.Project + "/" + md.ID
 	f, err := runcontrol.Load(root, md.Project, md.ID)
 	if err != nil {
@@ -383,9 +408,13 @@ func controlWants(root string, md *run.Metadata, withFinish bool) bool {
 }
 
 // ownerGeneration is this invocation's endpoint generation for a run,
-// or "" when it serves none. Endpoints arrive with internal/runsock;
-// until then every owner is generation "".
-var ownerGeneration = func(root, projectID, runID string) string { return "" }
+// or "" when it serves none.
+func ownerGeneration(root, projectID, runID string) string {
+	if srv := runEndpoint(root, projectID, runID); srv != nil {
+		return srv.Snapshot().Generation
+	}
+	return ""
+}
 
 // errControlWake ends a decision prompt that a control woke.
 var errControlWake = errors.New("woken by an operator control")

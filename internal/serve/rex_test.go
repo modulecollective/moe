@@ -164,8 +164,12 @@ func rexServer(t *testing.T, fake *fakeRex, opts Options) *Server {
 // the block is labelled with the child id (which is how a restarted serve
 // finds it), kept open so its status and screen survive the exit, not
 // focused, started in the root, and the sweep's own argv reaches moe
-// whole behind an env prefix carrying the two variables serve adds.
+// whole behind an env prefix carrying the variables serve adds: the
+// serve handshake and the launch origin a run endpoint reports.
 func TestRexLaunchArgvIsExact(t *testing.T) {
+	prevStamp := serveLaunchStamp
+	serveLaunchStamp = "7@2026-11-12T00:00:00Z"
+	t.Cleanup(func() { serveLaunchStamp = prevStamp })
 	t.Setenv("MOE_HOME", "/wrong/root")
 	fake := newFakeRex(t)
 	fake.reply("run", `{"window_id":"window:W","block_ids":["block:B1"],"revision":2}`, 0)
@@ -179,7 +183,7 @@ func TestRexLaunchArgvIsExact(t *testing.T) {
 	waitFor(t, "the sweep to be recorded", func() bool { return len(gate.sweptList()) == 1 })
 
 	want := "run --json --focus=false --keep-open -s session:S --label heartbeat:alpha --cwd " + root +
-		" -- /usr/bin/env MOE_HOME=" + root + " MOE_SERVE_AGENT=1 " + moe +
+		" -- /usr/bin/env MOE_HOME=" + root + " MOE_SERVE_AGENT=1 MOE_LAUNCH_HOST=rex MOE_SERVE_LAUNCH=heartbeat:alpha/7@2026-11-12T00:00:00Z " + moe +
 		" pulse new --dynamic --heartbeat --emit-run " + sweepRunPath(root, "alpha") +
 		` --pr-checks {"k":"v w"} alpha`
 	if calls := fake.calls(); len(calls) < 2 || calls[0] != "block ls --json -s session:S" || calls[1] != want {

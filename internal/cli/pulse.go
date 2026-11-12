@@ -445,6 +445,9 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 	// a long time, and a sweep that has already done all its work should
 	// not sit on the dash's ACTIVE list for the duration.
 	pi.Close()
+	// Every ride this sweep roots names it as its parent.
+	currentSweep = projectID + "/" + md.ID
+	defer func() { currentSweep = "" }()
 	return pulseSelfKick(root, groomed, stdout, stderr)
 }
 

@@ -9,6 +9,8 @@ import (
 
 	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/git/gittest"
+	"github.com/modulecollective/moe/internal/runsock"
+	"github.com/modulecollective/moe/internal/runsock/runsocktest"
 )
 
 // TestMain keeps the orchestration suite independent of provider accounts.
@@ -33,8 +35,14 @@ func runTests(m *testing.M) int {
 		fmt.Fprintln(os.Stderr, "test Git config:", err)
 		return 1
 	}
+	// Every execution owner serves a run endpoint, and agent sandboxes
+	// refuse AF_UNIX: run the package over an in-memory socket namespace
+	// in a private runtime dir.
+	sockets := runsocktest.New()
+	defer runsock.SetTransport(sockets.Listen, sockets.Dial)()
 	for key, value := range map[string]string{
 		"GIT_CONFIG_GLOBAL": cfg,
+		"XDG_RUNTIME_DIR":   dir,
 		"GIT_CONFIG_SYSTEM": os.DevNull,
 	} {
 		if err := os.Setenv(key, value); err != nil {

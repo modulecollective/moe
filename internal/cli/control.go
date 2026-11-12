@@ -7,15 +7,19 @@ package cli
 // `show` prints is how the operator picks the conversation up now.
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"slices"
 	"sort"
+	"time"
 
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runcontrol"
 	"github.com/modulecollective/moe/internal/runowner"
+	"github.com/modulecollective/moe/internal/runsock"
 )
 
 func init() {
@@ -64,9 +68,8 @@ func runControlSubmit(kind runcontrol.Kind, args []string, stdout, stderr io.Wri
 	if code != 0 {
 		return code
 	}
-	if !operatorCascades(md.Workflow) {
-		moePrintf(stderr, "%s: %s/%s is a %s run; controls apply to operator-paced stage workflows\n",
-			verb, md.Project, md.ID, md.Workflow)
+	if err := controlPolicy(md); err != nil {
+		moePrintf(stderr, "%s: %v\n", verb, err)
 		return 1
 	}
 	req := runcontrol.Request{ID: *id, Kind: kind}
@@ -76,10 +79,13 @@ func runControlSubmit(kind runcontrol.Kind, args []string, stdout, stderr io.Wri
 	if kind == runcontrol.KindHandoff {
 		req.Stage, req.Agent = conversationAddress(md)
 	}
-	r, err := runcontrol.Submit(root, md.Project, md.ID, req)
+	r, note, err := deliverControl(root, md, req)
 	if err != nil {
 		moePrintf(stderr, "%s: %v\n", verb, err)
 		return 1
+	}
+	if note != "" {
+		moePrintf(stderr, "%s: %s\n", verb, note)
 	}
 	key := md.Project + "/" + md.ID
 	if r.ID != req.ID {
@@ -112,7 +118,7 @@ func runControlResume(args []string, stdout, stderr io.Writer) int {
 	if code != 0 {
 		return code
 	}
-	release, ok := ownRunForVerb(root, md.Project, md.ID, stderr)
+	release, ok := ownRunForMutation(root, md.Project, md.ID, stderr)
 	if !ok {
 		return 1
 	}
@@ -306,4 +312,50 @@ func conversationCommand(md *run.Metadata, stage, agent string) string {
 		cmd += " --agent " + agent
 	}
 	return cmd
+}
+
+// controlDialTimeout bounds each exchange with a live owner.
+var controlDialTimeout = 3 * time.Second
+
+// deliverControl records req. With a live owner answering, the request
+// goes through its endpoint so the receipt is serialised with the
+// owner's transitions; a park is bound to that owner's generation. The
+// owner's refusal is definite. A send whose answer was lost is read back
+// by id, and if it never landed is committed directly under the same id
+// — never resent under a new one. With no owner answering, the request
+// is committed directly and the owner (if one exists) reads it at its
+// next boundary. note says which happened when it is not the plain case.
+func deliverControl(root string, md *run.Metadata, req runcontrol.Request) (runcontrol.Request, string, error) {
+	id := runsock.Identity{Root: root, Project: md.Project, Run: md.ID}
+	ctx, cancel := context.WithTimeout(context.Background(), controlDialTimeout)
+	defer cancel()
+	st, err := runsock.ReadStatus(ctx, runsock.RuntimeDir(), id)
+	if err == nil {
+		gen := ""
+		if req.Kind == runcontrol.KindPark {
+			gen, req.Owner = st.Generation, st.Generation
+		}
+		r, _, err := runsock.SendControl(ctx, runsock.RuntimeDir(), id, gen, req)
+		if err == nil {
+			return r, "", nil
+		}
+		if _, refused := errors.AsType[*runsock.RefusedError](err); refused {
+			return runcontrol.Request{}, "", err
+		}
+		f, lerr := runcontrol.Load(root, md.Project, md.ID)
+		if lerr != nil {
+			return runcontrol.Request{}, "", fmt.Errorf("owner acknowledgement lost (%v) and readback failed (%v); retry with --id %s", err, lerr, req.ID)
+		}
+		if r, ok := f.Find(req.ID); ok {
+			return r, "saved; the owner's acknowledgement was lost", nil
+		}
+	}
+	r, err := runcontrol.Submit(root, md.Project, md.ID, req)
+	if err != nil {
+		return runcontrol.Request{}, "", err
+	}
+	if busy, _ := runowner.Busy(root, md.Project, md.ID); busy && !r.Settled() {
+		return r, "saved; owner acknowledgement unavailable — it applies at the owner's next boundary", nil
+	}
+	return r, "", nil
 }

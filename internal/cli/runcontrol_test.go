@@ -44,7 +44,7 @@ func submitControl(t *testing.T, root string, kind runcontrol.Kind, id string) {
 // ownForTest takes this invocation's guard on the run, as a stage would.
 func ownForTest(t *testing.T, root string) {
 	t.Helper()
-	rel, err := ownRun(root, "moe", "change-auth")
+	rel, err := ownRun(root, "moe", "change-auth", true)
 	if err != nil {
 		t.Fatal(err)
 	}

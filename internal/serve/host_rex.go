@@ -80,7 +80,7 @@ func (h *rexHost) spawn(id, moeBin string, args []string, root string, logger io
 	}
 
 	// The same two variables serve adds for a local child.
-	argv, err := rexJobArgv(moeBin, []string{"MOE_HOME=" + root, "MOE_SERVE_AGENT=1"}, args)
+	argv, err := rexJobArgv(moeBin, append([]string{"MOE_HOME=" + root, "MOE_SERVE_AGENT=1"}, launchOriginEnv("rex", id)...), args)
 	if err != nil {
 		return nil, err
 	}

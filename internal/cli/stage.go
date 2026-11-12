@@ -34,6 +34,7 @@ import (
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/runsock"
 	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/stylesheet"
 	"github.com/modulecollective/moe/internal/sync"
@@ -386,6 +387,12 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	if entryCode != 0 {
 		return entryCode
 	}
+	publishRun(root, projectID, runID, func(s *runsock.Status) {
+		s.Phase, s.Stage, s.Waiting, s.Interactive = runsock.PhaseAdmission, docID, "", interactive
+		if interactive && !rideWalkActive {
+			s.Continuation = "prompt"
+		}
+	})
 	// Model stylesheet: resolve the (workflow, stage) → (agent, model)
 	// bindings from the checked-in <root>/model-stylesheet.css. Read from
 	// the canonical root here — the same freshness as md, loaded above —
@@ -775,6 +782,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		if !entry.release {
 			g.openHold = func() (<-chan struct{}, func()) { return watchControl(root, md, false) }
 		}
+		g.onWait = func(status string) { publishPhase(root, md, runsock.PhaseQuotaWait, docID, status) }
 		g.read = func(ctx context.Context, name, model string) (agent.Quota, error) {
 			return readStageQuota(ctx, name, model, mapToEnv(devEnv))
 		}
@@ -802,6 +810,9 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			if c := entry.admitted("stage "+docID, stderr); c != 0 {
 				return c
 			}
+			if code == 0 {
+				publishPhase(root, md, runsock.PhaseRunning, docID, "")
+			}
 		}
 		in.Agent = agentName
 		if code == exitQuotaDeferred {
@@ -818,6 +829,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	}
 
 	code := runStageTurn(root, in, stdout, stderr)
+	publishPhase(root, md, runsock.PhaseSettling, docID, "")
 	if code == exitQuotaDeferred && deferred != nil && clockQuota != nil {
 		if err := clockQuota.record(*deferred, stderr); err != nil {
 			moePrintf(stderr, "pulse: record quota retry: %v\n", err)

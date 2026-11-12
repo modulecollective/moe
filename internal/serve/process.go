@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"sync"
 	"time"
 )
@@ -171,4 +172,18 @@ func (c *child) snapshot() (exited bool, exitErr error) {
 	default:
 	}
 	return
+}
+
+// serveLaunchStamp identifies this serve process for the children it
+// launches: pid and start time, so a restarted serve is a different
+// launcher even on a reused pid.
+var serveLaunchStamp = fmt.Sprintf("%d@%s", os.Getpid(), time.Now().UTC().Format(time.RFC3339))
+
+// launchOriginEnv is the explicit origin handshake a child's run
+// endpoints report (see internal/cli runendpoint.go): how it is hosted,
+// and which serve launched which child. It rides the child's own
+// environment, so a Rex job adopted after a serve restart still names
+// the launch that started it, not the server now watching it.
+func launchOriginEnv(host, childID string) []string {
+	return []string{"MOE_LAUNCH_HOST=" + host, "MOE_SERVE_LAUNCH=" + childID + "/" + serveLaunchStamp}
 }
