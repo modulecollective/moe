@@ -474,3 +474,43 @@ func TestUnrecordedReceiptIsSpentBySettle(t *testing.T) {
 		t.Fatalf("empty owed-receipt file left behind: %v", err)
 	}
 }
+
+// A kept receipt carries why its commit failed, an entry kept before
+// that field existed still reads, and recording either one puts the
+// outcome — never the diagnostic — in the record.
+func TestUnrecordedReceiptKeepsItsRecordingError(t *testing.T) {
+	root := seedRoot(t)
+	submit(t, root, Request{ID: "f1", Kind: KindFinish})
+	s := Settlement{State: StateFailed, Boundary: "stage code", Outcome: "code stopped (exit 1)",
+		RecordingError: "commit-msg hook refused"}
+	if err := KeepUnrecorded(root, "moe", "r1", "f1", s); err != nil {
+		t.Fatal(err)
+	}
+	if owed, err := Unrecorded(root, "moe", "r1"); err != nil || owed["f1"] != s {
+		t.Fatalf("owed = %+v, %v", owed, err)
+	}
+	if err := Settle(root, "moe", "r1", "f1", s, ""); err != nil {
+		t.Fatal(err)
+	}
+	if r, _ := load(t, root).Find("f1"); r.State != StateFailed || r.Outcome != s.Outcome {
+		t.Fatalf("recorded = %+v", r)
+	}
+	if b, _ := os.ReadFile(filepath.Join(root, Path("moe", "r1"))); strings.Contains(string(b), "hook refused") {
+		t.Fatalf("the recording error reached control.json:\n%s", b)
+	}
+
+	// An entry kept before RecordingError existed.
+	submit(t, root, Request{ID: "p1", Kind: KindPause})
+	write(t, root, unrecordedPath("", "moe", "r1"),
+		`{"p1": {"State": "completed", "Boundary": "stage test", "Outcome": "held before stage test", "Recovery": false}}`)
+	owed, err := Unrecorded(root, "moe", "r1")
+	if want := (Settlement{State: StateCompleted, Boundary: "stage test", Outcome: "held before stage test"}); err != nil || owed["p1"] != want {
+		t.Fatalf("legacy owed = %+v, %v", owed, err)
+	}
+	if err := Settle(root, "moe", "r1", "p1", owed["p1"], ""); err != nil {
+		t.Fatal(err)
+	}
+	if owed, err := Unrecorded(root, "moe", "r1"); err != nil || len(owed) != 0 {
+		t.Fatalf("recorded receipts still owed: %v, %v", owed, err)
+	}
+}

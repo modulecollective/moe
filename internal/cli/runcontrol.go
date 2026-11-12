@@ -442,6 +442,7 @@ func settleControl(root string, md *run.Metadata, id string, s runcontrol.Settle
 		return
 	}
 	moePrintf(stderr, "control: record %s %s on %s/%s: %v\n", id, s.State, md.Project, md.ID, err)
+	s.RecordingError = err.Error()
 	if kerr := runcontrol.KeepUnrecorded(root, md.Project, md.ID, id, s); kerr != nil {
 		moePrintf(stderr, "control: keep %s's receipt locally: %v\n", id, kerr)
 		return

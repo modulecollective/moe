@@ -399,6 +399,10 @@ type Settlement struct {
 	// Recovery marks the outcome as unknown: automatic continuation is
 	// blocked until an operator Resume retires it.
 	Recovery bool
+	// RecordingError is why the receipt could not be committed when it
+	// was kept locally (KeepUnrecorded). It explains the local copy for
+	// status surfaces; Settle never writes it to the record.
+	RecordingError string `json:",omitempty"`
 }
 
 // Settle records an owner's progress on a request; applying one also
