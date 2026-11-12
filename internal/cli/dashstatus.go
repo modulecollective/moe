@@ -11,6 +11,10 @@ import (
 	"github.com/modulecollective/moe/internal/cliout"
 )
 
+// dashStatusSlots are the reports dashStatusReports can build, in emission
+// order. A slot missing here is built and silently never shown.
+var dashStatusSlots = []string{"moe/dash/activity", "moe/dash/questions", "moe/dash/control", "moe/dash/health"}
+
 // dashStatus owns only this watch's subtree. A successful write is the
 // comparison checkpoint; a failed write is retried on the next refresh.
 type dashStatus struct {
@@ -35,7 +39,7 @@ func (s *dashStatus) update(reports []cliout.ProgramStatus) error {
 		want[r.ID] = r.Normalized()
 	}
 	// Fixed order also makes clearing and reseeding deterministic.
-	for _, id := range []string{"moe/dash/activity", "moe/dash/questions", "moe/dash/health"} {
+	for _, id := range dashStatusSlots {
 		r, present := want[id]
 		old, existed := s.last[id]
 		if !present && !existed || present && existed && old == r {

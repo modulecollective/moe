@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -258,5 +259,35 @@ func TestGatherDashQuestionsValidityAndFilters(t *testing.T) {
 	}
 	if got := gather(DashFilter{ProjectFilter: "tele", WorkflowFilter: "sdlc"}); len(got.InputErrors) != 0 || len(got.Questions) != 1 {
 		t.Fatalf("recovery = %+v", got)
+	}
+}
+
+// Every slot the projection builds reaches the terminal and clears: the
+// control slot was once built and never emitted.
+func TestDashStatusEmitsAndClearsEverySlot(t *testing.T) {
+	w := &dashStatusSink{}
+	s := dashStatus{w: w}
+	var reports []cliout.ProgramStatus
+	for _, id := range dashStatusSlots {
+		reports = append(reports, cliout.ProgramStatus{ID: id, State: "blocked", App: "moe", Title: id})
+	}
+	if err := s.update(reports); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range dashStatusSlots {
+		if !strings.Contains(w.String(), "state=blocked:id="+id+":") {
+			t.Fatalf("%s never emitted: %q", id, w.String())
+		}
+	}
+	if err := s.update(nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range dashStatusSlots {
+		if !strings.Contains(w.String(), "state=clear:id="+id+"\x1b\\") {
+			t.Fatalf("%s never cleared", id)
+		}
+	}
+	if !slices.Contains(dashStatusSlots, "moe/dash/control") {
+		t.Fatal("control slot dropped")
 	}
 }
