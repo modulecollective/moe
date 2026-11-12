@@ -517,19 +517,22 @@ func (m *model) submitDraft(d *draft) {
 	m.runDraft(d, "", false)
 }
 
+// saveKey answers the save dialogue. Any other key leaves it open.
 func (m *model) saveKey(k Key) effect {
 	d := m.saveDraft
 	switch {
 	case k.Code == KeyEnter || k.Code == KeyRune && k.Rune == 's':
+		m.saveDraft = nil
 		m.runDraft(d, "", false)
 	case k.Code == KeyRune && k.Rune == 'g':
+		m.saveDraft = nil
 		m.runDraft(d, "sdlc", false)
 	case k.Code == KeyRune && k.Rune == 'd':
+		m.saveDraft = nil
 		m.runDraft(d, "sdlc", true)
-	case k.Code == KeyEsc:
-		m.mode = modeEdit
+	case k.Code == KeyEsc || k.Code == KeyCtrlC:
+		m.saveDraft, m.mode = nil, modeEdit
 	}
-	m.saveDraft = nil
 	return effNone
 }
 

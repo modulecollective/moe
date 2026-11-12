@@ -411,3 +411,34 @@ func stripSGR(s string) string {
 	}
 	return b.String()
 }
+
+// Keys the save dialogue does not name leave it open with its draft;
+// Esc and Ctrl-C go back to the editor. Each step paints, as the loop
+// does after every key.
+func TestIdeaSaveDialogueKeepsState(t *testing.T) {
+	m, q := testModel(t)
+	m.setBoard(board(1, idea("p", "i", 1)))
+	press(m, Key{Code: KeyRune, Rune: 'e'})
+	for _, k := range []Key{{Code: KeyUp}, {Code: KeyTab}, {Code: KeyCtrlS}, {Code: KeyRune, Rune: 'x'}, {Code: KeyPaste, Text: "y"}} {
+		press(m, Key{Code: KeyCtrlS})
+		press(m, k)
+		m.view()
+		if m.mode != modeSave || m.saveDraft == nil {
+			t.Fatalf("after %+v: mode %d, draft %v", k, m.mode, m.saveDraft)
+		}
+		press(m, Key{Code: KeyEsc})
+		m.view()
+		if m.mode != modeEdit || m.active == nil {
+			t.Fatalf("Esc did not return to the editor: mode %d", m.mode)
+		}
+	}
+	press(m, Key{Code: KeyCtrlS}, Key{Code: KeyCtrlC})
+	m.view()
+	if m.mode != modeEdit || m.active == nil {
+		t.Fatalf("Ctrl-C did not return to the editor: mode %d", m.mode)
+	}
+	press(m, Key{Code: KeyCtrlS}, Key{Code: KeyRune, Rune: 's'})
+	if j := <-q; j.steps[0].Kind != ActEdit {
+		t.Fatalf("save = %+v", j.steps[0])
+	}
+}

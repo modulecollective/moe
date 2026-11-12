@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
@@ -57,6 +58,10 @@ func TestUIPTYHelper(t *testing.T) {
 			return Result{OK: true, Message: "done"}
 		},
 	}
+	if os.Getenv("MOE_UI_PTY_PANIC") == "1" {
+		// Report runs on the loop goroutine, as a model panic would.
+		cfg.Report = func(io.Writer, Board) error { panic("probe") }
+	}
 	err := Run(context.Background(), cfg, os.Stdout, os.Stderr)
 	fmt.Fprintf(reports, "exit %v\n", err)
 	os.Exit(0)
@@ -73,7 +78,7 @@ type ptyChild struct {
 	exited  chan struct{}
 }
 
-func startPTYChild(t *testing.T) *ptyChild {
+func startPTYChild(t *testing.T, env ...string) *ptyChild {
 	t.Helper()
 	master, slave := openPTY(t)
 	r, w, err := os.Pipe()
@@ -87,6 +92,7 @@ func startPTYChild(t *testing.T) *ptyChild {
 	}
 	cmd := exec.Command(bin, "-test.run=^TestUIPTYHelper$")
 	cmd.Env = append(os.Environ(), "MOE_UI_PTY=1", "TERM=xterm-256color")
+	cmd.Env = append(cmd.Env, env...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = slave, slave, slave
 	cmd.ExtraFiles = []*os.File{w}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
@@ -264,5 +270,41 @@ func TestRunOnPTYSuspendContinue(t *testing.T) {
 	c.master.Write([]byte("q"))
 	if got := c.report(t); got != "exit <nil>" {
 		t.Fatalf("exit = %s", got)
+	}
+}
+
+// The idea save dialogue on a real terminal: keys it does not name
+// leave it open, and the save still goes through afterwards.
+func TestRunOnPTYSaveDialogue(t *testing.T) {
+	c := startPTYChild(t)
+	c.waitOut(t, "p/a")
+	c.master.Write([]byte(":new idea p/i\r"))
+	c.waitOut(t, "editing new idea p/i")
+	c.master.Write([]byte("\x13"))
+	c.waitOut(t, "save + tag sdlc")
+	c.master.Write([]byte("\x1b[A\t\x13x"))
+	c.master.Write([]byte("s"))
+	if got := c.report(t); got != `create idea p/i "# i\n"` {
+		t.Fatalf("report = %s", got)
+	}
+	c.master.Write([]byte("q"))
+	if got := c.report(t); got != "exit <nil>" {
+		t.Fatalf("exit = %s", got)
+	}
+}
+
+// A panic on the loop goroutine still hands the terminal back.
+func TestRunOnPTYRestoresOnPanic(t *testing.T) {
+	c := startPTYChild(t, "MOE_UI_PTY_PANIC=1")
+	c.wait(t)
+	after, err := getTermios(c.slave)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after != c.before {
+		t.Fatalf("termios not restored after a panic:\nbefore %+v\nafter  %+v", c.before.t, after.t)
+	}
+	if out := c.output(); !strings.Contains(out, "probe") || !strings.Contains(out, leaveModes) {
+		t.Fatalf("did not panic and restore: %q", out[max(len(out)-200, 0):])
 	}
 }

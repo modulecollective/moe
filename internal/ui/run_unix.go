@@ -93,6 +93,9 @@ func Run(ctx context.Context, cfg Config, stdout *os.File, stderr io.Writer) err
 		}
 	}()
 	defer func() {
+		// Restore before closing: on a panic this runs ahead of the
+		// deferred leave above, which would then find the tty closed.
+		leave()
 		close(quit)
 		tty.Close()
 		<-readerDone
