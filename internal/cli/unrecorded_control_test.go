@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"math/rand"
 	"net/http"
@@ -331,5 +332,93 @@ func TestServeShowsOwedOutcomeThroughRealWiring(t *testing.T) {
 	rr = do(httptest.NewRequest("GET", strings.TrimSuffix(rr.Header().Get("Location"), "#run-status"), nil))
 	if !strings.Contains(rr.Body.String(), "failed — code stopped (exit 1) — receipt not recorded") {
 		t.Errorf("redirect target lacks the outcome:\n%s", rr.Body.String())
+	}
+}
+
+// A submission whose local receipts cannot be read fails its readback —
+// naming the request delivery returned and that it stands — rather than
+// succeeding with an outcome it could not check, and changes nothing.
+func TestUnreadableReceiptsFailSubmissionReadback(t *testing.T) {
+	root, md, _, _, _ := owedFinishFixture(t)
+	local := filepath.Join(root, ".moe", "control-unrecorded", md.Project, md.ID+".json")
+	if err := os.WriteFile(local, []byte("{broken"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before := journalState(t, root)
+	const want = "finish owed was returned and delivery is not rolled back, but reading it back failed (local receipts unreadable: "
+	for _, id := range []string{"owed", "fresh"} {
+		var out, errs bytes.Buffer
+		code := runControlSubmit(runcontrol.KindFinish, []string{"--id", id, "moe/change-auth"}, &out, &errs)
+		if code != 1 || out.Len() != 0 || !strings.Contains(errs.String(), want) ||
+			!strings.Contains(errs.String(), "retry with the same id (owed)") {
+			t.Errorf("--id %s: exit=%d stdout=%q stderr=%q", id, code, out.String(), errs.String())
+		}
+	}
+	if msg, err := serveSubmitControl(root, md.Project, md.ID, "finish", "web-fresh", 0); err == nil ||
+		!strings.Contains(err.Error(), want) || errors.Is(err, serve.ErrControlRefused) {
+		t.Errorf("web readback = %q, %v", msg, err)
+	}
+	if after := journalState(t, root); after != before || len(controlRecord(t, root).Requests) != 1 {
+		t.Fatalf("resubmission changed the journal:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+}
+
+// A pause or handoff whose completed receipt the journal refused keeps
+// saying so after its owner lets go, and evidence that cannot be read
+// or makes no sense never reads as a turn still settling. The hold and
+// its resume-only actions follow the record throughout.
+func TestOwedHoldReceiptOutlivesItsOwner(t *testing.T) {
+	for _, tc := range []struct {
+		kind runcontrol.Kind
+		word string
+	}{{runcontrol.KindPause, "held"}, {runcontrol.KindHandoff, "handed off"}} {
+		t.Run(string(tc.kind), func(t *testing.T) {
+			root, md := controlFixture(t)
+			t.Run("owner", func(t *testing.T) { // its cleanup releases the guard
+				ownForTest(t, root)
+				submitControl(t, root, tc.kind, "h1")
+				hooks := t.TempDir()
+				script := "#!/bin/sh\ncase \"$(head -n 1 \"$1\")\" in 'control: completed '*) exit 1;; esac\nexit 0\n"
+				if err := os.WriteFile(filepath.Join(hooks, "commit-msg"), []byte(script), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				gittest.Run(t, root, "config", "core.hooksPath", hooks)
+				if code := controlCheckpoint(root, md, "stage test", io.Discard); code != exitYielded {
+					t.Fatalf("checkpoint = %d", code)
+				}
+			})
+			observe := func() RunObservation {
+				return ObserveRuns(root, []*run.Metadata{md}, time.Now())["moe/change-auth"]
+			}
+			o := observe()
+			r, _ := o.Control.Find("h1")
+			if _, owed := o.owedReceipt(r); o.Owned || r.Settled() || o.Control.Hold == nil || !owed {
+				t.Fatalf("fixture: owned=%v request=%+v hold=%+v unrecorded=%v", o.Owned, r, o.Control.Hold, o.Unrecorded)
+			}
+			if got := o.Summary(time.Now()); got != tc.word+" · receipt not recorded" {
+				t.Errorf("released owner: summary = %q", got)
+			}
+			if got := holdPhase(o, r); got != "held, ready to resume" {
+				t.Errorf("released owner: phase = %q", got)
+			}
+
+			local := filepath.Join(root, ".moe", "control-unrecorded", md.Project, md.ID+".json")
+			for _, body := range []string{`{"h1": {"State": "accepted"}}`, "{broken"} {
+				if err := os.WriteFile(local, []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				out, _ := runShow(t)
+				if strings.Contains(out, "settling") || !strings.Contains(out, "h1 — held, outcome unknown") {
+					t.Errorf("%s: show:\n%s", body, out)
+				}
+				v, _, err := serveRunControl(root, md.Project, md.ID)
+				if err != nil || !slices.Contains(v.Lines, "hold: "+string(tc.kind)+" h1 — held, outcome unknown") {
+					t.Errorf("%s: web view = %+v, %v", body, v, err)
+				}
+				if f := controlRecord(t, root); f.Hold == nil || f.Hold.Request != "h1" {
+					t.Fatalf("%s: the hold moved: %+v", body, f.Hold)
+				}
+			}
+		})
 	}
 }

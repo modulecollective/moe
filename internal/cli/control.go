@@ -266,7 +266,8 @@ type readback struct {
 // with the local receipts, so a reply never calls an outcome its owner
 // already knows pending. note only promises the owner's next boundary
 // while nothing says the request has ended. Delivery has succeeded by
-// now: a failed read names the id to retry with rather than implying
+// now: a failed read — of the record, or of the local receipts that may
+// say how it ended — names the id to retry with rather than implying
 // nothing was recorded.
 func readBack(root string, md *run.Metadata, r runcontrol.Request, note string) (readback, error) {
 	f, err := runcontrol.Load(root, md.Project, md.ID)
@@ -274,11 +275,15 @@ func readBack(root string, md *run.Metadata, r runcontrol.Request, note string) 
 	if err == nil && !ok {
 		err = fmt.Errorf("the record has no request %s", r.ID)
 	}
-	if err != nil {
-		return readback{}, fmt.Errorf("%s %s was returned, but reading it back failed (%v); retry with the same id (%s) to read it", r.Kind, r.ID, err, r.ID)
-	}
 	o := RunObservation{Control: f}
-	o.Unrecorded, o.UnrecordedErr = runcontrol.Unrecorded(root, md.Project, md.ID)
+	if err == nil {
+		if o.Unrecorded, err = runcontrol.Unrecorded(root, md.Project, md.ID); err != nil {
+			err = fmt.Errorf("local receipts unreadable: %w", err)
+		}
+	}
+	if err != nil {
+		return readback{}, fmt.Errorf("%s %s was returned and delivery is not rolled back, but reading it back failed (%v); retry with the same id (%s) to read it", r.Kind, r.ID, err, r.ID)
+	}
 	_, owed := o.owedReceipt(cur)
 	if note != "" && !cur.Settled() && !owed && !o.outcomeUnknown(cur) {
 		note += " — it applies at the owner's next boundary"
@@ -288,10 +293,14 @@ func readBack(root string, md *run.Metadata, r runcontrol.Request, note string) 
 
 // holdPhase distinguishes a hold whose owner is still settling from one
 // that is ready to resume. The receipt alone does not prove ownership
-// was released; `show` prints the guard alongside it.
+// was released; `show` prints the guard alongside it. Local evidence
+// that cannot be read or makes no sense supports neither claim.
 func holdPhase(o RunObservation, r runcontrol.Request) string {
 	if _, owed := o.owedReceipt(r); owed || r.Settled() {
 		return "held, ready to resume"
+	}
+	if o.outcomeUnknown(r) {
+		return "held, outcome unknown"
 	}
 	return "held, current turn settling"
 }

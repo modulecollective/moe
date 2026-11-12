@@ -139,11 +139,12 @@ func (o RunObservation) Summary(now time.Time) string {
 			what = "handed off"
 		}
 		// A hold whose settling turn ended reads as held, whether or not
-		// its receipt made the journal.
-		if r, ok := f.Find(f.Hold.Request); ok && !r.Settled() && o.Owned {
+		// its receipt made the journal; an unrecorded one says so whether
+		// or not its owner has since let go.
+		if r, ok := f.Find(f.Hold.Request); ok && !r.Settled() {
 			if _, owed := o.owedReceipt(r); owed {
 				what += " · receipt not recorded"
-			} else if !o.outcomeUnknown(r) {
+			} else if o.Owned && !o.outcomeUnknown(r) {
 				what = string(f.Hold.Kind) + " pending"
 			}
 		}
