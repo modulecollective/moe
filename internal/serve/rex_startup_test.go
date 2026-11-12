@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRexBlocksValidateWholeListing(t *testing.T) {
@@ -145,11 +146,24 @@ func TestRexStartupWaitsForReconciliation(t *testing.T) {
 			if body, _ := os.ReadFile(sweepRunPath(root, "alpha")); string(body) != "sentinel\n" {
 				t.Fatalf("adoption consumed live alpha's emit file: %q", body)
 			}
-			waitFor(t, "adopted exited block backoff", func() bool {
-				s.heartbeat.mu.Lock()
-				defer s.heartbeat.mu.Unlock()
-				return s.heartbeat.fails["gamma"] == 1
-			})
+			// Gamma's watcher records its backoff before acknowledging the
+			// exit to Rex; settled closes only after that rename returns, so
+			// the call-log snapshot below cannot catch it mid-flight.
+			g, ok := s.children.get("heartbeat:gamma")
+			if !ok || testBlock(s.children, g) != "block:EXIT" {
+				t.Fatalf("gamma not adopted from block:EXIT: child %v", g)
+			}
+			select {
+			case <-g.settled:
+			case <-time.After(5 * time.Second):
+				t.Fatal("adopted exited gamma never settled")
+			}
+			s.heartbeat.mu.Lock()
+			gammaFails := s.heartbeat.fails["gamma"]
+			s.heartbeat.mu.Unlock()
+			if gammaFails != 1 {
+				t.Fatalf("adopted exited block backoff = %d, want 1", gammaFails)
+			}
 			waitFor(t, "live watchers", func() bool { return fake.called("wait --json block:A") && fake.called("wait --json block:B") })
 			before := len(fake.calls())
 			s.heartbeatTick()
