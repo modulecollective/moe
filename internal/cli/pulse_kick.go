@@ -181,6 +181,10 @@ func pulseSelfKick(root string, groomed groomResult, stdout, stderr io.Writer) i
 		}
 		moePrintf(stderr, "pulse: kicking %s (%s)\n", step.Root, ride)
 		if code := chainKickRun(root, proj, runID, rideDynamic, step.OneStage, stdout, stderr); code != 0 {
+			if code == exitYielded {
+				moePrintf(stderr, "pulse: kick %s yielded to operator control\n", step.Root)
+				continue
+			}
 			moePrintf(stderr, "pulse: kick %s exited %d\n", step.Root, code)
 			if code == exitInterrupted {
 				return code
@@ -346,6 +350,11 @@ func kickFloorHold(root, threadRoot string, groomed groomResult) string {
 	// The other half of occupancy: a settled session no longer has a
 	// branch, but the invocation that ran it may still be at its prompt.
 	if hold := runOwnerHold(root, md); hold != "" {
+		return hold
+	}
+	// An operator hold stands until an explicit resume, whatever the
+	// survey thought of the thread.
+	if hold := controlHoldPhrase(root, md); hold != "" {
 		return hold
 	}
 	return ""

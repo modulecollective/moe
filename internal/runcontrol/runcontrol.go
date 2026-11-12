@@ -426,6 +426,18 @@ func Settle(root, projectID, runID, id string, s Settlement, consent string) err
 // Resume restores no authority: a finish whose outcome was unknown
 // stays failed.
 func Resume(root, projectID, runID string, owner *runowner.Handle, req Request) (Request, bool, error) {
+	return release(root, projectID, runID, owner, req, true)
+}
+
+// ReleaseForEntry is Resume for an explicit interactive stage entry that
+// has already been admitted: its own session reservation is the one
+// that would otherwise refuse it, so the reservation check is skipped.
+// Every other guard (owner, revision, idempotency) is the same.
+func ReleaseForEntry(root, projectID, runID string, owner *runowner.Handle) (Request, bool, error) {
+	return release(root, projectID, runID, owner, Request{}, false)
+}
+
+func release(root, projectID, runID string, owner *runowner.Handle, req Request, checkSessions bool) (Request, bool, error) {
 	if !owner.Owns(root, projectID, runID) {
 		return Request{}, false, fmt.Errorf("%w: %s/%s", ErrNotOwner, projectID, runID)
 	}
@@ -451,8 +463,10 @@ func Resume(root, projectID, runID string, owner *runowner.Handle, req Request) 
 		if req.Revision != 0 && req.Revision != f.Revision {
 			return "", fmt.Errorf("%w (shown revision %d, now %d)", ErrStale, req.Revision, f.Revision)
 		}
-		if err := session.RequireUnreserved(root, projectID, runID); err != nil {
-			return "", err
+		if checkSessions {
+			if err := session.RequireUnreserved(root, projectID, runID); err != nil {
+				return "", err
+			}
 		}
 		var what []string
 		if f.Hold != nil {

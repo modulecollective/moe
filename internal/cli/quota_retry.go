@@ -153,6 +153,11 @@ func combinePulseExit(current, next int) int {
 	if next == exitInterrupted {
 		return next
 	}
+	// A yield to operator control is the operator's decision, not a
+	// failed ride: no backoff, and the sweep carries on.
+	if next == exitYielded {
+		return current
+	}
 	if next != 0 && (current == 0 || current == exitQuotaDeferred) {
 		return next
 	}

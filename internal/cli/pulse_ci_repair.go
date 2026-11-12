@@ -14,6 +14,7 @@ import (
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/runcontrol"
 	"github.com/modulecollective/moe/internal/runowner"
 	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/trailers"
@@ -95,6 +96,9 @@ func ciRepairEligibilityExcept(sc *pulseScan, p ownedPRChecks, ownBranch string)
 		return nil, "run has an open session at " + stage
 	}
 	if hold := runOwnerHold(sc.root, md); hold != "" {
+		return nil, "run " + hold
+	}
+	if hold := controlHoldPhrase(sc.root, md); hold != "" {
 		return nil, "run " + hold
 	}
 	return fresh, ""
@@ -179,7 +183,9 @@ func kickCIRepair(root, key string, groomed groomResult, stdout, stderr io.Write
 		return 0
 	}
 	code := driveCIRepair(root, md, observed, stdout, stderr)
-	if code != 0 {
+	if code == exitYielded {
+		moePrintf(stderr, "pulse: CI repair %s yielded to operator control\n", key)
+	} else if code != 0 {
 		moePrintf(stderr, "pulse: CI repair %s exited %d\n", key, code)
 	} else {
 		moePrintf(stderr, "pulse: CI repair %s updated existing PR %s\n", key, observed.PR)
@@ -258,6 +264,22 @@ func driveCIRepair(root string, md *run.Metadata, p ownedPRChecks, stdout, stder
 			return 1
 		}
 	}
+	if cc := controlCheckpoint(root, md, "push", stderr); cc != 0 {
+		return cc
+	}
+	// A finish asked during the repair ships through the repair's own PR
+	// route: record it as applied before the push, done once it lands.
+	finish, finishing := openFinish(root, md)
+	if finishing {
+		markFinishInFlight(finish.ID, true)
+		defer markFinishInFlight(finish.ID, false)
+		if err := runcontrol.Settle(root, md.Project, md.ID, finish.ID, runcontrol.Settlement{
+			State: runcontrol.StateApplied, Boundary: "push",
+		}, walkConsent()); err != nil {
+			moePrintf(stderr, "control: finish %s: %v — not pushing\n", finish.ID, err)
+			return 1
+		}
+	}
 	// Force the PR route even if the project's default changed during the
 	// ride. The push revalidates the recorded PR again after hooks, before
 	// moving the remote, and cannot fall back to creating a replacement PR.
@@ -267,8 +289,15 @@ func driveCIRepair(root string, md *run.Metadata, p ownedPRChecks, stdout, stder
 	if err != nil {
 		moePrintf(stderr, "CI repair: %v; attempt remains spent\n", err)
 		if code == 0 {
-			return 1
+			code = 1
 		}
+	}
+	if finishing {
+		s := runcontrol.Settlement{State: runcontrol.StateCompleted, Boundary: "push", Outcome: "shipped: CI repair updated the existing PR"}
+		if code != 0 {
+			s.State, s.Outcome = runcontrol.StateFailed, fmt.Sprintf("CI repair push stopped (exit %d)", code)
+		}
+		settleControl(root, md, finish.ID, s, stderr)
 	}
 	return code
 }

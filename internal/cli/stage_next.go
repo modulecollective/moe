@@ -81,6 +81,11 @@ func promptNextStageOverride(root string, md *run.Metadata, justFinished, overri
 		return 1
 	}
 	defer releaseRun()
+	// A hold or park wins over every continuation this decision could
+	// offer, the nominated close included.
+	if code := controlCheckpoint(root, md, "the next-stage decision", stderr); code != 0 {
+		return code
+	}
 	wf, err := LookupWorkflow(md.Workflow)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
@@ -162,6 +167,8 @@ func promptNextStageOverride(root string, md *run.Metadata, justFinished, overri
 		(justFinished == "review" || justFinished == "test") {
 		if canvas := readPrintableCanvas(root, md, justFinished); canvas != "" {
 			if status, ok := stageGateStatus(canvas); ok && status == "blocked" {
+				// Finish obeys the gates: a blocked one is its outcome.
+				finishGateBlocked(root, md, justFinished, stderr)
 				if park || !stdinIsTerminal() {
 					// No operator to choose; point the nudge back at code
 					// (where the fix lives), not the forward stage.
@@ -171,6 +178,14 @@ func promptNextStageOverride(root string, md *run.Metadata, justFinished, overri
 				}
 				return promptKickback(g, scuttle, root, md, justFinished, canvas, stdout, stderr)
 			}
+		}
+	}
+	// A pending operator finish is this decision's answer: `!!` from here,
+	// through the same gates and route. After the blocked reshape above,
+	// so a blocked gate is never shipped past.
+	if !park && lookupCascadeDispatcher(md.Workflow) != nil {
+		if r, ok := openFinish(root, md); ok {
+			return applyFinish(root, md, r, "stage "+next.Name, stdout, stderr, finishWalk(root, md, next.Name, stdout, stderr))
 		}
 	}
 	hint := fmt.Sprintf("moe %s %s %s/%s", wf.Name, next.Name, md.Project, md.ID)
@@ -458,6 +473,9 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 	sig, stopSig := installSigint()
 	defer stopSig()
 	line, interrupted, err := readStageDecision(root, md, opts, "next: "+hint+" — run now?", extra, sig, stdout)
+	if errors.Is(err, errControlWake) {
+		return controlAtDecision(root, md, next.Name, false, stdout, stderr)
+	}
 	if interrupted {
 		// Cooked-mode Ctrl-C used to trap the runtime. Treat it as
 		// "decline" — safer default than guessing — and exit cleanly
@@ -578,6 +596,9 @@ func promptKickback(g *CommandGroup, scuttle *Command, root string, md *run.Meta
 	sig, stopSig := installSigint()
 	defer stopSig()
 	line, interrupted, err := readStageDecision(root, md, opts, blockedStage+" blocked — kick back to fix?", "", sig, stdout)
+	if errors.Is(err, errControlWake) {
+		return controlAtDecision(root, md, blockedStage, true, stdout, stderr)
+	}
 	if interrupted {
 		moePrintln(stdout, "^C")
 		return 0
@@ -716,6 +737,9 @@ func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root 
 	sig, stopSig := installSigint()
 	defer stopSig()
 	line, interrupted, err := readStageDecision(root, md, opts, "next: "+hint+" — run now?", extra, sig, stdout)
+	if errors.Is(err, errControlWake) {
+		return controlAtDecision(root, md, next.Name, false, stdout, stderr)
+	}
 	if interrupted {
 		// N is already the default here; SIGINT collapses to the same
 		// safe sentinel and avoids the runtime trap.
@@ -985,6 +1009,13 @@ func cascadeFromGate(startStage, destination string, oneStep bool, rideChain boo
 	}
 	for i := startIdx; i < endIdx; i++ {
 		stage := stages[i]
+		// The ship step checkpoints itself, once per push attempt.
+		if stage != "push" || !yolo {
+			if code := cascadeCheckpoint(md, "stage "+stage, stderr); code != 0 {
+				res.ran = append(res.ran, cascadeStepResult{stage: stage, code: code})
+				return res, code
+			}
+		}
 		moePrintf(stdout, "cascade: %s (headless)\n", stage)
 		if stage == "push" && yolo {
 			// The sdlc terminal ship — merge-path push, its bounded
@@ -1014,6 +1045,10 @@ func cascadeFromGate(startStage, destination string, oneStep bool, rideChain boo
 		// walk terminal so dispatchCascade's tail doesn't re-enter the
 		// chain prompt on a run that no longer exists to advance.
 		if root, err := findRoot(stderr); err == nil && stageNominatedClose(root, md, stage) {
+			if cc := controlCheckpoint(root, md, "nominated close", stderr); cc != 0 {
+				res.ran = append(res.ran, cascadeStepResult{stage: "close", code: cc})
+				return res, cc
+			}
 			closeCode := closeNominatedRun(md, stage, stdout, stderr)
 			res.ran = append(res.ran, cascadeStepResult{stage: "close", code: closeCode})
 			if closeCode != 0 {
@@ -1107,6 +1142,10 @@ func cascadeStageGate(wf *Workflow, dispatcher cascadeDispatcher, md *run.Metada
 	for {
 		if yolo && retries < 1 && md.Workflow == "sdlc" && (stage == "review" || stage == "test") {
 			if canvas, blocked := cascadeStageBlocked(md, stage, stderr); blocked {
+				if cc := cascadeCheckpoint(md, "gate kickback to code", stderr); cc != 0 {
+					steps = append(steps, cascadeStepResult{stage: "code", code: cc})
+					return steps, false, cc
+				}
 				retries++
 				// One headless kickback to code, carrying the blocking
 				// canvas as kickoff — the same seam the interactive
@@ -1117,6 +1156,10 @@ func cascadeStageGate(wf *Workflow, dispatcher cascadeDispatcher, md *run.Metada
 					return steps, false, recCode
 				}
 				// Re-dispatch the blocked stage; the loop re-checks its gate.
+				if cc := cascadeCheckpoint(md, "stage "+stage+" redispatch", stderr); cc != 0 {
+					steps = append(steps, cascadeStepResult{stage: stage, code: cc})
+					return steps, false, cc
+				}
 				moePrintf(stdout, "cascade: %s (headless)\n", stage)
 				dCode := dispatcher(stage, md.Project, md.ID, true, stdout, stderr)
 				steps = append(steps, cascadeStepResult{stage: stage, code: dCode})
@@ -1250,6 +1293,10 @@ func closeNominatedRun(md *run.Metadata, stage string, stdout, stderr io.Writer)
 func cascadeShipStep(workflow string, md *run.Metadata, rideChain bool, stdout, stderr io.Writer) (steps []cascadeStepResult, shipped bool, code int) {
 	retries := 0
 	for {
+		if cc := cascadeCheckpoint(md, "push", stderr); cc != 0 {
+			steps = append(steps, cascadeStepResult{stage: "push", code: cc})
+			return steps, false, cc
+		}
 		ship, err := pushFromCascade(workflow, []string{md.Project + "/" + md.ID}, pushRunOptions{
 			HeadlessRecovery: true,
 			SkipTerminalEdit: true,
@@ -1279,6 +1326,15 @@ func cascadeShipStep(workflow string, md *run.Metadata, rideChain bool, stdout, 
 			return steps, false, ship
 		}
 		steps = append(steps, cascadeStepResult{stage: "push", code: ship})
+		// An operator finish asked for this ship and nothing past it.
+		// The ship had already started, so it is reported as done and
+		// only the continuation is withheld.
+		if finishAtShip(md, stderr) {
+			if rideChain {
+				moePrintf(stdout, "chain: ship had already started; chain continuation withheld — the operator asked to finish %s/%s only\n", md.Project, md.ID)
+			}
+			return steps, true, 0
+		}
 		// Chain ride (`!!!` only): after the parent's terminal stage
 		// ships, if a live chain edge points at an unresolved child,
 		// cascade into it. `!!` stops here — rideChain is the gate.
@@ -1299,6 +1355,10 @@ func cascadeShipStep(workflow string, md *run.Metadata, rideChain bool, stdout, 
 		// that build on each other want `moe project ship merge`, which
 		// lands each parent before the next member's sandbox is cut.
 		if rideChain {
+			if cc := cascadeCheckpoint(md, "chain ride", stderr); cc != 0 {
+				moePrintf(stdout, "chain: ship completed; chain continuation withheld by operator control\n")
+				return steps, true, cc
+			}
 			if rideCode := maybeRideChain(md, rideChain, stdout, stderr); rideCode != 0 {
 				return steps, true, rideCode
 			}
@@ -1405,7 +1465,7 @@ func maybeRideChain(parentMD *run.Metadata, rideChain bool, stdout, stderr io.Wr
 	if summary := renderCascadeSummary(childKey, childRes); summary != "" {
 		moePrintln(stdout, summary)
 	}
-	if childCode != 0 && childCode != exitInterrupted {
+	if childCode != 0 && childCode != exitInterrupted && childCode != exitYielded {
 		// Interrupt needs no line — the child summary already read
 		// "… interrupted — stopped". Every other failure gets the
 		// pointer at *which* run stalled, since the code alone doesn't
@@ -1444,6 +1504,10 @@ func renderCascadeSummary(runKey string, res cascadeResult) string {
 			parts = append(parts, fmt.Sprintf("%s not started: quota", r.stage))
 		case r.code == exitQuotaDeferred:
 			parts = append(parts, fmt.Sprintf("%s deferred for quota", r.stage))
+		case r.code == exitYielded:
+			// The operator held or parked the run; the checkpoint already
+			// said which, and this step never started.
+			parts = append(parts, fmt.Sprintf("%s held by operator control", r.stage))
 		case r.code == exitInterrupted:
 			// An operator Ctrl-C, not a stage failure — read it as
 			// "interrupted" so the summary doesn't libel a clean,
@@ -1575,7 +1639,16 @@ func readStageDecision(root string, md *run.Metadata, opts []promptOption, quest
 	if extra != "" {
 		moePrintln(out, extra)
 	}
-	line, interrupted, err := readLineWithSignal(stdinSharedReader(), sig)
+	// An operator control wakes the prompt; the answer it cut short is
+	// never read. A line that did arrive is re-checked against the record
+	// below, so an answer and a control serialize: a hold that landed
+	// first wins, and a buffered Enter cannot advance past it.
+	wake, stopWake := watchControl(root, md, true)
+	line, interrupted, woke, err := readLineWithWake(stdinSharedReader(), sig, wake)
+	stopWake()
+	if woke || (!interrupted && operatorCascades(md.Workflow) && controlWants(root, md, true)) {
+		return "", false, errControlWake
+	}
 	if interrupted || (err != nil && err != io.EOF) || (err == io.EOF && line == "") {
 		return line, interrupted, err
 	}

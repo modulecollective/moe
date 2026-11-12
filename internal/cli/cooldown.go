@@ -117,6 +117,8 @@ const (
 	cooldownAdmit cooldownOutcome = iota
 	cooldownCancel
 	cooldownStop
+	// cooldownHeld: an operator control stopped the wait before admission.
+	cooldownHeld
 )
 
 // cooldownGate is the wait policy for one stage. One gate per stage, so
@@ -132,7 +134,10 @@ type cooldownGate struct {
 	// unattended. The returned stop must not return until the reader has
 	// let go of stdin.
 	openControls func() (<-chan cooldownControl, func())
-	stderr       io.Writer
+	// openHold, when set, watches for an operator control that must stop
+	// the wait (a hold, a park); its channel closes when one appears.
+	openHold func() (<-chan struct{}, func())
+	stderr   io.Writer
 	// resume is the ordinary invocation that re-runs this stage, printed
 	// when the gate stops it.
 	resume string
@@ -174,6 +179,12 @@ func (g *cooldownGate) check(ctx context.Context, agentName, model string) (outc
 	// dispatched — a goroutine still blocked on it would steal the
 	// interactive agent's keystrokes.
 	defer func() { stopControls() }()
+	var held <-chan struct{}
+	if g.openHold != nil {
+		h, stopHold := g.openHold()
+		defer stopHold()
+		held = h
+	}
 
 	failures := 0
 	lastStatus := ""
@@ -249,6 +260,9 @@ func (g *cooldownGate) check(ctx context.Context, agentName, model string) (outc
 			return cooldownCancel, false
 		case ctl := <-controls:
 			return g.control(ctl), waited
+		case <-held:
+			moePrintf(g.stderr, "cooldown: stopped waiting — operator control\n")
+			return cooldownHeld, waited
 		case <-g.after(pause):
 			waited = true
 		}
@@ -424,6 +438,8 @@ func stageCooldown(g *cooldownGate, agentName, model *string, resolve func(*run.
 			return exitInterrupted
 		case cooldownStop:
 			return exitNotStarted
+		case cooldownHeld:
+			return exitYielded
 		}
 		if !waited {
 			return 0

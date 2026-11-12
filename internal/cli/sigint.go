@@ -45,6 +45,15 @@ func installSigint() (<-chan os.Signal, func()) {
 // produces or closes; that orphan is fine for moe's lifecycle (the
 // process exits shortly after, and r is os.Stdin, which the OS reaps).
 func readLineWithSignal(r *bufio.Reader, sigCh <-chan os.Signal) (line string, interrupted bool, err error) {
+	line, interrupted, _, err = readLineWithWake(r, sigCh, nil)
+	return line, interrupted, err
+}
+
+// readLineWithWake is readLineWithSignal that also returns, with woke
+// set, when wake closes. Like an interrupt, a wake leaves the read
+// goroutine blocked on r: the caller must not read r again, so a line
+// already buffered (a stray Enter) can never be taken as an answer.
+func readLineWithWake(r *bufio.Reader, sigCh <-chan os.Signal, wake <-chan struct{}) (line string, interrupted, woke bool, err error) {
 	type result struct {
 		line string
 		err  error
@@ -56,9 +65,11 @@ func readLineWithSignal(r *bufio.Reader, sigCh <-chan os.Signal) (line string, i
 	}()
 	select {
 	case res := <-ch:
-		return res.line, false, res.err
+		return res.line, false, false, res.err
 	case <-sigCh:
-		return "", true, nil
+		return "", true, false, nil
+	case <-wake:
+		return "", false, true, nil
 	}
 }
 

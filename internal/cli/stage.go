@@ -344,6 +344,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	// without it a dynamic pulse could ride the run while its prompt is
 	// still waiting. Taken before admission so the repolock is never held
 	// while this is contended; a same-run nested entry borrows it.
+	freshOwner, acquired := heldRun(root, projectID, runID) == nil, time.Now()
 	releaseRun, ok := ownRunForVerb(root, projectID, runID, stderr)
 	if !ok {
 		return 1
@@ -377,6 +378,13 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
+	}
+	// Operator controls: a hold refuses every entry but an explicit
+	// interactive one, which resumes the run once quota admits it.
+	interactive := !opts.Headless && !serveAgentSuppress() && !rideWalkActive && stdinIsTerminal()
+	entry, entryCode := admitStageEntry(root, md, "stage "+docID, freshOwner, interactive, acquired, stderr)
+	if entryCode != 0 {
+		return entryCode
 	}
 	// Model stylesheet: resolve the (workflow, stage) → (agent, model)
 	// bindings from the checked-in <root>/model-stylesheet.css. Read from
@@ -764,6 +772,9 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		if opts.Headless || serveAgentSuppress() {
 			g.openControls = func() (<-chan cooldownControl, func()) { return nil, func() {} }
 		}
+		if !entry.release {
+			g.openHold = func() (<-chan struct{}, func()) { return watchControl(root, md, false) }
+		}
 		g.read = func(ctx context.Context, name, model string) (agent.Quota, error) {
 			return readStageQuota(ctx, name, model, mapToEnv(devEnv))
 		}
@@ -783,6 +794,15 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				}
 				return run.Load(sess.WorktreePath, projectID, runID)
 			}, stderr)
+		// A control that arrived while quota was checked or waited for
+		// is honoured before the agent launches; an explicit entry clears
+		// the hold it was admitted past only now, so a refused admission
+		// leaves the run held.
+		if code == 0 || code == exitYielded {
+			if c := entry.admitted("stage "+docID, stderr); c != 0 {
+				return c
+			}
+		}
 		in.Agent = agentName
 		if code == exitQuotaDeferred {
 			deferred = g.deferred

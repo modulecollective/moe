@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/repolock"
@@ -248,6 +249,7 @@ func chainKickRun(root, projectID, runID string, mode rideMode, oneStage bool, s
 	// head's guard before reloading it and hold it through the ride, so an
 	// operator prompt that opened after the plan was stamped still wins.
 	// Each child the ride reaches takes its own guard as its stage opens.
+	fresh, acquired := heldRun(root, projectID, runID) == nil, time.Now()
 	releaseRun, ok := ownRunForVerb(root, projectID, runID, stderr)
 	if !ok {
 		return 1
@@ -257,6 +259,11 @@ func chainKickRun(root, projectID, runID string, mode rideMode, oneStage bool, s
 	if err != nil {
 		moePrintf(stderr, "chain kick: %v\n", err)
 		return 1
+	}
+	// The kick is a machine admission: a hold, recovery block or park
+	// stops it here, and nothing it does clears a hold.
+	if _, code := admitStageEntry(root, md, "chain kick", fresh, false, acquired, stderr); code != 0 {
+		return code
 	}
 	// No status refusal: a head that has already shipped still heads a
 	// chain of parked runs, and riding them is the point. Next() reports
@@ -294,6 +301,18 @@ func chainKickRun(root, projectID, runID string, mode rideMode, oneStage bool, s
 		return 1
 	}
 	if kind == NextKindStage && next != "" {
+		// A pending operator finish turns this kick into this run's `!!`:
+		// it ships through the ordinary gates and rides no chain, whether
+		// the kick would have been a `!` or a `!!!`.
+		if r, ok := openFinish(root, md); ok {
+			return applyFinish(root, md, r, "stage "+next, stdout, stderr, func() int {
+				res, code := cascadeFromGate(next, "", false, false, md, stdout, stderr)
+				if summary := renderCascadeSummary(projectID+"/"+runID, res); summary != "" {
+					moePrintln(stdout, summary)
+				}
+				return code
+			})
+		}
 		// A regular head with work left: a programmatic `!!!`. The
 		// cascade ships this run and then rides its children through the
 		// same seam the operator's own `!!!` uses — including the
