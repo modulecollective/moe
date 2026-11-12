@@ -324,10 +324,7 @@ func chainKickRun(root, projectID, runID string, mode rideMode, oneStage bool, s
 		if summary := renderCascadeSummary(projectID+"/"+runID, res); summary != "" {
 			moePrintln(stdout, summary)
 		}
-		if oneStage {
-			return finishAfterOneStage(root, md, code, stdout, stderr)
-		}
-		return code
+		return finishAfterKick(root, md, res, code, oneStage, stdout, stderr)
 	}
 
 	// Nothing pending. For a chain run that is the whole lifecycle —
@@ -502,40 +499,66 @@ func mintChainRun(root, projectID, base, spawnedBy, note string) (*run.Metadata,
 	return runopen.Open(root, projectID, opts)
 }
 
-// finishAfterOneStage acts on a finish the operator asked for while a
-// one-stage kick's turn ran: the boundary that turn settled at is the
-// next one, so the finish applies there — this run's `!!` from the next
-// pending stage — rather than waiting for another sweep. A kick that
-// stopped (a blocked gate, a failure) is the finish's outcome; a yield
-// leaves it to the hold or park that caused it.
-func finishAfterOneStage(root string, md *run.Metadata, code int, stdout, stderr io.Writer) int {
+// finishAfterKick acts on a finish the operator asked for while a kick's
+// walk ran. The boundary that walk stopped at is the finish's next one,
+// so it is applied or settled there rather than left open for another
+// ride:
+//
+//   - a yield leaves it to the hold or park that caused it, and a quota
+//     deferral to the ride that retries the kick;
+//   - a stage that stopped, a blocked gate, or a full kick that ended
+//     without shipping is the finish's outcome, recorded as failed;
+//   - after a one-stage kick's stage settles cleanly, the finish runs
+//     this run's `!!` from that stage's successor — not Workflow.Next,
+//     which reports the just-settled stage as parked until its
+//     successor has a turn.
+//
+// A full kick that shipped has completed the finish at the ship seam
+// (finishAtShip). A finish accepted but never reached because this
+// process died stays accepted for a later owner; that is a different
+// rule and not this one.
+func finishAfterKick(root string, md *run.Metadata, res cascadeResult, code int, oneStage bool, stdout, stderr io.Writer) int {
 	r, ok := openFinish(root, md)
-	if !ok || code == exitYielded {
+	if !ok || code == exitYielded || code == exitQuotaDeferred || res.shipped {
+		return code
+	}
+	stopped := func(outcome string) int {
+		settleControl(root, md, r.ID, runcontrol.Settlement{State: runcontrol.StateFailed, Outcome: outcome}, stderr)
+		moePrintf(stderr, "control: finish on %s/%s stopped: %s\n", md.Project, md.ID, outcome)
 		return code
 	}
 	if code != 0 {
-		settleControl(root, md, r.ID, runcontrol.Settlement{
-			State: runcontrol.StateFailed, Outcome: fmt.Sprintf("the kick's stage stopped (exit %d)", code),
-		}, stderr)
+		return stopped(fmt.Sprintf("the kick's stage stopped (exit %d)", code))
+	}
+	if len(res.ran) == 0 {
 		return code
+	}
+	last := res.ran[len(res.ran)-1].stage
+	blocked := false
+	if md.Workflow == "sdlc" && (last == "review" || last == "test") {
+		_, blocked = cascadeStageBlocked(md, last, io.Discard)
+	}
+	if blocked {
+		finishGateBlocked(root, md, last, stderr)
+		moePrintf(stderr, "control: finish on %s/%s stopped: %s gate blocked\n", md.Project, md.ID, last)
+		return code
+	}
+	if !oneStage {
+		return stopped("the kick ended at " + last + " without shipping")
+	}
+	wf, err := LookupWorkflow(md.Workflow)
+	if err != nil {
+		moePrintf(stderr, "chain kick: %v\n", err)
+		return 1
+	}
+	next := wf.Successor(last)
+	if next == "" {
+		return code // nothing left to finish; the next boundary settles it
 	}
 	fresh, err := run.Load(root, md.Project, md.ID)
 	if err != nil {
 		moePrintf(stderr, "chain kick: %v\n", err)
 		return 1
-	}
-	wf, err := LookupWorkflow(fresh.Workflow)
-	if err != nil {
-		moePrintf(stderr, "chain kick: %v\n", err)
-		return 1
-	}
-	next, kind, err := wf.Next(root, fresh)
-	if err != nil {
-		moePrintf(stderr, "chain kick: next stage: %v\n", err)
-		return 1
-	}
-	if kind != NextKindStage || next == "" {
-		return code // nothing left to finish; the next boundary settles it
 	}
 	if cc := controlCheckpoint(root, fresh, "stage "+next, stderr); cc != 0 {
 		return cc

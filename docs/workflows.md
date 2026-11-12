@@ -285,10 +285,13 @@ place.
 if that owner is gone before it reaches a boundary. It is refused when no
 owner answers, since there is nothing to address. **Finish** is `!!` for
 this run alone: through the same gates and ship route, then no chain ride. It
-applies at the next-stage prompt, at the next kick (widening a `!`, narrowing a
-`!!!`), after the stage a running `!` kick is on, or on an open CI repair's existing PR; it does not start an idle run.
-A hold wins over finish, and an applied finish whose owner died is reconciled
-— shipped, or "recovery required" until a resume, never replayed.
+applies at the next-stage prompt, at the next kick (widening a `!`, narrowing
+a `!!!`), from the stage after the one a running `!` kick is on, or on an open
+CI repair's existing PR; it does not start an idle run. A kick that fails,
+meets a blocked gate or stops short of shipping is the finish's outcome: it
+is recorded as failed, not kept for a later ride. A hold wins over finish, and
+an applied finish whose owner died is reconciled — shipped, or "recovery
+required" until a resume, never replayed.
 
 Notes stay notes. `moe input add` neither pauses nor resumes anything.
 

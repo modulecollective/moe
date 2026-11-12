@@ -253,19 +253,22 @@ func holdPhase(r runcontrol.Request) string {
 // stage, and not the furthest stage with a session (a review→code
 // kickback leaves review's session behind code's newer turn).
 //
-// In order: the live owner's own stage and backend, when it reports a
-// stage that has a conversation; the run's last settled turn
+// In order: the live owner's stage and backend once its agent has
+// launched — a stage's first turn has no session in the canonical
+// metadata until it settles, but it is the conversation being had; the
+// live owner's stage when it already has a conversation (admission or a
+// quota wait, before a new agent starts); the run's last settled turn
 // (run.Metadata.LastTurn); and, for runs that settled no turn since that
 // was recorded, the furthest stage in workflow order with a session.
 // When the backend is not known it prefers the run's sticky agent among
 // the stage's sessions, and otherwise names none, leaving the stage
 // verb's normal resolution.
 func conversationAddress(md *run.Metadata, live *runsock.Status) (stage, agent string) {
+	if live != nil && live.Stage != "" && live.Agent != "" {
+		return live.Stage, live.Agent
+	}
 	if live != nil && live.Stage != "" {
 		if doc := md.Documents[live.Stage]; doc != nil && doc.HasSession() {
-			if live.Agent != "" {
-				return live.Stage, live.Agent
-			}
 			return live.Stage, stageAgent(md, live.Stage)
 		}
 	}
@@ -369,7 +372,19 @@ func deliverControl(root string, md *run.Metadata, req runcontrol.Request) (runc
 		return r, "", nil
 	}
 	gen := ""
-	if req.Kind == runcontrol.KindPark {
+	if req.Kind == runcontrol.KindPark && req.Owner == "" {
+		// A park already recorded under this id reads back under the
+		// lock, whichever owner answers now: it addressed the owner that
+		// received it and must neither conflict with nor retarget the
+		// successor. Only a genuinely new park is bound to the answering
+		// generation.
+		r, serr := runcontrol.Submit(root, md.Project, md.ID, req)
+		if serr == nil {
+			return r, "", nil
+		}
+		if !errors.Is(serr, runcontrol.ErrNoOwner) {
+			return runcontrol.Request{}, "", serr
+		}
 		gen, req.Owner = st.Generation, st.Generation
 	}
 	r, _, err := runsock.SendControl(ctx, runsock.RuntimeDir(), id, gen, req)
