@@ -1439,8 +1439,8 @@ func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectC
 	cliout.Printf(w, "%d project(s) registered · %d with active runs\n", projectCount, activeCount)
 }
 
-// noteWithControl is a row's note with its control overlay appended in
-// brackets, kept plain text so NO_COLOR and narrow terminals read it.
+// Keep the control before the note so a narrow watch viewport preserves
+// the operator's hold before clipping the workflow detail.
 func noteWithControl(r Row) string {
 	if r.Control == "" {
 		return r.Note
@@ -1448,5 +1448,5 @@ func noteWithControl(r Row) string {
 	if r.Note == "" {
 		return "[" + r.Control + "]"
 	}
-	return r.Note + "  [" + r.Control + "]"
+	return "[" + r.Control + "]  " + r.Note
 }

@@ -44,6 +44,13 @@ func TestDashRowsCarryControlOverlay(t *testing.T) {
 	if !strings.Contains(out.String(), "[handed off]") {
 		t.Fatalf("terminal dash lacks the overlay:\n%s", out.String())
 	}
+	var narrow bytes.Buffer
+	if err := writeWatchViewport(&narrow, out.Bytes(), 80, 50); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(narrow.String(), "[handed off]") {
+		t.Fatalf("narrow watch clipped the hold:\n%s", narrow.String())
+	}
 
 	// Resume, then own it the way a running stage does.
 	h, _ := runowner.Acquire(root, "moe", "change-auth")
