@@ -201,6 +201,11 @@ type Row struct {
 	// That is *unknown*, not operator — don't render it as one.
 	EdgeAgent   bool
 	EdgeConsent string
+	// Control is the live and control overlay for a run row: owner phase,
+	// hold and pending request ("handed off · waiting for operator"),
+	// observed when the row was gathered. Empty when there is nothing
+	// beyond the journal row to say.
+	Control string
 }
 
 // NextDecision is the per-run "what's next" decision the caller
@@ -1373,7 +1378,7 @@ func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectC
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, r := range active {
 			slug := rowPrefix(r) + r.Project + "/" + r.Run
-			fmt.Fprintf(tw, "  %s\t%s\t%s\n", slug, HumanAgo(now, r.When), r.Note)
+			fmt.Fprintf(tw, "  %s\t%s\t%s\n", slug, HumanAgo(now, r.When), noteWithControl(r))
 		}
 		tw.Flush()
 	}
@@ -1425,11 +1430,23 @@ func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectC
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, r := range shown {
 			slug := rowPrefix(r) + r.Project + "/" + r.Run
-			fmt.Fprintf(tw, "  %s\t%s\t%s\n", slug, HumanAgo(now, r.When), r.Note)
+			fmt.Fprintf(tw, "  %s\t%s\t%s\n", slug, HumanAgo(now, r.When), noteWithControl(r))
 		}
 		tw.Flush()
 	}
 	fmt.Fprintln(w)
 
 	cliout.Printf(w, "%d project(s) registered · %d with active runs\n", projectCount, activeCount)
+}
+
+// noteWithControl is a row's note with its control overlay appended in
+// brackets, kept plain text so NO_COLOR and narrow terminals read it.
+func noteWithControl(r Row) string {
+	if r.Control == "" {
+		return r.Note
+	}
+	if r.Note == "" {
+		return "[" + r.Control + "]"
+	}
+	return r.Note + "  [" + r.Control + "]"
 }

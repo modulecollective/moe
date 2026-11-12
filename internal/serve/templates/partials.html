@@ -237,3 +237,65 @@ document.getElementById('theme-toggle').addEventListener('click', function () {
 </script>
 {{end}}
 
+
+{{/* Live status refresh. Only the status block is fetched and swapped,
+     every five seconds while the page is visible, and never while focus
+     is inside it — so note drafts, focus and scroll stay put. Without
+     JavaScript the page is complete; the forms POST and redirect. */}}
+{{define "runstatusjs"}}
+<script>
+(function () {
+  var timer = null;
+  function block() { return document.getElementById('run-status'); }
+  function tick() {
+    var cur = block();
+    if (document.hidden || !cur || cur.contains(document.activeElement)) return;
+    fetch(cur.dataset.refresh, {credentials: 'same-origin', cache: 'no-store'})
+      .then(function (r) { return r.ok ? r.text() : null; })
+      .then(function (html) {
+        var now = block();
+        if (!html || !now || now.contains(document.activeElement)) return;
+        var holder = document.createElement('div');
+        holder.innerHTML = html;
+        var next = holder.querySelector('#run-status');
+        if (next) now.replaceWith(next);
+      })
+      .catch(function () {});
+  }
+  function start() { if (!timer) timer = setInterval(tick, 5000); }
+  function stop() { clearInterval(timer); timer = null; }
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) { stop(); } else { tick(); start(); }
+  });
+  if (block() && !document.hidden) start();
+})();
+</script>
+{{end}}
+
+{{/* The dash's compact row status, refreshed from one observation pass
+     every five seconds while the page is visible. */}}
+{{define "dashstatusjs"}}
+<script>
+(function () {
+  var timer = null;
+  function tick() {
+    if (document.hidden) return;
+    fetch('/run-status', {credentials: 'same-origin', cache: 'no-store'})
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (m) {
+        if (!m) return;
+        document.querySelectorAll('.run-status[data-key]').forEach(function (el) {
+          el.textContent = m[el.dataset.key] || '';
+        });
+      })
+      .catch(function () {});
+  }
+  function start() { if (!timer) timer = setInterval(tick, 5000); }
+  function stop() { clearInterval(timer); timer = null; }
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) { stop(); } else { tick(); start(); }
+  });
+  if (!document.hidden) start();
+})();
+</script>
+{{end}}

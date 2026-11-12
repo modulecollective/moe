@@ -2,6 +2,8 @@ package cli
 
 import (
 	"fmt"
+	"github.com/modulecollective/moe/internal/runcontrol"
+	"github.com/modulecollective/moe/internal/runsock"
 	"io"
 	"slices"
 	"strings"
@@ -143,6 +145,27 @@ func dashStatusReports(snap DashSnapshot, gatherErr error, st serveState, filter
 		}
 		add("questions", "blocked", "question", scope+" / operator questions",
 			fmt.Sprintf("%d outstanding operator questions: %s", len(keys), strings.Join(questions, "; ")))
+	}
+	if gatherErr == nil {
+		var waiting []string
+		for key, o := range snap.Observations {
+			if filter.WorkflowFilter != "" && o.Workflow != filter.WorkflowFilter {
+				continue
+			}
+			switch {
+			case o.Live != nil && o.Live.Phase == runsock.PhaseDeciding:
+				waiting = append(waiting, key+" (decision)")
+			case o.Control.Hold != nil && o.Control.Hold.Kind == runcontrol.KindHandoff:
+				waiting = append(waiting, key+" (handed off)")
+			case o.Control.Recovery != nil:
+				waiting = append(waiting, key+" (recovery required)")
+			}
+		}
+		if len(waiting) > 0 {
+			slices.Sort(waiting)
+			add("control", "blocked", "", scope+" / waiting for operator",
+				fmt.Sprintf("%d runs waiting for the operator: %s", len(waiting), strings.Join(waiting, "; ")))
+		}
 	}
 	if len(health) > 0 {
 		slices.Sort(health)

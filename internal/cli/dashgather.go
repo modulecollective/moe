@@ -30,6 +30,9 @@ type DashSnapshot struct {
 	Questions    map[string]string
 	InputErrors  []error
 	SessionError error
+	// Observations is the live and control overlay behind rows' Control
+	// text, keyed by project/run.
+	Observations map[string]RunObservation
 }
 
 // DashFilter mirrors the `moe dash` flag set so the gatherer can be
@@ -190,6 +193,8 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter) (DashSnap
 		return DashSnapshot{}, err
 	}
 
+	observations := observeRows(root, rows, mds, now)
+
 	projectCount, err := dash.CountProjects(root)
 	if err != nil {
 		return DashSnapshot{}, err
@@ -210,6 +215,7 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter) (DashSnap
 		Questions:      questions,
 		InputErrors:    inputErrors,
 		SessionError:   sessionErr,
+		Observations:   observations,
 	}, nil
 }
 

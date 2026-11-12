@@ -154,13 +154,17 @@ func runControlShow(args []string, stdout, stderr io.Writer) int {
 	}
 	key := md.Project + "/" + md.ID
 	moePrintf(stdout, "%s (%s, %s)\n", key, md.Workflow, md.Status)
-	moePrintf(stdout, "  owner: %s\n", ownerLine(root, md))
-	f, err := runcontrol.Load(root, md.Project, md.ID)
-	if err != nil {
+	now := time.Now()
+	o := ObserveRuns(root, []*run.Metadata{md}, now)[key]
+	for _, line := range o.Details(now) {
+		moePrintf(stdout, "  %s\n", line)
+	}
+	if o.ControlErr != nil {
 		// Never "not held": an unreadable record refuses motion.
-		moePrintf(stdout, "  control: unreadable — %v\n", err)
+		moePrintf(stdout, "  control: unreadable — %v\n", o.ControlErr)
 		return 1
 	}
+	f := o.Control
 	stage, agent := conversationAddress(md)
 	switch {
 	case f.Hold != nil:
@@ -245,19 +249,6 @@ func holdPhase(r runcontrol.Request) string {
 		return "held, ready to resume"
 	}
 	return "held, current turn settling"
-}
-
-// ownerLine reports the run guard. Live phase and activity come from
-// the owner's endpoint, which this does not consult.
-func ownerLine(root string, md *run.Metadata) string {
-	busy, err := runowner.Busy(root, md.Project, md.ID)
-	switch {
-	case err != nil:
-		return "unknown (" + err.Error() + ")"
-	case busy:
-		return "owned by a running moe invocation"
-	}
-	return "none"
 }
 
 // conversationAddress is the last stage that actually ran and the

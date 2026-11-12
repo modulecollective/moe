@@ -137,6 +137,16 @@ type Options struct {
 	// every hit — no row data is fatal, just less informative.
 	GatherRunRow func(project, run string) (row dash.Row, ok bool, err error)
 
+	// RunControl builds a run's live status block and the controls valid
+	// on it now; ok is false for a run that has none (terminal, capture,
+	// machine-paced). RunStatuses is the dash's compact row status for
+	// one observation pass, keyed by project/run. SubmitControl records a
+	// control or releases a hold — it never starts an agent — and wraps
+	// refusals in ErrControlRefused.
+	RunControl    func(project, run string) (view RunControlView, ok bool, err error)
+	RunStatuses   func(project string) (map[string]string, error)
+	SubmitControl func(project, run, action, id string, revision int) (string, error)
+
 	// ChainMembers returns the live batch hanging off a chain head: one
 	// dash.Row per member in head→tail order — the runs `moe chain kick`
 	// would actually ride.
@@ -504,6 +514,9 @@ func (s *Server) registerRoutes() {
 	// same as the advance mark.
 	s.router.HandleFunc("GET /input", s.handleInputQueue)
 	s.router.HandleFunc("POST /run/{project}/{slug}/input", s.handleInput)
+	s.router.HandleFunc("GET /run/{project}/{slug}/status", s.handleRunStatus)
+	s.router.HandleFunc("POST /run/{project}/{slug}/control", s.handleRunControl)
+	s.router.HandleFunc("GET /run-status", s.handleRunStatuses)
 	// Chore detail page. A chore isn't a run, so it has its own /chore
 	// namespace; read-only, because serve opens due chores on its own
 	// cadence now and `moe chore open --now` is the operator's override.

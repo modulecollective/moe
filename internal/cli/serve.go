@@ -149,6 +149,15 @@ func serveOptions(root string, stderr io.Writer) serve.Options {
 		GatherRunRow: func(project, runID string) (dash.Row, bool, error) {
 			return GatherRunRow(root, project, runID, time.Now().UTC())
 		},
+		RunControl: func(project, runID string) (serve.RunControlView, bool, error) {
+			return serveRunControl(root, project, runID)
+		},
+		RunStatuses: func(project string) (map[string]string, error) {
+			return serveRunStatuses(root, project)
+		},
+		SubmitControl: func(project, runID, action, id string, revision int) (string, error) {
+			return serveSubmitControl(root, project, runID, action, id, revision)
+		},
 		// The chain head's own page is where the dash's `parked · kick?`
 		// hint sends the operator, so it's where the batch has to be
 		// legible. Membership is journal state, so it crosses the seam as

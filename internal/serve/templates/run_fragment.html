@@ -1,4 +1,5 @@
 <div class="run-fragment">
+  {{template "run_status.html" .RunStatus}}
   {{with .Reaped}}
   <p class="reaped">the last machine turn at <strong>{{.Doc}}</strong> died before landing anything;
     the heartbeat abandoned its session branch{{if .Ago}} <span title="{{.At}}">{{.Ago}}</span>{{end}}.

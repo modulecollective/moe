@@ -81,6 +81,8 @@ type dashRowVM struct {
 	// when the journal recorded one.
 	Agent      bool
 	AgentTitle string
+	// Control is the row's live and control overlay (dash.Row.Control).
+	Control string
 }
 
 // agentMark decides whether a row wears the `agent` badge and what its
@@ -257,6 +259,7 @@ func newRowBuckets(now time.Time, rows []dash.Row, topCap int) rowBuckets {
 			URL:     rowURL(r),
 			Depth:   r.Depth,
 			Chained: r.Chained,
+			Control: r.Control,
 		}
 		row.Agent, row.AgentTitle = agentMark(r)
 		switch r.Bucket {

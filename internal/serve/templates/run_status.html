@@ -1,0 +1,17 @@
+{{with .Control}}<section class="run-status" id="run-status" data-refresh="{{$.StatusURL}}">
+  <h2>status</h2>
+  {{if .Summary}}<p class="meta"><span class="note">{{.Summary}}</span></p>{{end}}
+  {{if .Lines}}<ul>{{range .Lines}}<li>{{.}}</li>{{end}}</ul>{{end}}
+  {{if .Conversation}}<p class="meta">continue the conversation at a terminal: <code>{{.Conversation}}</code></p>{{end}}
+  {{if .Actions}}<div class="actions">
+    {{range .Actions}}<form method="post" action="{{$.ControlURL}}" class="action-form">
+      <input type="hidden" name="action" value="{{.}}">
+      <input type="hidden" name="id" value="{{$.ControlID}}">
+      <input type="hidden" name="revision" value="{{$.Control.Revision}}">
+      <button class="action" type="submit">{{.}}</button>
+    </form>{{end}}
+  </div>{{end}}
+  {{if .Requests}}<details class="control-requests"><summary>control requests</summary>
+    <ul>{{range .Requests}}<li>{{.}}</li>{{end}}</ul>
+  </details>{{end}}
+</section>{{end}}

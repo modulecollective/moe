@@ -52,6 +52,8 @@ type runVM struct {
 	ID      string
 	Project string
 	Slug    string
+	// RunStatus is the live status block and its control forms.
+	RunStatus runStatusVM
 	// RowNote / RowWhen are the dash-row Note and (humanised) When for
 	// this run, computed the same way the dash computes them. Empty
 	// strings when the row gathered as "no row" (e.g. the run classified
@@ -684,6 +686,7 @@ func (s *Server) buildRunVM(projectID, slug, id string) (runVM, error) {
 	vm.Provenance = s.gatherProvenance(projectID, slug)
 	vm.ChainMembers = s.gatherChainMembers(md, projectID, slug, now)
 	vm.Actions = s.composeRunActions(projectID, slug, vm.NextStage, md)
+	vm.RunStatus = s.runStatusVM(projectID, slug)
 	return vm, nil
 }
 
