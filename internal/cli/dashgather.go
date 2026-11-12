@@ -33,6 +33,8 @@ type DashSnapshot struct {
 	// Observations is the live and control overlay behind rows' Control
 	// text, keyed by project/run.
 	Observations map[string]RunObservation
+	// Runs is the scanned metadata, keyed by project/run.
+	Runs map[string]*run.Metadata
 }
 
 // DashFilter mirrors the `moe dash` flag set so the gatherer can be
@@ -51,6 +53,10 @@ type DashFilter struct {
 // (`LookupWorkflow` / `NextKindDone`) and `internal/dash` deliberately
 // stays free of that plumbing.
 func GatherDashSnapshot(root string, now time.Time, filter DashFilter) (DashSnapshot, error) {
+	return gatherDashSnapshot(root, now, filter, nil)
+}
+
+func gatherDashSnapshot(root string, now time.Time, filter DashFilter, cached liveLookup) (DashSnapshot, error) {
 	mds, err := run.Scan(root)
 	if err != nil {
 		return DashSnapshot{}, err
@@ -193,7 +199,7 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter) (DashSnap
 		return DashSnapshot{}, err
 	}
 
-	observations := observeRows(root, rows, mds, now)
+	observations := observeRows(root, rows, mds, now, cached)
 
 	projectCount, err := dash.CountProjects(root)
 	if err != nil {
@@ -216,6 +222,7 @@ func GatherDashSnapshot(root string, now time.Time, filter DashFilter) (DashSnap
 		InputErrors:    inputErrors,
 		SessionError:   sessionErr,
 		Observations:   observations,
+		Runs:           runsByKey(mds),
 	}, nil
 }
 
@@ -292,4 +299,12 @@ func GatherRunRow(root string, projectID, slug string, now time.Time) (dash.Row,
 		}
 	}
 	return dash.Row{}, false, nil
+}
+
+func runsByKey(mds []*run.Metadata) map[string]*run.Metadata {
+	out := make(map[string]*run.Metadata, len(mds))
+	for _, md := range mds {
+		out[md.Project+"/"+md.ID] = md
+	}
+	return out
 }

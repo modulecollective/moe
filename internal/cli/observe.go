@@ -66,6 +66,15 @@ func (o RunObservation) key() string { return o.Project + "/" + o.Run }
 // whose guard is held, with bounded concurrency and an overall budget.
 // Callers pass runs already narrowed by their own filters.
 func ObserveRuns(root string, mds []*run.Metadata, now time.Time) map[string]RunObservation {
+	return observeRuns(root, mds, now, nil)
+}
+
+// liveLookup supplies an owner snapshot a caller already holds fresh —
+// moe ui's watch subscriptions — keyed by project/run, so the
+// observation pass does not poll that endpoint again.
+type liveLookup func(key string) (runsock.Status, bool)
+
+func observeRuns(root string, mds []*run.Metadata, now time.Time, cached liveLookup) map[string]RunObservation {
 	out := make(map[string]RunObservation, len(mds))
 	var probe []*run.Metadata
 	for _, md := range mds {
@@ -73,8 +82,13 @@ func ObserveRuns(root string, mds []*run.Metadata, now time.Time) map[string]Run
 		o.Control, o.ControlErr = runcontrol.Load(root, md.Project, md.ID)
 		o.Unrecorded, o.UnrecordedErr = runcontrol.Unrecorded(root, md.Project, md.ID)
 		o.Owned, o.OwnerErr = runowner.Busy(root, md.Project, md.ID)
+		if o.Owned && cached != nil {
+			if st, ok := cached(o.key()); ok {
+				o.Live = &st
+			}
+		}
 		out[o.key()] = o
-		if o.Owned {
+		if o.Owned && o.Live == nil {
 			probe = append(probe, md)
 		}
 	}
@@ -332,7 +346,7 @@ func (o RunObservation) Details(now time.Time) []string {
 
 // observeRows fills each active row's Control text from one observation
 // pass over the live runs behind those rows.
-func observeRows(root string, rows []dash.Row, mds []*run.Metadata, now time.Time) map[string]RunObservation {
+func observeRows(root string, rows []dash.Row, mds []*run.Metadata, now time.Time, cached liveLookup) map[string]RunObservation {
 	byKey := make(map[string]*run.Metadata, len(mds))
 	for _, md := range mds {
 		byKey[md.Project+"/"+md.ID] = md
@@ -348,7 +362,7 @@ func observeRows(root string, rows []dash.Row, mds []*run.Metadata, now time.Tim
 		seen[key] = true
 		live = append(live, md)
 	}
-	obs := ObserveRuns(root, live, now)
+	obs := observeRuns(root, live, now, cached)
 	for i := range rows {
 		if o, ok := obs[rows[i].Project+"/"+rows[i].Run]; ok {
 			rows[i].Control = o.Summary(now)
