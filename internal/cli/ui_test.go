@@ -364,3 +364,30 @@ func TestUIRevealTerminal(t *testing.T) {
 		t.Fatalf("replaced owner = %+v %v", r, f.calls)
 	}
 }
+
+// A resume whose acknowledgement was lost, resent whole after a new
+// hold replaced the one it released, reads back what it did and leaves
+// the new hold alone. Resent with the new revision, it would conflict.
+func TestUIDoResumeRetryAfterNewHold(t *testing.T) {
+	root, _ := controlFixture(t)
+	do := func(a ui.Action) ui.Result { return uiDo(context.Background(), root, a) }
+	if r := do(ui.Action{Kind: ui.ActControl, Project: "moe", Run: "change-auth", Control: "pause", RequestID: "p1"}); !r.OK {
+		t.Fatalf("pause = %+v", r)
+	}
+	original := ui.Action{Kind: ui.ActControl, Project: "moe", Run: "change-auth", Control: "resume",
+		RequestID: "r1", HoldRevision: controlRecord(t, root).Revision}
+	if r := do(original); !r.OK { // acknowledgement "lost"
+		t.Fatalf("resume = %+v", r)
+	}
+	if r := do(ui.Action{Kind: ui.ActControl, Project: "moe", Run: "change-auth", Control: "pause", RequestID: "p2"}); !r.OK {
+		t.Fatalf("second pause = %+v", r)
+	}
+	if r := do(original); !r.OK || !strings.Contains(r.Message, "already recorded") || controlRecord(t, root).Hold == nil {
+		t.Fatalf("retry = %+v, hold %+v", r, controlRecord(t, root).Hold)
+	}
+	changed := original
+	changed.HoldRevision = controlRecord(t, root).Revision
+	if r := do(changed); r.OK {
+		t.Fatalf("retry rebuilt against the new hold succeeded: %+v", r)
+	}
+}

@@ -100,7 +100,7 @@ type model struct {
 	queue       chan<- job
 	message     string
 	lastResult  map[string][]string // by project/run
-	retry       map[string]string   // control retry ids, by target+verb
+	retry       map[string]Action   // uncertain control requests, by target+verb
 	pendingSel  *itemKey            // select this item once it appears
 	width, high int
 }
@@ -114,7 +114,7 @@ func newModel(queue chan<- job) *model {
 	return &model{
 		drafts:     map[draftKey]*draft{},
 		lastResult: map[string][]string{},
-		retry:      map[string]string{},
+		retry:      map[string]Action{},
 		queue:      queue,
 	}
 }
@@ -600,7 +600,8 @@ func (m *model) finished(r jobResult) {
 		if res.RequestID != "" {
 			key := step.Project + "/" + step.Run + " " + step.Control
 			if res.Uncertain {
-				m.retry[key] = res.RequestID
+				step.RequestID = res.RequestID
+				m.retry[key] = step
 			} else {
 				delete(m.retry, key)
 			}
@@ -748,15 +749,20 @@ func (m *model) runCommand(line string, target *Item) effect {
 			!need(target != nil && target.Controls, "select a live operator-paced run") {
 			return effNone
 		}
-		if verb == "park" && !need(target.Generation != "", "no live owner answered; there is nothing to park") {
-			return effNone
-		}
-		a := Action{Kind: ActControl, Project: target.Project, Run: target.Run, Control: verb,
-			Generation: target.Generation, HoldRevision: target.HoldRevision}
 		key := target.Label() + " " + verb
-		a.RequestID = m.retry[key]
+		// A retry resends the original request whole — its id and the
+		// owner and hold it was bound to — so the writer reads back
+		// that request rather than acting on whatever replaced them.
+		a, retrying := m.retry[key]
+		if !retrying {
+			if verb == "park" && !need(target.Generation != "", "no live owner answered; there is nothing to park") {
+				return effNone
+			}
+			a = Action{Kind: ActControl, Project: target.Project, Run: target.Run, Control: verb,
+				Generation: target.Generation, HoldRevision: target.HoldRevision}
+		}
 		label := verb + " " + target.Label()
-		if a.RequestID != "" {
+		if retrying {
 			label = "retrying " + label + " (" + a.RequestID + ")"
 		}
 		m.start(job{label: label, steps: []Action{a}, target: keyOf(*target)})

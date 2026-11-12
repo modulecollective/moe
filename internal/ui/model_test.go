@@ -471,3 +471,38 @@ func TestPendingSaveLocksItsDraft(t *testing.T) {
 		t.Fatalf("after the save: mode %d, text %q", m.mode, m.active.ed.String())
 	}
 }
+
+// An uncertain control is retried as the request it was: same id, same
+// owner generation and hold revision, even after a refresh shows a new
+// owner or hold.
+func TestUncertainControlRetriesOriginal(t *testing.T) {
+	for _, verb := range []string{"park", "resume"} {
+		m, q := testModel(t)
+		m.setBoard(board(1, run("p", "a")))
+		press(m, Key{Code: KeyRune, Rune: ':'})
+		typed(m, verb)
+		press(m, Key{Code: KeyEnter})
+		j := <-q
+		m.finished(jobResult{job: j, results: []Result{{Uncertain: true, RequestID: "req-1"}}})
+		next := run("p", "a")
+		next.Generation, next.HoldRevision = "g2", 4
+		m.setBoard(board(2, next))
+		press(m, Key{Code: KeyRune, Rune: ':'})
+		typed(m, verb)
+		press(m, Key{Code: KeyEnter})
+		got := (<-q).steps[0]
+		want := j.steps[0]
+		want.RequestID = "req-1"
+		if got != want {
+			t.Fatalf("%s retry = %+v, want %+v", verb, got, want)
+		}
+		// Settled: the next command is a new request against what is shown.
+		m.finished(jobResult{job: job{steps: []Action{got}}, results: []Result{{OK: true, RequestID: "req-1"}}})
+		press(m, Key{Code: KeyRune, Rune: ':'})
+		typed(m, verb)
+		press(m, Key{Code: KeyEnter})
+		if a := (<-q).steps[0]; a.RequestID != "" || a.Generation != "g2" || a.HoldRevision != 4 {
+			t.Fatalf("%s after settling = %+v", verb, a)
+		}
+	}
+}
