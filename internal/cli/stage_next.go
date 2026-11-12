@@ -886,6 +886,7 @@ func dispatchCascade(answer, startStage, root string, md *run.Metadata, stdout, 
 		moePrintln(stdout, summary)
 	}
 	if code != 0 {
+		finishWalkStopped(root, md, res, code, stderr)
 		return code
 	}
 	if res.shipped {
@@ -1474,6 +1475,9 @@ func maybeRideChain(parentMD *run.Metadata, rideChain bool, stdout, stderr io.Wr
 	if summary := renderCascadeSummary(childKey, childRes); summary != "" {
 		moePrintln(stdout, summary)
 	}
+	// The child's stop is where a finish accepted during its walk
+	// settles; nothing later in this ride returns to the child.
+	finishWalkStopped(root, childMD, childRes, childCode, stderr)
 	if childCode != 0 && childCode != exitInterrupted && childCode != exitYielded {
 		// Interrupt needs no line — the child summary already read
 		// "… interrupted — stopped". Every other failure gets the

@@ -506,8 +506,9 @@ func mintChainRun(root, projectID, base, spawnedBy, note string) (*run.Metadata,
 //
 //   - a yield leaves it to the hold or park that caused it, and a quota
 //     deferral to the ride that retries the kick;
-//   - a stage that stopped, a blocked gate, or a full kick that ended
-//     without shipping is the finish's outcome, recorded as failed;
+//   - a stage that stopped (finishWalkStopped), a blocked gate, or a
+//     full kick that ended without shipping is the finish's outcome,
+//     recorded as failed;
 //   - after a one-stage kick's stage settles cleanly, the finish runs
 //     this run's `!!` from that stage's successor — not Workflow.Next,
 //     which reports the just-settled stage as parked until its
@@ -518,17 +519,12 @@ func mintChainRun(root, projectID, base, spawnedBy, note string) (*run.Metadata,
 // process died stays accepted for a later owner; that is a different
 // rule and not this one.
 func finishAfterKick(root string, md *run.Metadata, res cascadeResult, code int, oneStage bool, stdout, stderr io.Writer) int {
+	if finishWalkStopped(root, md, res, code, stderr) {
+		return code
+	}
 	r, ok := openFinish(root, md)
-	if !ok || code == exitYielded || code == exitQuotaDeferred || res.shipped {
+	if !ok || code != 0 || res.shipped {
 		return code
-	}
-	stopped := func(outcome string) int {
-		settleControl(root, md, r.ID, runcontrol.Settlement{State: runcontrol.StateFailed, Outcome: outcome}, stderr)
-		moePrintf(stderr, "control: finish on %s/%s stopped: %s\n", md.Project, md.ID, outcome)
-		return code
-	}
-	if code != 0 {
-		return stopped(fmt.Sprintf("the kick's stage stopped (exit %d)", code))
 	}
 	if len(res.ran) == 0 {
 		return code
@@ -544,7 +540,10 @@ func finishAfterKick(root string, md *run.Metadata, res cascadeResult, code int,
 		return code
 	}
 	if !oneStage {
-		return stopped("the kick ended at " + last + " without shipping")
+		outcome := "the kick ended at " + last + " without shipping"
+		settleControl(root, md, r.ID, runcontrol.Settlement{State: runcontrol.StateFailed, Outcome: outcome}, stderr)
+		moePrintf(stderr, "control: finish on %s/%s stopped: %s\n", md.Project, md.ID, outcome)
+		return code
 	}
 	wf, err := LookupWorkflow(md.Workflow)
 	if err != nil {

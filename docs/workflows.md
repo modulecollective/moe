@@ -287,7 +287,8 @@ owner answers, since there is nothing to address. **Finish** is `!!` for
 this run alone: through the same gates and ship route, then no chain ride. It
 applies at the next-stage prompt, at the next kick (widening a `!`, narrowing
 a `!!!`), from the stage after the one a running `!` kick is on, or on an open
-CI repair's existing PR; it does not start an idle run. A kick that fails,
+CI repair's existing PR; it does not start an idle run. A walk through the
+run that fails — a kick, a typed cascade, or a chain ride — or a kick that
 meets a blocked gate or stops short of shipping is the finish's outcome: it
 is recorded as failed, not kept for a later ride. A hold wins over finish, and
 an applied finish whose owner died is reconciled — shipped, or "recovery

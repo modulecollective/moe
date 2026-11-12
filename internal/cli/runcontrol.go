@@ -353,6 +353,31 @@ func finishGateBlocked(root string, md *run.Metadata, stage string, stderr io.Wr
 	}
 }
 
+// finishWalkStopped completes an open finish whose run's walk just
+// stopped with a failure: that stop is the finish's outcome, recorded as
+// failed, so it can't widen a later invocation. Every walk that carries
+// a finish's run through cascadeFromGate settles here — a kick, the
+// operator's typed cascade, and each run a chain ride reaches. A yield
+// leaves the finish to the hold or park that caused it, a quota deferral
+// to the ride that retries, and a shipped run completed it at the ship
+// seam (finishAtShip). Reports whether it settled one.
+func finishWalkStopped(root string, md *run.Metadata, res cascadeResult, code int, stderr io.Writer) bool {
+	if code == 0 || code == exitYielded || code == exitQuotaDeferred || res.shipped {
+		return false
+	}
+	r, ok := openFinish(root, md)
+	if !ok {
+		return false
+	}
+	outcome := fmt.Sprintf("the walk stopped (exit %d)", code)
+	if len(res.ran) > 0 {
+		outcome = fmt.Sprintf("%s stopped (exit %d)", res.ran[len(res.ran)-1].stage, code)
+	}
+	settleControl(root, md, r.ID, runcontrol.Settlement{State: runcontrol.StateFailed, Outcome: outcome}, stderr)
+	moePrintf(stderr, "control: finish on %s/%s stopped: %s\n", md.Project, md.ID, outcome)
+	return true
+}
+
 // finishAtShip is the ship seam's half of finish: once this run has
 // shipped, any finish waiting on it is complete and the chain ride it
 // would have started is withheld. Returns whether to withhold the ride.

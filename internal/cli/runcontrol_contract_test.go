@@ -343,3 +343,61 @@ func TestParkRetryAfterOwnerReplacement(t *testing.T) {
 		t.Fatalf("retry recorded a second park: %d open", n)
 	}
 }
+
+// Review round 3. A finish accepted during the operator's typed cascade
+// that then fails is completed as failed, so a later kick runs as the
+// one stage it asked for rather than shipping under the stale finish.
+func TestFinishDuringFailedTypedCascadeSettles(t *testing.T) {
+	root, md := controlFixture(t)
+	exits := map[string]int{"code": 1}
+	stubOpenSdlcStage(t, exits)
+	push := stubPushFromCascade(t, 0, nil)
+	inner := openSdlcStage
+	openSdlcStage = func(s, p, r string, h bool, o, e io.Writer) int {
+		if s == "design" {
+			submitControl(t, root, runcontrol.KindFinish, "finish-typed")
+		}
+		return inner(s, p, r, h, o, e)
+	}
+	if code := dispatchCascade("!!", "design", root, md, io.Discard, io.Discard); code != 1 {
+		t.Fatalf("want stage failure, got %d", code)
+	}
+	f, _ := controlRecord(t, root).Find("finish-typed")
+	if f.State != runcontrol.StateFailed || !strings.Contains(f.Outcome, "code stopped") {
+		t.Fatalf("failed typed cascade retained reusable finish authority: %+v", f)
+	}
+	delete(exits, "code")
+	if code := chainKickRun(root, "moe", "change-auth", rideDynamic, true, io.Discard, io.Discard); code != 0 {
+		t.Fatalf("later kick exit %d", code)
+	}
+	if len(*push) != 0 {
+		t.Fatalf("later one-stage kick shipped under a stale finish: pushes=%d", len(*push))
+	}
+}
+
+// A finish accepted on a chained child while a ride walks it settles at
+// the child's own failed stop; nothing later in the ride returns to it.
+func TestFinishDuringFailedChildRideSettles(t *testing.T) {
+	root, _ := controlFixture(t)
+	parent := seedParkedRun(t, root, "parent-run")
+	chainEdgeCommit(t, root, "moe/parent-run", "moe/change-auth")
+	stubOpenSdlcStage(t, map[string]int{"code": 1})
+	push := stubPushFromCascade(t, 0, nil)
+	inner := openSdlcStage
+	openSdlcStage = func(s, p, r string, h bool, o, e io.Writer) int {
+		if r == "change-auth" && s == "design" {
+			submitControl(t, root, runcontrol.KindFinish, "finish-child")
+		}
+		return inner(s, p, r, h, o, e)
+	}
+	if code := maybeRideChain(parent, false, io.Discard, io.Discard); code != 1 {
+		t.Fatalf("want child stage failure, got %d", code)
+	}
+	f, _ := controlRecord(t, root).Find("finish-child")
+	if f.State != runcontrol.StateFailed || !strings.Contains(f.Outcome, "code stopped") {
+		t.Fatalf("failed child ride retained reusable finish authority: %+v", f)
+	}
+	if len(*push) != 0 {
+		t.Fatalf("failed child shipped: pushes=%d", len(*push))
+	}
+}
