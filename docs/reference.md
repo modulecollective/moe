@@ -98,12 +98,13 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
 - `moe chore list|check|open|skip` lists due project chores, dry-runs a chore
   definition, opens the run a due chore configures, or clears a due chore until
   it is next triggered.
-- `moe control show|pause|handoff|park|finish|resume <project>/<run> [--id
-  <id>]` reads and steers a stageful run at its next boundary: show prints the
-  live owner, phase, hold and request log; pause and handoff hold it until an
-  explicit resume; park has the current owner yield once; finish ships it with
-  `!!` and rides no chain; resume releases a hold and starts nothing. A retry
-  with the same `--id` reads back the first outcome. See
+- `moe control show <project>/<run>` prints a stageful run's live owner,
+  phase, hold and request log. It submits nothing.
+- `moe control pause|handoff|park|finish|resume [--id <id>] <project>/<run>`
+  steers a stageful run at its next boundary: pause and handoff hold it until
+  an explicit resume; park has the current owner yield once; finish ships it
+  with `!!` and rides no chain; resume releases a hold and starts nothing. A
+  retry with the same `--id` reads back the first outcome. See
   [Seeing and steering a running run](workflows.md#seeing-and-steering-a-running-run).
 - `moe input add <project>/<run> [text ...]` pushes a chunk of prose at a run;
   with no text arguments it reads stdin, so a paragraph can be piped. The run's
