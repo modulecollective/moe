@@ -145,7 +145,7 @@ func TestRexHeartbeatRecoversKilledSession(t *testing.T) {
 			waitFor(t, "recovered sweep completion", func() bool { return len(gate.sweptList()) == 2 })
 			waitRexWorkers(t, testRex(s.children))
 			wantDash := "run --json --focus=false --keep-open -s session:NEW --label dash --cwd " + s.opts.Root +
-				" -- /usr/bin/env MOE_HOME=" + s.opts.Root + " " + moe + " dash --watch"
+				" -- /usr/bin/env MOE_HOME=" + s.opts.Root + " " + moe + " dash --watch --all"
 			if !slices.Contains(fake.calls(), wantDash) {
 				t.Fatalf("dash argv missing: %q; want %q", fake.calls(), wantDash)
 			}

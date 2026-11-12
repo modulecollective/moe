@@ -62,12 +62,12 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   the process retracts it: no new sweep starts. At armed startup, serve looks
   for a local Rex server. With a usable server, serve opens a Rex session named
   `moe`, reached from the Rex client like any other session, whose `dash` block
-  runs `moe dash --watch`; each armed start replaces that block with a fresh
-  one. Session creation runs a harmless bootstrap; serve records its identity
-  atomically before launching a labelled sweep. Each sweep runs in that session
-  as a block labelled `heartbeat:<project>`. Such a sweep finishes even if serve
-  stops or crashes; an armed restart with a usable Rex host picks it up rather
-  than starting another, and Ctrl-C in its block is how to stop it. After
+  runs `moe dash --watch --all`; each armed start replaces that block with a
+  fresh one. Session creation runs a harmless bootstrap; serve records its
+  identity atomically before launching a labelled sweep. Each sweep runs in that
+  session as a block labelled `heartbeat:<project>`. Such a sweep finishes even
+  if serve stops or crashes; an armed restart with a usable Rex host picks it up
+  rather than starting another, and Ctrl-C in its block is how to stop it. After
   reporting an exit, serve renames the block to `done:heartbeat:<project>`;
   `done` acknowledges reporting, including a failed notification attempt.
   Successful blocks and quota deferrals close; failed screens stay readable

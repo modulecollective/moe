@@ -570,8 +570,8 @@ func rexStartupFake(t *testing.T) *fakeRex {
 }
 
 // TestRexStartupOpensTheDash: startup establishes the session with a harmless
-// bootstrap, then starts `moe dash --watch` with its label at creation. The env
-// prefix carries MOE_HOME and not MOE_SERVE_AGENT — the dash is the
+// bootstrap, then starts `moe dash --watch --all` with its label at creation.
+// The env prefix carries MOE_HOME and not MOE_SERVE_AGENT — the dash is the
 // operator's eye, and that variable shuts the status gate it reports
 // to Rex through.
 func TestRexStartupOpensTheDash(t *testing.T) {
@@ -583,7 +583,7 @@ func TestRexStartupOpensTheDash(t *testing.T) {
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: moe})
 	s.selectHost()
 
-	want := "run --json --focus=false --keep-open -s session:NEW --label dash --cwd " + root + " -- /usr/bin/env MOE_HOME=" + root + " " + moe + " dash --watch"
+	want := "run --json --focus=false --keep-open -s session:NEW --label dash --cwd " + root + " -- /usr/bin/env MOE_HOME=" + root + " " + moe + " dash --watch --all"
 	if !slices.Contains(fake.calls(), want) {
 		t.Errorf("rex calls = %q, want %q", fake.calls(), want)
 	}
@@ -622,7 +622,7 @@ func TestRexStartupReplacesTheDash(t *testing.T) {
 	calls := fake.calls()
 	closeAt := slices.Index(calls, "block close block:OLD")
 	runAt := slices.Index(calls, "run --json --focus=false --keep-open -s session:S --label dash --cwd "+root+
-		" -- /usr/bin/env MOE_HOME="+root+" "+moe+" dash --watch")
+		" -- /usr/bin/env MOE_HOME="+root+" "+moe+" dash --watch --all")
 	if closeAt < 0 || runAt < closeAt {
 		t.Errorf("rex calls = %q, want the old dash closed, then a new one run", calls)
 	}

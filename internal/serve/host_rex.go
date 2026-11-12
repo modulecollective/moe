@@ -243,12 +243,13 @@ func (h *rexHost) reconcile() error {
 }
 func (h *rexHost) shutdown(context.Context, io.Writer) { h.cancel() }
 
-// rexDashLabel labels the block serve keeps `moe dash --watch` in.
+// rexDashLabel labels the block serve keeps `moe dash --watch --all` in.
 const rexDashLabel = "dash"
 
-// openDash puts `moe dash --watch` in the session's "dash" block, so the
-// session exists the moment serve starts and the dash reports to the Rex
-// picker (OSC 7501) without the operator starting a watch.
+// openDash puts `moe dash --watch --all` in the session's "dash" block, so
+// the session exists the moment serve starts and the dash reports to the Rex
+// picker (OSC 7501) without the operator starting a watch. `--all` lifts the
+// ten-run completed cap; the watch viewport still clips what doesn't fit.
 //
 // A dash block a previous serve left is closed, not adopted: the update
 // watcher restarts serve on every reinstall, and an adopted dash would
@@ -256,7 +257,7 @@ const rexDashLabel = "dash"
 // so the session never holds two. Every failure here is only logged —
 // the dash is the operator's eye, and must not hold the heartbeat.
 func (h *rexHost) openDash() {
-	argv, err := rexJobArgv(h.moeBin, []string{"MOE_HOME=" + h.root}, []string{"dash", "--watch"})
+	argv, err := rexJobArgv(h.moeBin, []string{"MOE_HOME=" + h.root}, []string{"dash", "--watch", "--all"})
 	if err != nil {
 		h.logf("host: rex dash not opened: %v", err)
 		return
