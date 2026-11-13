@@ -27,48 +27,6 @@ Fixed: the retry loop now resets the counter.
 diff of foo.go; ran go test ./internal/foo.
 `
 
-const blockedTestCanvas = `# Test
-
-## Gate
-
-` + "```json" + `
-{"status":"blocked"}
-` + "```" + `
-
-## What was verified
-
-- ran go test ./internal/cli — a regression test still fails.
-
-## What wasn't verified
-
-- the failing path — blocked until the fix lands.
-
-## Fixes applied during this stage
-
-(none)
-`
-
-const readyFilledTestCanvas = `# Test
-
-## Gate
-
-` + "```json" + `
-{"status":"ready"}
-` + "```" + `
-
-## What was verified
-
-- ran go test ./internal/cli — all pass.
-
-## What wasn't verified
-
-- Nothing — automated tests cover the change.
-
-## Fixes applied during this stage
-
-(none)
-`
-
 // kickbackCall records one openKickbackSession dispatch so the headless
 // recovery tests can assert document, blocked stage, and the headless
 // flag the cascade passes.
