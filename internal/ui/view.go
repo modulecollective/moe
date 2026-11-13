@@ -27,10 +27,11 @@ Editor
   Alt-Left/Right or Alt-b/f move by a word
 
 Commands (:)
+  Tab / Shift-Tab complete fixed words, cycle forward / backward
+  Type spaces between words; Enter submits
   pause | handoff | park | finish | resume    the selected run
   new idea <project>/<slug>                   opens a draft; creates on save
   new intent <project>/<slug>
-  new-idea / new-intent <project>/<slug>       aliases
   edit | close                                the selected idea or intent
   tag sdlc | tag design | untag               the selected idea's licence
   terminal | help | quit

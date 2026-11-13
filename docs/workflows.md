@@ -278,13 +278,20 @@ separators have a blank row on each side, and the console keeps six message
 rows even on short terminals. The minimum size is 40 columns by 20 rows.
 Moving to the first board item reveals the headings above it.
 
-Use `:new idea <project>/<slug>` or `:new-idea <project>/<slug>` to open an
-idea draft; intents use `new intent` or `new-intent`. Nothing is created
-until Ctrl-S. Ideas offer save only, save and tag sdlc, or save and tag design
-only. The draft names its target even on an empty or filtered board.
-Alt-Backspace or Ctrl-W deletes a word; Alt-arrows or Alt-b/f moves by words.
-Words are whitespace-delimited, including newlines, so project/run tokens
-stay together. Esc keeps a draft, Ctrl-X discards it.
+Use `:new idea <project>/<slug>` or `:new intent <project>/<slug>` to open a
+capture draft. Nothing is created until Ctrl-S. Ideas offer save only, save
+and tag sdlc, or save and tag design only. The draft names its target even
+on an empty or filtered board. Alt-Backspace or Ctrl-W deletes a word;
+Alt-arrows or Alt-b/f moves by words. Words are whitespace-delimited, including
+newlines, so project/run tokens stay together. Esc keeps a draft, Ctrl-X
+discards it.
+
+In the command prompt, Tab completes a fixed command word and cycles matches
+in lexical order; Shift-Tab cycles backward. Type spaces between words and
+press Enter to submit. `new` completes `idea` or `intent`; `tag` completes
+`design` or `sdlc`. Project IDs, slugs and other values are typed in full.
+Completion replaces the word at the cursor and preserves surrounding text.
+For example, `:ne<Tab> ide<Tab> p/example` becomes `:new idea p/example`.
 
 The board still gathers every three seconds and follows owner status
 subscriptions. A separate 500 ms timer cycles cached smoke without extra

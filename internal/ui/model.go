@@ -102,6 +102,7 @@ type model struct {
 
 	cmd         *editor
 	cmdTarget   *Item // captured when : opened
+	completion  *commandCompletion
 	confirm     *pendingConfirm
 	choices     []Choice
 	choiceFor   Action
@@ -920,6 +921,7 @@ func (m *model) settleDraft(k draftKey, res Result) {
 // --- commands ---
 
 func (m *model) openCommand() {
+	m.completion = nil
 	m.cmd, m.mode = newEditor("", true), modeCommand
 	if it, ok := m.selected(); ok {
 		m.cmdTarget = &it
@@ -929,6 +931,11 @@ func (m *model) openCommand() {
 }
 
 func (m *model) commandKey(k Key) effect {
+	if k.Code == KeyTab || k.Code == KeyBackTab {
+		m.completeCommand(k.Code == KeyBackTab)
+		return effNone
+	}
+	m.completion = nil
 	switch k.Code {
 	case KeyEsc:
 		m.mode, m.cmd = modeNormal, nil
@@ -989,7 +996,7 @@ func commandHint(line string, target *Item) string {
 		if target != nil {
 			return "→ " + target.Label()
 		}
-	case "new", "new-idea", "new-intent":
+	case "new":
 		return "creates on save"
 	}
 	if target == nil {
@@ -1002,9 +1009,6 @@ func (m *model) runCommand(line string, target *Item) effect {
 	f := strings.Fields(line)
 	if len(f) == 0 {
 		return effNone
-	}
-	if f[0] == "new-idea" || f[0] == "new-intent" {
-		f = append([]string{"new", strings.TrimPrefix(f[0], "new-")}, f[1:]...)
 	}
 	need := func(ok bool, why string) bool {
 		if !ok {

@@ -99,7 +99,7 @@ func TestConsoleGeometryAndObservationDedup(t *testing.T) {
 }
 
 func TestCreationKeyboardAndSavePrompt(t *testing.T) {
-	for _, alias := range []string{"new idea", "new-idea", "new intent", "new-intent"} {
+	for _, alias := range []string{"new idea", "new intent"} {
 		for _, existing := range []bool{false, true} {
 			m, q := testModel(t)
 			m.resize(26, 40)
@@ -124,7 +124,7 @@ func TestCreationKeyboardAndSavePrompt(t *testing.T) {
 				keyboard(m, "s")
 			}
 			j := <-q
-			if len(j.steps) != 1 || j.steps[0].Kind != ActCreate || j.steps[0].Text != "# new-one\nbody" {
+			if len(j.steps) != 1 || j.steps[0].Kind != ActCreate || j.steps[0].Workflow != strings.TrimPrefix(alias, "new ") || j.steps[0].Text != "# new-one\nbody" {
 				t.Fatalf("wrong create: %+v", j)
 			}
 			m.finished(jobResult{job: j, results: []Result{{Message: "project not found; draft retained"}}})
@@ -135,7 +135,7 @@ func TestCreationKeyboardAndSavePrompt(t *testing.T) {
 	}
 	m, q := testModel(t)
 	m.setBoard(Board{ProjectFilter: "other"})
-	keyboard(m, ":new-intent p/hidden\rbody\x13")
+	keyboard(m, ":new intent p/hidden\rbody\x13")
 	m.finished(jobResult{job: <-q, results: []Result{{OK: true, Message: "created p/hidden"}}})
 	if m.pendingSel != nil || !strings.Contains(strings.Join(m.consoleRows(), ""), "hidden by current filters") {
 		t.Fatal("hidden create not explained")
@@ -143,7 +143,7 @@ func TestCreationKeyboardAndSavePrompt(t *testing.T) {
 }
 
 func TestCommandKeyboardValidation(t *testing.T) {
-	for _, line := range []string{"pause extra", "handoff extra", "park extra", "finish extra", "resume extra", "edit extra", "close extra", "tag sdlc extra", "untag extra", "terminal extra", "help extra", "quit extra", "q extra", "new-idea", "new intent", "new idea p/Bad", "new-intent p/new extra", "bogus"} {
+	for _, line := range []string{"pause extra", "handoff extra", "park extra", "finish extra", "resume extra", "edit extra", "close extra", "tag sdlc extra", "untag extra", "terminal extra", "help extra", "quit extra", "q extra", "new idea", "new intent", "new idea p/Bad", "new intent p/new extra", "bogus"} {
 		m, q := testModel(t)
 		m.setBoard(board(1, idea("p", "i", 1)))
 		if keyboard(m, ":"+line+"\r") != effNone || len(q) != 0 || m.mode != modeNormal || len(m.console.events) == 0 {

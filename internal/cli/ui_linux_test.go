@@ -125,11 +125,14 @@ func TestUIKeyboardCreatesThroughWriters(t *testing.T) {
 		name, command, key, tag string
 		design, hidden, empty   bool
 	}{
-		{name: "save only", command: "new-idea", key: "s"},
-		{name: "empty board", command: "new-idea", key: "s", empty: true},
+		{name: "save only", command: "new idea", key: "s"},
+		{name: "empty board", command: "new idea", key: "s", empty: true},
 		{name: "sdlc licence", command: "new idea", key: "g", tag: "sdlc"},
-		{name: "design licence", command: "new-idea", key: "d", tag: "sdlc", design: true},
-		{name: "filtered intent", command: "new-intent", hidden: true},
+		{name: "design licence", command: "new idea", key: "d", tag: "sdlc", design: true},
+		{name: "filtered intent", command: "new intent", hidden: true},
+		{name: "completed idea", command: "ne\t i\t", key: "s"},
+		{name: "completed intent", command: "ne\t i\t\t"},
+		{name: "reverse completed intent", command: "ne\t i\x1b[Z", empty: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, _ := controlFixture(t)
@@ -165,7 +168,11 @@ func TestUIKeyboardCreatesThroughWriters(t *testing.T) {
 			}
 			c.quit(t)
 			md, err := run.Load(root, "moe", "from-keys")
-			if err != nil || md.PromoteTo != tc.tag || md.DesignOnly != tc.design {
+			wantWorkflow := "intent"
+			if tc.key != "" {
+				wantWorkflow = "idea"
+			}
+			if err != nil || md.PromoteTo != tc.tag || md.DesignOnly != tc.design || md.Workflow != wantWorkflow {
 				t.Fatalf("created %+v: %v", md, err)
 			}
 			doc, _ := dash.CaptureDocID(md.Workflow)
@@ -255,10 +262,10 @@ func TestUIKeyboardFailedCreateKeepsDraft(t *testing.T) {
 			root, _ := controlFixture(t)
 			c := startUIKeyboard(t, root)
 			c.wait(t, "moe/change-auth")
-			c.send(t, ":new-idea "+target+"\rprecious text\x13g")
+			c.send(t, ":new idea "+target+"\rprecious text\x13g")
 			c.wait(t, "failed: create")
 			c.wait(t, "not tagged: the save did not succeed")
-			c.send(t, ":new-idea "+target+"\r")
+			c.send(t, ":new idea "+target+"\r")
 			c.wait(t, "precious text")
 			c.send(t, "\x18y") // discard the retained draft
 			c.wait(t, "draft discarded")
@@ -282,5 +289,21 @@ func TestUIKeyboardCancelledCreationWritesNothing(t *testing.T) {
 	c.quit(t)
 	if _, err := run.Load(root, "moe", "cancel-me"); err == nil {
 		t.Fatal("cancel created a capture")
+	}
+}
+
+func TestUIKeyboardRemovedCaptureAliases(t *testing.T) {
+	for _, alias := range []string{"new-idea", "new-intent"} {
+		t.Run(alias, func(t *testing.T) {
+			root, _ := controlFixture(t)
+			c := startUIKeyboard(t, root)
+			c.wait(t, "moe/change-auth")
+			c.send(t, ":"+alias+" moe/no-capture\r")
+			c.wait(t, "unknown command")
+			c.quit(t) // an open draft would ask for confirmation instead
+			if _, err := run.Load(root, "moe", "no-capture"); err == nil {
+				t.Fatal("removed alias created a capture")
+			}
+		})
 	}
 }
