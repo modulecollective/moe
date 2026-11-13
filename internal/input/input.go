@@ -502,7 +502,7 @@ func loadLive(root, projectID, runID string) (*run.Metadata, File, error) {
 var testLocked func()
 
 // commit runs prepare under the repo lock and lands what it returns as
-// one journal commit through the shared lock/pull/push pipeline.
+// one journal commit containing only the destination inputs.json.
 //
 // prepare rather than a ready File: every state-dependent read a verb
 // makes — the record, run.json, the check-then-act refusals, the id it
@@ -536,7 +536,7 @@ func commit(root, projectID, runID, purpose string, prepare func() (File, string
 		if err := writeFile(filepath.Join(root, rel), f); err != nil {
 			return err
 		}
-		if err := run.StageAndCommit(root, msg, rel); err != nil {
+		if err := commitFile(root, msg, rel); err != nil {
 			if errors.Is(err, run.ErrNothingToCommit) {
 				return err
 			}
@@ -548,6 +548,20 @@ func commit(root, projectID, runID, purpose string, prepare func() (File, string
 		return nil
 	}
 	return err
+}
+
+func commitFile(root, msg, rel string) error {
+	if err := run.Stage(root, rel); err != nil {
+		return err
+	}
+	changed, err := git.Output(root, "diff", "--cached", "--name-only", "--", rel)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(changed) == "" {
+		return run.ErrNothingToCommit
+	}
+	return git.Run(root, "commit", "--only", "-m", msg, "--", rel)
 }
 
 // fileSnap keeps working bytes separate from the index: an operator's
