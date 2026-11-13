@@ -364,7 +364,7 @@ func (s *uiSource) buildBoard(now time.Time) (ui.Board, []cliout.ProgramStatus) 
 	// Service detail is external text. Render without styles, then escape it
 	// before adding the trusted dashboard chrome below.
 	var service strings.Builder
-	s.serveNow.renderLines(&service, now)
+	s.serveNow.renderLines(&service, now, false)
 	for _, line := range strings.Split(strings.TrimSuffix(service.String(), "\n"), "\n") {
 		if service.Len() > 0 {
 			fmt.Fprintln(buf, ui.SafeText(line))

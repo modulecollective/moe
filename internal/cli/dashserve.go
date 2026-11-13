@@ -217,9 +217,10 @@ func (s serveState) failing(now time.Time) int {
 
 // renderLines writes what serve earns below the banner: the parse
 // warning if the file was unreadable, then a row per noteworthy project.
-// A healthy quiet board writes nothing — its status is already in the
-// banner's tail.
-func (s serveState) renderLines(w io.Writer, now time.Time) {
+// Dash includes routine sweeps; the interactive UI excludes them to
+// reserve board space for runs and service exceptions. A healthy quiet
+// board writes nothing — its status is already in the banner's tail.
+func (s serveState) renderLines(w io.Writer, now time.Time, includeSweeps bool) {
 	if s.err != nil {
 		// The error already wears the "serve:" prefix (it names the file).
 		cliout.Printf(w, "%v\n", s.err)
@@ -228,9 +229,8 @@ func (s serveState) renderLines(w io.Writer, now time.Time) {
 	if s.live == serveDead {
 		// A dead serve's project records are as stale as its stamp; the
 		// banner's "dead" is the whole message. Only provable death
-		// buys this silence — under unknown the rows are the sandboxed
-		// reader's only view of what serve is sweeping, and the
-		// headline already flags what it can't vouch for.
+		// buys this silence — under unknown each caller keeps its row
+		// policy, and the headline flags what it can't vouch for.
 		return
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
@@ -245,6 +245,9 @@ func (s serveState) renderLines(w io.Writer, now time.Time) {
 		fmt.Fprintf(tw, "  origin\t%s\t%s\n", state, detail)
 	}
 	for _, p := range s.snap.Projects {
+		if !includeSweeps && p.Sweeping() {
+			continue
+		}
 		state, detail := serveProjectState(now, p)
 		if state == "" {
 			continue

@@ -19,6 +19,7 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
 	"github.com/modulecollective/moe/internal/runsock"
+	"github.com/modulecollective/moe/internal/serve"
 	"github.com/modulecollective/moe/internal/trailers"
 	"github.com/modulecollective/moe/internal/ui"
 )
@@ -691,6 +692,107 @@ func TestUIFactoryFrameCache(t *testing.T) {
 	again = takeBoard(t, s)
 	if &b.Art.Frames[0][0] != &again.Art.Frames[0][0] {
 		t.Fatal("unchanged gather regenerated frames")
+	}
+}
+
+func TestUIBoardOmitsRoutineSweeps(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	now := time.Date(2026, 11, 13, 12, 30, 0, 0, time.Local)
+	for _, tc := range []struct {
+		name   string
+		host   string
+		live   serveLiveness
+		filter DashFilter
+		banner string
+	}{
+		{"rex", "rex", serveAlive, DashFilter{}, "serve armed"},
+		{"local", "local", serveAlive, DashFilter{}, "serve armed"},
+		{"unknown", "rex", serveUnknown, DashFilter{}, "serve unknown (sandbox)"},
+		{"project filter", "rex", serveAlive, DashFilter{ProjectFilter: "moe"}, "serve armed"},
+		{"workflow filter", "rex", serveAlive, DashFilter{WorkflowFilter: "sdlc"}, "serve armed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newUISource("", tc.filter, os.Stdout)
+			s.serveNow = serveState{ok: true, live: tc.live, snap: serve.ActivitySnapshot{
+				Armed: true, Host: tc.host, Started: now.Add(-time.Hour), WrittenAt: now,
+				Projects: []serve.ActivityProject{
+					{Project: "moe", SweepStarted: now.Add(-8 * time.Minute), Decision: "the journal moved"},
+					// A sweep takes precedence over its historical failure.
+					{Project: "other-sweeper", SweepStarted: now.Add(-time.Second), Decision: "retrying sweep",
+						SweptAt: now.Add(-time.Hour), Fails: 2, CoolTicks: 2},
+				},
+			}}
+			s.snap.Rows = []dash.Row{{Project: "moe", Run: "change-auth", Bucket: dash.BucketActiveRuns,
+				Note: "sdlc/build", Stage: "build", Control: "working · agent", When: now}}
+			b, reports := s.buildBoard(now)
+			all := strings.Join(b.Lines, "\n")
+			for _, unwanted := range []string{"sweeping", "the journal moved", "other-sweeper", "retrying sweep", "cooling"} {
+				if strings.Contains(all, unwanted) {
+					t.Fatalf("routine sweep leaked %q:\n%s", unwanted, all)
+				}
+			}
+			if !strings.HasPrefix(b.Lines[0], "ACTIVE (1)") || len(b.Items) != 1 {
+				t.Fatalf("unexpected board prefix or items: %+v", b)
+			}
+			line := b.Lines[b.Items[0].Line]
+			for _, want := range []string{"moe/change-auth", "sdlc/build", "working · agent"} {
+				if !strings.Contains(line, want) {
+					t.Fatalf("run lost %q: %q", want, line)
+				}
+			}
+			if !strings.Contains(b.Banner, tc.banner) {
+				t.Fatalf("banner = %q, want %q", b.Banner, tc.banner)
+			}
+			if tc.live == serveAlive && tc.filter == (DashFilter{}) {
+				if activity := reportSlot(reports, "activity"); activity.Message != "Live sweeps: moe, other-sweeper" {
+					t.Fatalf("hidden rows changed activity: %+v", activity)
+				}
+			}
+			s.snap.Rows = nil
+			b, _ = s.buildBoard(now)
+			if all := strings.Join(b.Lines, "\n"); strings.Contains(all, "sweeping") || strings.Contains(all, "the journal moved") || strings.Contains(all, "other-sweeper") {
+				t.Fatalf("sweep returned without a run:\n%s", all)
+			}
+		})
+	}
+}
+
+func TestUIBoardRetainsServiceExceptions(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	now := time.Date(2026, 11, 13, 12, 30, 0, 0, time.Local)
+	for _, live := range []serveLiveness{serveAlive, serveUnknown, serveDead} {
+		t.Run([]string{"alive", "dead", "unknown"}[live], func(t *testing.T) {
+			s := newUISource("", DashFilter{}, os.Stdout)
+			s.serveNow = serveState{ok: true, live: live, ahead: 2, snap: serve.ActivitySnapshot{
+				Armed: true, Host: "rex", HostError: "host unavailable\x1b[2J", WrittenAt: now,
+				PushFailingSince: now.Add(-time.Minute), PushError: "push rejected",
+				Projects: []serve.ActivityProject{
+					{Project: "sweeper", SweepStarted: now.Add(-8 * time.Minute), Decision: "the journal moved",
+						SweptAt: now.Add(-time.Hour), Fails: 2, CoolTicks: 2},
+					{Project: "cooler", CoolTicks: 2, SweptAt: now.Add(-time.Hour)},
+					// The gate verdict alone is not a running sweep.
+					{Project: "faller", Sweep: true, SweptAt: now.Add(-time.Hour), Decision: "agent failed"},
+					{Project: "deferred", SweepDeferred: true, Decision: "quota tomorrow"},
+				},
+			}}
+			s.snap.Rows = []dash.Row{{Project: "moe", Run: "change-auth", Bucket: dash.BucketActiveRuns, When: now}}
+			b, _ := s.buildBoard(now)
+			all := strings.Join(b.Lines, "\n")
+			if strings.Contains(all, "sweeper") || strings.Contains(all, "the journal moved") || strings.ContainsRune(all, '\x1b') {
+				t.Fatalf("sweep or unsafe text leaked:\n%s", all)
+			}
+			for _, want := range []string{"host unavailable^[[2J", "push failing", "push rejected", "cooler", "cooling", "faller", "agent failed", "deferred", "quota tomorrow"} {
+				if strings.Contains(all, want) != (live != serveDead) {
+					t.Fatalf("liveness %v: unexpected presence of %q:\n%s", live, want, all)
+				}
+			}
+			if len(b.Items) != 1 || !strings.Contains(b.Lines[b.Items[0].Line], "moe/change-auth") {
+				t.Fatalf("service lines displaced item: %+v", b.Items)
+			}
+			if live == serveUnknown && !strings.Contains(b.Banner, "serve unknown (sandbox)") {
+				t.Fatalf("unknown banner lost: %q", b.Banner)
+			}
+		})
 	}
 }
 

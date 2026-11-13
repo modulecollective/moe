@@ -52,7 +52,7 @@ func serveCluster(t *testing.T, root string, now time.Time) string {
 func serveLines(t *testing.T, root string, now time.Time) string {
 	t.Helper()
 	var buf bytes.Buffer
-	readServeState(root).renderLines(&buf, now)
+	readServeState(root).renderLines(&buf, now, true)
 	return buf.String()
 }
 

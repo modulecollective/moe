@@ -258,7 +258,7 @@ func renderDashFrame(stdout io.Writer, now time.Time, snap DashSnapshot, all boo
 	// Directly under the banner, above the art: the projects a sweep is
 	// working, holding back, or has killed. The banner's serve cluster is
 	// their label.
-	serveState.renderLines(stdout, now)
+	serveState.renderLines(stdout, now, true)
 	histogram := dash.BuildActivityHistogram(snap.Histogram)
 	dash.Render(stdout, now, histogram, snap.Rows, snap.ProjectCount, snap.ActiveProjects, all, state, r)
 }
