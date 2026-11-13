@@ -265,7 +265,26 @@ moe control resume  moe/change-auth   # release a hold; starts nothing
 `moe ui` puts all of this on one screen: the board with a selection, the
 selected run's `control show` facts below it, updated as the owner publishes,
 and the same controls as `:pause`, `:finish` and so on, alongside notes,
-answers and the run's Rex terminal (`t`).
+answers and the run's Rex terminal (`t`). A third pane keeps recent command
+outcomes and recovery messages. Tab and Shift-Tab cycle the three panes;
+End in the console follows new messages after scrolling.
+
+Use `:new idea <project>/<slug>` or `:new-idea <project>/<slug>` to open an
+idea draft; intents use `new intent` or `new-intent`. Nothing is created
+until Ctrl-S. Ideas offer save only, save and tag sdlc, or save and tag design
+only. The draft names its target even on an empty or filtered board.
+Alt-Backspace or Ctrl-W deletes a word; Alt-arrows or Alt-b/f moves by words.
+Words are whitespace-delimited, including newlines, so project/run tokens
+stay together. Esc keeps a draft, Ctrl-X discards it.
+
+The board still gathers every three seconds and follows owner status
+subscriptions. A separate 500 ms timer cycles cached smoke without extra
+observation work. Serve opens this console in its managed Rex `ui` block and
+keeps a running editor across restarts to preserve drafts. This also keeps
+its old binary: save or discard drafts and quit/reopen to update it. An
+exited editor is replaced on a later serve startup; unreadable process state
+or duplicate labels leave editors alone. The old managed `dash` block is
+retired, and serve shutdown leaves the UI running.
 
 None of them interrupts an agent. The owner finishes the turn it is on —
 commit, transcript, input stamps, any recovery that turn needs — and acts at
