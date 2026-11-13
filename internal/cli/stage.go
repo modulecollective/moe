@@ -674,7 +674,11 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				if err := commitSessionStart(workRoot, md, docID, sessionID); err != nil {
 					return stageTurnSpec{}, err
 				}
-				moePrintf(stderr, "opened %s canvas (session %s)\n  %s\n", docID, sessionID, filepath.Join(workRoot, run.ContentPath(md.Project, md.ID, docID)))
+				canvasShown := run.ContentPath(md.Project, md.ID, docID)
+				if canvasFiles != nil {
+					canvasShown = run.ContentDir(md.Project, md.ID, docID)
+				}
+				moePrintf(stderr, "opened %s canvas (session %s)\n  %s\n", docID, sessionID, filepath.Join(workRoot, canvasShown))
 			}
 
 			// Directory-form stages: seed any missing declared file
