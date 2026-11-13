@@ -866,22 +866,27 @@ func (s *Server) canvasLinks(projectID, slug string, now time.Time) []canvasLink
 		if err != nil {
 			continue
 		}
-		st, err := os.Stat(path)
-		if err != nil {
+		// readCanvas resolves the layout (content.md or content/) and
+		// reports a stage with no canvas as ErrNotExist — skipped, as a
+		// missing content.md always was. Any other failure is a race
+		// with a session commit (or a genuinely unreadable file): log
+		// it and emit the row with no body, so the reader still gets
+		// the stage link.
+		body, mod, err := readCanvas(path, s.canvasFiles(projectID, slug, stage), refs)
+		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
-		// The Stat above says the file is there, so a read failure here
-		// is a race with a session commit (or a genuinely unreadable
-		// file). Log it and emit the row with no body — the reader still
-		// gets the stage link, same as before canvases rendered inline.
-		body, err := readCanvas(path, refs)
 		if err != nil {
 			s.logf("run page canvas %s: %v", path, err)
+		}
+		modTime := ""
+		if !mod.IsZero() {
+			modTime = dash.HumanAgo(now, mod)
 		}
 		out = append(out, canvasLink{
 			Stage:       stage,
 			URL:         "/run/" + projectID + "/" + slug + "/canvas/" + stage,
-			ModTime:     dash.HumanAgo(now, st.ModTime()),
+			ModTime:     modTime,
 			Transcripts: s.transcriptLinks(artifacts, projectID, slug, stage),
 			Body:        body,
 		})

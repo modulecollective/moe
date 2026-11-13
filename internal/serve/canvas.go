@@ -2,10 +2,13 @@ package serve
 
 import (
 	"errors"
+	"fmt"
 	"html/template"
 	"io/fs"
 	"net/http"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -53,7 +56,7 @@ func (s *Server) handleCanvas(w http.ResponseWriter, r *http.Request) {
 		Stage:   stage,
 		Path:    path,
 	}
-	body, err := readCanvas(path, s.canvasReferenceResolver(projectID))
+	body, mod, err := readCanvas(path, s.canvasFiles(projectID, slug, stage), s.canvasReferenceResolver(projectID))
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			vm.Missing = true
@@ -65,25 +68,90 @@ func (s *Server) handleCanvas(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	vm.Body = body
-	if st, err := os.Stat(path); err == nil {
-		vm.ModTime = dash.HumanAgo(time.Now(), st.ModTime())
+	if !mod.IsZero() {
+		vm.ModTime = dash.HumanAgo(time.Now(), mod)
 	}
 	s.render(w, r, "canvas.html", vm)
 }
 
-// readCanvas reads a canvas file and renders its markdown. refs is a
+// canvasFiles is Options.CanvasFiles, nil-safe.
+func (s *Server) canvasFiles(projectID, slug, stage string) []string {
+	if s.opts.CanvasFiles == nil {
+		return nil
+	}
+	return s.opts.CanvasFiles(projectID, slug, stage)
+}
+
+// readCanvas reads a stage's canvases and renders their markdown. path
+// is the file-form canvas ResolveCanvas returned; its directory is the
+// document dir, which is where a directory-form stage's content/ lives
+// too, so the shared run resolver decides the layout. refs is a
 // resolver from canvasReferenceResolver; a caller rendering several
 // canvases into one page builds it once, since it caches run lookups.
+//
+// A file-form canvas renders exactly as it always has. A
+// directory-form stage renders each file under its own label (Code,
+// Test, …), declared files first in declaration order, then any extra
+// Markdown file the agent added; a declared file not yet written shows
+// a labelled missing state instead of vanishing. Nothing on disk at all
+// returns an fs.ErrNotExist error so callers keep their empty state.
+// modTime is the newest file's.
 //
 // A canvas is a run document, not part of the wiki/twin link graph, so
 // it has no relative-link routes to resolve (nil route resolver: any
 // relative link renders with its source target untouched).
-func readCanvas(path string, refs func(md.Reference) string) (template.HTML, error) {
-	body, err := os.ReadFile(path)
+func readCanvas(path string, declared []string, refs func(md.Reference) string) (template.HTML, time.Time, error) {
+	docDir := filepath.Dir(path)
+	canvases, err := run.DocCanvases(docDir)
 	if err != nil {
-		return "", err
+		return "", time.Time{}, err
 	}
-	return template.HTML(md.RenderWithReferences(string(body), nil, refs)), nil
+	if len(canvases) == 0 {
+		return "", time.Time{}, fmt.Errorf("%s: %w", path, fs.ErrNotExist)
+	}
+	if len(canvases) == 1 && canvases[0].Name == "" {
+		body, err := os.ReadFile(canvases[0].Path)
+		if err != nil {
+			return "", time.Time{}, err
+		}
+		var mod time.Time
+		if st, err := os.Stat(canvases[0].Path); err == nil {
+			mod = st.ModTime()
+		}
+		return template.HTML(md.RenderWithReferences(string(body), nil, refs)), mod, nil
+	}
+	byName := map[string]run.Canvas{}
+	for _, c := range canvases {
+		byName[c.Name] = c
+	}
+	names := append([]string(nil), declared...)
+	for _, c := range canvases {
+		if !slices.Contains(names, c.Name) {
+			names = append(names, c.Name)
+		}
+	}
+	var b strings.Builder
+	var mod time.Time
+	for _, name := range names {
+		label := template.HTMLEscapeString(run.CanvasLabel(name))
+		file := template.HTMLEscapeString("content/" + name)
+		fmt.Fprintf(&b, "<section class=\"canvas-file\">\n<h2 class=\"canvas-file-label\">%s <span class=\"meta\">%s</span></h2>\n", label, file)
+		c, ok := byName[name]
+		if !ok {
+			fmt.Fprintf(&b, "<p class=\"meta\">no %s yet</p>\n</section>\n", file)
+			continue
+		}
+		body, err := os.ReadFile(c.Path)
+		if err != nil {
+			return "", time.Time{}, err
+		}
+		if st, err := os.Stat(c.Path); err == nil && st.ModTime().After(mod) {
+			mod = st.ModTime()
+		}
+		b.WriteString(md.RenderWithReferences(string(body), nil, refs))
+		b.WriteString("\n</section>\n")
+	}
+	return template.HTML(b.String()), mod, nil
 }
 
 func (s *Server) canvasReferenceResolver(currentProject string) func(md.Reference) string {

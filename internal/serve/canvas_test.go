@@ -274,8 +274,10 @@ func TestCanvasRouteWithoutResolver500(t *testing.T) {
 func TestCanvasRouteIOError500(t *testing.T) {
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	// content.md exists but is a directory: the layout resolver must
+	// report it, not mistake it for a missing canvas.
 	dirPath := filepath.Join(root, "projects", "alpha", "runs", "fix-it",
-		"documents", "design")
+		"documents", "design", "content.md")
 	if err := os.MkdirAll(dirPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -350,5 +352,70 @@ func setProjectRemote(t *testing.T, root, projectID, remote string) {
 	path := filepath.Join(root, "projects", projectID, "project.json")
 	if err := os.WriteFile(path, body, 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestCanvasRouteRendersDirectoryFormWithLabels: a directory-form stage
+// (build) renders each content file under its own label, declared files
+// first in declaration order, and a declared file not written yet shows
+// a labelled missing state instead of vanishing. Harness files beside
+// content/ never render.
+func TestCanvasRouteRendersDirectoryFormWithLabels(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "fix-it", "sdlc")
+	docDir := filepath.Join(root, "projects", "alpha", "runs", "fix-it", "documents", "build")
+	for name, body := range map[string]string{
+		filepath.Join("content", "code.md"):  "# Code body\n\nthe change\n",
+		filepath.Join("content", "notes.md"): "# Notes body\n",
+		"prompt-claude.md":                   "# Harness prompt\n",
+	} {
+		p := filepath.Join(docDir, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: root,
+		ResolveCanvas: func(_, _, _ string) (string, error) {
+			return filepath.Join(docDir, "content.md"), nil
+		},
+		CanvasFiles: func(_, _, stage string) []string {
+			if stage == "build" {
+				return []string{"code.md", "test.md"}
+			}
+			return nil
+		},
+	})
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/alpha/fix-it/canvas/build", nil))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+	}
+	out := rr.Body.String()
+	order := []string{
+		`canvas-file-label">Code <span class="meta">content/code.md</span>`,
+		"<h1>Code body</h1>",
+		`canvas-file-label">Test <span class="meta">content/test.md</span>`,
+		"no content/test.md yet",
+		`canvas-file-label">Notes <span class="meta">content/notes.md</span>`,
+		"<h1>Notes body</h1>",
+	}
+	last := -1
+	for _, want := range order {
+		at := strings.Index(out, want)
+		if at < 0 {
+			t.Fatalf("body missing %q\n%s", want, out)
+		}
+		if at < last {
+			t.Fatalf("%q out of order\n%s", want, out)
+		}
+		last = at
+	}
+	if strings.Contains(out, "Harness prompt") {
+		t.Fatal("a harness file beside content/ rendered as a canvas")
 	}
 }

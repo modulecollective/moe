@@ -118,6 +118,13 @@ type Options struct {
 	// handler's ReadFile (ErrNotExist renders the 200 empty-state).
 	ResolveCanvas func(project, run, stage string) (path string, err error)
 
+	// CanvasFiles returns a directory-form stage's declared canvas file
+	// names (e.g. code.md, test.md) for an on-disk run, or nil for a
+	// file-form stage. The canvas route and the run page use it to show
+	// a labelled missing state for a declared file not yet written. Nil
+	// means every stage reads as file-form plus whatever content/ holds.
+	CanvasFiles func(project, run, stage string) []string
+
 	// RunStages returns the workflow ladder order for an on-disk run.
 	// canvasLinks walks this ladder and asks ResolveCanvas for each
 	// stage in order — so this drives both ordering *and* which

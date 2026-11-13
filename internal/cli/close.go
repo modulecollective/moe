@@ -5,8 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/lore"
@@ -247,9 +245,12 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 		// uses.
 		if !isCaptureWorkflow(workflow) {
 			for _, docID := range sortedDocIDs(md) {
-				canvasRel := run.ContentPath(md.Project, md.ID, docID)
-				info, err := os.Stat(filepath.Join(root, canvasRel))
-				if err != nil || info.Size() == 0 {
+				// Through the shared layout resolver: a directory-form
+				// document (build) has no content.md, and an ambiguous
+				// or empty one refuses the same way a missing file did.
+				canvasRel := canvasDiffPath(md, docID)
+				body, err := run.ReadCanvas(root, md.Project, md.ID, docID)
+				if err != nil || body == "" {
 					return fmt.Errorf(
 						"%s %s/%s: canvas %s is empty\n"+
 							"  reopen the session (`moe %s %s %s/%s`) and write to the canvas,\n"+

@@ -145,11 +145,11 @@ func unverifiedFollowupClaims(root string, md *run.Metadata) map[string][]string
 
 	out := map[string][]string{}
 	for _, docID := range sortedDocIDs(md) {
-		canvas, err := os.ReadFile(filepath.Join(root, run.ContentPath(md.Project, md.ID, docID)))
+		canvas, err := run.ReadCanvas(root, md.Project, md.ID, docID)
 		if err != nil {
 			continue
 		}
-		for _, slug := range followupClaimSlugs(canvas) {
+		for _, slug := range followupClaimSlugs([]byte(canvas)) {
 			// A cross-project claim (`claudia/foo`) is matched on its
 			// bare slug: run IDs are not project-qualified on disk.
 			base := slug

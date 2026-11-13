@@ -210,7 +210,7 @@ func stageLocationSection(md *run.Metadata, docID string) string {
 
 // designOnlyStageNote is the paragraph a design-only run's first stage
 // gets on top of its location block. The successor line above it
-// is true — `moe sdlc code …` is exactly what the operator will be
+// is true — `moe sdlc build …` is exactly what the operator will be
 // offered — but nothing walks there on its own, and an agent that
 // believes a code stage is coming writes a different document: it
 // leaves the hard calls for the walk it expects, and the walk never
@@ -310,7 +310,7 @@ func upstreamChangeBanner(root string, md *run.Metadata, docID string) (string, 
 		moved = append(moved, move{
 			doc:     dep,
 			when:    depWhen,
-			relPath: run.ContentPath(md.Project, md.ID, dep),
+			relPath: canvasDiffPath(md, dep),
 		})
 	}
 	if len(moved) == 0 {
@@ -501,24 +501,41 @@ func operationalCore(root string, md *run.Metadata, docID, clonePath string, san
 	// the bureaucracy root via --add-dir. Either way, writes to canvas,
 	// followups, and twin feedback land at the same absolute paths
 	// MoE's commit-turn logic reads back from.
-	content := filepath.Join(root, run.ContentPath(md.Project, md.ID, docID))
-
-	out := fmt.Sprintf(`You are collaborating with the operator on the %q document
-for run %q (project %q) in a Ministry of Everything bureaucracy repo.
-
-Your canvas for this document is the single file:
+	canvasPara := fmt.Sprintf(`Your canvas for this document is the single file:
   %s
 
 Treat the conversation as exploratory, and the file as the compressed
 artifact. When the operator asks for edits, write them directly to that
 file (create it if it doesn't exist). Keep the file tidy — it becomes
 upstream context for downstream agents once the operator moves on.
+`, filepath.Join(root, run.ContentPath(md.Project, md.ID, docID)))
+	if files := stageCanvasFiles(md.Workflow, docID); files != nil {
+		var paths strings.Builder
+		for _, f := range files {
+			fmt.Fprintf(&paths, "  %s\n", filepath.Join(root, run.ContentFilePath(md.Project, md.ID, docID, f.Name)))
+		}
+		canvasPara = `Your canvases for this document are these files, all writable:
+` + paths.String() + `
+Treat the conversation as exploratory, and the files as the compressed
+artifact. Update whichever file the work touches, as you go — you need
+not finish one before writing the other. Keep them tidy; they become
+upstream context for downstream agents.
 
+Each file carries its own ` + "`## Gate`" + `, reset to blocked when this
+stage opens. The stage advances only when every file is stamped ready
+and none of its sections is empty or still on its placeholder.
+`
+	}
+
+	out := fmt.Sprintf(`You are collaborating with the operator on the %q document
+for run %q (project %q) in a Ministry of Everything bureaucracy repo.
+
+%s`, docID, md.ID, md.Project, canvasPara) + `
 Prior runs of this project (their canvases, their stage transcripts,
 the journal sliced by run / doc / workflow) are reachable via the
-`+"`moe-context`"+` skill. Reach for it before asking the operator a
+` + "`moe-context`" + ` skill. Reach for it before asking the operator a
 question whose answer might already be in a prior run.
-`, docID, md.ID, md.Project, content)
+`
 
 	if clonePath != "" && sandboxReadOnly {
 		// Read-only variant for the strict-boundary stages. Without it
@@ -735,16 +752,27 @@ func priorRunsSection(root string, md *run.Metadata) string {
 }
 
 // priorRunArtifactPaths returns absolute paths to a prior run's
-// document content.md files (one per documents/<doc>/content.md that
-// exists on disk) and followups.md if present. Sorted so prompt
-// output is deterministic across runs. Returns nil when nothing on
-// disk matches — the caller still emits the slug line so the agent
-// knows the prior existed.
+// document canvases — content.md for file-form documents, each direct
+// Markdown file under content/ for directory-form ones — and
+// followups.md if present. Sorted so prompt output is deterministic
+// across runs. A document with an ambiguous layout contributes nothing
+// rather than a guess. Returns nil when nothing on disk matches — the
+// caller still emits the slug line so the agent knows the prior
+// existed.
 func priorRunArtifactPaths(root, projectID, slug string) []string {
 	runDir := filepath.Join(root, run.Dir(projectID, slug))
-	matches, _ := filepath.Glob(filepath.Join(runDir, "documents", "*", "content.md"))
-	sort.Strings(matches)
-	paths := matches
+	docDirs, _ := filepath.Glob(filepath.Join(runDir, "documents", "*"))
+	var paths []string
+	for _, docDir := range docDirs {
+		canvases, err := run.DocCanvases(docDir)
+		if err != nil {
+			continue
+		}
+		for _, c := range canvases {
+			paths = append(paths, c.Path)
+		}
+	}
+	sort.Strings(paths)
 	followups := filepath.Join(root, run.FollowupsPath(projectID, slug))
 	if _, err := os.Stat(followups); err == nil {
 		paths = append(paths, followups)

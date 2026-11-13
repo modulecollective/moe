@@ -158,6 +158,12 @@ func (s *Sheet) property(workflow, stage, prop string) string {
 type Vocab struct {
 	Workflows map[string][]string // workflow name → its stage names
 	Agents    []string            // registered backend names
+	// Retired maps a workflow to its retired stage names and each one's
+	// replacement. A selector naming a retired stage refuses with the
+	// replacement named, rather than the generic unknown-stage error —
+	// and never silently selects the replacement, because the retired
+	// stages' policies may have differed.
+	Retired map[string]map[string]string
 }
 
 // Validate checks every rule against the known vocabulary v and returns
@@ -222,6 +228,9 @@ func (sel selector) validate(v Vocab, line int) error {
 			return fmt.Errorf("line %d: unknown workflow %q (known: %s)", line, sel.workflow, strings.Join(workflowNames(v), ", "))
 		}
 		if !slices.Contains(stages, sel.stage) {
+			if repl, ok := v.Retired[sel.workflow][sel.stage]; ok {
+				return fmt.Errorf("line %d: stage %q in workflow %q was retired; use %q instead (rewrite the rule — retired stages' settings are not carried over)", line, sel.stage, sel.workflow, repl)
+			}
 			return fmt.Errorf("line %d: unknown stage %q in workflow %q (known: %s)", line, sel.stage, sel.workflow, strings.Join(stages, ", "))
 		}
 	case sel.workflow != "": // bare workflow
@@ -230,6 +239,11 @@ func (sel selector) validate(v Vocab, line int) error {
 		}
 	case sel.stage != "": // bare .stage
 		if !stageInAnyWorkflow(v, sel.stage) {
+			for wf, retired := range v.Retired {
+				if repl, ok := retired[sel.stage]; ok {
+					return fmt.Errorf("line %d: stage %q was retired from workflow %q; use %q instead (rewrite the rule — retired stages' settings are not carried over)", line, sel.stage, wf, repl)
+				}
+			}
 			return fmt.Errorf("line %d: unknown stage %q (known: %s)", line, sel.stage, strings.Join(allStages(v), ", "))
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	iofs "io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -81,17 +82,19 @@ func runCat(workflow, defaultStage string) func(args []string, stdout, stderr io
 			moePrintf(stderr, "moe %s cat: %v\n", workflow, err)
 			return 1
 		}
-		f, err := os.Open(abs)
+		// abs names the file-form canvas; its directory is the document
+		// dir, which also holds a directory-form stage's content/. The
+		// shared resolver picks the layout and labels each file.
+		body, err := run.RenderDocCanvases(filepath.Dir(abs))
 		if err != nil {
-			if os.IsNotExist(err) {
+			if errors.Is(err, iofs.ErrNotExist) {
 				moePrintf(stderr, "moe %s cat: no canvas yet at %s\n", workflow, abs)
 				return 1
 			}
 			moePrintf(stderr, "moe %s cat: %v\n", workflow, err)
 			return 1
 		}
-		defer f.Close()
-		if _, err := io.Copy(stdout, f); err != nil {
+		if _, err := io.WriteString(stdout, body); err != nil {
 			moePrintf(stderr, "moe %s cat: %v\n", workflow, err)
 			return 1
 		}

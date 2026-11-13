@@ -67,7 +67,10 @@ func DocCanvases(docDir string) ([]Canvas, error) {
 	if dirErr != nil && !errors.Is(dirErr, fs.ErrNotExist) {
 		return nil, dirErr
 	}
-	hasFile := fileErr == nil && !fileInfo.IsDir()
+	if fileErr == nil && fileInfo.IsDir() {
+		return nil, fmt.Errorf("%s: content.md is a directory, not a canvas", docDir)
+	}
+	hasFile := fileErr == nil
 	hasDir := dirErr == nil && dirInfo.IsDir()
 	switch {
 	case hasFile && hasDir:

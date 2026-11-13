@@ -57,12 +57,12 @@ func commitAdvance(root string, md *run.Metadata, docID string) error {
 			if fresh.Workflow != md.Workflow || wf.Successor(docID) == "" {
 				return "", fmt.Errorf("%w: invalid prior stage %s", runopen.ErrNotAdvanceable, docID)
 			}
-			ok, err := wf.CheckStageGate(root, fresh, docID)
+			problems, err := wf.StageGateProblems(root, fresh, docID)
 			if err != nil {
 				return "", err
 			}
-			if !ok {
-				return "", fmt.Errorf("%w: stage %s gate not satisfied", runopen.ErrNotAdvanceable, docID)
+			if len(problems) > 0 {
+				return "", fmt.Errorf("%w: stage %s gate not satisfied (%s)", runopen.ErrNotAdvanceable, docID, strings.Join(problems, "; "))
 			}
 			return docID, nil
 		},
@@ -74,11 +74,17 @@ func commitAdvance(root string, md *run.Metadata, docID string) error {
 type canvasRefusalError struct {
 	Path   string
 	Reason string
+	Detail string
 }
 
 func (e *canvasRefusalError) Error() string {
-	if e.Reason == "missing" {
+	switch e.Reason {
+	case "missing":
 		return fmt.Sprintf("commit: canvas %s does not exist — agent did not write to its canvas this turn", e.Path)
+	case "unchanged":
+		return fmt.Sprintf("commit: canvases under %s are unchanged since dispatch — agent did not write to them this turn", e.Path)
+	case "invalid":
+		return fmt.Sprintf("commit: canvases under %s cannot be read: %s", e.Path, e.Detail)
 	}
 	return fmt.Sprintf("commit: canvas %s is empty", e.Path)
 }
@@ -107,14 +113,20 @@ func commitTurn(root string, md *run.Metadata, docID, backend string, timedOut t
 	// staging set is non-empty and the turn would commit a
 	// transcript-only snapshot — the failure mode the missing-canvas-doc
 	// run was opened against.
-	canvas := filepath.Join(root, run.ContentPath(md.Project, md.ID, docID))
-	switch info, err := os.Stat(canvas); {
-	case errors.Is(err, fs.ErrNotExist):
-		return &canvasRefusalError{Path: canvas, Reason: "missing"}
-	case err != nil:
-		return fmt.Errorf("commit: stat canvas %s: %w", canvas, err)
-	case info.Size() == 0:
-		return &canvasRefusalError{Path: canvas, Reason: "empty"}
+	//
+	// A directory-form stage has no content.md; its caller has already
+	// compared the content files against the pre-dispatch baseline
+	// (checkCanvasOutput), which is the stronger form of this check.
+	if stageCanvasFiles(md.Workflow, docID) == nil {
+		canvas := filepath.Join(root, run.ContentPath(md.Project, md.ID, docID))
+		switch info, err := os.Stat(canvas); {
+		case errors.Is(err, fs.ErrNotExist):
+			return &canvasRefusalError{Path: canvas, Reason: "missing"}
+		case err != nil:
+			return fmt.Errorf("commit: stat canvas %s: %w", canvas, err)
+		case info.Size() == 0:
+			return &canvasRefusalError{Path: canvas, Reason: "empty"}
+		}
 	}
 
 	md.LastTurn = &run.Turn{Stage: docID, Agent: backend}

@@ -139,6 +139,17 @@ func serveOptions(root string, stderr io.Writer) serve.Options {
 			}
 			return resolveCanvasPath(root, md.Workflow, project, runID, stage)
 		},
+		CanvasFiles: func(project, runID, stage string) []string {
+			md, err := run.Load(root, project, runID)
+			if err != nil {
+				return nil
+			}
+			var names []string
+			for _, f := range stageCanvasFiles(md.Workflow, stage) {
+				names = append(names, f.Name)
+			}
+			return names
+		},
 		RunStages: func(project, runID string) ([]string, error) {
 			md, err := run.Load(root, project, runID)
 			if err != nil {

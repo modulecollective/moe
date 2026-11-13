@@ -1,5 +1,5 @@
 // Package cli, stage.go: the runStageSession orchestration that
-// wraps `moe sdlc design`, `moe sdlc code`, and the rest of the
+// wraps `moe sdlc design`, `moe sdlc build`, and the rest of the
 // per-stage entry points around a worktree-on-branch session.
 //
 // The chain prompts (promptNextStage / promptStageNextStage /
@@ -240,10 +240,14 @@ func stageAgentName(opts stageSessionOpts, md *run.Metadata, sheetAgent string) 
 // stages, or agents extend the accepted vocabulary automatically.
 func stylesheetVocab() stylesheet.Vocab {
 	wf := make(map[string][]string, len(workflows))
+	retired := map[string]map[string]string{}
 	for name, w := range workflows {
 		wf[name] = w.Stages()
+		if len(w.retired) > 0 {
+			retired[name] = maps.Clone(w.retired)
+		}
 	}
-	return stylesheet.Vocab{Workflows: wf, Agents: agent.Names()}
+	return stylesheet.Vocab{Workflows: wf, Agents: agent.Names(), Retired: retired}
 }
 
 // stageModel chooses an explicit model, then the resolved backend's model,
@@ -301,7 +305,7 @@ func resolveAgentName(explicit, runDefault, stylesheet string) string {
 	return "claude"
 }
 
-// runStageSession is the core loop shared by `moe sdlc design` and `moe sdlc code`:
+// runStageSession is the core loop shared by `moe sdlc design` and `moe sdlc build`:
 // resolve the run/document, hand the operator an interactive agent
 // session keyed to that document's session-id, and commit whatever changed
 // when the agent exits.
@@ -453,6 +457,14 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	// captured by BuildPrompt and stamped delivered below once the turn
 	// succeeds. Nil for nearly every turn.
 	var deliveredInputIDs []int
+
+	// Directory-form stages declare their canvas files on the workflow;
+	// nil for every file-form stage. canvasBaseline is their content
+	// after seeding and the entry gate reset, taken immediately before
+	// dispatch — the turn-output check compares against it so harness
+	// preparation never passes for agent work.
+	canvasFiles := stageCanvasFiles(md.Workflow, docID)
+	var canvasBaseline map[string]string
 
 	var clonePath string
 	var devEnv map[string]string
@@ -665,6 +677,26 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				moePrintf(stderr, "opened %s canvas (session %s)\n  %s\n", docID, sessionID, filepath.Join(workRoot, run.ContentPath(md.Project, md.ID, docID)))
 			}
 
+			// Directory-form stages: seed any missing declared file
+			// (from the run's legacy canvas when one is named, else its
+			// skeleton), then reset every content file's gate to
+			// blocked. Every admitted entry, not just the first: a
+			// resumed stage restamps against the current revision. The
+			// baseline is taken after both so neither counts as output.
+			if canvasFiles != nil {
+				if err := seedCanvasFiles(workRoot, md, docID, canvasFiles); err != nil {
+					return stageTurnSpec{}, err
+				}
+				if err := resetCanvasGates(workRoot, md, docID); err != nil {
+					return stageTurnSpec{}, fmt.Errorf("session: reset canvas gates: %w", err)
+				}
+				baseline, err := snapshotCanvases(workRoot, md, docID)
+				if err != nil {
+					return stageTurnSpec{}, fmt.Errorf("session: snapshot canvases: %w", err)
+				}
+				canvasBaseline = baseline
+			}
+
 			// CanvasOnOpen runs last in BuildSpec — after every step that
 			// can fail — so a bootstrap error never leaves an uncommitted
 			// canvas write behind. chat uses it to append its per-session
@@ -752,6 +784,11 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 					var timedOut time.Duration
 					if toErr, ok := errors.AsType[*agent.TimeoutError](runErr); ok {
 						timedOut = toErr.Timeout
+					}
+					if canvasFiles != nil {
+						if err := checkCanvasOutput(workRoot, md, docID, canvasBaseline); err != nil {
+							return err
+						}
 					}
 					if err := commitTurn(workRoot, md, docID, agentName, timedOut, extras...); err != nil {
 						return err

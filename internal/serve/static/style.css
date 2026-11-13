@@ -577,6 +577,10 @@ form.new-run button:hover, form.new-run button:focus {
 .doc .align-left { text-align: left; }
 .doc .align-center { text-align: center; }
 .doc .align-right { text-align: right; }
+/* A directory-form stage (build) renders one section per canvas file;
+   the label separates Code from Test where the files' own headings sit. */
+.doc .canvas-file + .canvas-file { margin-top: 2rem; border-top: 1px solid var(--hairline); }
+.doc .canvas-file-label { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
 
 /* Unresolved wikilink — legible, distinct from a real link (resolution
    to a target route is a follow-up). */

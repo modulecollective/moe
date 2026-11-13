@@ -1,7 +1,7 @@
 // Package session manages throwaway git worktrees for long-lived
 // stage sessions.
 //
-// A stage session (moe sdlc design, moe sdlc code) runs Claude against
+// A stage session (moe sdlc design, moe sdlc build) runs Claude against
 // the bureaucracy repo for minutes to hours. Holding the repo lock
 // across that window would block every other moe command, so we run
 // each session on a dedicated branch in a git worktree under
@@ -461,7 +461,19 @@ func Close(s *Session) error {
 	// a freshly reserved no-op session from a close that already landed; only
 	// the validated receipt above permits cleanup without this comparison.
 	// Refusal keeps the branch and files for explicit recovery or another turn.
+	//
+	// A directory-form document has no content.md; its canvas is the
+	// content/ tree, compared by tree hash the same way. The stage's own
+	// pre-dispatch baseline check is the precise one (seeds and gate
+	// resets don't count there); this one only has to refuse a branch
+	// that brought no canvas change at all.
 	canvasRel := run.ContentPath(s.Project, s.Run, s.Doc)
+	if _, err := git.RevParse(s.WorktreePath, s.Branch+":"+canvasRel); err != nil {
+		dirRel := run.ContentDir(s.Project, s.Run, s.Doc)
+		if _, dirErr := git.RevParse(s.WorktreePath, s.Branch+":"+dirRel); dirErr == nil {
+			canvasRel = dirRel
+		}
+	}
 	branchBlob, branchErr := git.RevParse(s.WorktreePath, s.Branch+":"+canvasRel)
 	mainBlob, mainErr := git.RevParse(s.Root, "main:"+canvasRel)
 	// branchErr means the canvas doesn't exist at the branch tip at

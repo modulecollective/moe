@@ -45,12 +45,19 @@ type Workflow struct {
 	docsOnly []string
 	// stageGates lets a stage layer an additional satisfiability check
 	// on top of the default "has a work-turn newer than upstream" rule.
-	// sdlc's test stage uses it: a committed canvas
+	// sdlc's review stage uses it: a committed canvas
 	// that left the structural sections empty must not advance the
 	// stage. The gate runs *after* the default work-turn check, only
 	// when that check passed — so a stage with no work-turn stays
 	// parked regardless of gate state.
 	stageGates map[string]StageGate
+	// stageFiles declares directory-form stages: their canvases are the
+	// named files under content/ rather than one content.md. See
+	// RegisterStageFiles.
+	stageFiles map[string][]CanvasFile
+	// retired maps a stage this workflow no longer runs to the stage
+	// that replaced it. See RetireStage.
+	retired map[string]string
 }
 
 // StageGate is the optional canvas-aware check a stage can register
@@ -67,6 +74,7 @@ func NewWorkflow(name string) *Workflow {
 		prereqs:    map[string][]string{},
 		successors: map[string][]string{},
 		stageGates: map[string]StageGate{},
+		stageFiles: map[string][]CanvasFile{},
 	}
 }
 
@@ -113,17 +121,70 @@ func (w *Workflow) RegisterStageGate(stage string, gate StageGate) {
 	w.stageGates[stage] = gate
 }
 
-func (w *Workflow) CheckStageGate(root string, md *run.Metadata, stage string) (bool, error) {
-	gate, ok := w.stageGates[stage]
-	if !ok {
-		return true, nil
+// RegisterStageFiles declares stage as directory-form: its canvases are
+// the named files under documents/<stage>/content/, each seeded from its
+// skeleton. Declaring files is the whole opt-in — the gate, the entry
+// reset, the turn-output check and the readers follow from it. Panics
+// on an unknown stage or a second declaration.
+func (w *Workflow) RegisterStageFiles(stage string, files ...CanvasFile) {
+	if !slices.Contains(w.stageOrder, stage) {
+		panic("cli: canvas files registered for unknown stage " + w.Name + " " + stage)
 	}
-	return gate(root, md)
+	if _, dup := w.stageFiles[stage]; dup {
+		panic("cli: duplicate canvas files " + w.Name + " " + stage)
+	}
+	if len(files) == 0 {
+		panic("cli: empty canvas file set " + w.Name + " " + stage)
+	}
+	w.stageFiles[stage] = append([]CanvasFile(nil), files...)
 }
 
+// StageFiles returns a directory-form stage's declared canvases in
+// declaration order, or nil for a file-form stage.
+func (w *Workflow) StageFiles(stage string) []CanvasFile {
+	return w.stageFiles[stage]
+}
+
+// CheckStageGate reports whether stage may advance. A directory-form
+// stage first has to have every content file stamped (see
+// canvasFileProblems); a registered gate then runs on top.
+func (w *Workflow) CheckStageGate(root string, md *run.Metadata, stage string) (bool, error) {
+	problems, err := w.StageGateProblems(root, md, stage)
+	if err != nil {
+		return false, err
+	}
+	return len(problems) == 0, nil
+}
+
+// StageGateProblems is CheckStageGate with the reasons: one line per
+// unstamped file for a directory-form stage, or a generic line when a
+// registered gate refuses. Empty means the gate is satisfied.
+func (w *Workflow) StageGateProblems(root string, md *run.Metadata, stage string) ([]string, error) {
+	if files := w.stageFiles[stage]; files != nil {
+		problems, err := canvasFileProblems(root, md, stage, files)
+		if err != nil || len(problems) > 0 {
+			return problems, err
+		}
+	}
+	gate, ok := w.stageGates[stage]
+	if !ok {
+		return nil, nil
+	}
+	pass, err := gate(root, md)
+	if err != nil {
+		return nil, err
+	}
+	if !pass {
+		return []string{"gate not satisfied"}, nil
+	}
+	return nil, nil
+}
+
+// HasStageGate reports whether stage carries any readiness check — a
+// registered gate or a directory-form canvas set.
 func (w *Workflow) HasStageGate(stage string) bool {
 	_, ok := w.stageGates[stage]
-	return ok
+	return ok || w.stageFiles[stage] != nil
 }
 
 // RegisterStage adds a stage name to this workflow's ladder. Panics on
@@ -360,8 +421,8 @@ func (w *Workflow) stageSatisfied(root string, md *run.Metadata, stage string, i
 	// check already would. Layering it on top of the time check keeps
 	// the gate honest: it speaks to the *quality* of a committed turn,
 	// not its existence.
-	if gate, ok := w.stageGates[stage]; ok {
-		ok, err := gate(root, md)
+	if w.HasStageGate(stage) {
+		ok, err := w.CheckStageGate(root, md, stage)
 		if err != nil {
 			return false, err
 		}
@@ -390,7 +451,7 @@ func (w *Workflow) stageSatisfied(root string, md *run.Metadata, stage string, i
 	if len(succs) == 0 {
 		return true, nil
 	}
-	for _, succ := range succs {
+	for _, succ := range w.successorEvidence(succs) {
 		succWhen, err := workTurnTime(root, md.Project, md.ID, succ, idx)
 		if err != nil {
 			return false, err
@@ -468,4 +529,48 @@ func WorkflowNames() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// RetireStage records that a stage this workflow once ran has been
+// replaced. A retired stage is not on the ladder and is never
+// dispatched; its historical documents stay readable (register it with
+// RegisterDoc for that), its typed verb points at the replacement, and
+// a stylesheet selector naming it refuses with the replacement named.
+func (w *Workflow) RetireStage(name, replacement string) {
+	if slices.Contains(w.stageOrder, name) {
+		panic("cli: retired stage still on the ladder " + w.Name + " " + name)
+	}
+	if !slices.Contains(w.stageOrder, replacement) {
+		panic("cli: retired stage replaced by unknown stage " + w.Name + " " + replacement)
+	}
+	if w.retired == nil {
+		w.retired = map[string]string{}
+	}
+	w.retired[name] = replacement
+}
+
+// RetiredStage returns the replacement for a retired stage name.
+func (w *Workflow) RetiredStage(name string) (string, bool) {
+	repl, ok := w.retired[name]
+	return repl, ok
+}
+
+// successorEvidence widens a stage's successors with every retired
+// stage they replaced. A run started under the old ladder recorded its
+// progress past design as code/test turns; those still prove design was
+// followed, so the run doesn't fall back to design. They never satisfy
+// the replacement itself — build needs its own turn — because this only
+// feeds the successor half of stageSatisfied.
+func (w *Workflow) successorEvidence(succs []string) []string {
+	if len(w.retired) == 0 {
+		return succs
+	}
+	out := append([]string(nil), succs...)
+	for old, repl := range w.retired {
+		if slices.Contains(succs, repl) {
+			out = append(out, old)
+		}
+	}
+	sort.Strings(out[len(succs):])
+	return out
 }
