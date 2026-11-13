@@ -730,6 +730,7 @@ func TestSDLCStageAgentCommitRejected(t *testing.T) {
 				t.Fatalf("runNew exit=%d stderr=%q", code, errb.String())
 			}
 			assertUnrelatedUnchanged := seedAgentSwitchStaging(t, root, "rejected-agent")
+			rel, working, index := seedAgentSwitchTarget(t, root, "rejected-agent")
 			installCreateFailureHook(t, root, `case "$(head -n 1 "$1")" in
   "switch agent:"*) echo reject-switch >&2; exit 1 ;;
 esac
@@ -737,10 +738,31 @@ esac
 			before := gittest.HeadSHA(t, root)
 			stages := stubOpenSdlcStage(t, nil)
 			pushes := stubPushFromCascade(t, 0, nil)
+			retrying := false
+			assertBeforeDispatch := func() {
+				t.Helper()
+				if !retrying {
+					t.Fatal("dispatch after rejected switch")
+				}
+				assertAgentSwitchCommit(t, root, "rejected-agent", before)
+				log := gitLogFormat(t, root, 1, "HEAD", "%B")
+				for _, want := range []string{"switch agent: tele/rejected-agent to codex", "MoE-Run: rejected-agent", "MoE-Project: tele", "MoE-Workflow: sdlc", "MoE-Document: design"} {
+					if !strings.Contains(log, want) {
+						t.Errorf("commit missing %q before dispatch: %s", want, log)
+					}
+				}
+			}
+			recordStage := openSdlcStage
+			openSdlcStage = func(stage, projectID, runID string, headless bool, stdout, stderr io.Writer) int {
+				assertBeforeDispatch()
+				return recordStage(stage, projectID, runID, headless, stdout, stderr)
+			}
+			calls := 0
 			prev := runStageSession
 			runStageSession = func(_, _, _ string, _ stageSessionOpts, _, _ io.Writer) int {
-				t.Fatal("session started after rejected switch")
-				return 1
+				assertBeforeDispatch()
+				calls++
+				return 0
 			}
 			t.Cleanup(func() { runStageSession = prev })
 			args := []string{"--agent", "codex", "tele/rejected-agent"}
@@ -763,6 +785,22 @@ esac
 			}
 			if after := gittest.HeadSHA(t, root); after != before {
 				t.Errorf("HEAD changed: before=%s after=%s", before, after)
+			}
+			assertAgentSwitchTarget(t, root, rel, working, index)
+			assertUnrelatedUnchanged()
+
+			gittest.Run(t, root, "config", "--unset", "core.hooksPath")
+			retrying = true
+			out.Reset()
+			errb.Reset()
+			if code := runDesign(args, &out, &errb); code != 0 {
+				t.Fatalf("retry exit=%d stderr=%q", code, errb.String())
+			}
+			if !strings.Contains(out.String(), "switched run agent to codex") {
+				t.Errorf("retry missing announcement: %s", out.String())
+			}
+			if cascade && (len(*stages) != 1 || calls != 0) || !cascade && (calls != 1 || len(*stages) != 0) || len(*pushes) != 0 {
+				t.Errorf("retry dispatch: stages=%v sessions=%d pushes=%v", *stages, calls, *pushes)
 			}
 			assertUnrelatedUnchanged()
 		})

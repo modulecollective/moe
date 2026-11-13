@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -185,6 +186,10 @@ func runRetiredSDLCStage(stage string) func(args []string, stdout, stderr io.Wri
 	}
 }
 
+// Private seams for failures after a partial save and cooperating lock writers.
+var saveSDLCStageAgent = run.Save
+var withSDLCStageAgentLock = repolock.With
+
 func persistSDLCStageAgent(verb, stage, projectID, runID, agentName string, stdout, stderr io.Writer) (string, int) {
 	resolvedRunID, code := resolveSDLCRunSlug(verb, projectID, runID, stdout, stderr)
 	if code != 0 {
@@ -194,42 +199,85 @@ func persistSDLCStageAgent(verb, stage, projectID, runID, agentName string, stdo
 	if err != nil {
 		return "", 1
 	}
-	md, err := run.Load(root, projectID, resolvedRunID)
-	if err != nil {
-		moePrintf(stderr, "%s: %v\n", verb, err)
-		return "", 1
-	}
-	if md.Agent == agentName {
-		return resolvedRunID, 0
-	}
-	md.Agent = agentName
-	if err := run.Save(root, md); err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return "", 1
-	}
-	runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
-	msg := fmt.Sprintf("switch agent: %s/%s to %s\n\n", md.Project, md.ID, agentName) +
-		trailers.Block{
-			Run:      md.ID,
-			Project:  md.Project,
-			Workflow: md.Workflow,
-			Document: stage,
-		}.String()
-	err = repolock.With(root, repolock.Options{
+	runJSON := filepath.Join(run.Dir(projectID, resolvedRunID), "run.json")
+	changed := false
+	err = withSDLCStageAgentLock(root, repolock.Options{
 		Purpose: "switch-agent",
-		Run:     md.Project + "/" + md.ID,
+		Run:     projectID + "/" + resolvedRunID,
 	}, func() error {
-		if err := run.Stage(root, runJSON); err != nil {
+		md, err := run.Load(root, projectID, resolvedRunID)
+		if err != nil {
 			return err
 		}
-		return git.Run(root, "commit", "--only", "-m", msg, "--", runJSON)
+		if md.Agent == agentName {
+			return nil
+		}
+		abs := filepath.Join(root, runJSON)
+		prev, err := os.ReadFile(abs)
+		if err != nil {
+			return fmt.Errorf("read %s: %w", runJSON, err)
+		}
+		// Working bytes and staged content may both differ from HEAD.
+		index, err := git.Output(root, "ls-files", "-s", "--", runJSON)
+		if err != nil {
+			return fmt.Errorf("read index entry for %s: %w", runJSON, err)
+		}
+		index = strings.TrimSpace(index)
+		if index != "" && (strings.Contains(index, "\n") || strings.Fields(index)[2] != "0") {
+			return fmt.Errorf("unmerged index entry for %s", runJSON)
+		}
+		rollback := func(cause error) error {
+			return restoreSDLCStageAgent(root, runJSON, prev, index, cause)
+		}
+		md.Agent = agentName
+		if err := saveSDLCStageAgent(root, md); err != nil {
+			return rollback(err)
+		}
+		if err := run.Stage(root, runJSON); err != nil {
+			return rollback(err)
+		}
+		msg := fmt.Sprintf("switch agent: %s/%s to %s\n\n", md.Project, md.ID, agentName) +
+			trailers.Block{
+				Run:      md.ID,
+				Project:  md.Project,
+				Workflow: md.Workflow,
+				Document: stage,
+			}.String()
+		if err := git.Run(root, "commit", "--only", "-m", msg, "--", runJSON); err != nil {
+			return rollback(err)
+		}
+		changed = true
+		return nil
 	})
 	if err != nil {
 		moePrintf(stderr, "commit agent switch: %v\n", err)
 		return "", 1
 	}
-	moePrintf(stdout, "switched run agent to %s\n", agentName)
+	if changed {
+		moePrintf(stdout, "switched run agent to %s\n", agentName)
+	}
 	return resolvedRunID, 0
+}
+
+// Restore only this writer's path, attempting both recoveries independently.
+func restoreSDLCStageAgent(root, rel string, prev []byte, index string, cause error) error {
+	var indexErr error
+	if fields := strings.Fields(index); len(fields) >= 2 {
+		indexErr = git.Run(root, "update-index", "--add", "--cacheinfo", fields[0]+","+fields[1]+","+rel)
+	} else {
+		indexErr = git.Run(root, "update-index", "--force-remove", "--", rel)
+	}
+	if indexErr != nil {
+		indexErr = fmt.Errorf("restore index for %s: %w", rel, indexErr)
+	}
+	fileErr := os.WriteFile(filepath.Join(root, rel), prev, 0o644)
+	if fileErr != nil {
+		fileErr = fmt.Errorf("restore file %s: %w", rel, fileErr)
+	}
+	if err := errors.Join(indexErr, fileErr); err != nil {
+		return fmt.Errorf("agent switch failed (%w); rollback incomplete: %w; inspect and repair %s before retrying", cause, err, rel)
+	}
+	return cause
 }
 
 // openSdlcDesign is the Go-level seam behind `moe sdlc design`. The
