@@ -14,7 +14,7 @@ func (m *model) animate(last *frame) []byte {
 		return nil
 	}
 	m.animation = (m.animation + 1) % len(art.Frames)
-	if m.tooSmall() {
+	if m.tooSmall() || m.mode == modeConfirm {
 		return nil
 	}
 	var b bytes.Buffer

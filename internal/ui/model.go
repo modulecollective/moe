@@ -120,6 +120,7 @@ type model struct {
 type pendingConfirm struct {
 	prompt string
 	yes    func(m *model)
+	top    int
 }
 
 func newModel(queue chan<- job) *model {
@@ -490,7 +491,34 @@ func (m *model) ask(prompt string, yes func(*model)) {
 	m.mode = modeConfirm
 }
 
+func (m *model) confirmationRows() []string {
+	return wrapRows(m.confirm.prompt, max(m.width-1, 1))
+}
+
 func (m *model) confirmKey(k Key) effect {
+	c := m.confirm
+	h := max(m.high-3, 1)
+	switch k.Code {
+	case KeyUp:
+		c.top--
+	case KeyDown:
+		c.top++
+	case KeyPgUp:
+		c.top -= h
+	case KeyPgDn:
+		c.top += h
+	case KeyHome:
+		c.top = 0
+	case KeyEnd:
+		c.top = len(m.confirmationRows())
+	default:
+		return m.answerConfirm(k)
+	}
+	c.top = min(max(c.top, 0), max(len(m.confirmationRows())-h, 0))
+	return effNone
+}
+
+func (m *model) answerConfirm(k Key) effect {
 	c := m.confirm
 	if k.Code == KeyRune && (k.Rune == 'y' || k.Rune == 'Y') {
 		m.confirm, m.mode = nil, modeNormal

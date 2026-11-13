@@ -36,6 +36,7 @@ Commands (:)
   terminal | help | quit
 
 Console: arrows/page/Home scroll history; End follows newest messages.
+Confirmations: y accepts, Esc cancels; arrows/page/Home/End scroll the question.
 
 Notes reach the run's next prompt; they never pause, resume or start
 work. finish ships the run (!!) from its next boundary. resume releases
@@ -59,6 +60,19 @@ func (m *model) view() frame {
 				f.rows[i] = plain(l, w)
 			}
 		}
+		return f
+	}
+	if m.mode == modeConfirm {
+		// A pending decision owns its screen: history position, arrivals and
+		// the selected item's details cannot hide the action or its target.
+		rows := m.confirmationRows()
+		h := m.high - 3 // title, confirmation heading, footer
+		top := min(m.confirm.top, max(len(rows)-h, 0))
+		m.confirm.top = top
+		f.rows[0] = m.titleRow(w)
+		f.rows[1] = plain(fmt.Sprintf("── confirmation [%d–%d/%d]", top+1, min(top+h, len(rows)), len(rows)), w)
+		copy(f.rows[2:m.high-1], rows[top:min(top+h, len(rows))])
+		f.rows[m.high-1], _ = m.footerRow(w)
 		return f
 	}
 	bh, dh := m.boardHeight(), m.detailHeight()
@@ -280,7 +294,10 @@ func (m *model) footerRow(w int) (string, int) {
 		}
 		return ":" + line, 1 + cc
 	case modeConfirm:
-		return plain("y confirm · any other key cancel", w), -1
+		if len(m.confirmationRows()) > m.high-3 {
+			return plain("y confirm · Esc cancel · ↑↓/Pg scroll", w), -1
+		}
+		return plain("y confirm · n/Esc cancel", w), -1
 	case modeSave:
 		return plain("Choose above · Esc back", w), -1
 	case modeChoice:

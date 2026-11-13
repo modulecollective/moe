@@ -67,6 +67,10 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   scrollable in the details. Retired intents appear under `CLOSED INTENTS`,
   ordered by project/run; inspection remains available after discarding a
   draft or restarting the console. Closed captures accept no new edits.
+
+  Close and discard confirmations show their question on a separate screen,
+  independent of console history. Press `y` to accept or `Esc` to cancel;
+  arrows, page keys, Home and End scroll long questions.
 - `moe serve [--addr <host[:port]>] [--port <n>] [--dynamic]` runs the moe
   server: the web UI, journal pushing, and an optional heartbeat. It binds to
   `127.0.0.1:4242` by default; `--port` is ignored when `--addr` includes a
