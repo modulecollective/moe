@@ -47,7 +47,7 @@ func advanceRun(t *testing.T, root, runID, docID string) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, []byte("# a turn\n\nbody\n"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(readyDesign), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	// The document entry a real session would have minted; commitTurn

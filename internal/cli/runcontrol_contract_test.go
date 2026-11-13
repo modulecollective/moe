@@ -238,6 +238,7 @@ func TestFinishAfterOneStageKickDoesNotRepeatSettledStage(t *testing.T) {
 // finish obeys the gates and is not queued for another ride.
 func TestFinishAfterOneStageKickStopsAtBlockedGate(t *testing.T) {
 	root, md := controlFixture(t)
+	writeReadyDesign(t, root, md)
 	base := time.Now().Add(-time.Hour)
 	for i, s := range []string{"design", "build"} { // parked at review
 		trailerstest.CommitWorkTurnAt(t, root, md.Project, md.ID, "sdlc", s, base.Add(time.Duration(i)*time.Minute))

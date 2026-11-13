@@ -14,8 +14,8 @@ not the same judgement. Pick the one that matches.
 **"This run shouldn't proceed at all."** The idea is already done, the
 premise is falsified by the code, the smallest correct diff is no diff.
 That's a conclusion, not a shortfall — so write it down. Write a real
-canvas: what you checked, what you found, why the run is moot. End it
-with the gate section:
+canvas: what you checked, what you found, why the run is moot. Edit the
+existing first gate (add it below the title only if absent):
 
     ## Gate
 
@@ -25,10 +25,9 @@ with the gate section:
 
 Then exit normally. The turn commits like any other stage turn, and the
 harness closes the run — your reasoning is the durable record, and the
-run stops being re-offered on every sweep. Write a `## Gate` section
-only when you are nominating the close; don't quote the fence as an
-example elsewhere in the canvas. If the operator disagrees, `moe sdlc
-reopen` mints a successor seeded from your canvas — so a close is
+run stops being re-offered on every sweep. Keep the controlling gate first;
+don't quote another Gate heading ahead of it. If the operator disagrees,
+`moe sdlc reopen` mints a successor seeded from your canvas — so a close is
 recoverable, but it is still terminal until someone acts. Nominate it
 only when you are sure.
 
@@ -37,19 +36,22 @@ questions you cannot resolve, the change is too large for one headless
 turn, or verification requires a human surface you cannot drive from
 tools (a rendered UI, agent behaviour against real Claude, a prompt
 change whose only signal is human-shaped, anything that needs an
-operator's eyes and nothing else covers it). Refuse silently: exit
-without writing to your canvas. The runner refuses a turn that left its
-canvases unchanged — for build, that means both seeded files untouched —
-so the refusal stops the chain and the run parks. The operator picks it
-up interactively (`moe sdlc <stage>`) from there.
+operator's eyes and nothing else covers it). **At design, write what is
+unresolved and why, keep the first gate blocked, and exit normally.** That
+is a saved design outcome; it parks without offering build. At other stages,
+refuse silently: exit without writing to your canvas. The runner refuses a
+turn that left its canvases unchanged — for build, that means both seeded
+files untouched — so the refusal stops the chain and the run parks. The
+operator picks it up interactively (`moe sdlc <stage>`) from there.
 
 Don't ask questions in your output. There is nobody on the other end to
-answer. Either ship the canvas, nominate the close, or refuse silently.
+answer. Save a ready or blocked design, nominate close, or use the refusal
+policy for the other stages.
 
 A note for the design stage in particular: a baked canvas (a promoted
 idea, a reopened run's prior design, an upstream seed) is still a
 design turn that needs a canvas edit on success. If the design is
-already code-ready, the edit is the `## Design review` note the stage
-fragment describes — not a no-op exit. If you can't tell whether it's
-code-ready, refuse silently as above; the unchanged-canvas gate stops
-the chain so an operator can pick the run up interactively.
+already build-ready, the edit is the `## Design review` note the stage
+fragment describes, plus a ready stamp — not a no-op exit. If you can't
+tell whether it's build-ready, write the uncertainty and keep the first
+gate blocked. The operator can pick the run up interactively.

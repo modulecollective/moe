@@ -285,7 +285,7 @@ func TestCooldownReservationStopsBeforeCanvasMutations(t *testing.T) {
 	}
 	var out bytes.Buffer
 	started := false
-	code := runStageSession("tele", md.ID, "design", stageSessionOpts{Headless: true, OnAgentStart: func() { started = true }}, io.Discard, &out)
+	code := runStageSession("tele", md.ID, "design", stageSessionOpts{Headless: true, CanvasSkeleton: designCanvasSkeleton, OnAgentStart: func() { started = true }}, io.Discard, &out)
 	after, _ := git.HEAD(root)
 	sessions, _ := session.List(root)
 	if code != exitNotStarted || started || reads != 1 || before != after || len(sessions) != 0 {

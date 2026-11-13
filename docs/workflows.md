@@ -37,20 +37,22 @@ moe sdlc push my-project/add-batch-support
 ```
 
 The `new` command opens the run and writes the first files into the
-bureaucracy. `design` shapes the request into a reviewable plan. `build` gives
-the agent write access inside an isolated clone of the target project, requires
-it to commit the implementation there, and has it exercise and repair the
-change in the same session. Build keeps two canvases, `content/code.md`
-(behavior, decisions, PR draft, test plan) and `content/test.md` (what was and
-wasn't verified), each with its own gate; the run moves on only when both are
-stamped ready, and every build entry resets both to blocked. `review` is the
-last judgment before push: an independent pass over the diff *and* build's
+bureaucracy. `design` shapes the request into a reviewable plan with a
+single-file template and an explicit gate. `build` gives the agent write
+access inside an isolated clone of the target project, requires it to commit
+the implementation there, and has it exercise and repair the change in the
+same session. Build keeps two canvases, `content/code.md` (behavior,
+decisions, PR draft, test plan) and `content/test.md` (what was and wasn't
+verified), each with its own gate; the run moves on only when both are stamped
+ready, and every build entry resets both to blocked. `review` is the last
+judgment before push: an independent pass over the diff *and* build's
 evidence, ending in a ship verdict — trivial zero-risk findings (a typo,
 comment drift) it fixes and commits in place; anything bigger blocks the gate
 and kicks the run back to build. `push` ships the branch by the project's ship
-route. New registrations use a fast-forward merge; existing projects keep their
-settings, with an absent ship field still meaning PR. `moe project ship <id>
-pr` selects PRs, and `--pr` / `--merge` override the route for one invocation.
+route. New registrations use a fast-forward merge; existing projects keep
+their settings, with an absent ship field still meaning PR. `moe project ship
+<id> pr` selects PRs, and `--pr` / `--merge` override the route for one
+invocation.
 
 `moe sdlc code` and `moe sdlc test` are retired: they print the build command
 and start nothing. A run started before build existed keeps its code and test
@@ -157,6 +159,17 @@ stage and re-check its gate once — if the fix doesn't stick, it parks as befor
 gate and fall through to that same chain prompt (headless, a back-pointing `kick
 back to fix` nudge prints instead).
 
+Design starts with Problem, Decision, Scope, Verification and Open questions
+headings, plus a fenced JSON gate initially `blocked`. The headings guide
+authorship; readiness requires an explicit `ready` judgment. Every admitted
+design entry resets the first gate to `blocked` while preserving existing prose,
+including promoted, baked and reopened seeds. Seeding/reset alone never counts
+as a work turn. A blocked, missing or malformed gate parks automatic progression
+at design, including recovery overrides; resume with `moe sdlc design`. Old
+gate-less unfinished designs need a design pass too. A ready verdict still needs
+the ordinary work-turn and advance/successor evidence; explicit stage verbs
+retain their gate bypass and prior-canvas checks.
+
 A build that ends with either canvas unstamped parks at build on every exit —
 the chain prompt, a cascade, a review kickback, a push-hook or rebase recovery,
 and a CI repair alike — and names each unstamped file and why. It never kicks
@@ -165,14 +178,25 @@ back to itself; resume it with `moe sdlc build`.
 **Nominated closes.** A blocked gate says "this diff isn't ready"; a stage
 that concludes the *run* is moot — the change already landed, the premise
 doesn't survive the code — says so instead by writing its canvas normally
-and ending it with `{"status":"close"}` in the gate (for build, in either
-content file; the prompt asks for code.md). MoE closes the run
-through the same `moe sdlc close` every other path uses, in the cascade and
-at the interactive chain prompt alike. The reasoning is durable (it is the
-committed canvas) and the run stops being re-offered on every sweep;
-`moe sdlc reopen` mints a successor seeded from that canvas if the operator
-disagrees. A close that fails — lock contention, a dirty tree — warns and
-leaves the run open. sdlc only.
+and editing the existing first gate to `close` (add it below the title only
+when absent). For build, either content file can nominate close; the prompt
+asks for code.md. The complete format is:
+
+````markdown
+## Gate
+
+```json
+{"status":"close"}
+```
+````
+
+Bare JSON is unready. A valid close works even with unfinished template
+sections. MoE closes without another question through the same `moe sdlc close`
+every other path uses, in the cascade and at the interactive chain prompt
+alike. The reasoning is durable (it is the committed canvas) and the run stops
+being re-offered on every sweep; `moe sdlc reopen` mints a successor seeded from
+that canvas if the operator disagrees. A close that fails — lock contention, a
+dirty tree — warns and leaves the run open. sdlc only.
 
 ### Chains
 

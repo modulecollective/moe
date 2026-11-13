@@ -459,11 +459,13 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	var deliveredInputIDs []int
 
 	// Directory-form stages declare their canvas files on the workflow;
-	// nil for every file-form stage. canvasBaseline is their content
-	// after seeding and the entry gate reset, taken immediately before
+	// nil for every file-form stage. Design also resets its single gate.
+	// canvasBaseline is the content after seeding and the entry gate reset,
+	// taken immediately before
 	// dispatch — the turn-output check compares against it so harness
 	// preparation never passes for agent work.
 	canvasFiles := stageCanvasFiles(md.Workflow, docID)
+	resetCanvases := canvasFiles != nil || (md.Workflow == sdlcWorkflow && docID == "design")
 	var canvasBaseline map[string]string
 
 	var clonePath string
@@ -650,24 +652,21 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 				return stageTurnSpec{}, err
 			}
 			mutated = mutated || sessionChanged
+			// Seed only missing canvases; promoted and reopened prose stays.
+			if opts.CanvasSkeleton != "" && (mutated || resetCanvases) {
+				canvasRel := run.ContentPath(md.Project, md.ID, docID)
+				canvasAbs := filepath.Join(workRoot, canvasRel)
+				if _, statErr := os.Stat(canvasAbs); errors.Is(statErr, fs.ErrNotExist) {
+					if err := os.WriteFile(canvasAbs, []byte(opts.CanvasSkeleton), 0o644); err != nil {
+						return stageTurnSpec{}, fmt.Errorf("session: seed canvas skeleton: %w", err)
+					}
+				} else if statErr != nil {
+					return stageTurnSpec{}, fmt.Errorf("session: stat canvas: %w", statErr)
+				}
+			}
 			if mutated {
 				if err := run.Save(workRoot, md); err != nil {
 					return stageTurnSpec{}, err
-				}
-				// Seed the canvas skeleton on first open if requested —
-				// stages with a fixed structural shape (test stage) want
-				// the agent's first read to land on the headings it has
-				// to fill, not a blank file. Only writes if the canvas
-				// doesn't already exist on disk: a pre-existing canvas
-				// from a stale stub or test fixture stays untouched.
-				if opts.CanvasSkeleton != "" {
-					canvasRel := run.ContentPath(md.Project, md.ID, docID)
-					canvasAbs := filepath.Join(workRoot, canvasRel)
-					if _, statErr := os.Stat(canvasAbs); errors.Is(statErr, fs.ErrNotExist) {
-						if err := os.WriteFile(canvasAbs, []byte(opts.CanvasSkeleton), 0o644); err != nil {
-							return stageTurnSpec{}, fmt.Errorf("session: seed canvas skeleton: %w", err)
-						}
-					}
 				}
 				// Commit on the session branch — no repo lock needed
 				// because the branch has a single writer (this session).
@@ -683,14 +682,16 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 
 			// Directory-form stages: seed any missing declared file
 			// (from the run's legacy canvas when one is named, else its
-			// skeleton), then reset every content file's gate to
-			// blocked. Every admitted entry, not just the first: a
+			// skeleton). Design and directory-form gates reset to blocked
+			// on every admitted entry, not just the first: a
 			// resumed stage restamps against the current revision. The
 			// baseline is taken after both so neither counts as output.
 			if canvasFiles != nil {
 				if err := seedCanvasFiles(workRoot, md, docID, canvasFiles); err != nil {
 					return stageTurnSpec{}, err
 				}
+			}
+			if resetCanvases {
 				if err := resetCanvasGates(workRoot, md, docID); err != nil {
 					return stageTurnSpec{}, fmt.Errorf("session: reset canvas gates: %w", err)
 				}
@@ -789,7 +790,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 					if toErr, ok := errors.AsType[*agent.TimeoutError](runErr); ok {
 						timedOut = toErr.Timeout
 					}
-					if canvasFiles != nil {
+					if resetCanvases {
 						if err := checkCanvasOutput(workRoot, md, docID, canvasBaseline); err != nil {
 							return err
 						}

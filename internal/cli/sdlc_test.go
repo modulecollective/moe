@@ -163,8 +163,8 @@ func TestSDLCDesignNoOpSessionRefusesAndBlocksCascade(t *testing.T) {
 	if code == 0 {
 		t.Fatalf("expected non-zero exit when agent never touches the canvas; stderr=%q stdout=%q", errb.String(), out.String())
 	}
-	// Both refusals must reach the operator: commitTurn rejecting the
-	// empty canvas, and session.Close rejecting the unchanged canvas.
+	// Both refusals must reach the operator: the post-preparation output
+	// check and session.Close rejecting the unchanged canvas.
 	// They are not interchangeable — the close error is the only one
 	// that names the session branch that survives this failure, and its
 	// `moe session abandon` hint is the operator's recovery path. When
@@ -172,7 +172,7 @@ func TestSDLCDesignNoOpSessionRefusesAndBlocksCascade(t *testing.T) {
 	// was swallowed and the surviving branch surfaced later as a
 	// mystery occupancy-gate failure on an unrelated verb.
 	stderrStr := errb.String()
-	if !strings.Contains(stderrStr, "agent did not write to its canvas") {
+	if !strings.Contains(stderrStr, "unchanged since dispatch") {
 		t.Errorf("expected the commit refusal naming the untouched canvas, got: %q", stderrStr)
 	}
 	if !strings.Contains(stderrStr, "unchanged from main") {

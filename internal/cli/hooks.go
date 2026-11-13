@@ -217,14 +217,19 @@ func openCodeRecoverySession(md *run.Metadata, recovery string, headless bool, k
 // here is deliberate: a kickback is not a push deferral, so it should
 // not manufacture one.
 //
-// A directory-form document (build) must be stamped ready before the
+// Design and directory-form documents must be stamped ready before the
 // recovery hands on to its destination. The interactive path gets that
 // check from the post-turn chain prompt; a headless recovery has no
-// prompt, so the check runs here and an unready build exits 1 — the
+// prompt, so the check runs here and an unready stage exits 1 — the
 // caller's retry (push) or re-dispatch (review) never runs over
 // unverified work.
 func openRecoveryStageSession(md *run.Metadata, document, override string, headless bool, kickoff string, stdout, stderr io.Writer) int {
+	skeleton := ""
+	if document == "design" {
+		skeleton = designCanvasSkeleton
+	}
 	code := runStageSession(md.Project, md.ID, document, stageSessionOpts{
+		CanvasSkeleton:    skeleton,
 		ValidateEntry:     sdlcSessionEntry,
 		NeedsSandbox:      true,
 		Headless:          headless,
@@ -242,13 +247,11 @@ func openRecoveryStageSession(md *run.Metadata, document, override string, headl
 	return requireStageReady(root, md, document, stderr)
 }
 
-// requireStageReady checks a directory-form stage's derived gate after
-// an automatic exit and prints the per-file refusal when it fails.
-// File-form stages pass: their gates are checked where they always
-// were.
+// requireStageReady checks design and directory-form readiness after
+// an automatic recovery exit. Review keeps its distinct kickback policy.
 func requireStageReady(root string, md *run.Metadata, stage string, stderr io.Writer) int {
 	wf, err := LookupWorkflow(md.Workflow)
-	if err != nil || wf.StageFiles(stage) == nil {
+	if err != nil || (wf.StageFiles(stage) == nil && !(md.Workflow == sdlcWorkflow && stage == "design")) {
 		return 0
 	}
 	problems, err := wf.StageGateProblems(root, md, stage)

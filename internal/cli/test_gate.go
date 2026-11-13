@@ -11,6 +11,20 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 )
 
+// designStageGate requires an explicit ready judgment. The template's
+// headings guide authorship; they are not a mandatory section schema.
+func designStageGate(root string, md *run.Metadata) (bool, error) {
+	body, err := os.ReadFile(filepath.Join(root, run.ContentPath(md.Project, md.ID, "design")))
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	status, ok := stageGateStatus(string(body))
+	return ok && status == "ready", nil
+}
+
 // reviewStageGate refuses to advance the run when the review canvas
 // left the JSON gate anything but "ready", or — for canvases carrying
 // the newer skeleton — left "## Followups filed" on its seeded

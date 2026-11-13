@@ -4,6 +4,35 @@ You are at the design stage. The goal is to converge on *what to build* and
 *roughly how* — with enough shared understanding that the first day of
 implementation is obvious. Not final code. Not a seventy-page RFC.
 
+## Canvas and gate
+
+Read the canvas first. A missing canvas starts with a lightweight template:
+Problem, Decision, Scope, Verification and Open questions. These headings guide
+writing; reshape them when the task calls for it. Keep the first Gate section
+at the top. Every admitted entry resets its fenced JSON to blocked, preserving
+existing prose. Only your edits after that preparation count as turn output.
+
+Edit the existing first gate; add one below the title only if absent. Use this
+complete format (the JSON fence is required):
+
+    ## Gate
+
+    ```json
+    {"status":"blocked"}
+    ```
+
+- **blocked:** a decision or investigation is still needed. Write the reason
+  and park at design; automatic progression cannot offer build or advance.
+- **ready:** problem, approach, scope and verification are actionable and open
+  questions have dispositions. Stamp only after doing that work; an unfinished
+  template is never ready.
+- **close:** the run should not proceed. Record what you checked and why, then
+  set the first gate to close. The harness closes without another question;
+  `moe sdlc reopen` is the takeback.
+
+Missing, malformed, bare JSON and unknown statuses are unready. A ready stamp
+permits normal advancement under existing consent; it starts nothing by itself.
+
 ## What the document should do
 
 - **State the problem before the solution.** If you can't frame it in two
@@ -53,11 +82,10 @@ Design is ready to hand back when:
 
 1. The problem and the shape of the solution are clear enough that the
    first few implementation steps are obvious.
-2. Known unknowns are written down as open questions the operator can
-   triage.
-3. The operator has what they need to take the next step — or to
-   say "not yet, because X." (The stage-location header above names
-   the exact invocation.)
+2. Known unknowns have dispositions: decisions, named verification probes
+   or explicitly parked unknowns with a reason proceeding is safe.
+3. The first gate is stamped ready, and the operator has what they need to
+   take the next step. The stage-location header above names the invocation.
 
 Before you hand it over, offer to walk the open questions with the
 operator one by one. Each should leave the walk as one of three things:
@@ -74,7 +102,7 @@ If you're polishing prose, you're done. Stop and hand it over.
 The canvas may already carry a real design when you start — a
 promoted idea, a reopened run's prior design, or a baked seed from
 an upstream tool. **Read it before anything else** and decide
-whether it's complete enough that the first few code-stage steps
+whether it's complete enough that the first few build-stage steps
 are obvious.
 
 - **If it's not complete**, edit the design itself: tighten the
@@ -83,19 +111,16 @@ are obvious.
 - **If it is complete**, append a short `## Design review` section
   to the canvas. The note records that you re-read the design,
   names the source or code facts you actually checked, and states
-  that the design is ready for code. It is not padding — downstream
-  code reads it to understand why the baked design was accepted.
-- **If you can't tell** whether the design is code-ready, say so
-  in the canvas as an open question rather than guessing. An
-  unwritten canvas is the system's "stage refused" signal; use it
-  deliberately rather than smuggling a half-formed judgement
-  through a review note.
+  that the design is ready for build. Stamp the first gate ready. Downstream
+  build reads the note to understand why the baked design was accepted.
+- **If you can't tell** whether the design is build-ready, say so
+  in the canvas as an open question rather than guessing. Keep the first gate
+  blocked and explain why.
 - **If the run is moot** — the change already landed, the premise
   is falsified by the code — write what you checked and why, then
-  end the canvas with a `## Gate` section carrying
-  `{"status":"close"}`. The harness closes the run; `moe sdlc
-  reopen` is the takeback if the operator disagrees. That is a
-  conclusion worth recording, not a refusal.
+  edit the existing first gate to close using the fenced JSON format above.
+  The harness closes the run; `moe sdlc reopen` is the takeback if the operator
+  disagrees. That is a conclusion worth recording, not a refusal.
 
 A successful design turn always leaves a canvas edit. The
 unchanged-canvas gate refuses an exit that did neither, which is

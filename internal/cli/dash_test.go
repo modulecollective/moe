@@ -84,6 +84,7 @@ func TestDashAfterCodeShowsCodeStage(t *testing.T) {
 
 	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 	writeContent(t, root, "tele", "fix-it", "build", "// implementation\n")
+	writeReadyDesign(t, root, stageMetadata("tele", "fix-it", "sdlc"))
 	// Timestamps are relative to now rather than hard-coded so the
 	// fixture doesn't decay as the suite ages.
 	t0 := time.Now().UTC().Add(-3 * 24 * time.Hour)
@@ -774,6 +775,7 @@ func TestDashOpenSessionSameDocMarksRunning(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	writeReadyDesign(t, root, stageMetadata("tele", "fix-it", "sdlc"))
 	// Timestamps are relative to now rather than hard-coded so the
 	// fixture doesn't decay as the suite ages.
 	t0 := time.Now().UTC().Add(-3 * 24 * time.Hour)

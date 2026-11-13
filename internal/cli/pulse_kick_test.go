@@ -273,7 +273,7 @@ func TestSelfKickRidesARootParkedByDownstreamWork(t *testing.T) {
 	root, stages, _ := kickFixture(t)
 	now := time.Now().Local()
 	seedRun(t, root, "moe", "mid-ladder", "sdlc", run.StatusInProgress, now,
-		map[string]string{"design": "# Half built\n\nbody\n", "build": stampedBuildCanvas})
+		map[string]string{"design": readyDesign, "build": stampedBuildCanvas})
 	trailerstest.CommitWorkTurnAt(t, root, "moe", "mid-ladder", "sdlc", "design", now.Add(-2*time.Hour))
 	trailerstest.CommitWorkTurnAt(t, root, "moe", "mid-ladder", "sdlc", "build", now.Add(-time.Hour))
 	groomed := groomChains(root, "moe", "pulse-groom",

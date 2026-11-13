@@ -104,19 +104,18 @@ func promptNextStageOverride(root string, md *run.Metadata, justFinished, overri
 	if override == "" && stageNominatedClose(root, md, justFinished) {
 		return closeNominatedRun(md, justFinished, stdout, stderr)
 	}
-	// A directory-form stage that just ran advances only when every
-	// canvas file is stamped — on every exit, the recovery overrides
-	// (push retry after a hook repair, re-review after a kickback)
-	// included, which is why this sits ahead of the override switch.
-	// An unready build parks with each file's reason named; it never
-	// kicks back to itself.
-	if justFinished != "" && wf.StageFiles(justFinished) != nil {
+	// Design and directory-form stages advance only when ready, including
+	// recovery overrides (push retry after a hook repair, re-review after
+	// a kickback), which is why this sits ahead of the override switch.
+	// An unready stage parks; it never kicks back to itself.
+	if justFinished != "" && (wf.StageFiles(justFinished) != nil || (md.Workflow == sdlcWorkflow && justFinished == "design")) {
 		problems, err := wf.StageGateProblems(root, md, justFinished)
 		if err != nil {
 			moePrintf(stderr, "%s gate: %v\n", justFinished, err)
 			return 1
 		}
 		if len(problems) > 0 {
+			finishGateBlocked(root, md, justFinished, stderr)
 			moePrintf(stdout, "%s", stageNotReadyMessage(wf.Name, md, justFinished, problems))
 			return 0
 		}

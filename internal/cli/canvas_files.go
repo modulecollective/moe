@@ -65,8 +65,8 @@ func seedCanvasFiles(workRoot string, md *run.Metadata, docID string, files []Ca
 	return nil
 }
 
-// resetCanvasGates sets the gate of every direct Markdown file in the
-// document's content/ to blocked, leaving the rest of each file alone.
+// resetCanvasGates blocks a file-form canvas or every direct Markdown
+// file in a directory-form document, leaving the rest of each file alone.
 // It runs at every admitted stage entry, so a resumed stage has to
 // restamp each file against the current revision before it can
 // advance again. A `ship` declaration rides the fence and drops with
@@ -77,9 +77,6 @@ func resetCanvasGates(workRoot string, md *run.Metadata, docID string) error {
 		return err
 	}
 	for _, c := range canvases {
-		if c.Name == "" {
-			continue
-		}
 		body, err := os.ReadFile(c.Path)
 		if err != nil {
 			return err
@@ -146,10 +143,10 @@ func resetGate(body string) string {
 	return section + body
 }
 
-// snapshotCanvases records the bytes of every direct Markdown file in a
-// directory-form document. Taken after seeding and the gate reset, it
-// is the baseline the turn-output check compares against, so harness
-// preparation can never pass for agent work.
+// snapshotCanvases records the bytes of a file-form canvas or every
+// direct Markdown file in a directory-form document. Taken after seeding
+// and the gate reset, it is the baseline the turn-output check compares
+// against, so harness preparation can never pass for agent work.
 func snapshotCanvases(workRoot string, md *run.Metadata, docID string) (map[string]string, error) {
 	canvases, err := run.DocCanvases(filepath.Join(workRoot, run.DocDir(md.Project, md.ID, docID)))
 	if err != nil {
@@ -166,21 +163,21 @@ func snapshotCanvases(workRoot string, md *run.Metadata, docID string) (map[stri
 	return out, nil
 }
 
-// checkCanvasOutput refuses a directory-form turn whose canvases are
+// checkCanvasOutput refuses a turn whose canvases are
 // byte-identical to the pre-dispatch baseline, or that left no canvas
 // at all. Any authored edit to any file — a progress note is enough —
 // saves the turn; readiness is the gate's question, not this one's.
 func checkCanvasOutput(workRoot string, md *run.Metadata, docID string, baseline map[string]string) error {
-	dirRel := run.ContentDir(md.Project, md.ID, docID)
+	canvasRel := canvasDiffPath(md, docID)
 	after, err := snapshotCanvases(workRoot, md, docID)
 	if err != nil {
-		return &canvasRefusalError{Path: filepath.Join(workRoot, dirRel), Reason: "invalid", Detail: err.Error()}
+		return &canvasRefusalError{Path: filepath.Join(workRoot, canvasRel), Reason: "invalid", Detail: err.Error()}
 	}
 	if len(after) == 0 {
-		return &canvasRefusalError{Path: filepath.Join(workRoot, dirRel), Reason: "missing"}
+		return &canvasRefusalError{Path: filepath.Join(workRoot, canvasRel), Reason: "missing"}
 	}
 	if maps.Equal(after, baseline) {
-		return &canvasRefusalError{Path: filepath.Join(workRoot, dirRel), Reason: "unchanged"}
+		return &canvasRefusalError{Path: filepath.Join(workRoot, canvasRel), Reason: "unchanged"}
 	}
 	return nil
 }

@@ -16,6 +16,9 @@ import (
 // leaves in the journal.
 func advanceAt(t *testing.T, root, projectID, runID, docID string, when time.Time) {
 	t.Helper()
+	if docID == "design" {
+		writeReadyDesign(t, root, stageMetadata(projectID, runID, "sdlc"))
+	}
 	trailerstest.CommitWorkTurnAt(t, root, projectID, runID, "sdlc", docID, when)
 	trailerstest.CommitAdvanceAt(t, root, projectID, runID, "sdlc", docID, when.Add(time.Minute))
 }

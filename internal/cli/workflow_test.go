@@ -27,6 +27,7 @@ func TestWorkflowNextWalksStages(t *testing.T) {
 		t.Fatal(err)
 	}
 	md := &run.Metadata{ID: "r", Project: "p", Workflow: "sdlc", Status: run.StatusInProgress}
+	writeReadyDesign(t, root, md)
 
 	next, kind, err := wf.Next(root, md)
 	if err != nil {
@@ -85,6 +86,7 @@ func TestWorkflowNextReopensStaleStage(t *testing.T) {
 		t.Fatal(err)
 	}
 	md := &run.Metadata{ID: "r", Project: "p", Workflow: "sdlc", Status: run.StatusInProgress}
+	writeReadyDesign(t, root, md)
 
 	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
 	trailerstest.CommitWorkTurnAt(t, root, "p", "r", "sdlc", "design", t0)
@@ -128,6 +130,7 @@ func TestWorkflowNextAdvanceMarkerSatisfiesStage(t *testing.T) {
 		t.Fatal(err)
 	}
 	md := &run.Metadata{ID: "r", Project: "p", Workflow: "sdlc", Status: run.StatusInProgress}
+	writeReadyDesign(t, root, md)
 
 	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
 	trailerstest.CommitWorkTurnAt(t, root, "p", "r", "sdlc", "design", t0)
@@ -291,6 +294,7 @@ func TestWorkflowNextWithIndexMatchesForkingPath(t *testing.T) {
 	}
 	mdA := &run.Metadata{ID: "fix-bug", Project: "a", Workflow: "sdlc", Status: run.StatusInProgress}
 	mdB := &run.Metadata{ID: "fix-bug", Project: "b", Workflow: "sdlc", Status: run.StatusInProgress}
+	writeReadyDesign(t, root, mdA)
 
 	// Walk a representative timeline: nothing → design committed →
 	// code committed → design re-opened (re-flips to design) → code
@@ -376,6 +380,7 @@ func TestWorkflowNextLegacyRunNeedsABuildTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 	md := &run.Metadata{ID: "r", Project: "p", Workflow: "sdlc", Status: run.StatusInProgress}
+	writeReadyDesign(t, root, md)
 
 	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
 	trailerstest.CommitWorkTurnAt(t, root, "p", "r", "sdlc", "design", t0)

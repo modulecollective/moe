@@ -51,6 +51,7 @@ case "$canvas" in
     printf '%s\n' '# Pulse' '' '## Gate' '' "${ticks}json" '{"status":"ok","loose":[{"slug":"worth-a-think","title":"Worth a think","why":"the operator tagged it"}]}' "$ticks" > "$canvas"
     ;;
   *)
+    sed -i '0,/"status":"blocked"/s//"status":"ready"/' "$canvas"
     printf '\n## What I decided\n\nOne recommendation, named.\n' >> "$canvas"
     ;;
 esac

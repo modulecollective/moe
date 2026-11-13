@@ -108,6 +108,7 @@ func init() {
 		CanvasFile{Name: "code.md", Skeleton: buildCodeSkeleton, LegacyDoc: "code"},
 		CanvasFile{Name: "test.md", Skeleton: buildTestSkeleton, LegacyDoc: "test"},
 	)
+	w.RegisterStageGate("design", designStageGate)
 	w.RegisterStageGate("review", reviewStageGate)
 	// The retired code and test documents stay readable (cat, the web
 	// run page) on the runs that carry them; they are no longer stages.
@@ -302,6 +303,7 @@ func openSdlcDesign(projectID, runID string, headless bool, agentOverride string
 			NeedsSandbox:           true,
 			EnforceSandboxBoundary: true,
 			Headless:               headless,
+			CanvasSkeleton:         designCanvasSkeleton,
 			Agent:                  agentOverride,
 			ExtraStagePaths:        stageCommitPathsPresent,
 		}, stdout, stderr)
@@ -411,6 +413,35 @@ func init() {
 		return openSdlcStage(stage, projectID, runID, headless, stdout, stderr)
 	})
 }
+
+const designCanvasSkeleton = `# Design
+
+## Gate
+
+` + "```json" + `
+{"status":"blocked"}
+` + "```" + `
+
+## Problem
+
+(agent fills: the failure or unmet need)
+
+## Decision
+
+(agent fills: the approach and its tradeoffs)
+
+## Scope
+
+(agent fills: included and excluded work)
+
+## Verification
+
+(agent fills: concrete acceptance checks)
+
+## Open questions
+
+(agent fills: decisions, named probes or safely parked unknowns)
+`
 
 const reviewCanvasSkeleton = `# Review
 

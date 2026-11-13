@@ -157,10 +157,13 @@ func TestServeOptionsCheckStageGateWiring(t *testing.T) {
 		t.Fatal("serveOptions must wire CheckStageGate; a nil callback silently skips the check")
 	}
 
-	// design registers no gate — CheckStageGate reports true and never
-	// touches a canvas.
+	// Design requires a ready gate, including for old gate-less canvases.
+	if ok, err := gate(md, "design"); err != nil || ok {
+		t.Errorf("missing design gate = (%v, %v), want (false, nil)", ok, err)
+	}
+	writeReadyDesign(t, root, md)
 	if ok, err := gate(md, "design"); err != nil || !ok {
-		t.Errorf("design gate = (%v, %v), want (true, nil) — design registers no gate", ok, err)
+		t.Errorf("ready design gate = (%v, %v), want (true, nil)", ok, err)
 	}
 
 	fence := "```"
