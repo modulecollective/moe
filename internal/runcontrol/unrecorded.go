@@ -80,7 +80,15 @@ func dropUnrecorded(root, projectID, runID, id string) error {
 	return writeUnrecorded(root, projectID, runID, m)
 }
 
-func writeUnrecorded(root, projectID, runID string, m map[string]Settlement) error {
+// Private operation seams allow deterministic preparation/publication failures
+// in tests while keeping real temporary files and their private permissions.
+var (
+	unrecordedWrite  = (*os.File).Write
+	unrecordedClose  = (*os.File).Close
+	unrecordedRename = os.Rename
+)
+
+func writeUnrecorded(root, projectID, runID string, m map[string]Settlement) (err error) {
 	path := unrecordedPath(root, projectID, runID)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -93,10 +101,17 @@ func writeUnrecorded(root, projectID, runID string, m map[string]Settlement) err
 	if err != nil {
 		return err
 	}
-	_, werr := tmp.Write(append(b, '\n'))
-	if err := errors.Join(werr, tmp.Close()); err != nil {
-		os.Remove(tmp.Name())
+	name := tmp.Name()
+	defer func() {
+		if err != nil {
+			if cleanupErr := os.Remove(name); cleanupErr != nil && !errors.Is(cleanupErr, os.ErrNotExist) {
+				err = errors.Join(err, fmt.Errorf("runcontrol: remove temporary file %s: %w", name, cleanupErr))
+			}
+		}
+	}()
+	_, werr := unrecordedWrite(tmp, append(b, '\n'))
+	if err := errors.Join(werr, unrecordedClose(tmp)); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	return unrecordedRename(name, path)
 }
