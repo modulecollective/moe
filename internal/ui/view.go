@@ -231,7 +231,7 @@ func (m *model) dividerRow(sel Item, ok bool, w int) string {
 		label = sel.Label()
 	}
 	if m.mode == modeEdit && m.active != nil {
-		label = draftWhat(m.active.key)
+		label = "editing " + draftWhat(m.active.key)
 	}
 	if m.mode == modeSave {
 		label = draftWhat(m.saveDraft.key)
@@ -263,7 +263,7 @@ func (m *model) detailLines(sel Item, ok bool, w, h int) ([]string, *cell) {
 	case modeEdit:
 		d := m.active
 		var head []string
-		for _, l := range m.draftNotes(d) {
+		for _, l := range m.draftWarnings(d) {
 			head = append(head, wrapRows(l, w)...)
 		}
 		// At most half the pane: the text being edited keeps the rest,
@@ -325,7 +325,7 @@ func (m *model) itemDetail(it Item, ok bool) []string {
 		if d.dirty() {
 			out = append(out, "unsaved "+draftWhat(d.key)+" — "+reopenKey(d.key.purpose)+" to continue it")
 		}
-		out = append(out, m.draftNotes(d)[1:]...)
+		out = append(out, m.draftWarnings(d)...)
 	}
 	if r := m.lastResult[it.Label()]; len(r) > 0 {
 		out = append(out, "", "last action:")
@@ -513,11 +513,10 @@ func (f frame) paint() []byte {
 	return b.Bytes()
 }
 
-// draftNotes is what the editor says above a draft: what it is and the
-// keys, then why its last save failed or may not have landed, and
-// whether its question has closed.
-func (m *model) draftNotes(d *draft) []string {
-	out := []string{"editing " + draftWhat(d.key)}
+// draftWarnings explains closed targets and failed or uncertain saves
+// above the editor and in the target's normal details.
+func (m *model) draftWarnings(d *draft) []string {
+	var out []string
 	if m.answerClosed(d.key) {
 		out = append(out, fmt.Sprintf("! question #%d is no longer open: saving will be refused; Ctrl-X discards this answer", d.key.question))
 	}
