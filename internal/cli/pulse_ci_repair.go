@@ -256,7 +256,7 @@ func driveCIRepair(root string, md *run.Metadata, p ownedPRChecks, stdout, stder
 		moePrintln(stderr, "CI repair: build produced no repair commit or nominated close; keeping the pushed run and spent attempt")
 		return 1
 	}
-	if code := requireStageReady(root, md, "build", stdout, stderr); code != 0 {
+	if code := requireStageReady(root, md, "build", stderr); code != 0 {
 		return code
 	}
 	wf, _ := LookupWorkflow(md.Workflow)

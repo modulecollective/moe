@@ -239,14 +239,14 @@ func openRecoveryStageSession(md *run.Metadata, document, override string, headl
 	if err != nil {
 		return 1
 	}
-	return requireStageReady(root, md, document, stdout, stderr)
+	return requireStageReady(root, md, document, stderr)
 }
 
 // requireStageReady checks a directory-form stage's derived gate after
 // an automatic exit and prints the per-file refusal when it fails.
 // File-form stages pass: their gates are checked where they always
 // were.
-func requireStageReady(root string, md *run.Metadata, stage string, stdout, stderr io.Writer) int {
+func requireStageReady(root string, md *run.Metadata, stage string, stderr io.Writer) int {
 	wf, err := LookupWorkflow(md.Workflow)
 	if err != nil || wf.StageFiles(stage) == nil {
 		return 0
