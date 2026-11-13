@@ -142,8 +142,8 @@ func pasteText(p []byte) string {
 }
 
 // flush resolves input that cannot complete: a lone Escape (or any
-// partial sequence) after the caller's wait. A partial sequence reads as
-// Escape; its remainder is dropped rather than typed as text.
+// partial sequence) after the caller's wait. Incomplete modified input
+// is dropped whole, so it cannot escape an editor and fire a shortcut.
 func (d *decoder) flush() []Key {
 	if d.pasting || len(d.buf) == 0 {
 		return nil
@@ -308,11 +308,4 @@ func finalKey(c byte) (KeyCode, bool) {
 		return KeyEnd, true
 	}
 	return KeyNone, false
-}
-
-func cutByte(s string, sep byte) (string, string, bool) {
-	if i := bytes.IndexByte([]byte(s), sep); i >= 0 {
-		return s[:i], s[i+1:], true
-	}
-	return s, "", false
 }

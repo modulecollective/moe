@@ -70,7 +70,12 @@ func (m *model) view() frame {
 	for i := range bh {
 		n := m.boardTop + i
 		if n < len(m.board.Lines) {
-			f.rows[row] = boardLine(m.board.Lines[n], hasSel && sel.Line == n, w)
+			line := m.board.Lines[n]
+			art := m.board.Art
+			if n >= art.Start && n < art.Start+art.Height && len(art.Frames) > 0 {
+				line = art.Frames[m.animation%len(art.Frames)][n-art.Start]
+			}
+			f.rows[row] = boardLine(line, hasSel && sel.Line == n, w)
 		}
 		row++
 	}

@@ -1,6 +1,6 @@
 // Package ui is moe ui's terminal console: a board pane with selection
-// and a detail pane for the selected item's facts, a small text editor
-// and a command line. It owns the event loop, selection, panes, the key
+// and panes for selected details/editing and recent messages, plus a
+// command line. It owns the event loop, selection, panes, the key
 // decoder and the text buffer, and nothing else: what is on the board,
 // what an item's details say and what an action does all come from the
 // caller (internal/cli) as plain data and one callback. The package
@@ -68,9 +68,16 @@ type Question struct {
 	Text string
 }
 
+// Art is a bounded set of factory frames and their placement in the board.
+type Art struct {
+	Start, Height int        // explicit zero-based line span in Board.Lines
+	Frames        [][]string // identical dimensions; already styled by the renderer
+}
+
 // Board is one complete board: its painted lines and the items on them,
 // ordered by Line.
 type Board struct {
+	Art   Art
 	Lines []string
 	Items []Item
 	// Issues are current observation failures, without captured text. Unchanged issues are logged once.

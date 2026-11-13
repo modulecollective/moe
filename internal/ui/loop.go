@@ -24,17 +24,19 @@ type Config struct {
 
 // escWait is how long a lone Escape waits for the rest of a sequence.
 const escWait = 40 * time.Millisecond
+const animationInterval = 500 * time.Millisecond
 
 // loopIO is the terminal as the loop sees it, so tests can drive the
 // loop with no terminal at all.
 type loopIO struct {
-	out     io.Writer
-	input   <-chan []byte // closed when the terminal goes
-	resize  <-chan struct{}
-	size    func() (rows, cols int, err error)
-	stop    <-chan struct{} // a terminating signal
-	tstp    <-chan struct{} // a stop request from outside (SIGTSTP)
-	suspend func() error    // restore, stop, and re-enter on continue
+	animation <-chan time.Time // nil uses the production 500 ms ticker
+	out       io.Writer
+	input     <-chan []byte // closed when the terminal goes
+	resize    <-chan struct{}
+	size      func() (rows, cols int, err error)
+	stop      <-chan struct{} // a terminating signal
+	tstp      <-chan struct{} // a stop request from outside (SIGTSTP)
+	suspend   func() error    // restore, stop, and re-enter on continue
 }
 
 // errStopped reports a terminating signal.
@@ -64,6 +66,13 @@ func worker(do func(Action) Result, jobs <-chan job, results chan<- jobResult) {
 // the terminal is restored.
 func runLoop(ctx context.Context, cfg Config, tio loopIO, jobs chan<- job, results <-chan jobResult) (*job, error) {
 	m := newModel(jobs)
+	animation := tio.animation
+	if animation == nil {
+		ticker := time.NewTicker(animationInterval)
+		defer ticker.Stop()
+		animation = ticker.C
+	}
+	var last frame
 	rows, cols, err := tio.size()
 	if err != nil {
 		return nil, err
@@ -72,7 +81,8 @@ func runLoop(ctx context.Context, cfg Config, tio loopIO, jobs chan<- job, resul
 	var dec decoder
 	var esc <-chan time.Time
 	paint := func() error {
-		_, err := tio.out.Write(m.view().paint())
+		last = m.view()
+		_, err := tio.out.Write(last.paint())
 		return err
 	}
 	if err := paint(); err != nil {
@@ -87,7 +97,18 @@ func runLoop(ctx context.Context, cfg Config, tio loopIO, jobs chan<- job, resul
 			return m.busy, errStopped
 		case <-tio.tstp:
 			eff = effSuspend
-		case b := <-cfg.Boards:
+		case <-animation:
+			if p := m.animate(&last); len(p) > 0 {
+				if _, err := tio.out.Write(p); err != nil {
+					return m.busy, err
+				}
+			}
+			continue
+		case b, ok := <-cfg.Boards:
+			if !ok {
+				cfg.Boards = nil
+				continue
+			}
 			m.setBoard(b)
 			if cfg.Report != nil {
 				// Best effort: a failed report retries with the next board.

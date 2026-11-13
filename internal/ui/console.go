@@ -23,7 +23,6 @@ type console struct {
 // say is the only entry to the UI's transient history. It never receives
 // note or capture bodies, and never changes focus or the active editor.
 func (m *model) say(text string) {
-	m.message = text
 	if text == "" {
 		return
 	}

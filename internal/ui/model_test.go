@@ -61,8 +61,8 @@ func TestSelectionFollowsIdentity(t *testing.T) {
 	}
 	// The run went: nearest survivor, said.
 	m.setBoard(board(4, run("p", "b"), run("p", "a")))
-	if m.sel != (itemKey{"p", "a", 0}) || !strings.Contains(m.message, "p/x left the board") {
-		t.Fatalf("after removal = %+v, %q", m.sel, m.message)
+	if m.sel != (itemKey{"p", "a", 0}) || !strings.Contains(consoleText(m), "p/x left the board") {
+		t.Fatalf("after removal = %+v, %q", m.sel, consoleText(m))
 	}
 	// A late, older board is ignored.
 	m.setBoard(board(3, run("p", "z")))
@@ -187,8 +187,8 @@ func TestIdeaSaveChoices(t *testing.T) {
 		}
 		// Saved but tag failed: both said, retry offered, draft gone.
 		m.finished(jobResult{job: j, results: []Result{{OK: true, Message: "saved"}, {Message: "tag refused"}}})
-		if !strings.Contains(m.message, "saved") || !strings.Contains(m.message, "tag refused") || !strings.Contains(m.message, "retry with :tag") {
-			t.Fatalf("message = %q", m.message)
+		if !strings.Contains(consoleText(m), "saved") || !strings.Contains(consoleText(m), "tag refused") || !strings.Contains(consoleText(m), "retry with :tag") {
+			t.Fatalf("message = %q", consoleText(m))
 		}
 		if m.dirtyDrafts() != 0 {
 			t.Fatal("saved draft kept")
@@ -258,8 +258,8 @@ func TestCommands(t *testing.T) {
 	press(m, Key{Code: KeyRune, Rune: ':'})
 	typed(m, "pause")
 	press(m, Key{Code: KeyEnter})
-	if !strings.Contains(m.message, "select a live operator-paced run") {
-		t.Fatalf("pause on idea = %q", m.message)
+	if !strings.Contains(consoleText(m), "select a live operator-paced run") {
+		t.Fatalf("pause on idea = %q", consoleText(m))
 	}
 	press(m, Key{Code: KeyRune, Rune: ':'})
 	typed(m, "close")
@@ -299,8 +299,8 @@ func TestCommands(t *testing.T) {
 	press(m, Key{Code: KeyRune, Rune: ':'})
 	typed(m, "rm -rf /")
 	press(m, Key{Code: KeyEnter})
-	if !strings.Contains(m.message, `unknown command "rm"`) {
-		t.Fatalf("unknown = %q", m.message)
+	if !strings.Contains(consoleText(m), `unknown command "rm"`) {
+		t.Fatalf("unknown = %q", consoleText(m))
 	}
 }
 
@@ -335,8 +335,8 @@ func TestNewCapture(t *testing.T) {
 	press(m, Key{Code: KeyRune, Rune: ':'})
 	typed(m, "new intent p/Bad Slug")
 	press(m, Key{Code: KeyEnter})
-	if m.mode != modeNormal || !strings.Contains(m.message, "usage") && !strings.Contains(m.message, "kebab") {
-		t.Fatalf("bad slug = %v %q", m.mode, m.message)
+	if m.mode != modeNormal || !strings.Contains(consoleText(m), "usage") && !strings.Contains(consoleText(m), "kebab") {
+		t.Fatalf("bad slug = %v %q", m.mode, consoleText(m))
 	}
 }
 
@@ -457,8 +457,8 @@ func TestPendingSaveLocksItsDraft(t *testing.T) {
 	if m.mode != modeEdit {
 		typed(m, " second") // lands nowhere: normal mode ignores it
 	}
-	if m.mode == modeEdit || !strings.Contains(m.message, "wait for its outcome") {
-		t.Fatalf("reopened a pending draft: mode %d, %q", m.mode, m.message)
+	if m.mode == modeEdit || !strings.Contains(consoleText(m), "wait for its outcome") {
+		t.Fatalf("reopened a pending draft: mode %d, %q", m.mode, consoleText(m))
 	}
 	// Other drafts stay open to edit.
 	press(m, Key{Code: KeyDown}, Key{Code: KeyRune, Rune: 'e'})
@@ -694,7 +694,7 @@ func TestDraftReachableAfterTargetCloses(t *testing.T) {
 					t.Fatalf("mode=%v dirty=%d", m.mode, m.dirtyDrafts())
 				}
 				if it, ok := m.selected(); !ok || it.Run != c.item.Run {
-					t.Fatalf("selected %+v, message %q", it, m.message)
+					t.Fatalf("selected %+v, message %q", it, consoleText(m))
 				}
 				detail := strings.Join(m.detailLinesForTest(), "\n")
 				if !strings.Contains(detail, string(c.key)+" to continue it") || !strings.Contains(detail, "saving will be refused; Ctrl-X discards it") {
@@ -705,7 +705,7 @@ func TestDraftReachableAfterTargetCloses(t *testing.T) {
 				}
 				press(m, Key{Code: KeyRune, Rune: c.key})
 				if m.mode != modeEdit || m.active.key.run != c.item.Run || !strings.Contains(m.active.ed.String(), "precious operator text") {
-					t.Fatalf("reopen: mode=%v message=%q", m.mode, m.message)
+					t.Fatalf("reopen: mode=%v message=%q", m.mode, consoleText(m))
 				}
 				press(m, Key{Code: KeyCtrlX}, Key{Code: KeyRune, Rune: 'y'})
 				if m.dirtyDrafts() != 0 || m.mode != modeNormal {
@@ -782,3 +782,5 @@ func TestClosedIntentInspectable(t *testing.T) {
 		}
 	}
 }
+
+func consoleText(m *model) string { return strings.Join(m.consoleRows(), "") }

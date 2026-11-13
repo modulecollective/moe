@@ -1348,6 +1348,14 @@ func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectC
 // row renders as exactly one line, so a caller can select rows on the
 // painted board without reading them back out of the text.
 func RenderIndexed(w io.Writer, now time.Time, histogram []string, rows []Row, projectCount, activeCount int, showAll bool, state FactoryState, r *rand.Rand) (lines []int) {
+	lines, _ = RenderIndexedArt(w, now, histogram, rows, projectCount, activeCount, showAll, StyledFactoryFrames(w, state, 1, r)[0])
+	return lines
+}
+
+// RenderIndexedArt renders supplied, already styled factory art and returns
+// its explicit line span's start, alongside the selectable row positions.
+// The UI caches the styled frames and swaps only this span between gathers.
+func RenderIndexedArt(w io.Writer, now time.Time, histogram []string, rows []Row, projectCount, activeCount int, showAll bool, art []string) (lines []int, artStart int) {
 	lw := &lineWriter{w: w}
 	w = lw
 	lines = make([]int, len(rows))
@@ -1360,10 +1368,8 @@ func RenderIndexed(w io.Writer, now time.Time, histogram []string, rows []Row, p
 			lines[i] = lw.n + k
 		}
 	}
-	art := BuildFactoryArt(state, ArtWidth, r)
 	if cliout.Enabled(w) {
 		histogram = styleHistogramANSI(histogram)
-		art = styleFactoryANSI(art)
 	}
 
 	fmt.Fprintln(w)
@@ -1371,6 +1377,7 @@ func RenderIndexed(w io.Writer, now time.Time, histogram []string, rows []Row, p
 		fmt.Fprintln(w, line)
 	}
 	fmt.Fprintln(w)
+	artStart = lw.n
 	for _, line := range art {
 		fmt.Fprintln(w, line)
 	}
@@ -1464,7 +1471,7 @@ func RenderIndexed(w io.Writer, now time.Time, histogram []string, rows []Row, p
 	fmt.Fprintln(w)
 
 	cliout.Printf(w, "%d project(s) registered · %d with active runs\n", projectCount, activeCount)
-	return lines
+	return lines, artStart
 }
 
 // Keep the control before the note so a narrow watch viewport preserves

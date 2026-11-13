@@ -474,3 +474,49 @@ func TestUIClosedIntentsInspectable(t *testing.T) {
 		t.Fatalf("closed canvas changed: %q, %v", got, err)
 	}
 }
+
+func TestUIFactoryFrameCache(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	root, _ := controlFixture(t)
+	s := newUISource(root, DashFilter{}, os.Stdout)
+	if err := s.refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	b := takeBoard(t, s)
+	if len(b.Art.Frames) != 8 || b.Art.Height != len(b.Art.Frames[0]) {
+		t.Fatal("missing bounded animation frames")
+	}
+	for i, line := range b.Art.Frames[0] {
+		if b.Lines[b.Art.Start+i] != line {
+			t.Fatal("renderer span does not match board art")
+		}
+	}
+	for _, frame := range b.Art.Frames {
+		if len(frame) != b.Art.Height {
+			t.Fatal("varying frame height")
+		}
+		if frame[len(frame)-1] != b.Art.Frames[0][b.Art.Height-1] {
+			t.Fatal("rail animated")
+		}
+		for _, line := range frame {
+			if strings.ContainsRune(line, '\x1b') {
+				t.Fatal("NO_COLOR frame contains ANSI")
+			}
+		}
+	}
+	// Owner pushes and new gathers with unchanged factory state reuse the
+	// frame set. There are no input/capture reads on a cached publish.
+	s.mu.Lock()
+	again, _ := s.buildBoard(time.Now().Add(time.Second))
+	s.mu.Unlock()
+	if &b.Art.Frames[0][0] != &again.Art.Frames[0][0] {
+		t.Fatal("publish regenerated frames")
+	}
+	if err := s.refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	again = takeBoard(t, s)
+	if &b.Art.Frames[0][0] != &again.Art.Frames[0][0] {
+		t.Fatal("unchanged gather regenerated frames")
+	}
+}

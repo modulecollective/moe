@@ -55,17 +55,20 @@ type uiSource struct {
 	boards chan ui.Board // one slot, latest wins
 	poke   chan struct{} // a subscription heard something
 
-	mu       sync.Mutex
-	live     map[string]*liveRun
-	tokens   int
-	snap     DashSnapshot
-	serveNow serveState
-	extra    map[string]uiExtra
-	gathered time.Time
-	gerr     error
-	seed     int64
-	seq      uint64
-	reports  func() []cliout.ProgramStatus
+	mu        sync.Mutex
+	live      map[string]*liveRun
+	tokens    int
+	snap      DashSnapshot
+	serveNow  serveState
+	extra     map[string]uiExtra
+	gathered  time.Time
+	gerr      error
+	seed      int64
+	artState  dash.FactoryState
+	artColor  bool
+	artFrames [][]string
+	seq       uint64
+	reports   func() []cliout.ProgramStatus
 
 	handshakes chan struct{} // bounds concurrent subscription handshakes
 	wg         sync.WaitGroup
@@ -368,7 +371,13 @@ func (s *uiSource) buildBoard(now time.Time) (ui.Board, []cliout.ProgramStatus) 
 	offset := bytes.Count(buf.Bytes(), []byte{'\n'})
 	state := dash.FactoryStateFromRows(rows)
 	histogram := dash.BuildActivityHistogram(snap.Histogram)
-	lines := dash.RenderIndexed(buf, now, histogram, rows, snap.ProjectCount, snap.ActiveProjects, true, state, rand.New(rand.NewSource(s.seed)))
+	color := cliout.Enabled(buf)
+	if s.artFrames == nil || color != s.artColor || state.BacklogCount != s.artState.BacklogCount || state.CompletedCount != s.artState.CompletedCount || !slices.Equal(state.ActiveStages, s.artState.ActiveStages) {
+		s.artFrames = dash.StyledFactoryFrames(buf, state, 8, rand.New(rand.NewSource(s.seed)))
+		s.artState, s.artColor = state, color
+	}
+	lines, artStart := dash.RenderIndexedArt(buf, now, histogram, rows, snap.ProjectCount, snap.ActiveProjects, true, s.artFrames[0])
+	b.Art = ui.Art{Start: offset + artStart, Height: len(s.artFrames[0]), Frames: s.artFrames}
 	b.Lines = strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n")
 
 	for i, row := range rows {

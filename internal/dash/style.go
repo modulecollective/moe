@@ -1,6 +1,8 @@
 package dash
 
 import (
+	"io"
+	"math/rand"
 	"strings"
 
 	"github.com/modulecollective/moe/internal/cliout"
@@ -245,3 +247,15 @@ func paintLines(spans [][]Span) []string {
 func styleHistogramANSI(lines []string) []string { return paintLines(HistogramSpans(lines)) }
 
 func styleFactoryANSI(lines []string) []string { return paintLines(FactorySpans(lines)) }
+
+// StyledFactoryFrames shares the CLI's color gate and classification with
+// cached UI frames. Every frame has the same dimensions and deterministic rail.
+func StyledFactoryFrames(w io.Writer, state FactoryState, n int, r *rand.Rand) [][]string {
+	frames := BuildFactoryFrames(state, ArtWidth, n, r)
+	if cliout.Enabled(w) {
+		for i := range frames {
+			frames[i] = styleFactoryANSI(frames[i])
+		}
+	}
+	return frames
+}

@@ -106,3 +106,15 @@ func TestEditorWordKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestEditorUnicodeSpaceIsAWordBoundary(t *testing.T) {
+	e := newEditor("one\u2003two/é", false)
+	e.key(Key{Code: KeyWordBackspace})
+	if e.String() != "one\u2003" || e.cur != 4 {
+		t.Fatalf("Unicode boundary: %q at %d", e.String(), e.cur)
+	}
+	e.key(Key{Code: KeyWordLeft})
+	if e.cur != 0 {
+		t.Fatal("did not skip Unicode whitespace")
+	}
+}

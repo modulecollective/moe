@@ -167,3 +167,74 @@ func TestCommandKeyboardValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestSaveOutcomeArrivesBeforeTag(t *testing.T) {
+	m, q := testModel(t)
+	m.setBoard(board(1, idea("p", "i", 1)))
+	keyboard(m, "eextra\x13g")
+	j := <-q
+	jobs := make(chan job, 1)
+	results := make(chan jobResult, 1)
+	release := make(chan struct{})
+	workerDone := make(chan struct{})
+	go func() {
+		worker(func(a Action) Result {
+			if a.Kind == ActTag {
+				<-release
+				return Result{Message: "tag failed"}
+			}
+			return Result{OK: true, Message: "saved p/i"}
+		}, jobs, results)
+		close(workerDone)
+	}()
+	jobs <- j
+	progress := <-results
+	m.finished(progress)
+	if !progress.progress || m.busy == nil || !strings.Contains(strings.Join(m.consoleRows(), ""), "saved p/i") {
+		t.Fatal("save outcome held behind tag")
+	}
+	close(release)
+	m.finished(<-results)
+	close(jobs)
+	<-workerDone
+	text := strings.Join(m.consoleRows(), "")
+	if strings.Count(text, "saved p/i") != 2 || !strings.Contains(text, "tag failed") || m.busy != nil {
+		t.Fatalf("partial result: %s", text)
+	}
+}
+
+func TestHelpCtrlCProtectsDraft(t *testing.T) {
+	m, _ := testModel(t)
+	m.setBoard(board(1, run("p", "a")))
+	keyboard(m, "nkeep me\x1b\x1b")
+	keyboard(m, "?")
+	if m.mode != modeHelp {
+		t.Fatal("help not opened")
+	}
+	if keyboard(m, "\x03") != effNone || m.mode != modeConfirm {
+		t.Fatal("help Ctrl-C lost draft protection")
+	}
+}
+
+func TestRevealResultDoesNotReplaceEditor(t *testing.T) {
+	m, q := testModel(t)
+	it := run("p", "a")
+	it.Terminal = true
+	m.setBoard(board(1, it))
+	keyboard(m, "tnmy draft")
+	j := <-q
+	active := m.active
+	m.finished(jobResult{job: j, results: []Result{{Choices: []Choice{{ID: "app", Label: "Rex"}}, Message: "choose a Rex app"}}})
+	if m.active != active || m.mode != modeEdit {
+		t.Fatal("reveal outcome replaced the editor")
+	}
+	keyboard(m, "\x1b\x1b")
+	keyboard(m, "t")
+	if m.mode != modeChoice || len(q) != 0 {
+		t.Fatal("deferred choice not reachable locally")
+	}
+	keyboard(m, "\x1b\x1b")
+	if len(m.choices) != 0 {
+		t.Fatal("cancel did not clear choices")
+	}
+}

@@ -93,6 +93,7 @@ type model struct {
 	focus pane
 	mode  mode
 
+	animation int // index into the board's cached factory frames
 	boardTop  int // first board line in view
 	detailTop int
 
@@ -108,7 +109,6 @@ type model struct {
 	progress    int // already reported steps of the in-flight job
 	busy        *job
 	queue       chan<- job
-	message     string // latest summary; retained events live in the console
 	console     console
 	observed    map[string]bool
 	lastResult  map[string][]string // by project/run
@@ -203,7 +203,7 @@ func (m *model) withKept(b Board) Board {
 			continue
 		}
 		if d.seen == nil || listed[l] {
-			continue // a new capture's target was never on the board
+			continue
 		}
 		listed[l] = true
 		last := *d.seen
@@ -233,9 +233,7 @@ func (m *model) withKept(b Board) Board {
 // last draft holding it.
 func (m *model) dropDraft(k draftKey) {
 	delete(m.drafts, k)
-	msg := m.message
 	m.applyBoard()
-	m.message = msg
 }
 
 // applyBoard rebuilds the shown board from the raw one and the drafts,
@@ -323,8 +321,8 @@ func (m *model) clampBoard() {
 	m.boardTop = max(m.boardTop, 0)
 }
 
-// Layout: one title row, the board, one divider, details, one footer.
-// The board keeps about two thirds of the rest, whatever the mode.
+// Layout reserves the title, two dividers, console and footer. The
+// remaining space stays two-thirds board and one-third details in every mode.
 func (m *model) consoleHeight() int {
 	if m.high < 20 {
 		return 1
@@ -380,6 +378,9 @@ func (m *model) key(k Key) effect {
 	case modeChoice:
 		return m.choiceKey(k)
 	case modeHelp:
+		if k.Code == KeyCtrlC {
+			return m.quit()
+		}
 		if k.Code == KeyEsc || k.Code == KeyRune && (k.Rune == '?' || k.Rune == 'q') || k.Code == KeyEnter {
 			m.mode = modeNormal
 			return effNone
@@ -775,7 +776,12 @@ func (m *model) finished(r jobResult) {
 			m.settleDraft(*j.draft, res)
 		}
 		if step.Kind == ActReveal && len(res.Choices) > 0 {
-			m.choices, m.choiceFor, m.mode = res.Choices, step, modeChoice
+			m.choices, m.choiceFor = res.Choices, step
+			if m.mode == modeNormal {
+				m.mode = modeChoice
+			} else {
+				m.say("terminal choice ready for " + step.Project + "/" + step.Run + "; return to navigation and press t to choose")
+			}
 		}
 		if step.Kind == ActCreate && res.OK {
 			if m.raw.ProjectFilter != "" && m.raw.ProjectFilter != step.Project || m.raw.WorkflowFilter != "" && m.raw.WorkflowFilter != step.Workflow {
@@ -793,17 +799,11 @@ func (m *model) finished(r jobResult) {
 	}
 	if len(r.results) == 2 && !r.results[1].OK {
 		t := j.steps[1]
-		retry := "retry with :" + tagCommand(t.Workflow, t.DesignOnly) + " (tag only; saved " + t.Project + "/" + t.Run + ")"
+		retry := "saved " + t.Project + "/" + t.Run + "; select that idea and retry with :" + tagCommand(t.Workflow, t.DesignOnly) + " (tag only)"
 		msgs = append(msgs, retry)
 		m.say(retry)
 	}
 	msgs = slices.DeleteFunc(msgs, func(s string) bool { return s == "" })
-	m.message = strings.Join(msgs, " · ")
-	if last := r.results[len(r.results)-1]; !last.OK {
-		// Marked so a failure reads as one even when the title clips it;
-		// the whole text is in the target's details.
-		m.message = "! " + m.message
-	}
 	m.lastResult[j.target.project+"/"+j.target.run] = append(msgs, lines...)
 	m.progress = 0
 	m.applyBoard()
@@ -936,7 +936,11 @@ func (m *model) runCommand(line string, target *Item) effect {
 	}
 	need := func(ok bool, why string) bool {
 		if !ok {
-			m.say(f[0] + ": " + why)
+			label := f[0]
+			if target != nil {
+				label += " (" + target.Label() + ")"
+			}
+			m.say(label + ": " + why)
 		}
 		return ok
 	}
@@ -974,7 +978,10 @@ func (m *model) runCommand(line string, target *Item) effect {
 		}
 		m.start(job{label: label, steps: []Action{a}, target: keyOf(*target)})
 	case "new":
-		if !need(len(f) == 3 && (f[1] == "idea" || f[1] == "intent"), "usage: new idea|intent <project>/<slug>") {
+		if !need(len(f) >= 2 && (f[1] == "idea" || f[1] == "intent"), "usage: :new idea <project>/<slug> or :new intent <project>/<slug>") {
+			return effNone
+		}
+		if !need(len(f) == 3, "usage: :new "+f[1]+" <project>/<slug>") {
 			return effNone
 		}
 		p, slug, ok := strings.Cut(f[2], "/")
@@ -1063,6 +1070,10 @@ func (m *model) revealOf(target *Item, client string) {
 		m.say("terminal: the selected run reports no Rex terminal")
 		return
 	}
+	if client == "" && len(m.choices) > 0 && m.choiceFor.Project == target.Project && m.choiceFor.Run == target.Run {
+		m.mode = modeChoice
+		return
+	}
 	a := Action{Kind: ActReveal, Project: target.Project, Run: target.Run, Generation: target.Generation, Client: client}
 	m.start(job{label: "reveal " + target.Label(), steps: []Action{a}, target: keyOf(*target)})
 }
@@ -1079,6 +1090,7 @@ func (m *model) choiceKey(k Key) effect {
 	}
 	if k.Code == KeyEsc || k.Code == KeyCtrlC {
 		m.choices, m.mode = nil, modeNormal
+		m.say("terminal reveal cancelled")
 	}
 	return effNone
 }
