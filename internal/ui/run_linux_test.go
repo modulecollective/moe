@@ -193,6 +193,7 @@ func TestRunOnPTY(t *testing.T) {
 	if after != before {
 		t.Fatalf("termios not restored:\nbefore %+v\nafter  %+v", before.t, after.t)
 	}
+	c.waitOut(t, leaveModes)
 	if out := c.output(); !strings.Contains(out, leaveModes) {
 		t.Fatalf("screen modes not restored: %q", out[max(len(out)-80, 0):])
 	}
@@ -209,6 +210,7 @@ func TestRunOnPTYRestoresOnSignal(t *testing.T) {
 	}
 	c.wait(t)
 	after, _ := getTermios(c.slave)
+	c.waitOut(t, leaveModes)
 	if after != before || !strings.Contains(c.output(), leaveModes) {
 		t.Fatal("signal exit did not restore the terminal")
 	}
@@ -304,6 +306,7 @@ func TestRunOnPTYRestoresOnPanic(t *testing.T) {
 	if after != c.before {
 		t.Fatalf("termios not restored after a panic:\nbefore %+v\nafter  %+v", c.before.t, after.t)
 	}
+	c.waitOut(t, "probe")
 	if out := c.output(); !strings.Contains(out, "probe") || !strings.Contains(out, leaveModes) {
 		t.Fatalf("did not panic and restore: %q", out[max(len(out)-200, 0):])
 	}
