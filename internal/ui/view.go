@@ -9,6 +9,7 @@ import (
 )
 
 const helpText = `Keys
+  /              search board labels from any pane (see Search below)
   Up/Down, j/k   select the previous/next board item
   PgUp/PgDn      page the focused pane; Home/End jump to its ends
   Tab/Shift-Tab  cycle board, details and console
@@ -22,6 +23,21 @@ const helpText = `Keys
   :              command line for the selected item
   ?              this help (Esc closes)
   q, Ctrl-C      quit (asks first when drafts are unsaved)
+
+Search (/)
+  Literal, case-insensitive project/run substring; surrounding spaces ignored
+  All board rows, including off-screen items and kept drafts; no prose search
+  Board order and groups stay; * marks matches, > marks the selected match
+  Up/Down move among matching occurrences, stopping at either end
+  Empty query selects among all items without match marks
+  Enter accepts selection and returns to board navigation; starts no action
+  Esc / Ctrl-C cancel and restore the previous selection and pane
+  Refresh keeps the matching occurrence, then the same run, then first match
+  No matches clears the preview; edit or cancel (Enter stays in search)
+  Arrows, Home/End, Backspace/Delete and word keys edit the query
+  Paste is literal; newlines become spaces; all printable shortcuts are text
+  Tab, Shift-Tab, page and save/discard keys have no search action
+  Ctrl-L redraws; Ctrl-Z suspends
 
 Editor
   Ctrl-S save · Esc back (the draft is kept) · Ctrl-X discard
@@ -100,10 +116,23 @@ func (m *model) view() frame {
 	row := l.boardRow
 
 	sel, hasSel := m.selected()
+	matches := map[int]bool{}
+	if m.mode == modeSearch && strings.TrimSpace(m.search.ed.String()) != "" {
+		for _, i := range m.search.candidates {
+			matches[m.board.Items[i].Line] = true
+		}
+	}
 	for i := range bh {
 		n := m.boardTop + i
 		if n < len(m.board.Lines) {
-			f.rows[row] = boardLine(m.board.Lines[n], hasSel && sel.Line == n, w)
+			marker := byte(0)
+			if matches[n] {
+				marker = '*'
+			}
+			if hasSel && sel.Line == n {
+				marker = '>'
+			}
+			f.rows[row] = markedBoardLine(m.board.Lines[n], marker, w)
 		}
 		row++
 	}
@@ -149,7 +178,7 @@ func (m *model) paneFocused(p pane) bool {
 	switch m.mode {
 	case modeEdit, modeSave, modeHelp:
 		return p == paneDetail
-	case modeCommand, modeChoice, modeConfirm:
+	case modeCommand, modeChoice, modeConfirm, modeSearch:
 		return false
 	}
 	return m.focus == p
@@ -218,6 +247,12 @@ func (m *model) dividerRow(sel Item, ok bool, w int) string {
 func (m *model) detailLines(sel Item, ok bool, w, h int) ([]string, *cell) {
 	var src []string
 	switch m.mode {
+	case modeSearch:
+		if !ok {
+			src = []string{"No matches"}
+		} else {
+			src = m.itemDetail(sel, ok)
+		}
 	case modeHelp:
 		src = strings.Split(helpText, "\n")
 	case modeSave:
@@ -330,6 +365,8 @@ func (m *model) draftsFor(it Item) []*draft {
 // footerRow is the key line, or the prompt with its cursor column.
 func (m *model) footerRow(w int) (string, int) {
 	switch m.mode {
+	case modeSearch:
+		return m.searchFooter(w)
 	case modeCommand:
 		hint := commandHint(m.cmd.String(), m.cmdTarget)
 		line, cc := m.cmd.horizontal(max(w-4, 1))
@@ -358,7 +395,7 @@ func (m *model) footerRow(w int) (string, int) {
 	case modeHelp:
 		return plain("Esc close help", w), -1
 	}
-	var keys []string
+	keys := []string{"/ search"}
 	if it, ok := m.selected(); ok && it.Kind == ItemIdea && it.Editable {
 		keys = append(keys, "g sdlc", "d design", "u untag")
 	}
@@ -397,6 +434,14 @@ func plain(s string, w int) string {
 // The selected line's leading space becomes a marker that needs no
 // colour to read.
 func boardLine(line string, selected bool, w int) string {
+	marker := byte(0)
+	if selected {
+		marker = '>'
+	}
+	return markedBoardLine(line, marker, w)
+}
+
+func markedBoardLine(line string, marker byte, w int) string {
 	var b bytes.Buffer
 	p := []byte(line)
 	for len(p) > 0 {
@@ -415,11 +460,11 @@ func boardLine(line string, selected bool, w int) string {
 		p = p[1:]
 	}
 	s := b.Bytes()
-	if selected {
+	if marker != 0 {
 		if len(s) > 0 && s[0] == ' ' {
-			s = append([]byte{'>'}, s[1:]...)
+			s = append([]byte{marker}, s[1:]...)
 		} else {
-			s = append([]byte("> "), s...)
+			s = append([]byte{marker, ' '}, s...)
 		}
 	}
 	var out bytes.Buffer

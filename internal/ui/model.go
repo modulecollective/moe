@@ -24,6 +24,7 @@ const (
 	modeSave         // save / save+tag choice for an idea draft
 	modeChoice       // pick a Rex client
 	modeHelp
+	modeSearch
 )
 
 // itemKey identifies one board occurrence.
@@ -101,6 +102,7 @@ type model struct {
 	active *draft
 
 	cmd         *editor
+	search      *boardSearch
 	cmdTarget   *Item // captured when : opened
 	completion  *commandCompletion
 	confirm     *pendingConfirm
@@ -242,6 +244,15 @@ func (m *model) dropDraft(k draftKey) {
 // applyBoard rebuilds the shown board from the raw one and the drafts,
 // then settles the selection on it.
 func (m *model) applyBoard() {
+	// Reconcile search last: a pending save may select a nonmatching item.
+	if m.mode == modeSearch {
+		previous, had := m.sel, m.has
+		top := m.detailTop
+		defer func() {
+			m.detailTop = top
+			m.reconcileSearch(previous, had)
+		}()
+	}
 	b := m.withKept(m.raw)
 	prevIdx := m.selectedIndex()
 	prevSel, _ := m.selected()
@@ -291,7 +302,9 @@ func (m *model) applyBoard() {
 	}
 	m.sel = keyOf(b.Items[i])
 	m.detailTop = 0
-	m.say(gone + " left the board; selected " + b.Items[i].Label())
+	if m.mode != modeSearch {
+		m.say(gone + " left the board; selected " + b.Items[i].Label())
+	}
 	m.scrollToSelection()
 }
 
@@ -417,6 +430,8 @@ func (m *model) key(k Key) effect {
 		return m.editKey(k)
 	case modeCommand:
 		return m.commandKey(k)
+	case modeSearch:
+		return m.searchKey(k)
 	case modeConfirm:
 		return m.confirmKey(k)
 	case modeSave:
@@ -450,6 +465,9 @@ func (m *model) normalKey(k Key) effect {
 	}
 	if k.Code == KeyRune {
 		switch k.Rune {
+		case '/':
+			m.openSearch()
+			return effNone
 		case 'j':
 			k = Key{Code: KeyDown}
 		case 'k':

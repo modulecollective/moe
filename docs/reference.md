@@ -74,6 +74,20 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   waits for and prints that save's outcome. In a Rex terminal it reports the
   same OSC 7501 status as `dash --watch`.
 
+  `/` opens temporary board search from any pane. Type a case-insensitive
+  literal substring of `project/run`; surrounding spaces are ignored. Search
+  covers all selectable rows within the current filters, including off-screen
+  items and kept drafts. It preserves board order and groups: `*` marks matches,
+  and `>` marks the selected match. Up/Down step through matching occurrences
+  without wrapping. Enter accepts the selection and returns to board navigation
+  without taking an action; Esc or Ctrl-C cancels and restores the previous
+  selection and pane against the latest board. An empty query includes all
+  items without match marks. `No matches` clears the preview; edit or cancel to
+  recover. Query editing uses the single-line editor, including word keys and
+  literal paste (newlines become spaces). Printable shortcuts remain text;
+  Tab, page and save/discard keys have no search action. Search covers labels,
+  not titles or bodies. In editors and the command line, `/` remains text.
+
   In the command prompt, Tab completes fixed words and cycles matches in lexical
   order; Shift-Tab cycles backward. Type spaces between words; Enter submits.
   `new` completes `idea|intent` and `tag` completes `design|sdlc`. Other values

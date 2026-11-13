@@ -50,7 +50,11 @@ func TestUIPTYHelper(t *testing.T) {
 	}
 	reports := os.NewFile(3, "reports")
 	boards := make(chan Board, 1)
-	boards <- board(1, run("p", "a"))
+	b := board(1, run("p", "a"))
+	if os.Getenv("MOE_UI_PTY_SEARCH") == "1" {
+		b = board(1, run("p", "a"), run("p", "世界-one"), run("p", "世界-two"))
+	}
+	boards <- b
 	cfg := Config{
 		Boards: boards,
 		Do: func(a Action) Result {
@@ -325,6 +329,43 @@ func TestRunOnPTYWordEditing(t *testing.T) {
 		t.Fatal(got)
 	}
 	c.wait(t)
+}
+
+func TestRunOnPTYSearch(t *testing.T) {
+	c := startPTYChild(t, "MOE_UI_PTY_SEARCH=1")
+	c.waitOut(t, "p/a")
+	c.master.Write([]byte("/"))
+	query := []byte("世界")
+	c.master.Write(query[:1]) // a rune split across terminal reads
+	c.master.Write(query[1:])
+	c.waitOut(t, "/ 世界")
+	c.master.Write([]byte("\x1b[B\r"))
+	c.master.Write([]byte("n/\x1b[200~q:njk/\x1b[201~\x13"))
+	if got := c.report(t); got != `note to p/世界-two "/q:njk/"` {
+		t.Fatalf("searched action = %s", got)
+	}
+	c.waitOut(t, "done: note to p/世界-two")
+	c.master.Write([]byte("/p/a"))
+	c.waitOut(t, "/ p/a")
+	// The second Escape introduces the following arrow, resolving the first
+	// as cancellation without depending on a terminal-read timing gap.
+	c.master.Write([]byte("\x1b\x1b[Cnkept target\x13"))
+	if got := c.report(t); got != `note to p/世界-two "kept target"` {
+		t.Fatalf("cancelled action = %s", got)
+	}
+	c.master.Write([]byte("q"))
+	if got := c.report(t); got != "exit <nil>" {
+		t.Fatal(got)
+	}
+	c.wait(t)
+	after, err := getTermios(c.slave)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after != c.before {
+		t.Fatal("search exit did not restore termios")
+	}
+	c.waitOut(t, leaveModes)
 }
 
 // Capture frames while unwrapping to a real terminal for color detection.

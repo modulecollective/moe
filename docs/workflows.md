@@ -316,6 +316,22 @@ separators have a blank row on each side, and the console keeps six message
 rows even on short terminals. The minimum size is 40 columns by 20 rows.
 Moving to the first board item reveals the headings above it.
 
+Press `/` from any pane to find a board item by a case-insensitive literal
+substring of `project/run`. Surrounding query spaces are ignored. Search
+includes off-screen rows, captures, completed items, chores and kept drafts
+within the current filters; it does not search titles or prose. The board
+keeps its order and groups. `*` marks matches; `>` marks the selected match.
+Up/Down move among matching occurrences, stopping at either end. Enter accepts
+the selection and returns to board navigation without starting an action.
+Esc or Ctrl-C cancels and restores the previous selection, pane and scroll
+positions against the latest board. Empty queries include all items without
+match marks. `No matches` clears the preview and keeps search open until you
+edit or cancel. The footer shows the query, cursor, position/count and hints.
+Use the single-line editor's movement, deletion and word keys; paste is
+literal, with newlines becoming spaces. Printable shortcuts remain query
+text; Tab, page and save/discard keys do nothing in search. Ctrl-L redraws
+and Ctrl-Z suspends. In editors and the command line, `/` remains text.
+
 Use `:new idea <project>/<slug>` or `:new intent <project>/<slug>` to open a
 capture draft. Nothing is created until Ctrl-S. Ideas offer save only, save
 and tag sdlc, or save and tag design only. The draft names its target even
