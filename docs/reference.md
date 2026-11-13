@@ -80,6 +80,12 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   ordered by project/run; inspection remains available after discarding a
   draft or restarting the console. Closed captures accept no new edits.
 
+  Saved input appears in the selected run or idea's details: notes, open
+  questions and answered pairs. Notes and answered pairs are labelled `pending`
+  or `delivered to <stage>`. Focus details with Tab and scroll with arrows or
+  page keys. Saved history remains readable after delivery, console restart and
+  completion; completed items remain available for inspection only.
+
   Close and discard confirmations show their question on a separate screen,
   independent of console history. Press `y` to accept or `Esc` to cancel;
   arrows, page keys, Home and End scroll long questions.

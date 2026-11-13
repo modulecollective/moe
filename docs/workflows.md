@@ -763,9 +763,10 @@ an idea into its eventual run. A pending note counts as an operator mark under
 nothing on its own. It neither tags an untagged idea nor advances a stage.
 
 Delivery is once. A pending note reaches exactly one *successful* turn, then
-lives on the run page as history — the canvas that turn writes is where durable
-direction is supposed to persist. A turn that fails marks nothing, so the next
-attempt redelivers.
+lives on the web run page and in the selected item's details in
+[`moe ui`](reference.md#re-entry-and-supervision) as saved history. The canvas
+that turn writes is where durable direction is supposed to persist. A turn that
+fails marks nothing, so the next attempt redelivers.
 
 The other direction: a dynamic survey can ask *you* something, at the run whose
 future agent needs the answer.
