@@ -199,6 +199,9 @@ type Request struct {
 // surfaced on the caller's stdout while the turn runs. No session
 // resume, no operator on stdin.
 type OneShotRequest struct {
+	// Capture requests raw stream files. Nil disables capture; unsupported
+	// backends leave it empty. Read only after ExecuteOneShot returns.
+	Capture *OneShotCapture
 	// Root is the bureaucracy repo root. Passed as a writable
 	// add-dir so the canvas stays reachable when cwd is the sandbox
 	// clone.
@@ -244,6 +247,16 @@ type OneShotRequest struct {
 	// into). Best-effort: a copy failure surfaces on r.Stderr but
 	// doesn't override the turn's exit status.
 	ThreadPath string
+}
+
+// OneShotCapture carries optional raw execution evidence back to the caller.
+// Supporting backends populate private scratch paths and any capture error
+// without changing the subprocess outcome. The caller owns cleanup.
+type OneShotCapture struct {
+	Dir        string
+	StdoutPath string
+	StderrPath string
+	Error      string
 }
 
 var (

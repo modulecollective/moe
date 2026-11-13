@@ -234,9 +234,15 @@ func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 	if stdout == nil {
 		stdout = os.Stdout
 	}
-	cmd.Stderr = r.Stderr
-	if cmd.Stderr == nil {
-		cmd.Stderr = os.Stderr
+	stderr := r.Stderr
+	if stderr == nil {
+		stderr = os.Stderr
+	}
+
+	rawOut, rawErr, finishCapture := captureStreams(r.Capture, stderr)
+	defer finishCapture()
+	if rawErr != nil {
+		stderr = io.MultiWriter(rawErr, stderr)
 	}
 
 	// StdoutPipe + Start/Wait (not Run): Wait must not run until the
@@ -246,6 +252,13 @@ func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 	pipe, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", fmt.Errorf("codex: exec stdout pipe: %w", err)
+	}
+	// Own both drains: an escaped child can hold stderr open as well as
+	// stdout, so the deadline's force-close must cover both descriptors.
+	errPipe, err := cmd.StderrPipe()
+	if err != nil {
+		pipe.Close()
+		return "", fmt.Errorf("codex: exec stderr pipe: %w", err)
 	}
 	// Isolate the child in its own process group so the deadline kill
 	// takes tool children too, not just the codex leader — a zombie tool
@@ -263,14 +276,28 @@ func (Agent) ExecuteOneShot(r agent.OneShotRequest) (string, error) {
 	}
 	sidCh := make(chan string, 1)
 	done := make(chan struct{})
+	stderrDone := make(chan struct{})
+	var stderrErr error
+	go func() {
+		defer close(stderrDone)
+		_, stderrErr = io.Copy(stderr, errPipe)
+	}()
 	go func() {
 		defer close(done)
-		pipeExecProgress(pipe, stdout, r.Root, sidCh)
+		var input io.Reader = pipe
+		if rawOut != nil {
+			input = io.TeeReader(input, rawOut)
+		}
+		pipeExecProgress(input, stdout, r.Root, sidCh)
+		<-stderrDone
 	}()
 	// Drain the pipe fully before reaping (ac.Wait closes the read end):
 	// otherwise a fast-failing turn can lose the thread.started event and
 	// with it the sid, killing the transcript mirror and auto-tail.
-	waitErr := agent.DrainThenWait(ctx, done, pipe, ac)
+	waitErr := agent.DrainThenWait(ctx, done, pipe, ac, errPipe)
+	if waitErr == nil {
+		waitErr = stderrErr
+	}
 	close(sidCh)
 	// Shared post-Wait tail: drain the sid, mirror the transcript, map
 	// the exit to a timeout or the raw waitErr. Routed through the agent
@@ -783,6 +810,10 @@ func pipeExecProgress(r io.Reader, w io.Writer, trimRoot string, sidCh chan<- st
 			fmt.Fprintf(w, "> %s\n", renderCommandExecution(ev.Item, trimRoot))
 		}
 	}
+	// Scanner stops at its bounded token limit. Keep draining even when an
+	// oversized event cannot be rendered, so capture remains complete and the
+	// child cannot block on a full pipe before Wait.
+	_, _ = io.Copy(io.Discard, r)
 }
 
 // codexEvent is the minimum subset of `codex exec --json` we read.

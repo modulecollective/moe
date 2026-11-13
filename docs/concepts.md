@@ -29,11 +29,16 @@ transcript; `--agent claude|codex` disambiguates if both transcript files
 exist. When a turn returns with a missing or empty canvas, it still fails:
 MoE saves its prompt, available transcript, and execution result in an
 immutable `diagnostics/<stage>/<attempt-id>/` directory under the run on
-main. These diagnostic commits never satisfy a stage. The log command shows
-the latest saved failure until a later normal turn supersedes it, using
-journal order rather than timestamps. Older attempts remain in Git after
-retries and session cleanup. If archival fails, stderr names the surviving
-worktree holding the evidence.
+main. Codex headless attempts also save raw `stdout-codex.jsonl` and
+`stderr-codex.log`, with capture errors recorded in `failure.json`. Raw
+streams are captured to private scratch files while live progress and stderr
+continue; scratch files are removed after successful turns or archival.
+These diagnostic commits never satisfy a stage. The log command shows the
+latest saved failure until a later normal turn supersedes it, using journal
+order rather than timestamps. Older attempts remain in Git after retries and
+session cleanup. If archival fails, stderr names the surviving worktree and
+raw capture directory holding the evidence. Other unsuccessful turns retain
+their raw capture directory and print its path.
 
 ## Bureaucracy Repo And Target Repos
 

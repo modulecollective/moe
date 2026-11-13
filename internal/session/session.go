@@ -268,6 +268,8 @@ func Open(root, projectID, runID, docID string) (*Session, error) {
 		"!/projects/*/runs/*/documents/*/prompt-*.md",
 		"!/projects/*/runs/*/diagnostics/*/*/thread*.jsonl",
 		"!/projects/*/runs/*/diagnostics/*/*/prompt-*.md",
+		"!/projects/*/runs/*/diagnostics/*/*/stdout-*.jsonl",
+		"!/projects/*/runs/*/diagnostics/*/*/stderr-*.log",
 		"/" + filepath.ToSlash(run.Dir(projectID, runID)) + "/**",
 	}
 	args := append([]string{"sparse-checkout", "set", "--no-cone", "--no-sparse-index", "--"}, patterns...)

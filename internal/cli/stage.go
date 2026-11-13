@@ -1199,6 +1199,21 @@ func runStageTurn(root string, in stageTurnInputs, stdout, stderr io.Writer) (co
 	}
 	var runErr error
 	var returnedSid string
+	var capture agent.OneShotCapture
+	retainCapture := false
+	defer func() {
+		if capture.Dir == "" {
+			return
+		}
+		if !retainCapture {
+			if err := os.RemoveAll(capture.Dir); err == nil {
+				return
+			} else {
+				moePrintf(stderr, "remove raw execution capture: %v\n", err)
+			}
+		}
+		moePrintf(stderr, "raw execution evidence remains in %s\n", capture.Dir)
+	}()
 	if interrupt.interrupted.Load() {
 		closeBootstrapFailedSession(closeSess, stderr)
 		return exitInterrupted
@@ -1223,6 +1238,7 @@ func runStageTurn(root string, in stageTurnInputs, stdout, stderr io.Writer) (co
 			threadPath = filepath.Join(workRoot, run.ThreadPathFor(in.Agent, spec.Metadata.Project, spec.Metadata.ID, spec.DocID))
 		}
 		returnedSid, runErr = a.ExecuteOneShot(agent.OneShotRequest{
+			Capture:    &capture,
 			Root:       workRoot,
 			Prompt:     prompt,
 			UserPrompt: spec.InitialPrompt,
@@ -1297,12 +1313,14 @@ func runStageTurn(root string, in stageTurnInputs, stdout, stderr io.Writer) (co
 	if spec.CommitStager != nil {
 		commitErr = spec.CommitStager(workRoot, runErr)
 	}
+	retainCapture = runErr != nil || commitErr != nil
 	var refusal *canvasRefusalError
 	if errors.As(commitErr, &refusal) && spec.Metadata != nil {
-		rel, err := saveStageFailure(root, in, spec, a, agentName, returnedSid, prompt, runErr, refusal)
+		rel, err := saveStageFailure(root, in, spec, a, agentName, returnedSid, prompt, runErr, refusal, &capture)
 		if err != nil {
 			moePrintf(stderr, "agent returned without the required canvas; diagnostics could not be saved: %v\n  evidence remains in %s\n", err, workRoot)
 		} else {
+			retainCapture = false
 			moePrintf(stderr, "agent returned without the required canvas; diagnostics saved: %s\n", filepath.Join(root, rel))
 		}
 	}

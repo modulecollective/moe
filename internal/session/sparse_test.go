@@ -23,6 +23,8 @@ func TestSparseSessionPreservesArchive(t *testing.T) {
 		active, run.PromptPathFor("codex", "alpha", "active", "code"),
 		"projects/alpha/runs/active/diagnostics/design/attempt/thread-codex.jsonl",
 		"projects/alpha/runs/active/diagnostics/design/attempt/prompt-codex.md",
+		"projects/alpha/runs/active/diagnostics/design/attempt/stdout-codex.jsonl",
+		"projects/alpha/runs/active/diagnostics/design/attempt/stderr-codex.log",
 		run.ContentPath("alpha", "active", "design"),
 		"projects/alpha/runs/active/run.json",
 		"lore/sparse-checkout.md", "soul.md", "AGENTS.md",
@@ -34,6 +36,8 @@ func TestSparseSessionPreservesArchive(t *testing.T) {
 			"knowledge/topics/prompt-example.md",
 			"digital-twin/architecture.md",
 			"hooks/thread-example.jsonl",
+			"hooks/stdout-example.jsonl",
+			"hooks/stderr-example.log",
 			"hooks/pre-push.d/check.sh",
 			"chores/example/chore.json",
 			"chores/example/prompt.md",
@@ -51,6 +55,8 @@ func TestSparseSessionPreservesArchive(t *testing.T) {
 			run.PromptPathFor("claude", project, "other", "code"),
 			"projects/"+project+"/runs/other/diagnostics/design/attempt/thread-claude.jsonl",
 			"projects/"+project+"/runs/other/diagnostics/design/attempt/prompt-claude.md",
+			"projects/"+project+"/runs/other/diagnostics/design/attempt/stdout-codex.jsonl",
+			"projects/"+project+"/runs/other/diagnostics/design/attempt/stderr-codex.log",
 		)
 	}
 	for _, path := range append(included, omitted...) {

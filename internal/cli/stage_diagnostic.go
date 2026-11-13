@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,6 +30,9 @@ type stageFailure struct {
 	TranscriptAvailable bool          `json:"transcript_available"`
 	TranscriptError     string        `json:"transcript_error,omitempty"`
 	PromptAvailable     bool          `json:"prompt_available"`
+	RawStdoutAvailable  bool          `json:"raw_stdout_available,omitempty"`
+	RawStderrAvailable  bool          `json:"raw_stderr_available,omitempty"`
+	CaptureError        string        `json:"capture_error,omitempty"`
 }
 
 type turnExecution struct {
@@ -62,10 +66,10 @@ func diagnosticStageDir(projectID, runID, stage string) string {
 	return filepath.Join(run.Dir(projectID, runID), "diagnostics", stage)
 }
 
-// saveStageFailure snapshots only the two mirrors and failure metadata onto
+// saveStageFailure snapshots the prompt, transcript, raw streams and metadata onto
 // canonical main. --only keeps an unrelated staged change out of this commit;
 // cleanup touches only the newly allocated directory, even on hook failure.
-func saveStageFailure(root string, in stageTurnInputs, spec stageTurnSpec, a agent.Agent, agentName, sid, prompt string, runErr error, refusal *canvasRefusalError) (string, error) {
+func saveStageFailure(root string, in stageTurnInputs, spec stageTurnSpec, a agent.Agent, agentName, sid, prompt string, runErr error, refusal *canvasRefusalError, capture *agent.OneShotCapture) (string, error) {
 	md := spec.Metadata
 	id, err := run.NewSessionID()
 	if err != nil {
@@ -76,6 +80,11 @@ func saveStageFailure(root string, in stageTurnInputs, spec stageTurnSpec, a age
 		Stage: spec.DocID, Agent: agentName, BackendSessionID: sid,
 		ObservedAt: time.Now().UTC(), Execution: executionResult(runErr), CanvasRefusal: refusal.Reason,
 	}
+	if capture != nil {
+		failure.RawStdoutAvailable = capture.StdoutPath != ""
+		failure.RawStderrAvailable = capture.StderrPath != ""
+		failure.CaptureError = capture.Error
+	}
 	// Read the returned session afresh: the ordinary document mirror can
 	// still belong to a previous attempt when this executor never mirrored.
 	// The prompt comes directly from the payload handed to the executor.
@@ -84,20 +93,21 @@ func saveStageFailure(root string, in stageTurnInputs, spec stageTurnSpec, a age
 	if sid != "" {
 		tmp, err := os.MkdirTemp("", "moe-diagnostic-*")
 		if err != nil {
-			return "", err
-		}
-		defer os.RemoveAll(tmp)
-		thread := filepath.Join(tmp, "thread-"+agentName+".jsonl")
-		found, err := a.CopyTranscript(sid, spec.SessionCwd, thread)
-		if err != nil {
 			failure.TranscriptError = err.Error()
-		} else if found {
-			b, err := os.ReadFile(thread)
+		} else {
+			defer os.RemoveAll(tmp)
+			thread := filepath.Join(tmp, "thread-"+agentName+".jsonl")
+			found, err := a.CopyTranscript(sid, spec.SessionCwd, thread)
 			if err != nil {
-				return "", err
+				failure.TranscriptError = err.Error()
+			} else if found {
+				b, err := os.ReadFile(thread)
+				if err != nil {
+					return "", err
+				}
+				files[filepath.Base(thread)] = b
+				failure.TranscriptAvailable = true
 			}
-			files[filepath.Base(thread)] = b
-			failure.TranscriptAvailable = true
 		}
 	}
 	b, err := json.MarshalIndent(failure, "", "  ")
@@ -127,6 +137,21 @@ func saveStageFailure(root string, in stageTurnInputs, spec stageTurnSpec, a age
 			}
 			paths = append(paths, p)
 		}
+		if capture != nil {
+			for name, source := range map[string]string{
+				"stdout-" + agentName + ".jsonl": capture.StdoutPath,
+				"stderr-" + agentName + ".log":   capture.StderrPath,
+			} {
+				if source == "" {
+					continue
+				}
+				p := filepath.Join(rel, name)
+				if err := copyDiagnosticStream(source, filepath.Join(root, p)); err != nil {
+					return err
+				}
+				paths = append(paths, p)
+			}
+		}
 		if err := run.Stage(root, paths...); err != nil {
 			return err
 		}
@@ -142,6 +167,22 @@ func saveStageFailure(root string, in stageTurnInputs, spec stageTurnSpec, a age
 		return "", err
 	}
 	return rel, nil
+}
+
+// Stream from disk: raw output can be much larger than the progress parser's
+// token limit and must never be materialized as a diagnostic-sized byte slice.
+func copyDiagnosticStream(source, dest string) error {
+	in, err := os.Open(source)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dest, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(out, in)
+	return errors.Join(copyErr, out.Close())
 }
 
 // latestStageFailure uses the journal's topological order, never mtimes or

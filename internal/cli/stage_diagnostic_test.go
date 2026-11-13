@@ -360,7 +360,7 @@ func TestDiagnosticSerializesWithJournalWriter(t *testing.T) {
 	md := loadRun(t, root, "tele", "fix-it")
 	timer := time.AfterFunc(100*time.Millisecond, func() { _ = stdin.Close() })
 	defer timer.Stop()
-	_, err = saveStageFailure(root, stageTurnInputs{Project: "tele", RunSlug: "fix-it", DocID: "design"}, stageTurnSpec{Metadata: md, DocID: "design"}, fake, "codex", "", "prompt", nil, &canvasRefusalError{Reason: "missing"})
+	_, err = saveStageFailure(root, stageTurnInputs{Project: "tele", RunSlug: "fix-it", DocID: "design"}, stageTurnSpec{Metadata: md, DocID: "design"}, fake, "codex", "", "prompt", nil, &canvasRefusalError{Reason: "missing"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -444,7 +444,7 @@ func TestDiagnosticCopiesReturnedSessionAtExecutionCwd(t *testing.T) {
 	rel, err := saveStageFailure(root,
 		stageTurnInputs{Project: "tele", RunSlug: "fix-it", DocID: "design"},
 		stageTurnSpec{Metadata: md, DocID: "design", SessionCwd: cwd},
-		fake, "codex", sid, "prompt", nil, &canvasRefusalError{Reason: "missing"})
+		fake, "codex", sid, "prompt", nil, &canvasRefusalError{Reason: "missing"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -455,5 +455,102 @@ func TestDiagnosticCopiesReturnedSessionAtExecutionCwd(t *testing.T) {
 	got, err := os.ReadFile(filepath.Join(root, rel, "thread-codex.jsonl"))
 	if err != nil || !bytes.Equal(got, fake.transcript) {
 		t.Fatalf("archived transcript = %q, err=%v", got, err)
+	}
+}
+
+// Drive the real Codex executor through the stage boundary with a fake binary;
+// no vendor session is spent, and no transcript exists to substitute for stdout.
+func TestCodexRawStreamsThroughStage(t *testing.T) {
+	for _, tc := range []struct {
+		name                            string
+		success, archiveFail, setupFail bool
+	}{
+		{name: "missing"}, {name: "success", success: true}, {name: "archive-failure", archiveFail: true}, {name: "capture-setup-failure", setupFail: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, _ := setupResumeFixture(t, "unused-raw-capture")
+			defer withRideMode(rideStatic)()
+			scratch := t.TempDir()
+			t.Setenv("TMPDIR", scratch)
+			const raw = "{\"type\":\"thread.started\",\"thread_id\":\"raw-capture-fixture\"}\n{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"\"}}\n{\"type\":\"turn.completed\"}\n"
+			bin := t.TempDir()
+			count := filepath.Join(bin, "calls")
+			script := fmt.Sprintf("#!/bin/sh\necho call >> %q\nprintf '%%s' '%s'\nprintf 'stderr\\000tail' >&2\n", count, raw)
+			if tc.success {
+				script += "printf '# completed\\n' > " + run.ContentPath("tele", "fix-it", "design") + "\n"
+			}
+			if tc.setupFail {
+				t.Setenv("TMPDIR", filepath.Join(scratch, "absent"))
+			}
+			if err := os.WriteFile(filepath.Join(bin, "codex"), []byte(script), 0755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+			if tc.archiveFail {
+				hook := fmt.Sprintf("#!/bin/sh\nif [ \"$PWD\" = %q ]; then echo archive-denied >&2; exit 1; fi\n", root)
+				if err := os.WriteFile(filepath.Join(root, ".git/hooks/pre-commit"), []byte(hook), 0755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var out, errb bytes.Buffer
+			code := runStageSession("tele", "fix-it", "design", stageSessionOpts{Agent: "codex", Headless: true, SkipNextStage: tc.success}, &out, &errb)
+			if (code == 0) != tc.success {
+				t.Fatalf("code=%d: %s", code, errb.String())
+			}
+			calls, err := os.ReadFile(count)
+			if err != nil || string(calls) != "call\n" {
+				t.Fatalf("downstream launched: %q %v", calls, err)
+			}
+			dirs, err := filepath.Glob(filepath.Join(scratch, "moe-codex-exec-*"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.archiveFail {
+				diagnosticAttempts(t, root, 0)
+				if len(dirs) != 1 || !strings.Contains(errb.String(), "raw execution evidence remains in "+dirs[0]) {
+					t.Fatalf("lost capture recovery path: %v %s", dirs, errb.String())
+				}
+				got, err := os.ReadFile(filepath.Join(dirs[0], "stdout.jsonl"))
+				if err != nil || string(got) != raw {
+					t.Fatalf("lost retained raw stream: %q %v", got, err)
+				}
+				return
+			}
+			if len(dirs) != 0 {
+				t.Fatalf("scratch leaked: %v", dirs)
+			}
+			if tc.success {
+				diagnosticAttempts(t, root, 0)
+				return
+			}
+			failurePath := diagnosticAttempts(t, root, 1)[0]
+			failure := readStageFailure(t, failurePath)
+			if failure.TranscriptAvailable || failure.Execution.ExitCode == nil || *failure.Execution.ExitCode != 0 {
+				t.Fatalf("changed outcome: %+v", failure)
+			}
+			if tc.setupFail {
+				if failure.CaptureError == "" || failure.RawStdoutAvailable || failure.RawStderrAvailable {
+					t.Fatalf("lost capture failure: %+v", failure)
+				}
+				return
+			}
+			if !failure.RawStdoutAvailable || !failure.RawStderrAvailable || failure.CaptureError != "" {
+				t.Fatalf("missing raw availability: %+v", failure)
+			}
+			for name, want := range map[string]string{"stdout-codex.jsonl": raw, "stderr-codex.log": "stderr\x00tail"} {
+				path := filepath.Join(filepath.Dir(failurePath), name)
+				rel, err := filepath.Rel(root, path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got, err := git.Output(root, "show", "main:"+rel)
+				if err != nil || got != want {
+					t.Fatalf("archived %s=%q (%v)", name, got, err)
+				}
+			}
+			if sha, _, err := run.LatestWorkTurnSHA(root, "tele", "fix-it", "design"); err != nil || sha != "" {
+				t.Fatalf("failure satisfied stage: %s %v", sha, err)
+			}
+		})
 	}
 }

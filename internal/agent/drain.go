@@ -24,9 +24,9 @@ const drainGrace = 5 * time.Second
 // nondeterministically — including the system/init (claude) /
 // thread.started (codex) event that carries the session id.
 //
-// done is closed by the caller when the drain goroutine returns. pipe is
-// the child's StdoutPipe; on the deadline path it's force-closed to
-// unblock a scanner stuck on a pipe the group kill couldn't EOF (the
+// done is closed by the caller when all drain goroutines return. pipe is
+// the child's StdoutPipe; on the deadline path it and extraPipes are
+// force-closed to unblock a drain stuck on a pipe the group kill couldn't EOF (the
 // scanner surfaces ErrClosed, which the progress readers already swallow
 // silently). c is the started command to reap.
 //
@@ -34,7 +34,7 @@ const drainGrace = 5 * time.Second
 // the executor passes context.Background(), whose Done() is nil and
 // never selects, so a no-deadline turn blocks on the drain exactly as
 // the doc wants and can't reach the grace force-close.
-func DrainThenWait(ctx context.Context, done <-chan struct{}, pipe io.Closer, c *Command) error {
+func DrainThenWait(ctx context.Context, done <-chan struct{}, pipe io.Closer, c *Command, extraPipes ...io.Closer) error {
 	select {
 	case <-done:
 	case <-ctx.Done():
@@ -42,6 +42,9 @@ func DrainThenWait(ctx context.Context, done <-chan struct{}, pipe io.Closer, c 
 		case <-done:
 		case <-time.After(drainGrace):
 			pipe.Close() // force the scanner off a pipe the group kill couldn't EOF
+			for _, p := range extraPipes {
+				p.Close()
+			}
 			<-done
 		}
 	}

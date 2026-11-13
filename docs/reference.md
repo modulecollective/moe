@@ -582,10 +582,11 @@ present.
 ## Session Checkout
 
 New bureaucracy sessions use sparse checkout: other runs' mirrored transcripts
-and saved prompts under `documents/` and `diagnostics/` stay in Git without
-being copied to disk. The entire active run and normal project context remain
-present. Existing full sessions resume unchanged. This bounds archive checkout
-cost without changing auto-pull, session locking, or the complete commit tree.
+and saved prompts under `documents/` and `diagnostics/`, plus raw execution
+streams under `diagnostics/`, stay in Git without being copied to disk. The
+entire active run and normal project context remain present. Existing full
+sessions resume unchanged. This bounds archive checkout cost without changing
+auto-pull, session locking, or the complete commit tree.
 
 `moe <workflow> log`, usage reports, and serve transcript pages read omitted
 transcripts from the session's index without restoring files; present files
