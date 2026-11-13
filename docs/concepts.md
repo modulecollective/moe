@@ -9,10 +9,11 @@ reference, see [reference.md](reference.md).
 
 A workflow is a small ladder of stages. A run is one pass through that
 ladder. A stage has one canvas file at
-`projects/<project>/runs/<slug>/documents/<stage>/content.md`. The agent
-reads that file, talks with you, edits the file, and MoE commits the turn
-with trailers like `MoE-Run`, `MoE-Document`, `MoE-Session`, and
-`MoE-Workflow`.
+`projects/<project>/runs/<slug>/documents/<stage>/content.md` — or, for a stage
+with several canvases, the Markdown files under `documents/<stage>/content/`
+(sdlc build keeps `code.md` and `test.md` there). The agent reads its canvas,
+talks with you, edits it, and MoE commits the turn with trailers like
+`MoE-Run`, `MoE-Document`, `MoE-Session`, and `MoE-Workflow`.
 
 Runs live under `projects/<project>/runs/<slug>/`. Each run has `run.json`
 plus one document directory per stage. The canvas is the public artifact for

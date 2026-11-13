@@ -36,7 +36,9 @@ The shape under `{{.BureaucracyRoot}}` is the same for every project:
 
 - `projects/<p>/runs/<slug>/documents/<stage>/content.md` — the canvas
   every prior run committed for that stage. Grep here for prior
-  thinking on a topic.
+  thinking on a topic. A stage with several canvases keeps them under
+  `documents/<stage>/content/` instead — sdlc build's are
+  `content/code.md` and `content/test.md`.
 - `projects/<p>/runs/<slug>/feedback/twin.md`,
   `feedback/lore.md` — observations prior runs left for the operator
   to triage.
@@ -85,8 +87,8 @@ by stage, or by workflow with no extra tooling. Run these from
   by the `sdlc` workflow.
 - `git log --all -- projects/{{.Project}}/runs/` — file-scoped walk
   of this project's run history.
-- `rg '<topic>' projects/*/runs/*/documents/*/content.md` — prose
-  search across every prior canvas.
+- `rg '<topic>' -g 'content.md' -g '**/content/*.md' projects/*/runs` —
+  prose search across every prior canvas, both layouts.
 
 For portable problems — sandbox quirks, agent ergonomics, recurring
 patterns — widen the grep to other projects' runs before drafting new
@@ -164,7 +166,7 @@ context when warranted. Then search this project's canvases and metadata:
 
 ```sh
 rg -l -i -e 'robot.?pm' \
-  -g 'content.md' -g 'run.json' \
+  -g 'content.md' -g '**/content/*.md' -g 'run.json' \
   'projects/{{.Project}}/runs'
 ```
 
