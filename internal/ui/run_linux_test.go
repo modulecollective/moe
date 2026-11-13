@@ -55,11 +55,17 @@ func TestUIPTYHelper(t *testing.T) {
 		b = board(1, run("p", "a"), run("p", "世界-one"), run("p", "世界-two"))
 	}
 	boards <- b
+	actions := 0
 	cfg := Config{
 		Boards: boards,
 		Do: func(a Action) Result {
 			fmt.Fprintf(reports, "%s %q\n", a.describe(), a.Text)
-			return Result{OK: true, Message: "done"}
+			message := "done"
+			if os.Getenv("MOE_UI_PTY_SEARCH") == "1" {
+				actions++
+				message = fmt.Sprintf("done #%d", actions)
+			}
+			return Result{OK: true, Message: message}
 		},
 	}
 	if os.Getenv("MOE_UI_PTY_PANIC") == "1" {
@@ -353,6 +359,9 @@ func TestRunOnPTYSearch(t *testing.T) {
 	if got := c.report(t); got != `note to p/世界-two "kept target"` {
 		t.Fatalf("cancelled action = %s", got)
 	}
+	// The callback report precedes delivery of its result to the loop.
+	// Wait for that acknowledgement so q cannot see a still-dirty draft.
+	c.waitOut(t, "done #2")
 	c.master.Write([]byte("q"))
 	if got := c.report(t); got != "exit <nil>" {
 		t.Fatal(got)
