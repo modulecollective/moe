@@ -79,10 +79,10 @@ and launches nothing.
 A run whose work landed entirely as bureaucracy commits — project hooks,
 chores, knowledge topics, the bureaucracy's own docs — can declare `ship: none`
 on build's test.md gate, and `push` then closes the run rather than refusing an
-empty branch, so a ride carries on instead of stalling. It honors that only when the
-branch verifiably has zero commits ahead of the default branch: a gate and a
-branch that disagree refuse loudly, because the alternative is a mis-written
-gate deleting a sandbox that still held reviewed work.
+empty branch, so a ride carries on instead of stalling. It honors that only
+when the branch verifiably has zero commits ahead of the default branch: a gate
+and a branch that disagree refuse loudly, because the alternative is a
+mis-written gate deleting a sandbox that still held reviewed work.
 
 `moe sdlc new --from-idea <project>/<slug>` promotes an idea into a run and
 seeds the design canvas from the idea body. `moe sdlc reopen <project>/<slug>`
