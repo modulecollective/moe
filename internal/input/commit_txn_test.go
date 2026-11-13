@@ -260,7 +260,7 @@ func TestInputCommitFailureReportsRestorationFailures(t *testing.T) {
 			rel := Path("moe", "destination")
 			before := readInputPath(t, root, rel)
 			head := gittest.HeadSHA(t, root)
-			// A directory makes WriteFile fail even when tests run as root.
+			// A directory blocks replacement even when tests run as root.
 			sabotage := fmt.Sprintf("rm -- '%s'\nmkdir -- '%s'\n", rel, rel)
 			if breakIndex {
 				sabotage += "mv .git/index .git/index.saved\nmkdir .git/index\n"

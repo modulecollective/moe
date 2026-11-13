@@ -589,7 +589,7 @@ func (s fileSnap) restore(root string, cause error) error {
 	abs := filepath.Join(root, s.rel)
 	var fileErr error
 	if s.existed {
-		fileErr = os.WriteFile(abs, s.bytes, 0o644)
+		fileErr = replaceFile(abs, s.bytes)
 	} else if err := os.Remove(abs); err != nil && !errors.Is(err, os.ErrNotExist) {
 		fileErr = err
 	}
@@ -603,14 +603,11 @@ func (s fileSnap) restore(root string, cause error) error {
 }
 
 func writeFile(path string, f File) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
 	b, err := json.MarshalIndent(f, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(b, '\n'), 0o644)
+	return replaceFile(path, append(b, '\n'))
 }
 
 // Waiting is one entry the board is still carrying: an open ping needing
