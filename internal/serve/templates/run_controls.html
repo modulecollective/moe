@@ -1,0 +1,8 @@
+<div id="run-controls" class="run-controls">{{with .Control}}
+  {{range .Actions}}<form method="post" action="{{$.ControlURL}}" class="action-form">
+    <input type="hidden" name="action" value="{{.}}">
+    <input type="hidden" name="id" value="{{$.ControlID}}">
+    <input type="hidden" name="revision" value="{{$.Control.Revision}}">
+    <button class="action" type="submit">{{.}}</button>
+  </form>{{end}}
+{{end}}</div>

@@ -356,7 +356,17 @@ section.actions {
   gap: 0.5rem;
   margin-top: 1rem;
 }
+.run-controls { display: contents; }
 .action-form { margin: 0; }
+
+/* Detailed run diagnostics follow the work and wrap on narrow screens. */
+section.run-status {
+  color: var(--muted);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+section.run-status ul { list-style: none; padding: 0; margin: 0.5rem 0; }
+section.run-status li { margin: 0.25rem 0; }
 .action {
   appearance: none;
   background: transparent;

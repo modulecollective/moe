@@ -1,5 +1,4 @@
 <div class="run-fragment">
-  {{template "run_status.html" .RunStatus}}
   {{with .Reaped}}
   <p class="reaped">the last machine turn at <strong>{{.Doc}}</strong> died before landing anything;
     the heartbeat abandoned its session branch{{if .Ago}} <span title="{{.At}}">{{.Ago}}</span>{{end}}.
@@ -16,7 +15,7 @@
   <p class="meta"><span class="status exited">{{.Status}}</span></p>
   {{end}}
 
-  {{if .Actions}}
+  {{if or .Actions .RunStatus.Control}}
   <section class="actions">
     {{range .Actions}}
       {{if eq .Method "POST"}}
@@ -25,6 +24,7 @@
       <a class="action" href="{{.Href}}">{{.Label}}</a>
       {{end}}
     {{end}}
+    {{template "run_controls.html" .RunStatus}}
   </section>
   {{end}}
 
@@ -170,4 +170,5 @@
     </ul>
   </section>
   {{end}}
+  {{if .RunStatus.Control}}{{template "run_status.html" .RunStatus}}{{end}}
 </div>

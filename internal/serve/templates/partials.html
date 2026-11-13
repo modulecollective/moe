@@ -238,27 +238,37 @@ document.getElementById('theme-toggle').addEventListener('click', function () {
 {{end}}
 
 
-{{/* Live status refresh. Only the status block is fetched and swapped,
-     every five seconds while the page is visible, and never while focus
-     is inside it — so note drafts, focus and scroll stay put. Without
-     JavaScript the page is complete; the forms POST and redirect. */}}
+{{/* Refresh both live slots from one observation, leaving the rest of the
+     page intact. No-JS forms still POST and redirect to fresh readback. */}}
 {{define "runstatusjs"}}
 <script>
 (function () {
   var timer = null;
   function block() { return document.getElementById('run-status'); }
+  function controls() { return document.getElementById('run-controls'); }
+  function occupied(status, actions) {
+    return status.contains(document.activeElement) || actions.contains(document.activeElement);
+  }
   function tick() {
-    var cur = block();
-    if (document.hidden || !cur || cur.contains(document.activeElement)) return;
+    var cur = block(), actions = controls();
+    if (document.hidden || !cur || !actions || occupied(cur, actions)) return;
     fetch(cur.dataset.refresh, {credentials: 'same-origin', cache: 'no-store'})
       .then(function (r) { return r.ok ? r.text() : null; })
       .then(function (html) {
-        var now = block();
-        if (!html || !now || now.contains(document.activeElement)) return;
+        var now = block(), actions = controls();
+        if (!html || document.hidden || !now || !actions || occupied(now, actions)) return;
         var holder = document.createElement('div');
         holder.innerHTML = html;
         var next = holder.querySelector('#run-status');
-        if (next) now.replaceWith(next);
+        var nextActions = holder.querySelector('#run-controls');
+        if (!next || !nextActions) return;
+        var receipts = now.querySelector('.control-requests');
+        var nextReceipts = next.querySelector('.control-requests');
+        if (receipts && nextReceipts) nextReceipts.open = receipts.open;
+        var x = window.scrollX, y = window.scrollY;
+        now.replaceWith(next);
+        actions.replaceWith(nextActions);
+        window.scrollTo(x, y);
       })
       .catch(function () {});
   }
@@ -267,7 +277,7 @@ document.getElementById('theme-toggle').addEventListener('click', function () {
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) { stop(); } else { tick(); start(); }
   });
-  if (block() && !document.hidden) start();
+  if (block() && controls() && !document.hidden) start();
 })();
 </script>
 {{end}}

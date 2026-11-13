@@ -9,7 +9,7 @@ package serve
 // for an eligible sweep, and the conversation command is printed for
 // the operator to run at a terminal. Forms work without JavaScript and
 // POST redirects to a fresh readback; the script only re-fetches the
-// status block while the page is visible.
+// status and control slots while the page is visible.
 
 import (
 	"encoding/json"
@@ -80,7 +80,7 @@ func (s *Server) handleRunStatus(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.loadRunOr404(w, projectID, slug, "run status"); !ok {
 		return
 	}
-	s.render(w, r, "run_status.html", s.runStatusVM(projectID, slug))
+	s.render(w, r, "run_status_fragments.html", s.runStatusVM(projectID, slug))
 }
 
 func (s *Server) handleRunControl(w http.ResponseWriter, r *http.Request) {
