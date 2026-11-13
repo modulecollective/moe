@@ -57,7 +57,13 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   overwrite a canvas someone else changed meanwhile. Runs update as their
   owners publish, not only on the 3s refresh; a lost owner's facts stay,
   labelled stale. Smoke cycles cached art every 500 ms without scans, socket
-  reads or status reports. The console retains 100 events in memory, with
+  reads or status reports. The shared dash banner stays visible; the complete
+  histogram and factory are pinned above the scrolling board when they fit,
+  and collapse together on short or narrow terminals. Resizing restores them.
+  A heavy, bright amber pane heading identifies where keys go; without color
+  the heavy rule remains. The selected target retains its `>` marker. A board
+  heading's `lines … of …` counts scrollable display lines (including headings
+  and blanks), not runs. The console retains 100 events in memory, with
   bounded, labelled message truncation; it never logs note or capture bodies.
   It needs a terminal on stdout (Linux or macOS) and restores it on every
   exit; quitting mid-save waits for and prints that save's outcome. In a Rex
