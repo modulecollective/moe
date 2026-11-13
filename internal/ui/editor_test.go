@@ -74,3 +74,35 @@ func TestEditorSingleLineAndLimit(t *testing.T) {
 		t.Fatal("insert past the limit accepted")
 	}
 }
+
+func TestEditorWordKeys(t *testing.T) {
+	for _, single := range []bool{false, true} {
+		for _, tc := range []struct {
+			text              string
+			at, back, forward int
+		}{
+			{"héllo 世界/p-x  tail", 13, 6, 18},
+			{"one\n\t two", 7, 6, 9},
+			{"one two", 0, 0, 3}, {"one two", 5, 4, 7}, {"one two", 7, 4, 7},
+			{"one\n\t two", 6, 0, 9},
+		} {
+			for _, code := range []KeyCode{KeyWordLeft, KeyWordRight, KeyWordBackspace} {
+				e := newEditor(tc.text, single)
+				e.cur = tc.at
+				e.key(Key{Code: code})
+				want := tc.back
+				text := tc.text
+				if code == KeyWordRight {
+					want = tc.forward
+				}
+				if code == KeyWordBackspace {
+					rs := []rune(text)
+					text = string(rs[:tc.back]) + string(rs[tc.at:])
+				}
+				if e.cur != want || e.String() != text || !utf8.ValidString(e.String()) {
+					t.Fatalf("%q at %d code %d: cur=%d text=%q; want %d %q", tc.text, tc.at, code, e.cur, e.String(), want, text)
+				}
+			}
+		}
+	}
+}

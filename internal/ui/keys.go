@@ -42,6 +42,9 @@ const (
 	KeyCtrlX
 	KeyCtrlZ
 	KeyCtrlL
+	KeyWordLeft
+	KeyWordRight
+	KeyWordBackspace
 )
 
 // maxPaste bounds one bracketed paste. Notes and captures are short; a
@@ -147,8 +150,11 @@ func (d *decoder) flush() []Key {
 	}
 	b := d.buf
 	d.buf = nil
-	if b[0] == 0x1b {
+	if len(b) == 1 && b[0] == 0x1b {
 		return []Key{{Code: KeyEsc}}
+	}
+	if b[0] == 0x1b {
+		return nil // partial modified input must not become a shortcut
 	}
 	return []Key{{Code: KeyRune, Rune: utf8.RuneError}}
 }
@@ -180,6 +186,8 @@ func decodeOne(b []byte) (Key, int) {
 		return Key{Code: KeyCtrlZ}, 1
 	case c == 0x0c:
 		return Key{Code: KeyCtrlL}, 1
+	case c == 0x17:
+		return Key{Code: KeyWordBackspace}, 1
 	case c < 0x20:
 		return Key{}, 1
 	}
@@ -208,9 +216,19 @@ func decodeEscape(b []byte) (Key, int) {
 	case 0x1b:
 		// Escape then something: the first one is a key of its own.
 		return Key{Code: KeyEsc}, 1
+	case 0x7f, 0x08:
+		return Key{Code: KeyWordBackspace}, 2
+	case 'b':
+		return Key{Code: KeyWordLeft}, 2
+	case 'f':
+		return Key{Code: KeyWordRight}, 2
 	}
-	// Alt+key: treat as the key alone, consuming the Escape.
-	return Key{Code: KeyEsc}, 1
+	// Unsupported Meta input is consumed whole, including a split rune.
+	if !utf8.FullRune(b[1:]) {
+		return Key{}, 0
+	}
+	_, n := utf8.DecodeRune(b[1:])
+	return Key{}, 1 + n
 }
 
 // decodeCSI reads ESC [ params final.
@@ -233,8 +251,22 @@ func decodeCSI(b []byte) (Key, int) {
 	if final < 0x40 || final > 0x7e {
 		return Key{}, n
 	}
+	if params == "1;3" {
+		switch final {
+		case 'D':
+			return Key{Code: KeyWordLeft}, n
+		case 'C':
+			return Key{Code: KeyWordRight}, n
+		}
+	}
+	if params != "" && params != "1" && final != '~' {
+		return Key{}, n
+	}
 	if final == '~' {
-		num, _, _ := cutByte(params, ';')
+		if bytes.ContainsRune([]byte(params), ';') {
+			return Key{}, n
+		}
+		num := params
 		switch num {
 		case "1", "7":
 			return Key{Code: KeyHome}, n

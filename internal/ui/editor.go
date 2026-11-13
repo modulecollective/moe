@@ -2,6 +2,7 @@ package ui
 
 import (
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/modulecollective/moe/internal/cliout"
@@ -61,6 +62,19 @@ func (e *editor) key(k Key) bool {
 			return false
 		}
 		return e.insert("\n")
+	case KeyWordLeft:
+		e.cur = e.wordBack()
+	case KeyWordRight:
+		for e.cur < len(e.text) && unicode.IsSpace(e.text[e.cur]) {
+			e.cur++
+		}
+		for e.cur < len(e.text) && !unicode.IsSpace(e.text[e.cur]) {
+			e.cur++
+		}
+	case KeyWordBackspace:
+		start := e.wordBack()
+		e.text = append(e.text[:start], e.text[e.cur:]...)
+		e.cur = start
 	case KeyBackspace:
 		if e.cur > 0 {
 			e.text = append(e.text[:e.cur-1], e.text[e.cur:]...)
@@ -97,6 +111,17 @@ func (e *editor) key(k Key) bool {
 	}
 	e.want = -1
 	return true
+}
+
+func (e *editor) wordBack() int {
+	i := e.cur
+	for i > 0 && unicode.IsSpace(e.text[i-1]) {
+		i--
+	}
+	for i > 0 && !unicode.IsSpace(e.text[i-1]) {
+		i--
+	}
+	return i
 }
 
 // vertical moves the cursor one visual row, keeping its column.

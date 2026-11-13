@@ -119,6 +119,7 @@ func TestLoopEscapeAndOutputError(t *testing.T) {
 	h.input <- []byte("n")
 	h.waitOut(t, "editing note")
 	h.input <- []byte("\x1b")
+	time.Sleep(2 * escWait)
 	h.input <- []byte(":")
 	h.waitOut(t, "→ p/a") // the Escape was a key: the editor closed and : opened
 	h.out.mu.Lock()

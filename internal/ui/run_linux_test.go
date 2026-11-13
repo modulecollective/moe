@@ -311,3 +311,18 @@ func TestRunOnPTYRestoresOnPanic(t *testing.T) {
 		t.Fatalf("did not panic and restore: %q", out[max(len(out)-200, 0):])
 	}
 }
+
+func TestRunOnPTYWordEditing(t *testing.T) {
+	c := startPTYChild(t)
+	c.waitOut(t, "p/a")
+	c.master.Write([]byte("none 世界/p-x\x1b\x7ftwo\x1bq\x13"))
+	if got := c.report(t); got != `note to p/a "one two"` {
+		t.Fatalf("word edit: %s", got)
+	}
+	c.waitOut(t, "done")
+	c.master.Write([]byte("q"))
+	if got := c.report(t); got != "exit <nil>" {
+		t.Fatal(got)
+	}
+	c.wait(t)
+}
