@@ -658,51 +658,70 @@ func TestStaleAnswerRecoverable(t *testing.T) {
 // A draft outlives its target's eligibility: once a capture closes or a
 // run finishes, the key that opened its draft still reopens it to read
 // or discard, the details say so, and the save stays the writer's to
-// refuse.
+// refuse. A closed intent leaves the board altogether, as the dash
+// drops it; its draft keeps a read-only row under its own identity.
 func TestDraftReachableAfterTargetCloses(t *testing.T) {
 	cases := []struct {
 		name  string
 		item  Item
 		key   rune
-		close func(*Item)
+		close func(Item) []Item // the target's items on the next board
 	}{
-		{"idea body", idea("p", "x", 1), 'e', func(it *Item) { it.Editable, it.Notes = false, false }},
-		{"intent body", Item{Project: "p", Run: "y", Kind: ItemIntent, Editable: true, Body: "# y\n"}, 'e', func(it *Item) { it.Editable = false }},
-		{"run note", run("p", "a"), 'n', func(it *Item) { it.Notes, it.Controls = false, false }},
+		{"idea body", idea("p", "x", 1), 'e', func(it Item) []Item { it.Editable, it.Notes = false, false; return []Item{it} }},
+		{"intent body", Item{Project: "p", Run: "y", Kind: ItemIntent, Editable: true, Body: "# y\nintent canvas\n"}, 'e', func(Item) []Item { return nil }},
+		{"run note", run("p", "a"), 'n', func(it Item) []Item { it.Notes, it.Controls = false, false; return []Item{it} }},
 	}
 	for _, c := range cases {
 		for _, submit := range []bool{true, false} {
 			t.Run(fmt.Sprintf("%s/submit=%v", c.name, submit), func(t *testing.T) {
 				m, q := testModel(t)
-				it := c.item
-				m.setBoard(board(1, it))
+				other := idea("p", "z", 1)
+				m.setBoard(board(1, c.item, other))
 				press(m, Key{Code: KeyRune, Rune: c.key})
 				typed(m, "precious operator text")
-				c.close(&it)
-				m.setBoard(board(2, it))
+				m.setBoard(board(2, append(c.close(c.item), other)...))
 				if submit {
 					press(m, Key{Code: KeyCtrlS})
 					j := <-q
+					if j.steps[0].Run != c.item.Run {
+						t.Fatalf("submitted to %s", j.steps[0].Run)
+					}
 					m.finished(jobResult{job: j, results: []Result{{Message: "no longer open"}}})
 				}
 				press(m, Key{Code: KeyEsc})
 				if m.mode != modeNormal || m.dirtyDrafts() != 1 {
 					t.Fatalf("mode=%v dirty=%d", m.mode, m.dirtyDrafts())
 				}
+				if it, ok := m.selected(); !ok || it.Run != c.item.Run {
+					t.Fatalf("selected %+v, message %q", it, m.message)
+				}
 				detail := strings.Join(m.detailLinesForTest(), "\n")
 				if !strings.Contains(detail, string(c.key)+" to continue it") || !strings.Contains(detail, "saving will be refused; Ctrl-X discards it") {
 					t.Fatalf("detail = %s", detail)
 				}
+				if c.item.Kind == ItemIntent && !strings.Contains(detail, "intent canvas") {
+					t.Fatalf("closed intent's body not shown: %s", detail)
+				}
 				press(m, Key{Code: KeyRune, Rune: c.key})
-				if m.mode != modeEdit || !strings.Contains(m.active.ed.String(), "precious operator text") {
+				if m.mode != modeEdit || m.active.key.run != c.item.Run || !strings.Contains(m.active.ed.String(), "precious operator text") {
 					t.Fatalf("reopen: mode=%v message=%q", m.mode, m.message)
 				}
 				press(m, Key{Code: KeyCtrlX}, Key{Code: KeyRune, Rune: 'y'})
 				if m.dirtyDrafts() != 0 || m.mode != modeNormal {
 					t.Fatalf("discard: dirty=%d mode=%v", m.dirtyDrafts(), m.mode)
 				}
+				if c.close(c.item) == nil {
+					for _, it := range m.board.Items {
+						if it.Run == c.item.Run {
+							t.Fatal("kept row outlived its discarded draft")
+						}
+					}
+					if strings.Contains(strings.Join(m.board.Lines, "\n"), keptHeading) {
+						t.Fatal("kept heading outlived its last draft")
+					}
+				}
 				press(m, Key{Code: KeyRune, Rune: c.key})
-				if m.mode == modeEdit {
+				if m.mode == modeEdit && m.active.key.run == c.item.Run {
 					t.Fatal("opened a fresh draft on a closed target")
 				}
 			})

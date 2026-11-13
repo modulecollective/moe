@@ -52,6 +52,9 @@ type draft struct {
 	// with the draft until it is resubmitted.
 	refused   []string
 	confirmed bool
+	// seen is its target as the board last showed it, so the draft stays
+	// reachable (see withKept) after the target leaves the board.
+	seen *Item
 }
 
 func (d *draft) dirty() bool { return d.ed.String() != d.base }
@@ -81,7 +84,8 @@ const (
 
 // model is the console's whole state. Only the loop goroutine touches it.
 type model struct {
-	board Board
+	raw   Board // as the caller sent it
+	board Board // raw plus kept-draft targets that left it
 	sel   itemKey
 	has   bool // sel names an item
 	focus pane
@@ -148,9 +152,81 @@ func (m *model) selectedIndex() int {
 // surviving item — and saying so. Open editors, commands and prompts
 // keep their captured targets.
 func (m *model) setBoard(b Board) {
-	if b.Seq != 0 && b.Seq < m.board.Seq {
+	if b.Seq != 0 && b.Seq < m.raw.Seq {
 		return
 	}
+	m.raw = b
+	m.applyBoard()
+}
+
+// keptBucket marks an item withKept added: no dash bucket is negative.
+const keptBucket = -1
+
+const keptHeading = "KEPT DRAFTS"
+
+// withKept is b plus one read-only item for each target that left the
+// board while a draft for it is kept — a closed intent drops out of the
+// dash entirely, a run can fall out of the filter. The item keeps the
+// target's identity and what the board last showed of it, so the
+// operator can still read the text, reopen it with the key that opened
+// it, and discard it. It offers no action: a save goes to the writer,
+// which refuses it, and the text is never retargeted. Drafts whose
+// target is on b record it as last seen.
+func (m *model) withKept(b Board) Board {
+	present := map[string]Item{}
+	for _, it := range b.Items {
+		if _, ok := present[it.Label()]; !ok {
+			present[it.Label()] = it
+		}
+	}
+	var gone []Item
+	listed := map[string]bool{}
+	for _, d := range m.drafts {
+		l := d.key.project + "/" + d.key.run
+		if it, ok := present[l]; ok {
+			d.seen = &it
+			continue
+		}
+		if d.seen == nil || listed[l] {
+			continue // a new capture's target was never on the board
+		}
+		listed[l] = true
+		last := *d.seen
+		gone = append(gone, Item{
+			Project: last.Project, Run: last.Run, Bucket: keptBucket, Kind: last.Kind, Body: last.Body,
+			Detail: append([]string{
+				l + " is no longer on the board. Its kept draft stays listed here until it is saved or discarded.",
+				"", "as the board last showed it:",
+			}, last.Detail...),
+		})
+	}
+	if len(gone) == 0 {
+		return b
+	}
+	slices.SortFunc(gone, func(x, y Item) int { return strings.Compare(x.Label(), y.Label()) })
+	b.Lines = append(slices.Clone(b.Lines), "", keptHeading)
+	b.Items = slices.Clone(b.Items)
+	for _, it := range gone {
+		it.Line = len(b.Lines)
+		b.Lines = append(b.Lines, "  "+it.Label())
+		b.Items = append(b.Items, it)
+	}
+	return b
+}
+
+// dropDraft forgets a draft, and its kept-target row if that was the
+// last draft holding it.
+func (m *model) dropDraft(k draftKey) {
+	delete(m.drafts, k)
+	msg := m.message
+	m.applyBoard()
+	m.message = msg
+}
+
+// applyBoard rebuilds the shown board from the raw one and the drafts,
+// then settles the selection on it.
+func (m *model) applyBoard() {
+	b := m.withKept(m.raw)
 	prevIdx := m.selectedIndex()
 	old := m.board
 	m.board = b
@@ -178,6 +254,10 @@ func (m *model) setBoard(b Board) {
 	for _, it := range b.Items {
 		if it.Project == m.sel.project && it.Run == m.sel.run {
 			m.sel = keyOf(it)
+			if it.Bucket == keptBucket {
+				m.message = it.Label() + " left the board; its kept draft is listed under " + keptHeading
+			}
+			m.scrollToSelection()
 			return
 		}
 	}
@@ -408,6 +488,12 @@ func (m *model) openDraft(key draftKey, seed string) {
 	d, ok := m.drafts[key]
 	if !ok {
 		d = &draft{key: key, ed: newEditor(seed, false), base: seed}
+		for _, it := range m.raw.Items {
+			if it.Project == key.project && it.Run == key.run {
+				d.seen = &it
+				break
+			}
+		}
 		m.drafts[key] = d
 	}
 	m.active, m.mode, m.detailTop = d, modeEdit, 0
@@ -472,15 +558,15 @@ func (m *model) editKey(k Key) effect {
 	case KeyEsc:
 		m.active, m.mode = nil, modeNormal
 		if !d.dirty() {
-			delete(m.drafts, d.key)
+			m.dropDraft(d.key)
 		}
 		return effNone
 	case KeyCtrlC:
 		return m.quit()
 	case KeyCtrlX:
 		m.ask("Discard this "+draftWhat(d.key)+"?", func(m *model) {
-			delete(m.drafts, d.key)
 			m.active = nil
+			m.dropDraft(d.key)
 			m.message = "draft discarded"
 		})
 		return effNone
@@ -679,7 +765,7 @@ func (m *model) settleDraft(k draftKey, res Result) {
 	}
 	switch {
 	case res.OK:
-		delete(m.drafts, k)
+		m.dropDraft(k)
 	case res.Uncertain:
 		d.uncertain = append([]string{res.Message}, res.Lines...)
 	default:

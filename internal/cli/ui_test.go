@@ -391,3 +391,46 @@ func TestUIDoResumeRetryAfterNewHold(t *testing.T) {
 		t.Fatalf("retry rebuilt against the new hold succeeded: %+v", r)
 	}
 }
+
+// A closed intent leaves the console's board altogether, as it leaves
+// the dash; an idea closed beside it stays, as completed history. The
+// console's kept-draft row (internal/ui) is what keeps a draft for the
+// intent reachable.
+func TestUIClosedIntentLeavesBoard(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	root, _ := controlFixture(t)
+	do := func(a ui.Action) ui.Result { return uiDo(context.Background(), root, a) }
+	for _, a := range []ui.Action{
+		{Kind: ui.ActCreate, Project: "moe", Run: "a-goal", Workflow: "intent", Text: "# a-goal\n"},
+		{Kind: ui.ActCreate, Project: "moe", Run: "an-idea", Workflow: "idea", Text: "# an-idea\n"},
+	} {
+		if r := do(a); !r.OK {
+			t.Fatalf("%+v: %+v", a, r)
+		}
+	}
+	s := newUISource(root, DashFilter{}, os.Stdout)
+	if err := s.refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	b := takeBoard(t, s)
+	if it := uiItem(t, b, "moe", "a-goal", ui.ItemIntent); !it.Editable {
+		t.Fatalf("open intent = %+v", it)
+	}
+	for _, slug := range []string{"a-goal", "an-idea"} {
+		if r := do(ui.Action{Kind: ui.ActClose, Project: "moe", Run: slug}); !r.OK {
+			t.Fatalf("close %s: %+v", slug, r)
+		}
+	}
+	if err := s.refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	b = takeBoard(t, s)
+	for _, it := range b.Items {
+		if it.Run == "a-goal" {
+			t.Fatalf("closed intent still on the board: %+v", it)
+		}
+	}
+	if it := uiItem(t, b, "moe", "an-idea", ui.ItemIdea); it.Editable {
+		t.Fatalf("closed idea = %+v", it)
+	}
+}
