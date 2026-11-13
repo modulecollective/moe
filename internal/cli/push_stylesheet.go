@@ -37,7 +37,7 @@ func checkProposedStylesheet(root string, md *run.Metadata) error {
 	}
 	if err != nil {
 		return fmt.Errorf("push: proposed stylesheet %s: %w\n"+
-			"       fix it in a stage turn (`moe %s code %s/%s`) and re-run push",
+			"       fix it in a stage turn (`moe %s build %s/%s`) and re-run push",
 			rel, err, md.Workflow, md.Project, md.ID)
 	}
 	return nil

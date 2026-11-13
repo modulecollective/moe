@@ -249,6 +249,9 @@ func TestProposedBackendModelValidation(t *testing.T) {
 	}{
 		{"backend choices", backendModelsSheet, ""},
 		{"unknown backend property", backendModelsSheet + "sdlc.build { model-codxe: value; }\n", "model-codxe"},
+		// The remediation hint must name a verb that still runs: code
+		// and test are retired, so a hint naming them is a dead end.
+		{"retired stage selector", backendModelsSheet + "sdlc.code { model-claude: opus; }\n", "`moe sdlc build "},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newPushFixture(t)
