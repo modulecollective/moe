@@ -415,11 +415,26 @@ func (m *model) openDraft(key draftKey, seed string) {
 
 func (m *model) startNote() {
 	it, ok := m.selected()
+	if ok && m.reopenKept(draftKey{project: it.Project, run: it.Run, purpose: "note"}) {
+		return
+	}
 	if !ok || !it.Notes {
 		m.message = "notes: select a live run or an open idea"
 		return
 	}
 	m.openDraft(draftKey{project: it.Project, run: it.Run, purpose: "note"}, "")
+}
+
+// reopenKept opens a draft already kept under key. Text outlives its
+// target's eligibility — a capture closed or a run finished mid-edit —
+// so reading and discarding it must not hinge on the flags that gate a
+// new draft; the writer still refuses the save.
+func (m *model) reopenKept(key draftKey) bool {
+	if _, ok := m.drafts[key]; !ok {
+		return false
+	}
+	m.openDraft(key, "")
+	return true
 }
 
 func (m *model) startAnswer() {
@@ -444,11 +459,11 @@ func (m *model) startAnswer() {
 
 func (m *model) startEditBody() {
 	it, ok := m.selected()
-	if !ok || !it.Editable {
+	if !ok {
 		m.message = "edit: select an open idea or intent"
 		return
 	}
-	m.openDraft(draftKey{project: it.Project, run: it.Run, purpose: "body"}, it.Body)
+	m.startEditBodyOf(&it)
 }
 
 func (m *model) editKey(k Key) effect {
@@ -833,6 +848,9 @@ func (m *model) runCommand(line string, target *Item) effect {
 }
 
 func (m *model) startEditBodyOf(target *Item) {
+	if target != nil && m.reopenKept(draftKey{project: target.Project, run: target.Run, purpose: "body"}) {
+		return
+	}
 	if target == nil || !target.Editable {
 		m.message = "edit: select an open idea or intent"
 		return
@@ -911,6 +929,17 @@ func (m *model) staleAnswer(it Item) *draft {
 		}
 	}
 	return best
+}
+
+// targetClosed reports whether k is a body or note draft whose item no
+// longer accepts that write.
+func (m *model) targetClosed(k draftKey) bool {
+	for _, it := range m.board.Items {
+		if it.Project == k.project && it.Run == k.run {
+			return k.purpose == "body" && !it.Editable || k.purpose == "note" && !it.Notes
+		}
+	}
+	return false
 }
 
 // answerClosed reports whether k is an answer to a question its run no

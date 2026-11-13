@@ -373,6 +373,13 @@ func (m *model) draftNotes(d *draft) []string {
 	if m.answerClosed(d.key) {
 		out = append(out, fmt.Sprintf("! question #%d is no longer open: saving will be refused; Ctrl-X discards this answer", d.key.question))
 	}
+	if m.targetClosed(d.key) {
+		what := "notes"
+		if d.key.purpose == "body" {
+			what = "edits"
+		}
+		out = append(out, "! "+d.key.project+"/"+d.key.run+" no longer takes "+what+": saving will be refused; Ctrl-X discards it")
+	}
 	for _, l := range d.refused {
 		out = append(out, "! "+l)
 	}
