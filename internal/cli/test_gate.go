@@ -87,8 +87,9 @@ func testGateShipNone(root string, md *run.Metadata) bool {
 
 // parseTestCanvasSections splits a markdown canvas keyed by `## ` H2
 // headings into title → body strings. Bodies retain their interior
-// newlines but lose the heading line itself. Used by testStageGate;
-// kept here so it's testable in isolation.
+// newlines but lose the heading line itself. Used by the review gate
+// and the directory-form canvas gate; kept here so it's testable in
+// isolation.
 //
 // First occurrence of a heading wins. The split has no fence
 // awareness, so a canvas that quotes the seeded skeleton as captured

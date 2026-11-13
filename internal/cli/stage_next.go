@@ -930,7 +930,7 @@ type cascadeResult struct {
 // Each stage dispatch goes through the workflow's registered
 // dispatcher — the Go-level seam the cascade driver (`!` / `!<stage>`
 // / `!!` / `!!!`) reaches into — so stage-specific pre-flight
-// (requireDesignCanvas, requireCodeCanvas, canvas skeleton seeding)
+// (requireDesignCanvas, requireBuildCanvases, canvas skeleton seeding)
 // still fires. Every dispatch is headless, and a headless turn skips
 // its own inner promptNextStage (runStageSession's tail guards on
 // opts.Headless), so the cascade owns routing.
@@ -1042,7 +1042,7 @@ func cascadeFromGate(startStage, destination string, oneStep bool, rideChain boo
 		steps, parked, gateCode := cascadeStageGate(wf, dispatcher, md, stage, yolo, stdout, stderr)
 		res.ran = append(res.ran, steps...)
 		if parked {
-			// Blocked review/test gate on a non-yolo cascade: stop the walk
+			// Blocked review gate on a non-yolo cascade: stop the walk
 			// and let dispatchCascade's tail anchor promptNextStage at this
 			// stage (the last res.ran entry), where the kickback offer / nudge
 			// fires. Exit 0 — a park at a gate, not a failure.
@@ -1080,7 +1080,7 @@ var checkCascadeStageGate = func(wf *Workflow, md *run.Metadata, stage string, s
 
 // cascadeStageGate evaluates a just-dispatched stage's gate and, on a
 // headless ship cascade (`!!` / `!!!`) that hit a *blocked* sdlc
-// review/test gate, makes one bounded headless kickback to code before
+// review gate, makes one bounded headless kickback to build before
 // re-dispatching the stage and re-checking once. It is the judgement-
 // recovery analogue of cascadeShipStep's mechanical push retry: a real
 // review finding no longer dies silently in a headless chain, but the
@@ -1090,30 +1090,30 @@ var checkCascadeStageGate = func(wf *Workflow, md *run.Metadata, stage string, s
 //
 // Recovery is gated to the ship cascade (yolo). A non-yolo cascade
 // (`!` / `!<stage>` / `--once` / `--to=`) that hits a *blocked* sdlc
-// review/test gate does not dead-end: it returns parked=true (code 0,
+// review gate does not dead-end: it returns parked=true (code 0,
 // no steps), and cascadeFromGate stops the walk so dispatchCascade's
 // tail re-enters the chain prompt at the blocked stage. There the
 // kickback offer fires on a TTY, or the `moe sdlc build <run> (review
 // blocked — kick back to fix)` nudge prints when headless — the "offer
 // when a human is present, launch when headless" line the design draws.
-// Any other non-yolo gate failure (test gate refusing an unfilled
-// skeleton, gate read errors) keeps the hard "parked at <stage>" +
-// exit 1 below: a stage refusal stops the chain, and there is no
-// kickback affordance to offer for it.
+// Any other gate failure (an unstamped build canvas, a ready review
+// gate over an unfilled section, gate read errors) keeps the hard
+// "parked at <stage>" + exit 1 below: a stage refusal stops the chain,
+// and there is no kickback affordance to offer for it.
 //
 // The blocked check reads the canvas's gate status directly (mirroring
 // the interactive headless nudge in promptNextStageOverride) rather than
 // leaning on checkCascadeStageGate's pass/fail alone: only a literal
 // "blocked" status earns a kickback (yolo) or a park-to-prompt
-// (non-yolo). A test gate that fails on an unfilled skeleton (status
-// "ready", empty sections) is not a finding a code turn can resolve, so
+// (non-yolo). A gate that fails on an unfilled skeleton (status
+// "ready", empty sections) is not a finding a build turn can resolve, so
 // it parks without burning a recovery turn — and reading the status
 // first keeps checkCascadeStageGate's "parked" line from printing on a
 // recovery that ultimately succeeds.
 //
 // Returns the recovery/re-dispatch steps to append (empty when no
 // recovery ran), a parked flag (set only for a non-yolo blocked
-// review/test gate that should fall through to the chain prompt), and
+// review gate that should fall through to the chain prompt), and
 // the exit code to propagate (0 = gate satisfied, proceed; non-zero =
 // park).
 func cascadeStageGate(wf *Workflow, dispatcher cascadeDispatcher, md *run.Metadata, stage string, yolo bool, stdout, stderr io.Writer) (steps []cascadeStepResult, parked bool, code int) {
@@ -1132,7 +1132,7 @@ func cascadeStageGate(wf *Workflow, dispatcher cascadeDispatcher, md *run.Metada
 					return steps, false, cc
 				}
 				retries++
-				// One headless kickback to code, carrying the blocking
+				// One headless kickback to build, carrying the blocking
 				// canvas as kickoff — the same seam the interactive
 				// kickback uses, run headless and re-checked by the loop.
 				recCode := openKickbackSession(md, "build", stage, canvas, true, stdout, stderr)
