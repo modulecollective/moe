@@ -44,6 +44,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/trailers"
@@ -512,6 +513,9 @@ var testLocked func()
 // A prepare with nothing to write returns run.ErrNothingToCommit, which
 // skips the commit (repolock.With passes it through untouched) and
 // maps back to nil here — the no-op verbs' contract.
+// A staging/commit failure restores the destination's prior bytes,
+// existence and index entry before releasing the lock. Only successful
+// restoration may report that nothing was recorded.
 func commit(root, projectID, runID, purpose string, prepare func() (File, string, error)) error {
 	rel := Path(projectID, runID)
 	err := repolock.With(root, repolock.Options{
@@ -525,15 +529,77 @@ func commit(root, projectID, runID, purpose string, prepare func() (File, string
 		if err != nil {
 			return err
 		}
+		prev, err := snapFile(root, rel)
+		if err != nil {
+			return err
+		}
 		if err := writeFile(filepath.Join(root, rel), f); err != nil {
 			return err
 		}
-		return run.StageAndCommit(root, msg, rel)
+		if err := run.StageAndCommit(root, msg, rel); err != nil {
+			if errors.Is(err, run.ErrNothingToCommit) {
+				return err
+			}
+			return prev.restore(root, err)
+		}
+		return nil
 	})
 	if errors.Is(err, run.ErrNothingToCommit) {
 		return nil
 	}
 	return err
+}
+
+// fileSnap keeps working bytes separate from the index: an operator's
+// staged version may match neither HEAD nor the working file.
+type fileSnap struct {
+	rel     string
+	bytes   []byte
+	existed bool
+	index   string // ls-files -s entry, or empty when absent
+}
+
+func snapFile(root, rel string) (fileSnap, error) {
+	s := fileSnap{rel: rel}
+	b, err := os.ReadFile(filepath.Join(root, rel))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return s, fmt.Errorf("input: read %s: %w", rel, err)
+	}
+	s.bytes, s.existed = b, err == nil
+	if s.index, err = git.Output(root, "ls-files", "-s", "--", rel); err != nil {
+		return s, fmt.Errorf("input: read index entry for %s: %w", rel, err)
+	}
+	s.index = strings.TrimSpace(s.index)
+	if s.index != "" && (strings.Contains(s.index, "\n") || strings.Fields(s.index)[2] != "0") {
+		return s, fmt.Errorf("input: unmerged index entry for %s", rel)
+	}
+	return s, nil
+}
+
+func (s fileSnap) restore(root string, cause error) error {
+	var indexErr error
+	if f := strings.Fields(s.index); len(f) >= 2 {
+		indexErr = git.Run(root, "update-index", "--add", "--cacheinfo", f[0]+","+f[1]+","+s.rel)
+	} else {
+		indexErr = git.Run(root, "update-index", "--force-remove", "--", s.rel)
+	}
+	if indexErr != nil {
+		indexErr = fmt.Errorf("restore index: %w", indexErr)
+	}
+	abs := filepath.Join(root, s.rel)
+	var fileErr error
+	if s.existed {
+		fileErr = os.WriteFile(abs, s.bytes, 0o644)
+	} else if err := os.Remove(abs); err != nil && !errors.Is(err, os.ErrNotExist) {
+		fileErr = err
+	}
+	if fileErr != nil {
+		fileErr = fmt.Errorf("restore file: %w", fileErr)
+	}
+	if err := errors.Join(indexErr, fileErr); err != nil {
+		return fmt.Errorf("input: commit failed (%w); restoring %s also failed: %w", cause, s.rel, err)
+	}
+	return fmt.Errorf("input: commit failed, nothing recorded: %w", cause)
 }
 
 func writeFile(path string, f File) error {

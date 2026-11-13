@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/input"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
@@ -166,6 +168,46 @@ func TestUIDoInput(t *testing.T) {
 	f, _ = input.Load(root, "moe", "change-auth")
 	if len(f.Pending()) != 2 {
 		t.Fatalf("pending = %+v", f.Pending())
+	}
+}
+
+func TestUIDoInputCommitFailureIsDefinite(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		kind ui.ActionKind
+	}{{"note", ui.ActNote}, {"answer", ui.ActAnswer}} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, _ := controlFixture(t)
+			askOn(t, root, "moe", "change-auth", "Which store?")
+			rel := input.Path("moe", "change-auth")
+			abs := filepath.Join(root, rel)
+			before, err := os.ReadFile(abs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			head := gittest.HeadSHA(t, root)
+			index := gittest.Output(t, root, "ls-files", "-s", "--", rel)
+			hooks := t.TempDir()
+			if err := os.WriteFile(filepath.Join(hooks, "commit-msg"), []byte("#!/bin/sh\necho ui-input-test-rejected >&2\nexit 1\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			gittest.Run(t, root, "config", "core.hooksPath", hooks)
+			t.Cleanup(func() { gittest.Run(t, root, "config", "--unset", "core.hooksPath") })
+			r := uiDo(context.Background(), root, ui.Action{Kind: tc.kind, Project: "moe", Run: "change-auth", QuestionID: 1, Text: "sqlite"})
+			if r.OK || r.Uncertain || !strings.Contains(r.Message, "input: commit failed, nothing recorded") || !strings.Contains(r.Message, "ui-input-test-rejected") {
+				t.Fatalf("failed input = %+v", r)
+			}
+			if len(r.Lines) != 0 {
+				t.Fatalf("definite failure included uncertain readback: %+v", r)
+			}
+			after, err := os.ReadFile(abs)
+			if err != nil || string(after) != string(before) {
+				t.Fatalf("record after failure = %q, %v; want %q", after, err, before)
+			}
+			if gittest.HeadSHA(t, root) != head || gittest.Output(t, root, "ls-files", "-s", "--", rel) != index {
+				t.Fatal("failed input changed journal or index")
+			}
+		})
 	}
 }
 
