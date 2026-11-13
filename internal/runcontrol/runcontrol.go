@@ -577,11 +577,23 @@ func commit(root, projectID, runID, purpose string, prepare func(*File) (string,
 		if err != nil {
 			return err
 		}
+		// Staged content may match neither HEAD nor the working bytes.
+		index, err := git.Output(root, "ls-files", "-s", "--", rel)
+		if err != nil {
+			return fmt.Errorf("runcontrol: read index entry for %s: %w", rel, err)
+		}
+		index = strings.TrimSpace(index)
+		if index != "" && (strings.Contains(index, "\n") || strings.Fields(index)[2] != "0") {
+			return fmt.Errorf("runcontrol: unmerged index entry for %s", rel)
+		}
 		if err := writeFile(abs, f); err != nil {
 			return err
 		}
 		if err := run.StageAndCommit(root, msg, rel); err != nil {
-			return restore(root, rel, abs, prev, existed, err)
+			if errors.Is(err, run.ErrNothingToCommit) {
+				return err
+			}
+			return restore(root, rel, abs, prev, existed, index, err)
 		}
 		return nil
 	})
@@ -593,15 +605,25 @@ func commit(root, projectID, runID, purpose string, prepare func(*File) (string,
 
 // restore undoes this writer's file and index change after a failed
 // commit, touching nothing else in the tree.
-func restore(root, rel, abs string, prev []byte, existed bool, cause error) error {
+func restore(root, rel, abs string, prev []byte, existed bool, index string, cause error) error {
 	var errs []error
-	if err := git.Run(root, "reset", "-q", "--", rel); err != nil {
-		errs = append(errs, err)
+	var indexErr error
+	if fields := strings.Fields(index); len(fields) >= 2 {
+		indexErr = git.Run(root, "update-index", "--add", "--cacheinfo", fields[0]+","+fields[1]+","+rel)
+	} else {
+		indexErr = git.Run(root, "update-index", "--force-remove", "--", rel)
 	}
+	if indexErr != nil {
+		errs = append(errs, fmt.Errorf("restore index: %w", indexErr))
+	}
+	var fileErr error
 	if existed {
-		errs = append(errs, os.WriteFile(abs, prev, 0o644))
+		fileErr = os.WriteFile(abs, prev, 0o644)
 	} else if err := os.Remove(abs); err != nil && !errors.Is(err, os.ErrNotExist) {
-		errs = append(errs, err)
+		fileErr = err
+	}
+	if fileErr != nil {
+		errs = append(errs, fmt.Errorf("restore file: %w", fileErr))
 	}
 	if err := errors.Join(errs...); err != nil {
 		return fmt.Errorf("runcontrol: commit failed (%w); restoring %s also failed: %v", cause, rel, err)
