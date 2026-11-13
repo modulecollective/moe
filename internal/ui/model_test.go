@@ -508,37 +508,38 @@ func TestUncertainControlRetriesOriginal(t *testing.T) {
 	}
 }
 
-// A long logical line wraps in the details, so every character of a
-// capture is reachable by scrolling — closed captures too, which have no
-// editor to fall back on — and no row is wider than the pane.
+// Captures and saved notes remain completely readable through the real
+// scrolled view, including blank lines, wide runes and escaped controls.
 func TestDetailWrapsLongLines(t *testing.T) {
-	long := strings.Repeat("x", 150) + "END_OF_CAPTURE"
 	for _, cols := range []int{100, 40} {
-		m, _ := testModel(t)
-		m.resize(23, cols)
-		closed := idea("p", "i", 1)
-		closed.Editable = false
-		closed.Body = "# i\n" + strings.Repeat("filler\n", 20) + long + "\n"
-		m.setBoard(board(1, closed))
-		press(m, Key{Code: KeyTab})
-		seen := map[int]string{} // painted detail rows by absolute row
-		for range 60 {
-			f := m.view()
-			for i := range m.detailHeight() {
-				r := f.rows[m.layout().detailRow+i]
-				if w := textWidth(r); w > cols-1 {
-					t.Fatalf("%d cols: row %q is %d cells", cols, r, w)
+		for _, savedNote := range []bool{false, true} {
+			t.Run(fmt.Sprintf("cols=%d/note=%t", cols, savedNote), func(t *testing.T) {
+				m, _ := testModel(t)
+				m.resize(23, cols)
+				long := strings.Repeat("x世界", 50) + "END_OF_TEXT"
+				it := idea("p", "i", 1)
+				it.Editable = false
+				it.Body = "# i\n" + strings.Repeat("filler\n", 20) + long + "\n"
+				if savedNote {
+					it = run("p", "r")
+					it.Detail = []string{"1 pending note", "", "note #1 · pending", "first 世界 line", "", "second logical line", "control: \x1b[2J\r\x00\x7f\u0085"}
+					it.Detail = append(it.Detail, strings.Split(strings.Repeat("filler\n", 20)+long, "\n")...)
 				}
-				seen[m.detailTop+i] = r
-			}
-			press(m, Key{Code: KeyDown})
-		}
-		var all []string
-		for i := range len(seen) {
-			all = append(all, seen[i])
-		}
-		if !strings.Contains(strings.Join(all, ""), long) {
-			t.Fatalf("%d cols: %q never painted whole:\n%s", cols, long, strings.Join(all, "\n"))
+				m.setBoard(board(1, it))
+				if got := paintedDetail(t, m); !strings.Contains(got, long) {
+					t.Fatalf("last line not fully painted: %q", got)
+				}
+				if savedNote {
+					m.detailTop = 0
+					lines, _ := m.detailLines(it, true, cols-1, 100)
+					got := strings.Join(lines, "\n")
+					for _, want := range []string{"1 pending note\n\nnote #1 · pending\nfirst 世界 line\n\nsecond logical line", "control: ^[[2J^M^@^?�"} {
+						if !strings.Contains(got, want) {
+							t.Fatalf("detail lost boundaries or safe text %q: %q", want, got)
+						}
+					}
+				}
+			})
 		}
 	}
 }

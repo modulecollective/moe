@@ -155,18 +155,13 @@ func (s *uiSource) cachedLive(key string) (runsock.Status, bool) {
 func (s *uiSource) readExtras(snap DashSnapshot) map[string]uiExtra {
 	out := map[string]uiExtra{}
 	for key, md := range snap.Runs {
-		live := md.Status == run.StatusInProgress || md.Status == run.StatusPushed
 		var e uiExtra
-		if live {
-			e.input, e.inputErr = input.Load(s.root, md.Project, md.ID)
-		}
+		e.input, e.inputErr = input.Load(s.root, md.Project, md.ID)
 		if doc, ok := dash.CaptureDocID(md.Workflow); ok {
 			b, err := os.ReadFile(s.root + "/" + run.ContentPath(md.Project, md.ID, doc))
 			e.body, e.bodyErr = string(b), err
 		}
-		if live || e.body != "" || e.bodyErr != nil {
-			out[key] = e
-		}
+		out[key] = e
 	}
 	return out
 }
@@ -494,7 +489,7 @@ func (s *uiSource) item(row dash.Row, now time.Time, obs map[string]RunObservati
 	o, observed := obs[key]
 	it.Notes = inProgress || md.Status == run.StatusPushed
 	it.Controls = observed && (inProgress || md.Status == run.StatusPushed) && operatorCascades(md.Workflow)
-	if ping, open := ex.input.OpenPing(); open && ex.inputErr == nil {
+	if ping, open := ex.input.OpenPing(); open && ex.inputErr == nil && it.Notes {
 		it.Question = &ui.Question{ID: ping.ID, Text: ping.Question}
 	}
 	l := s.live[key]
@@ -539,12 +534,32 @@ func inputLines(ex uiExtra) []string {
 	if ex.inputErr != nil {
 		return []string{"input record unreadable: " + ex.inputErr.Error()}
 	}
-	var out []string
-	if p := ex.input.Pending(); len(p) > 0 {
-		out = append(out, fmt.Sprintf("%s waiting for the next prompt", plural(len(p), "note")))
+	if len(ex.input.Notes) == 0 {
+		return nil
 	}
-	if ping, open := ex.input.OpenPing(); open {
-		out = append(out, fmt.Sprintf("open question #%d: %s", ping.ID, ping.Question))
+	out := []string{plural(len(ex.input.Pending()), "pending note")}
+	for _, e := range ex.input.Notes {
+		out = append(out, "")
+		if e.Open() {
+			out = append(out, fmt.Sprintf("open question #%d", e.ID))
+			out = append(out, strings.Split(e.Question, "\n")...)
+			continue
+		}
+		state := "pending"
+		if !e.Pending() {
+			state = "delivered to " + e.DeliveredTo
+		}
+		kind := "note"
+		if e.IsPing() {
+			kind = "question"
+		}
+		out = append(out, fmt.Sprintf("%s #%d · %s", kind, e.ID, state))
+		if e.IsPing() {
+			out = append(out, "question:")
+			out = append(out, strings.Split(e.Question, "\n")...)
+			out = append(out, "answer:")
+		}
+		out = append(out, strings.Split(e.Text, "\n")...)
 	}
 	return out
 }
@@ -566,7 +581,7 @@ func (s *uiSource) runDetail(md *run.Metadata, row dash.Row, o RunObservation, o
 		if md.Status != run.StatusInProgress && md.Status != run.StatusPushed {
 			out = append(out, "completed: inspect only; no live actions")
 		}
-		return out
+		return append(out, inputLines(ex)...)
 	}
 	if l != nil && l.status != nil {
 		switch {

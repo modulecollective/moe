@@ -172,6 +172,136 @@ func TestUIDoInput(t *testing.T) {
 	}
 }
 
+// Saved input survives refresh, delivery and completion for both run
+// and idea rows. Reading it must not consume the input or mint a commit.
+func TestUIInputHistoryReadback(t *testing.T) {
+	for _, workflow := range []string{"sdlc", "idea"} {
+		t.Run(workflow, func(t *testing.T) {
+			t.Setenv("NO_COLOR", "1")
+			root, _ := controlFixture(t)
+			slug, kind := "change-auth", ui.ItemRun
+			if workflow == "idea" {
+				slug, kind = "an-idea", ui.ItemIdea
+				if _, err := createIdea(root, "moe", slug, "# Idea\n\nKeep this canvas.\n", "", trailers.Block{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			s := newUISource(root, DashFilter{}, os.Stdout)
+			refresh := func(source *uiSource) ui.Item {
+				t.Helper()
+				if err := source.refresh(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+				return uiItem(t, takeBoard(t, source), "moe", slug, kind)
+			}
+			refresh(s) // start the source before any note is saved
+			note := "Keep the names.\n\n世界 \x1b[2J stays visible.\nLast note line."
+			if r := uiDo(context.Background(), root, ui.Action{Kind: ui.ActNote, Project: "moe", Run: slug, Text: note}); !r.OK {
+				t.Fatalf("save note: %+v", r)
+			}
+			if err := input.MarkDelivered(root, "moe", slug, "design", []int{1}, ""); err != nil {
+				t.Fatal(err)
+			}
+			askOn(t, root, "moe", slug, "Which store?\nKeep exports?")
+			if _, err := input.Answer(root, "moe", slug, 2, "SQLite.\n\nKeep the export format."); err != nil {
+				t.Fatal(err)
+			}
+			addOn(t, root, "moe", slug, "Pending note.\nFinal pending line.")
+			askOn(t, root, "moe", slug, "Keep the import?\nOpen question last line.")
+			want := []string{
+				"2 pending notes", "",
+				"note #1 · delivered to design", "Keep the names.", "", "世界 \x1b[2J stays visible.", "Last note line.", "",
+				"question #2 · pending", "question:", "Which store?", "Keep exports?", "answer:", "SQLite.", "", "Keep the export format.", "",
+				"note #3 · pending", "Pending note.", "Final pending line.", "",
+				"open question #4", "Keep the import?", "Open question last line.",
+			}
+			check := func(it ui.Item, want []string) {
+				t.Helper()
+				start := slices.Index(it.Detail, want[0])
+				if start < 0 || len(it.Detail) < start+len(want) || !slices.Equal(it.Detail[start:start+len(want)], want) {
+					t.Fatalf("saved input detail = %q; want contiguous lines %q", it.Detail, want)
+				}
+				if strings.Count(strings.Join(it.Detail, "\n"), "Open question last line.") != 1 {
+					t.Fatalf("open question repeated: %q", it.Detail)
+				}
+				if kind == ui.ItemIdea && it.Body != "# Idea\n\nKeep this canvas.\n" {
+					t.Fatalf("capture body = %q", it.Body)
+				}
+			}
+			before, err := os.ReadFile(filepath.Join(root, input.Path("moe", slug)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			head := gittest.HeadSHA(t, root)
+			for _, source := range []*uiSource{s, newUISource(root, DashFilter{}, os.Stdout)} {
+				it := refresh(source)
+				check(it, want)
+				if kind == ui.ItemRun && (it.Question == nil || it.Question.ID != 4 || it.Question.Text != "Keep the import?\nOpen question last line.") {
+					t.Fatalf("live question action = %+v", it.Question)
+				}
+			}
+			after, err := os.ReadFile(filepath.Join(root, input.Path("moe", slug)))
+			if err != nil || string(after) != string(before) || gittest.HeadSHA(t, root) != head {
+				t.Fatalf("reading changed the input record or journal: %v", err)
+			}
+			if err := input.MarkDelivered(root, "moe", slug, "code", []int{2, 3}, ""); err != nil {
+				t.Fatal(err)
+			}
+			want[0] = "0 pending notes"
+			want[slices.Index(want, "question #2 · pending")] = "question #2 · delivered to code"
+			want[slices.Index(want, "note #3 · pending")] = "note #3 · delivered to code"
+			check(refresh(s), want)
+			addOn(t, root, "moe", slug, "Still pending at completion.")
+			want[0] = "1 pending note"
+			want = append(want, "", "note #5 · pending", "Still pending at completion.")
+			if kind == ui.ItemIdea {
+				if err := runopen.CloseCapture(root, "moe", slug); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				markRunStatus(t, root, "moe", slug, run.StatusClosed)
+			}
+			for _, source := range []*uiSource{s, newUISource(root, DashFilter{}, os.Stdout)} {
+				it := refresh(source)
+				check(it, want)
+				if it.Notes || it.Controls || it.Editable || it.Question != nil {
+					t.Fatalf("completed item exposes live actions: %+v", it)
+				}
+			}
+		})
+	}
+}
+
+func TestUIInputRecordDiagnostics(t *testing.T) {
+	for _, status := range []string{run.StatusInProgress, run.StatusClosed} {
+		t.Run(status, func(t *testing.T) {
+			root, _ := controlFixture(t)
+			markRunStatus(t, root, "moe", "change-auth", status)
+			s := newUISource(root, DashFilter{}, os.Stdout)
+			for _, body := range []string{"", `{"notes":[]}`, `{"notes":broken}`} {
+				if body != "" {
+					if err := os.WriteFile(filepath.Join(root, input.Path("moe", "change-auth")), []byte(body), 0o644); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := s.refresh(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+				b := takeBoard(t, s)
+				it := uiItem(t, b, "moe", "change-auth", ui.ItemRun)
+				detail := strings.Join(it.Detail, "\n")
+				malformed := strings.Contains(body, "broken")
+				if strings.Contains(detail, "input record unreadable:") != malformed || strings.Contains(strings.Join(b.Issues, "\n"), "input record unreadable:") != malformed {
+					t.Fatalf("record %q: detail %q, issues %q", body, detail, b.Issues)
+				}
+				if !malformed && strings.Contains(detail, "pending note") {
+					t.Fatalf("empty record has input section: %q", detail)
+				}
+			}
+		})
+	}
+}
+
 func TestUIDoInputCommitFailureIsDefinite(t *testing.T) {
 	for _, tc := range []struct {
 		name string

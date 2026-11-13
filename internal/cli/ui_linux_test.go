@@ -225,6 +225,42 @@ func TestUIKeyboardInputsAndControls(t *testing.T) {
 	}
 }
 
+// Save through the editor, then read through the source's ordinary
+// refresh and the scrolled terminal view. Restart has no draft to mask
+// a missing persisted read, and delivery must not hide the text.
+func TestUIKeyboardNoteReadback(t *testing.T) {
+	root, _ := controlFixture(t)
+	c := startUIKeyboard(t, root)
+	c.wait(t, "moe/change-auth")
+	note := "First saved line.\n\n" + strings.Repeat("saved filler\n", 20) + strings.Repeat("x", 150) + "\nEND_OF_SAVED_NOTE"
+	c.send(t, "n"+strings.ReplaceAll(note, "\n", "\r")+"\x13")
+	c.wait(t, "done: note")
+	// Discard editor frames: only a subsequent details paint can prove
+	// readback. The save result itself never echoes the note body.
+	c.mu.Lock()
+	c.output.Reset()
+	c.mu.Unlock()
+	c.send(t, "\t\x1b[H")
+	c.wait(t, "1 pending note")
+	c.send(t, "\x1b[F")
+	c.wait(t, "END_OF_SAVED_NOTE")
+	c.quit(t)
+	f, err := input.Load(root, "moe", "change-auth")
+	if err != nil || len(f.Notes) != 1 || f.Notes[0].Text != note || !f.Notes[0].Pending() {
+		t.Fatalf("saved note = %+v, %v", f, err)
+	}
+	if err := input.MarkDelivered(root, "moe", "change-auth", "code", []int{1}, ""); err != nil {
+		t.Fatal(err)
+	}
+	c = startUIKeyboard(t, root)
+	c.wait(t, "moe/change-auth")
+	c.send(t, "\t\x1b[H\x1b[B\x1b[B")
+	c.wait(t, "note #1 · delivered to code")
+	c.send(t, "\x1b[F")
+	c.wait(t, "END_OF_SAVED_NOTE")
+	c.quit(t)
+}
+
 func TestUIKeyboardCaptureEditLicenceAndClose(t *testing.T) {
 	root, _ := controlFixture(t)
 	if _, err := createIdea(root, "moe", "capture", "# Capture\n", "", trailers.Block{}); err != nil {
