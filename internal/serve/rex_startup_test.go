@@ -129,7 +129,7 @@ func TestRexStartupWaitsForReconciliation(t *testing.T) {
 			// gamma, and blocks that must not become heartbeat children.
 			fake.reply("block-ls", `{"blocks":[{"block_id":"block:A","label":"heartbeat:alpha"},{"block_id":"block:EXIT","label":"heartbeat:gamma"},{"block_id":"block:D","label":"dash"},{"block_id":"block:X","label":"shell"}]}`, 0)
 			fake.reply("wait@block:EXIT", `{"exit_code":1}`, 1)
-			fake.reply("run@dash", `{"block_ids":["block:D2"]}`, 0)
+			fake.reply("run@ui", `{"block_ids":["block:D2"]}`, 0)
 			fake.reply("run@heartbeat:beta", `{"block_ids":["block:B"]}`, 0)
 			s.heartbeatTick()
 			a, ok := s.children.get("heartbeat:alpha")
@@ -174,7 +174,7 @@ func TestRexStartupWaitsForReconciliation(t *testing.T) {
 			closeAt := slices.Index(calls, "block close block:D")
 			dashAt, betaAt, dashCount := -1, -1, 0
 			for i, call := range calls {
-				if strings.Contains(call, "--label dash ") {
+				if strings.Contains(call, "--label ui ") {
 					dashAt, dashCount = i, dashCount+1
 				}
 				if strings.Contains(call, "--label heartbeat:beta ") {
@@ -245,12 +245,12 @@ func TestRexStartupRecoversOnIdleTick(t *testing.T) {
 			s := newTestServer(t, Options{Root: root, MoeBin: "/bin/true", Heartbeat: gate})
 			s.selectHost()
 			fake.reply("block-ls", `{"blocks":[]}`, 0)
-			fake.reply("run@dash", `{"block_ids":["block:D"]}`, 0)
+			fake.reply("run@ui", `{"block_ids":["block:D"]}`, 0)
 			if dashFails {
-				fake.reply("run@dash", "", 1)
+				fake.reply("run@ui", "", 1)
 			}
 			s.heartbeatTick()
-			if testAdoptionError(s) != nil || !fake.called("run --json --focus=false --keep-open -s session:OLD --label dash ") || fake.called("new ") || len(s.children.all) != 0 {
+			if testAdoptionError(s) != nil || !fake.called("run --json --focus=false --keep-open -s session:OLD --label ui ") || fake.called("new ") || len(s.children.all) != 0 {
 				t.Fatalf("idle recovery failed: error %v, calls %q", testAdoptionError(s), fake.calls())
 			}
 			before := len(fake.calls())
@@ -314,7 +314,7 @@ func TestRexStartupMissingSessionRetainsIdentityOnFailedReplacement(t *testing.T
 			fake.reply("new", `{"session_id":"session:NEW","initial_windows":[{"block_ids":["block:A"]}]}`, 0)
 			fake.reply("block-ls@session:NEW", `{"blocks":[]}`, 0)
 			fake.reply("run@session:NEW", `{"block_ids":["block:A"]}`, 0)
-			fake.reply("run@dash", `{"block_ids":["block:D"]}`, 0)
+			fake.reply("run@ui", `{"block_ids":["block:D"]}`, 0)
 			s.heartbeatTick()
 			waitRexWorkers(t, testRex(s.children))
 			waitFor(t, "replacement sweep backoff", func() bool {
@@ -328,7 +328,7 @@ func TestRexStartupMissingSessionRetainsIdentityOnFailedReplacement(t *testing.T
 			if body, _ := os.ReadFile(rexSessionPath(root)); string(body) != "session:NEW\n" {
 				t.Fatalf("successful replacement not persisted: %q", body)
 			}
-			if !fake.called("run --json --focus=false --keep-open -s session:NEW --label heartbeat:alpha ") || !fake.called("run --json --focus=false --keep-open -s session:NEW --label dash ") {
+			if !fake.called("run --json --focus=false --keep-open -s session:NEW --label heartbeat:alpha ") || !fake.called("run --json --focus=false --keep-open -s session:NEW --label ui ") {
 				t.Fatalf("sweep/dash missing from replacement: %q", fake.calls())
 			}
 			s.heartbeat.record("alpha", false)
@@ -363,7 +363,7 @@ func TestRexStartupAbsenceIsNotCachedForDash(t *testing.T) {
 				t.Fatalf("confirmed absence should complete adoption: %v", err)
 			}
 			fake.reply("ls", tc.ls, tc.status)
-			h.openDash()
+			h.openUI()
 			if h.sessionID() != "session:S" || fake.called("run ") || fake.called("new ") || fake.called("block close ") {
 				t.Fatalf("dash reused obsolete absence evidence: %q", fake.calls())
 			}

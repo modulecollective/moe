@@ -129,9 +129,9 @@ func TestRexHeartbeatRecoversKilledSession(t *testing.T) {
 			fake.reply("new", `{"session_id":"session:NEW","initial_windows":[{"block_ids":["block:B2"]}]}`, 0)
 			fake.reply("block-ls@session:NEW", `{"blocks":[]}`, 0)
 			fake.reply("run@session:NEW", `{"block_ids":["block:B2"]}`, 0)
-			fake.reply("run@dash", `{"block_ids":["block:D"]}`, 0)
+			fake.reply("run@ui", `{"block_ids":["block:D"]}`, 0)
 			if tc.dashFail {
-				fake.reply("run@dash", "", 1)
+				fake.reply("run@ui", "", 1)
 				// Even a failed dash launch must preserve the newly
 				// registered sweep, never create a second session.
 				fake.reply("ls", `{"sessions":[{"session_id":"session:NEW"}]}`, 0)
@@ -144,12 +144,12 @@ func TestRexHeartbeatRecoversKilledSession(t *testing.T) {
 			}
 			waitFor(t, "recovered sweep completion", func() bool { return len(gate.sweptList()) == 2 })
 			waitRexWorkers(t, testRex(s.children))
-			wantDash := "run --json --focus=false --keep-open -s session:NEW --label dash --cwd " + s.opts.Root +
-				" -- /usr/bin/env MOE_HOME=" + s.opts.Root + " " + moe + " dash --watch --all"
+			wantDash := "run --json --focus=false --keep-open -s session:NEW --label ui --cwd " + s.opts.Root +
+				" -- /usr/bin/env MOE_HOME=" + s.opts.Root + " " + moe + " ui"
 			if !slices.Contains(fake.calls(), wantDash) {
 				t.Fatalf("dash argv missing: %q; want %q", fake.calls(), wantDash)
 			}
-			if tc.dashFail && !strings.Contains(log.String(), "rex dash not opened") {
+			if tc.dashFail && !strings.Contains(log.String(), "rex ui not opened") {
 				t.Fatalf("dash failure not logged: %q", log.String())
 			}
 			if body, err := os.ReadFile(rexSessionPath(s.opts.Root)); err != nil || string(body) != "session:NEW\n" {
@@ -343,7 +343,7 @@ func TestRexHeartbeatRetriesReplacementThroughAnotherProject(t *testing.T) {
 	fake.reply("ls", `{"sessions":[]}`, 0)
 	fake.reply("block-ls@session:NEW", `{"blocks":[]}`, 0)
 	fake.reply("run@session:NEW", `{"block_ids":["block:new"]}`, 0)
-	fake.reply("run@dash", `{"block_ids":["block:dash"]}`, 0)
+	fake.reply("run@ui", `{"block_ids":["block:dash"]}`, 0)
 	fake.reply("wait", `{"exit_code":1}`, 1)
 	s.heartbeatTick()
 	waitRexWorkers(t, testRex(s.children))
@@ -363,7 +363,7 @@ func TestRexHeartbeatRetriesReplacementThroughAnotherProject(t *testing.T) {
 		if strings.HasPrefix(call, "new ") {
 			news++
 		}
-		if strings.Contains(call, "--label dash ") {
+		if strings.Contains(call, "--label ui ") {
 			dashes++
 		}
 	}

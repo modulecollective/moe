@@ -574,20 +574,20 @@ func rexStartupFake(t *testing.T) *fakeRex {
 }
 
 // TestRexStartupOpensTheDash: startup establishes the session with a harmless
-// bootstrap, then starts `moe dash --watch --all` with its label at creation.
+// bootstrap, then starts `moe ui` with its label at creation.
 // The env prefix carries MOE_HOME and not MOE_SERVE_AGENT — the dash is the
 // operator's eye, and that variable shuts the status gate it reports
 // to Rex through.
 func TestRexStartupOpensTheDash(t *testing.T) {
 	fake := rexStartupFake(t)
 	fake.reply("new", `{"session_id":"session:NEW","initial_windows":[{"block_ids":["block:BOOT"]}]}`, 0)
-	fake.reply("run@dash", `{"block_ids":["block:D"]}`, 0)
+	fake.reply("run@ui", `{"block_ids":["block:D"]}`, 0)
 	moe, _ := argvRecorder(t, 0)
 	root := t.TempDir()
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: moe})
 	s.selectHost()
 
-	want := "run --json --focus=false --keep-open -s session:NEW --label dash --cwd " + root + " -- /usr/bin/env MOE_HOME=" + root + " " + moe + " dash --watch --all"
+	want := "run --json --focus=false --keep-open -s session:NEW --label ui --cwd " + root + " -- /usr/bin/env MOE_HOME=" + root + " " + moe + " ui"
 	if !slices.Contains(fake.calls(), want) {
 		t.Errorf("rex calls = %q, want %q", fake.calls(), want)
 	}
@@ -597,7 +597,7 @@ func TestRexStartupOpensTheDash(t *testing.T) {
 	if body, _ := os.ReadFile(rexSessionPath(root)); strings.TrimSpace(string(body)) != "session:NEW" {
 		t.Errorf(".moe/rex-session = %q, want session:NEW", body)
 	}
-	if _, ok := s.children.get(rexDashLabel); ok {
+	if _, ok := s.children.get(rexUILabel); ok {
 		t.Error("the dash was registered as a child; it is no job of the heartbeat's")
 	}
 }
@@ -625,8 +625,8 @@ func TestRexStartupReplacesTheDash(t *testing.T) {
 	}
 	calls := fake.calls()
 	closeAt := slices.Index(calls, "block close block:OLD")
-	runAt := slices.Index(calls, "run --json --focus=false --keep-open -s session:S --label dash --cwd "+root+
-		" -- /usr/bin/env MOE_HOME="+root+" "+moe+" dash --watch --all")
+	runAt := slices.Index(calls, "run --json --focus=false --keep-open -s session:S --label ui --cwd "+root+
+		" -- /usr/bin/env MOE_HOME="+root+" "+moe+" ui")
 	if closeAt < 0 || runAt < closeAt {
 		t.Errorf("rex calls = %q, want the old dash closed, then a new one run", calls)
 	}
@@ -648,7 +648,7 @@ func TestRexDashFailureHoldsNothing(t *testing.T) {
 		gate := &fakeHeartbeat{due: []string{"alpha"}}
 		s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: moe, Heartbeat: gate, Logger: &log})
 		s.selectHost()
-		if !strings.Contains(log.String(), "rex dash not opened") || testPermanentError(s) != nil {
+		if !strings.Contains(log.String(), "rex ui not opened") || testPermanentError(s) != nil {
 			t.Fatalf("log = %q, hostErr = %v; want the failure logged and the host usable", log.String(), testPermanentError(s))
 		}
 
@@ -674,7 +674,7 @@ func TestRexDashFailureHoldsNothing(t *testing.T) {
 		if fake.called("run") {
 			t.Errorf("rex calls = %q, want no second dash beside the one that wouldn't close", fake.calls())
 		}
-		if !strings.Contains(log.String(), "rex dash not opened") {
+		if !strings.Contains(log.String(), "rex ui not opened") {
 			t.Errorf("log = %q, want the failure logged", log.String())
 		}
 	})

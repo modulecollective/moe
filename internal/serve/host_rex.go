@@ -99,7 +99,7 @@ func (h *rexHost) spawn(id, moeBin string, args []string, root string, logger io
 	}
 	c := h.register(id, block, false, logger)
 	if h.sessionID() != session {
-		h.openDash()
+		h.openUI()
 	}
 	return c, nil
 }
@@ -201,7 +201,7 @@ func (h *rexHost) reconcile() error {
 		if err := h.establish(); err != nil {
 			return err
 		}
-		h.openDash()
+		h.openUI()
 	}
 	if h.ready {
 		return nil
@@ -235,7 +235,7 @@ func (h *rexHost) reconcile() error {
 		return fmt.Errorf("rex adoption pending: %w", err)
 	}
 	h.ready = true
-	h.openDash()
+	h.openUI()
 	if h.candidate != "" {
 		return fmt.Errorf("rex session %s persistence pending", h.candidate)
 	}
@@ -243,50 +243,75 @@ func (h *rexHost) reconcile() error {
 }
 func (h *rexHost) shutdown(context.Context, io.Writer) { h.cancel() }
 
-// rexDashLabel labels the block serve keeps `moe dash --watch --all` in.
+// The old read-only console is retired when the editor takes its place.
 const rexDashLabel = "dash"
+const rexUILabel = "ui"
 
-// openDash puts `moe dash --watch --all` in the session's "dash" block, so
-// the session exists the moment serve starts and the dash reports to the Rex
-// picker (OSC 7501) without the operator starting a watch. `--all` lifts the
-// completed-run cap; the watch viewport still clips what doesn't fit.
-//
-// A dash block a previous serve left is closed, not adopted: the update
-// watcher restarts serve on every reinstall, and an adopted dash would
-// go on running the old binary. If that close fails nothing is launched,
-// so the session never holds two. Every failure here is only logged —
-// the dash is the operator's eye, and must not hold the heartbeat.
-func (h *rexHost) openDash() {
-	argv, err := rexJobArgv(h.moeBin, []string{"MOE_HOME=" + h.root}, []string{"dash", "--watch", "--all"})
+// openUI keeps a running editor across serve restarts: replacing it would
+// destroy drafts. Only a known exit or valid absence permits a new console.
+// Failures here never hold the heartbeat, and shutdown leaves the UI in Rex.
+func (h *rexHost) openUI() {
+	argv, err := rexJobArgv(h.moeBin, []string{"MOE_HOME=" + h.root}, []string{"ui"})
 	if err != nil {
-		h.logf("host: rex dash not opened: %v", err)
+		h.logf("host: rex ui not opened: %v", err)
 		return
 	}
+	var current string
+	var legacy []string
 	if session := h.sessionID(); session != "" {
 		bs, err := h.blocks(session)
 		if err != nil {
 			present, probeErr := h.sessionPresent(session)
 			if probeErr != nil || present {
-				h.logf("host: rex dash not opened: %v (session present: %t, check: %v)", err, present, probeErr)
+				h.logf("host: rex ui not opened: %v (session present: %t, check: %v)", err, present, probeErr)
 				return
 			}
 		}
 		for _, b := range bs {
-			if b.Label != rexDashLabel {
-				continue
-			}
-			if err := h.closeBlock(b.ID); err != nil {
-				h.logf("host: rex dash not opened: close the previous one: %v", err)
-				return
+			switch b.Label {
+			case rexUILabel:
+				if current != "" {
+					h.logf("host: rex ui not opened: duplicate managed ui blocks; leaving editors alone")
+					return
+				}
+				current = b.ID
+			case rexDashLabel:
+				legacy = append(legacy, b.ID)
 			}
 		}
 	}
-	block, err := h.launch(rexDashLabel, argv)
-	if err != nil {
-		h.logf("host: rex dash not opened: %v", err)
-		return
+	for _, block := range legacy {
+		if err := h.closeBlock(block); err != nil {
+			h.logf("host: rex ui not opened: close legacy dash: %v", err)
+			return
+		}
 	}
-	h.logf("host: rex dash open in block %s", block)
+	if current != "" {
+		_, exited, err := h.lastExit(current)
+		if err != nil {
+			h.logf("host: rex ui not opened: process state unknown for %s: %v", current, err)
+			return
+		}
+		if !exited {
+			h.logf("host: rex ui retained in block %s", current)
+			return
+		}
+		if err := h.closeBlock(current); err != nil {
+			h.logf("host: rex ui not opened: close exited editor: %v", err)
+			return
+		}
+	}
+	block, err := h.launch(rexUILabel, argv)
+	if err != nil {
+		found, readErr := h.findLabel(rexUILabel)
+		if readErr != nil || found == "" {
+			h.logf("host: rex ui not opened: launch unresolved: %v (readback: %v); leaving it alone", err, readErr)
+			return
+		}
+		h.logf("host: rex ui launch reported %v; label reconciled to %s", err, found)
+		block = found
+	}
+	h.logf("host: rex ui open in block %s", block)
 }
 
 // adopt picks up the jobs a previous serve launched. The session's
