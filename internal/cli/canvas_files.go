@@ -234,8 +234,9 @@ func canvasFileProblem(body string) string {
 	case status != "ready":
 		return "gate " + status
 	}
+	sections := parseTestCanvasSections(body)
 	for _, title := range sectionOrder(body) {
-		if !testSectionFilled(parseTestCanvasSections(body)[title]) {
+		if !testSectionFilled(sections[title]) {
 			return fmt.Sprintf("section %q unfilled", title)
 		}
 	}
