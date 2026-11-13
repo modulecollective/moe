@@ -363,6 +363,7 @@ func TestUsageNewPricesAggregateThroughParsers(t *testing.T) {
 	now := time.Now().Local()
 	seedRun(t, root, "tele", "new-prices", "sdlc", run.StatusMerged, now, nil)
 	seedRun(t, root, "tele", "sol-6-1", "sdlc", run.StatusMerged, now, nil)
+	seedRun(t, root, "tele", "terra-6-1", "pulse", run.StatusMerged, now, nil)
 	seedRun(t, root, "tele", "opus-5-5", "sdlc", run.StatusMerged, now, nil)
 	gittest.Commit(t, root, "seed run")
 	seedThread(t, root, "tele", "new-prices", "design", "claude",
@@ -378,11 +379,13 @@ func TestUsageNewPricesAggregateThroughParsers(t *testing.T) {
 		codexTurn("gpt-6-sol", 2_000_000, 1_000_000, 1_000_000))
 	seedThread(t, root, "tele", "sol-6-1", "code", "codex",
 		codexTurn("gpt-6.1-sol", 2_000_000, 1_000_000, 1_000_000))
+	seedThread(t, root, "tele", "terra-6-1", "pulse", "codex",
+		codexTurn("gpt-6.1-terra", 2_000_000, 1_000_000, 1_000_000))
 	seedThread(t, root, "tele", "opus-5-5", "code", "claude",
 		claudeTurn("opus", "claude-opus-5-5", 1_000_000, 1_000_000, 1_000_000))
 
 	rep := gather(t, root, Filter{Cutoff: now.Add(-24 * time.Hour)})
-	wantDollars := 0.25001 + 61 + 14.20 + 1.42 + 12.20 + 12.10 + 28.200004
+	wantDollars := 0.25001 + 61 + 14.20 + 1.42 + 12.20 + 12.10 + 6.05 + 28.200004
 	if rep.Dollars < wantDollars-0.000001 || rep.Dollars > wantDollars+0.000001 {
 		t.Errorf("dollars = %v, want %v", rep.Dollars, wantDollars)
 	}
@@ -585,6 +588,7 @@ func TestNotionalCostPublishedRates(t *testing.T) {
 		{"gpt-6-astra", transcript.ModelUsage{Input: 1_000_000, CacheRead: 1_000_000, Output: 1_000_000}, 61},
 		{"gpt-6-sol", transcript.ModelUsage{Input: 1_000_000, CacheRead: 1_000_000, Output: 1_000_000}, 12.20},
 		{"gpt-6.1-sol", transcript.ModelUsage{Input: 1_000_000, CacheRead: 1_000_000, Output: 1_000_000}, 12.10},
+		{"gpt-6.1-terra", transcript.ModelUsage{Input: 1_000_000, CacheRead: 1_000_000, Output: 1_000_000}, 6.05},
 		{"gpt-5.6-sol", transcript.ModelUsage{Input: 1_000_000, CacheRead: 1_000_000, Output: 1_000_000}, 24.40},
 		{"gpt-5.6-terra", transcript.ModelUsage{Input: 1_000_000, CacheRead: 1_000_000, Output: 1_000_000}, 14.20},
 		{"gpt-5.6-luna", transcript.ModelUsage{Input: 1_000_000, CacheRead: 1_000_000, Output: 1_000_000}, 1.42},
@@ -615,6 +619,7 @@ func TestModelPricesMatchPublishedRates(t *testing.T) {
 		{"gpt-6-astra", 10, 1, 50},
 		{"gpt-6-sol", 2, 0.20, 10},
 		{"gpt-6.1-sol", 2, 0.10, 10},
+		{"gpt-6.1-terra", 1, 0.05, 5},
 		{"gpt-5.6-sol", 4, 0.40, 20},
 		{"gpt-5.6-terra", 2, 0.20, 12},
 		{"gpt-5.6-luna", 0.20, 0.02, 1.20},
@@ -647,6 +652,9 @@ func TestPriceForLongestPrefixWins(t *testing.T) {
 	if p, ok := priceFor("gpt-6.1-sol-test-suffix"); !ok || p.prefix != "gpt-6.1-sol" {
 		t.Errorf("priceFor(gpt-6.1-sol-test-suffix) = %+v ok=%v, want gpt-6.1-sol", p, ok)
 	}
+	if p, ok := priceFor("gpt-6.1-terra-test-suffix"); !ok || p.prefix != "gpt-6.1-terra" {
+		t.Errorf("priceFor(gpt-6.1-terra-test-suffix) = %+v ok=%v, want gpt-6.1-terra", p, ok)
+	}
 	// The context tag is a lookup fixture, not a claimed vendor model ID.
 	for _, model := range []string{"claude-opus-5-5", "claude-opus-5-5[1m]"} {
 		if p, ok := priceFor(model); !ok || p.prefix != "claude-opus-5-5" {
@@ -668,6 +676,7 @@ func TestPriceForLongestPrefixWins(t *testing.T) {
 		"claude-opus-5-5":      0.20,
 		"claude-opus-5-5[1m]":  0.20,
 		"gpt-6.1-sol":          0.10,
+		"gpt-6.1-terra":        0.05,
 	} {
 		got, ok := NotionalCost(model, transcript.ModelUsage{CacheRead: 1_000_000})
 		if !ok || got != want {

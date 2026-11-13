@@ -88,6 +88,9 @@ var modelPrices = []modelPrice{
 	// re-verify it rather than guessing an automatic reversion.
 	{"gpt-5.6-sol", 4, 0.40, 20},
 	{"gpt-5.6-terra", 2, 0.20, 12},
+	// GPT-6.1 Terra standard rate verified 2026-11-13:
+	// https://developers.openai.com/api/docs/models/gpt-6.1-terra
+	{"gpt-6.1-terra", 1, 0.05, 5},
 	{"gpt-5.6-luna", 0.20, 0.02, 1.20},
 	{"gpt-5.5", 5, 0.50, 30},
 }
