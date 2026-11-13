@@ -19,7 +19,7 @@ func codes(ks []Key) string {
 			parts = append(parts, s)
 		default:
 			parts = append(parts, map[KeyCode]string{
-				KeyEnter: "enter", KeyTab: "tab", KeyBackTab: "backtab", KeyBackspace: "bs",
+				KeyEnter: "enter", KeyShiftEnter: "shift-enter", KeyTab: "tab", KeyBackTab: "backtab", KeyBackspace: "bs",
 				KeyDelete: "del", KeyUp: "up", KeyDown: "down", KeyLeft: "left", KeyRight: "right",
 				KeyHome: "home", KeyEnd: "end", KeyPgUp: "pgup", KeyPgDn: "pgdn", KeyEsc: "esc",
 				KeyCtrlC: "^C", KeyCtrlS: "^S", KeyCtrlX: "^X", KeyCtrlZ: "^Z", KeyCtrlL: "^L", KeyWordLeft: "word-left", KeyWordRight: "word-right", KeyWordBackspace: "word-bs",
@@ -117,5 +117,60 @@ func TestDecoderWordKeys(t *testing.T) {
 	}
 	if got := codes(d.feed([]byte("\x1b[200~\x1b\x7f\x17\x1bb\x1b[201~"))); got != "paste:\x1b\x7f\x17\x1bb" {
 		t.Fatal(got)
+	}
+}
+
+func TestDecoderShiftEnter(t *testing.T) {
+	for _, seq := range []string{"\x1b[13;2u", "\x1b[27;2;13~"} {
+		in := "é" + seq + "x\r\n"
+		want := "r:é shift-enter r:x enter enter"
+		for split := range len(in) + 1 {
+			var d decoder
+			got := append(d.feed([]byte(in[:split])), d.feed([]byte(in[split:]))...)
+			if codes(got) != want || d.pending() {
+				t.Fatalf("%q split %d: %q", seq, split, codes(got))
+			}
+		}
+		var d decoder
+		var got []Key
+		for i := range len(in) {
+			got = append(got, d.feed([]byte{in[i]})...)
+		}
+		if codes(got) != want || d.pending() {
+			t.Fatalf("%q bytewise: %q", seq, codes(got))
+		}
+		for end := 2; end < len(seq); end++ {
+			d = decoder{}
+			if got := d.feed([]byte(seq[:end])); len(got) != 0 || !d.pending() {
+				t.Fatalf("%q prefix %d decoded early: %v", seq, end, got)
+			}
+			if got := d.flush(); len(got) != 0 || d.pending() {
+				t.Fatalf("%q prefix %d flush: %v", seq, end, got)
+			}
+			if got := codes(d.feed([]byte("x"))); got != "r:x" {
+				t.Fatalf("text after flush: %q", got)
+			}
+		}
+		d = decoder{}
+		if got := d.feed([]byte("\x1b[200~" + seq + "\x1b[201~")); len(got) != 1 || got[0].Code != KeyPaste || got[0].Text != seq {
+			t.Fatalf("%q paste decoded as keys: %v", seq, got)
+		}
+	}
+}
+
+func TestDecoderRejectsOtherModifiedEnter(t *testing.T) {
+	for _, seq := range []string{
+		"\x1b[13;3u", "\x1b[13;5u", "\x1b[13;4u", "\x1b[13u",
+		"\x1b[27;3;13~", "\x1b[27;5;13~", "\x1b[27;2;14~",
+		"\x1b[13;2:3u", "\x1b[13;2:2u", "\x1b[13:13;2u",
+	} {
+		in := "a" + seq + "x"
+		for split := range len(in) + 1 {
+			var d decoder
+			got := append(d.feed([]byte(in[:split])), d.feed([]byte(in[split:]))...)
+			if codes(got) != "r:a r:x" || d.pending() {
+				t.Fatalf("%q split %d: %q", seq, split, codes(got))
+			}
+		}
 	}
 }

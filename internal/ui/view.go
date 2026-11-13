@@ -41,7 +41,8 @@ Search (/)
 
 Editor
   Ctrl-S save · Esc back (the draft is kept) · Ctrl-X discard
-  Enter is a newline; arrows, Home/End, Backspace/Delete, paste
+  Enter or Shift+Enter inserts a newline
+  Arrows, Home/End, Backspace/Delete, paste edit the draft
   Alt-Backspace / Ctrl-W delete the previous whitespace-delimited word
   Alt-Left/Right or Alt-b/f move by a word
 

@@ -698,6 +698,9 @@ func (m *model) startEditBody() {
 }
 
 func (m *model) editKey(k Key) effect {
+	if k.Code == KeyShiftEnter {
+		k.Code = KeyEnter
+	}
 	d := m.active
 	switch k.Code {
 	case KeyEsc:

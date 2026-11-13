@@ -338,12 +338,12 @@ text; Tab, page and save/discard keys do nothing in search. Ctrl-L redraws
 and Ctrl-Z suspends. In editors and the command line, `/` remains text.
 
 Use `:new idea <project>/<slug>` or `:new intent <project>/<slug>` to open a
-capture draft. Nothing is created until Ctrl-S. Ideas offer save only, save
-and tag sdlc, or save and tag design only. The draft names its target even
-on an empty or filtered board. Alt-Backspace or Ctrl-W deletes a word;
-Alt-arrows or Alt-b/f moves by words. Words are whitespace-delimited, including
-newlines, so project/run tokens stay together. Esc keeps a draft, Ctrl-X
-discards it.
+capture draft. In multiline editors, Enter or Shift+Enter inserts a newline.
+Nothing is created until Ctrl-S. Ideas offer save only, save and tag sdlc,
+or save and tag design only. The draft names its target even on an empty or
+filtered board. Alt-Backspace or Ctrl-W deletes a word; Alt-arrows or Alt-b/f
+moves by words. Words are whitespace-delimited, including newlines, so
+project/run tokens stay together. Esc keeps a draft, Ctrl-X discards it.
 
 On the selected open idea, press `g` to set the SDLC licence, `d` to set a
 design-only licence, or `u` to clear either licence. These are explicit

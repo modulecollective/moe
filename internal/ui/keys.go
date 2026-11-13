@@ -24,6 +24,7 @@ const (
 	KeyRune
 	KeyPaste
 	KeyEnter
+	KeyShiftEnter
 	KeyTab
 	KeyBackTab
 	KeyBackspace
@@ -258,6 +259,9 @@ func decodeCSI(b []byte) (Key, int) {
 		case 'C':
 			return Key{Code: KeyWordRight}, n
 		}
+	}
+	if final == 'u' && params == "13;2" || final == '~' && params == "27;2;13" {
+		return Key{Code: KeyShiftEnter}, n
 	}
 	if params != "" && params != "1" && final != '~' {
 		return Key{}, n

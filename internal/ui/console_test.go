@@ -16,6 +16,120 @@ func keyboard(m *model, text string) effect {
 	return eff
 }
 
+func TestShiftEnterEditsDrafts(t *testing.T) {
+	for _, tc := range []struct {
+		purpose, open, seed string
+		kind                ActionKind
+	}{
+		{"note", "n", "", ActNote},
+		{"answer", "a", "", ActAnswer},
+		{"new-idea", ":new idea p/a\r", "# a\n", ActCreate},
+		{"new-intent", ":new intent p/a\r", "# a\n", ActCreate},
+		{"body", "e", "# a\n", ActEdit},
+	} {
+		for _, seq := range []string{"\r", "\n", "\x1b[13;2u", "\x1b[27;2;13~"} {
+			t.Run(fmt.Sprintf("%s/%q", tc.purpose, seq), func(t *testing.T) {
+				m, q := testModel(t)
+				it := run("p", "a")
+				it.Question = &Question{ID: 4, Text: "which?"}
+				if tc.purpose == "body" {
+					it = idea("p", "a", 1)
+				}
+				m.setBoard(board(1, it))
+				keyboard(m, tc.open)
+				d := m.active
+				key := d.key
+				keyboard(m, "é😀z\x1b[D"+seq)
+				want := tc.seed + "é😀\nz"
+				if m.mode != modeEdit || d == nil || d.ed.String() != want || d.ed.cur != len([]rune(tc.seed))+3 {
+					t.Fatalf("middle insertion: mode %v, draft %+v", m.mode, d)
+				}
+				keyboard(m, "\x1b[F"+seq)
+				want += "\n"
+				if m.active != d || m.mode != modeEdit || d.ed.String() != want || d.ed.cur != len([]rune(want)) || d.key != key {
+					t.Fatalf("end insertion: mode %v, draft %+v", m.mode, d)
+				}
+				if len(q) != 0 || m.busy != nil || m.saveDraft != nil {
+					t.Fatal("newline started a save")
+				}
+				keyboard(m, "\x13")
+				if tc.purpose == "new-idea" || tc.purpose == "body" {
+					if m.mode != modeSave || len(q) != 0 {
+						t.Fatal("Ctrl-S did not offer the idea save choices")
+					}
+					keyboard(m, "\r")
+				}
+				if len(q) != 1 {
+					t.Fatal("Ctrl-S did not queue exactly one save")
+				}
+				j := <-q
+				if len(j.steps) != 1 {
+					t.Fatalf("save steps = %+v", j.steps)
+				}
+				a := j.steps[0]
+				if a.Kind != tc.kind || a.Text != want || a.Project != "p" || a.Run != "a" || tc.purpose == "answer" && a.QuestionID != 4 {
+					t.Fatalf("save = %+v", j.steps)
+				}
+				// A refused save must leave this exact multiline draft reachable.
+				m.finished(jobResult{job: j, results: []Result{{Message: "refused"}}})
+				keyboard(m, tc.open)
+				if m.mode != modeEdit || m.active != d || d.ed.String() != want {
+					t.Fatal("refused save lost the multiline draft")
+				}
+			})
+		}
+	}
+}
+
+func TestShiftEnterTextLimit(t *testing.T) {
+	for _, seq := range []string{"\r", "\x1b[13;2u", "\x1b[27;2;13~"} {
+		m, q := testModel(t)
+		m.setBoard(board(1, run("p", "a")))
+		keyboard(m, "n"+strings.Repeat("é", maxText))
+		keyboard(m, seq)
+		if m.mode != modeEdit || len(q) != 0 || m.busy != nil || len(m.active.ed.text) != maxText || m.active.ed.cur != maxText || !strings.Contains(consoleText(m), "text limit reached (256 KiB); nothing was inserted") {
+			t.Fatalf("%q at limit: mode %v, message %q", seq, m.mode, consoleText(m))
+		}
+		keyboard(m, "\x7f"+seq)
+		if m.active.ed.cur != maxText || m.active.ed.text[maxText-1] != '\n' {
+			t.Fatalf("%q did not insert after making room", seq)
+		}
+	}
+}
+
+func TestShiftEnterOutsideEditor(t *testing.T) {
+	for _, seq := range []string{"\x1b[13;2u", "\x1b[27;2;13~"} {
+		for _, tc := range []struct {
+			name, open string
+			mode       mode
+		}{
+			{"command", ":help", modeCommand},
+			{"search", "/p/a", modeSearch},
+			{"save choice", ":new idea p/a\r\x13", modeSave},
+		} {
+			t.Run(fmt.Sprintf("%s/%q", tc.name, seq), func(t *testing.T) {
+				m, q := testModel(t)
+				m.setBoard(board(1, run("p", "a")))
+				keyboard(m, tc.open+seq)
+				if m.mode != tc.mode || len(q) != 0 || m.busy != nil {
+					t.Fatal("Shift+Enter accepted outside the editor")
+				}
+				if tc.mode == modeCommand && m.cmd.String() != "help" || tc.mode == modeSearch && m.search.ed.String() != "p/a" {
+					t.Fatal("Shift+Enter changed single-line text")
+				}
+				keyboard(m, "\r")
+				wantMode := modeNormal
+				if tc.mode == modeCommand {
+					wantMode = modeHelp
+				}
+				if m.mode != wantMode || (len(q) == 1) != (tc.mode == modeSave) {
+					t.Fatalf("ordinary Enter: mode %v, jobs %d", m.mode, len(q))
+				}
+			})
+		}
+	}
+}
+
 func TestConsoleHistoryAndFocus(t *testing.T) {
 	m, _ := testModel(t)
 	m.setBoard(board(1, run("p", "a")))

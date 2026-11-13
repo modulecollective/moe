@@ -337,6 +337,21 @@ func TestRunOnPTYWordEditing(t *testing.T) {
 	c.wait(t)
 }
 
+func TestRunOnPTYShiftEnter(t *testing.T) {
+	c := startPTYChild(t)
+	c.waitOut(t, "p/a")
+	c.master.Write([]byte("né😀z\x1b[D\x1b[13;2u\x1b[F\x1b[27;2;13~tail\rordinary\x13"))
+	if got := c.report(t); got != `note to p/a "é😀\nz\ntail\nordinary"` {
+		t.Fatalf("Shift+Enter edit: %s", got)
+	}
+	c.waitOut(t, "done")
+	c.master.Write([]byte("q"))
+	if got := c.report(t); got != "exit <nil>" {
+		t.Fatal(got)
+	}
+	c.wait(t)
+}
+
 func TestRunOnPTYSearch(t *testing.T) {
 	c := startPTYChild(t, "MOE_UI_PTY_SEARCH=1")
 	c.waitOut(t, "p/a")
