@@ -165,12 +165,12 @@ const keptBucket = -1
 const keptHeading = "KEPT DRAFTS"
 
 // withKept is b plus one read-only item for each target that left the
-// board while a draft for it is kept — a closed intent drops out of the
-// dash entirely, a run can fall out of the filter. The item keeps the
-// target's identity and what the board last showed of it, so the
-// operator can still read the text, reopen it with the key that opened
-// it, and discard it. It offers no action: a save goes to the writer,
-// which refuses it, and the text is never retargeted. Drafts whose
+// board while a draft for it is kept, for example when a run falls out
+// of the filter. The item keeps the target's identity and what the board
+// last showed of it, so the operator can still read the text, reopen it
+// with the key that opened it, and discard it. It offers no action:
+// a save goes to the writer, which refuses it, and the text is never
+// retargeted. Drafts whose
 // target is on b record it as last seen.
 func (m *model) withKept(b Board) Board {
 	present := map[string]Item{}

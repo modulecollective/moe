@@ -658,9 +658,10 @@ func TestStaleAnswerRecoverable(t *testing.T) {
 // A draft outlives its target's eligibility: once a capture closes or a
 // run finishes, the key that opened its draft still reopens it to read
 // or discard, the details say so, and the save stays the writer's to
-// refuse. A closed intent leaves the board altogether, as the dash
-// drops it; its draft keeps a read-only row under its own identity.
+// refuse. A target missing from the source keeps a read-only draft row;
+// a closed intent still on the source stays listed after draft discard.
 func TestDraftReachableAfterTargetCloses(t *testing.T) {
+	intentBody := "# y\nintent canvas\n" + strings.Repeat("standing direction\n", 30) + strings.Repeat("x", 164) + "END_OF_INTENT\n"
 	cases := []struct {
 		name  string
 		item  Item
@@ -668,7 +669,8 @@ func TestDraftReachableAfterTargetCloses(t *testing.T) {
 		close func(Item) []Item // the target's items on the next board
 	}{
 		{"idea body", idea("p", "x", 1), 'e', func(it Item) []Item { it.Editable, it.Notes = false, false; return []Item{it} }},
-		{"intent body", Item{Project: "p", Run: "y", Kind: ItemIntent, Editable: true, Body: "# y\nintent canvas\n"}, 'e', func(Item) []Item { return nil }},
+		{"intent body", Item{Project: "p", Run: "y", Kind: ItemIntent, Editable: true, Body: intentBody}, 'e', func(it Item) []Item { it.Editable = false; it.Bucket = 4; return []Item{it} }},
+		{"off-board intent body", Item{Project: "p", Run: "y", Kind: ItemIntent, Editable: true, Body: "# y\nintent canvas\n"}, 'e', func(Item) []Item { return nil }},
 		{"run note", run("p", "a"), 'n', func(it Item) []Item { it.Notes, it.Controls = false, false; return []Item{it} }},
 	}
 	for _, c := range cases {
@@ -719,10 +721,63 @@ func TestDraftReachableAfterTargetCloses(t *testing.T) {
 					if strings.Contains(strings.Join(m.board.Lines, "\n"), keptHeading) {
 						t.Fatal("kept heading outlived its last draft")
 					}
+				} else if it, ok := m.selected(); !ok || it.Run != c.item.Run || it.Body != c.item.Body {
+					t.Fatalf("canonical target lost after discard: %+v", it)
+				}
+				if c.name == "intent body" {
+					got := paintedDetail(t, m)
+					if !strings.Contains(got, strings.ReplaceAll(strings.TrimRight(intentBody, "\n"), "\n", "")) || strings.Contains(got, "precious operator text") {
+						t.Fatalf("canonical body after draft discard: %s", got)
+					}
 				}
 				press(m, Key{Code: KeyRune, Rune: c.key})
 				if m.mode == modeEdit && m.active.key.run == c.item.Run {
 					t.Fatal("opened a fresh draft on a closed target")
+				}
+			})
+		}
+	}
+}
+
+// With no draft at all, both a newly closed intent and one already
+// closed at startup remain selectable with every body character reachable.
+func TestClosedIntentInspectable(t *testing.T) {
+	long := strings.Repeat("x", 164) + "END_OF_INTENT"
+	body := "# Direction\n" + strings.Repeat("standing direction\n", 30) + long + "\n"
+	for _, startup := range []bool{false, true} {
+		for _, width := range []int{40, 100} {
+			t.Run(fmt.Sprintf("startup=%v/width=%d", startup, width), func(t *testing.T) {
+				m, q := testModel(t)
+				m.resize(14, width)
+				closed := Item{Project: "p", Run: "intent", Kind: ItemIntent, Bucket: 4, Body: body}
+				other := idea("p", "neighbour", 3)
+				if !startup {
+					open := closed
+					open.Editable, open.Bucket = true, 1
+					m.setBoard(board(1, other, open))
+					press(m, Key{Code: KeyDown})
+				}
+				m.setBoard(board(2, other, closed))
+				if startup {
+					press(m, Key{Code: KeyDown})
+				}
+				if it, ok := m.selected(); !ok || it.Run != closed.Run || len(m.drafts) != 0 {
+					t.Fatalf("closed selection = %+v, drafts=%d", it, len(m.drafts))
+				}
+				if got := paintedDetail(t, m); !strings.Contains(got, strings.ReplaceAll(strings.TrimRight(body, "\n"), "\n", "")) {
+					t.Fatalf("closed body not fully reachable: %s", got)
+				}
+				press(m, Key{Code: KeyRune, Rune: 'e'}, Key{Code: KeyRune, Rune: 'n'})
+				for _, command := range []string{"edit", "close", "pause", "tag sdlc"} {
+					press(m, Key{Code: KeyRune, Rune: ':'})
+					typed(m, command)
+					press(m, Key{Code: KeyEnter})
+					if m.mode != modeNormal {
+						t.Fatalf("closed intent accepted %q: mode %v", command, m.mode)
+					}
+				}
+				if len(q) != 0 || len(m.drafts) != 0 {
+					t.Fatal("inspection enabled a write or fresh draft")
 				}
 			})
 		}

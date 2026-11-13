@@ -392,16 +392,16 @@ func TestUIDoResumeRetryAfterNewHold(t *testing.T) {
 	}
 }
 
-// A closed intent leaves the console's board altogether, as it leaves
-// the dash; an idea closed beside it stays, as completed history. The
-// console's kept-draft row (internal/ui) is what keeps a draft for the
-// intent reachable.
-func TestUIClosedIntentLeavesBoard(t *testing.T) {
+// Closed intents remain inspectable from the canonical scan, without a
+// draft or a previously running source. Ordinary dash membership stays intact.
+func TestUIClosedIntentsInspectable(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	root, _ := controlFixture(t)
 	do := func(a ui.Action) ui.Result { return uiDo(context.Background(), root, a) }
+	body := "# A goal\n" + strings.Repeat("standing direction\n", 30) + strings.Repeat("x", 164) + "END_OF_INTENT\n"
 	for _, a := range []ui.Action{
-		{Kind: ui.ActCreate, Project: "moe", Run: "a-goal", Workflow: "intent", Text: "# a-goal\n"},
+		{Kind: ui.ActCreate, Project: "moe", Run: "b-goal", Workflow: "intent", Text: "# Another goal\n"},
+		{Kind: ui.ActCreate, Project: "moe", Run: "a-goal", Workflow: "intent", Text: body},
 		{Kind: ui.ActCreate, Project: "moe", Run: "an-idea", Workflow: "idea", Text: "# an-idea\n"},
 	} {
 		if r := do(a); !r.OK {
@@ -416,21 +416,61 @@ func TestUIClosedIntentLeavesBoard(t *testing.T) {
 	if it := uiItem(t, b, "moe", "a-goal", ui.ItemIntent); !it.Editable {
 		t.Fatalf("open intent = %+v", it)
 	}
-	for _, slug := range []string{"a-goal", "an-idea"} {
+	for _, slug := range []string{"a-goal", "b-goal", "an-idea"} {
 		if r := do(ui.Action{Kind: ui.ActClose, Project: "moe", Run: slug}); !r.OK {
 			t.Fatalf("close %s: %+v", slug, r)
 		}
 	}
-	if err := s.refresh(context.Background()); err != nil {
-		t.Fatal(err)
-	}
-	b = takeBoard(t, s)
-	for _, it := range b.Items {
-		if it.Run == "a-goal" {
-			t.Fatalf("closed intent still on the board: %+v", it)
+	for _, source := range []*uiSource{s, newUISource(root, DashFilter{}, os.Stdout)} {
+		if err := source.refresh(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		b = takeBoard(t, source)
+		it := uiItem(t, b, "moe", "a-goal", ui.ItemIntent)
+		if it.Body != body || it.Editable || it.Notes || it.Controls || it.Terminal || it.Question != nil || !strings.Contains(strings.Join(it.Detail, "\n"), "closed") {
+			t.Fatalf("closed intent = %+v", it)
+		}
+		other := uiItem(t, b, "moe", "b-goal", ui.ItemIntent)
+		if it.Line >= other.Line || !strings.Contains(b.Lines[it.Line], it.Label()) || !strings.Contains(strings.Join(b.Lines[:it.Line], "\n"), "CLOSED INTENTS") {
+			t.Fatalf("closed intent lines = %v", b.Lines)
+		}
+		if idea := uiItem(t, b, "moe", "an-idea", ui.ItemIdea); idea.Editable {
+			t.Fatalf("closed idea = %+v", idea)
+		}
+		for _, row := range source.snap.Rows {
+			if row.Run == "a-goal" || row.Run == "b-goal" {
+				t.Fatalf("UI history changed dash membership: %+v", row)
+			}
 		}
 	}
-	if it := uiItem(t, b, "moe", "an-idea", ui.ItemIdea); it.Editable {
-		t.Fatalf("closed idea = %+v", it)
+	// The scan includes every project/workflow; the UI-only section must
+	// apply the same filters as the ordinary dashboard rows.
+	for _, filter := range []DashFilter{{ProjectFilter: "elsewhere"}, {WorkflowFilter: "idea"}, {WorkflowFilter: "intent"}} {
+		source := newUISource(root, filter, os.Stdout)
+		if err := source.refresh(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		b := takeBoard(t, source)
+		var intents []string
+		for _, it := range b.Items {
+			if it.Kind == ui.ItemIntent {
+				intents = append(intents, it.Run)
+			}
+		}
+		want := []string(nil)
+		if filter.WorkflowFilter == "intent" {
+			want = []string{"a-goal", "b-goal"}
+		}
+		if !slices.Equal(intents, want) {
+			t.Fatalf("filter %+v: intents %v, want %v", filter, intents, want)
+		}
+	}
+	// Inspection grants no write authority, even if a stale editor sends one.
+	if r := do(ui.Action{Kind: ui.ActEdit, Project: "moe", Run: "a-goal", Expected: body, Text: "replacement"}); r.OK || r.Uncertain {
+		t.Fatalf("closed edit = %+v", r)
+	}
+	got, err := os.ReadFile(root + "/" + run.ContentPath("moe", "a-goal", "intent"))
+	if err != nil || string(got) != body {
+		t.Fatalf("closed canvas changed: %q, %v", got, err)
 	}
 }

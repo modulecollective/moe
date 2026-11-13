@@ -360,6 +360,33 @@ func (s *uiSource) buildBoard(now time.Time) (ui.Board, []cliout.ProgramStatus) 
 		it.Line = offset + lines[i]
 		b.Items = append(b.Items, it)
 	}
+	// Dash omits retired standing direction. The console also offers
+	// capture inspection, so list closed intents from the canonical scan
+	// without changing dash rows, counts, art or status reports.
+	var closed []string
+	for key, md := range snap.Runs {
+		if md.Workflow != dash.IntentWorkflow || md.Status != run.StatusClosed {
+			continue
+		}
+		if s.filter.ProjectFilter != "" && md.Project != s.filter.ProjectFilter {
+			continue
+		}
+		if s.filter.WorkflowFilter != "" && md.Workflow != s.filter.WorkflowFilter {
+			continue
+		}
+		closed = append(closed, key)
+	}
+	slices.Sort(closed)
+	if len(closed) > 0 {
+		b.Lines = append(b.Lines, "", fmt.Sprintf("CLOSED INTENTS (%d)", len(closed)))
+		for _, key := range closed {
+			md := snap.Runs[key]
+			it := s.item(dash.Row{Project: md.Project, Run: md.ID, Bucket: dash.BucketCompletedRuns}, now, obs)
+			it.Line = len(b.Lines)
+			b.Lines = append(b.Lines, "  "+it.Label()+" · closed")
+			b.Items = append(b.Items, it)
+		}
+	}
 	slices.SortStableFunc(b.Items, func(x, y ui.Item) int { return x.Line - y.Line })
 
 	watching := 0

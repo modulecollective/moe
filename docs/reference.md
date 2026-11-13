@@ -54,6 +54,11 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   stdout (Linux or macOS) and restores it on every exit; quitting mid-save
   waits for and prints that save's outcome. In a Rex terminal it reports the
   same OSC 7501 status as `dash --watch`.
+
+  Closed ideas and intents remain selectable with their full capture text
+  scrollable in the details. Retired intents appear under `CLOSED INTENTS`,
+  ordered by project/run; inspection remains available after discarding a
+  draft or restarting the console. Closed captures accept no new edits.
 - `moe serve [--addr <host[:port]>] [--port <n>] [--dynamic]` runs the moe
   server: the web UI, journal pushing, and an optional heartbeat. It binds to
   `127.0.0.1:4242` by default; `--port` is ignored when `--addr` includes a
