@@ -10,7 +10,6 @@ package cli
 // is healthy.
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -363,12 +362,24 @@ func (s *uiSource) buildBoard(now time.Time) (ui.Board, []cliout.ProgramStatus) 
 	snap.Rows, snap.Observations = rows, obs
 
 	buf := &ttyFrameBuffer{terminal: s.terminal}
-	banner.Dash(buf, now, s.serveNow.bannerCluster(now))
-	s.serveNow.renderLines(buf, now)
-	if s.gerr != nil {
-		moePrintf(buf, "observation failed: %v (showing the last good board)\n", s.gerr)
+	banner.Dash(buf, now, ui.SafeText(s.serveNow.bannerCluster(now)))
+	// Printf's reset may follow its newline. This is exactly one banner row.
+	b.Banner = strings.ReplaceAll(buf.String(), "\n", "")
+	buf.Reset()
+	// Service detail is external text. Render without styles, then escape it
+	// before adding the trusted dashboard chrome below.
+	var service strings.Builder
+	s.serveNow.renderLines(&service, now)
+	for _, line := range strings.Split(strings.TrimSuffix(service.String(), "\n"), "\n") {
+		if service.Len() > 0 {
+			fmt.Fprintln(buf, ui.SafeText(line))
+		}
 	}
-	offset := bytes.Count(buf.Bytes(), []byte{'\n'})
+	if s.gerr != nil {
+		moePrintf(buf, "observation failed: %s (showing the last good board)\n", ui.SafeText(s.gerr.Error()))
+	}
+	serviceLines := buf.String()
+	buf.Reset()
 	state := dash.FactoryStateFromRows(rows)
 	histogram := dash.BuildActivityHistogram(snap.Histogram)
 	color := cliout.Enabled(buf)
@@ -376,9 +387,20 @@ func (s *uiSource) buildBoard(now time.Time) (ui.Board, []cliout.ProgramStatus) 
 		s.artFrames = dash.StyledFactoryFrames(buf, state, 8, rand.New(rand.NewSource(s.seed)))
 		s.artState, s.artColor = state, color
 	}
-	lines, artStart := dash.RenderIndexedArt(buf, now, histogram, rows, snap.ProjectCount, snap.ActiveProjects, true, s.artFrames[0])
-	b.Art = ui.Art{Start: offset + artStart, Height: len(s.artFrames[0]), Frames: s.artFrames}
-	b.Lines = strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n")
+	artStart := dash.RenderOverview(buf, histogram, s.artFrames[0])
+	b.Art = ui.Art{Start: artStart, Height: len(s.artFrames[0]), Frames: s.artFrames}
+	b.Overview = strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n")
+	buf.Reset()
+	// Escape external labels before the renderer adds its own trusted SGR.
+	paintRows := slices.Clone(rows)
+	for i := range paintRows {
+		r := &paintRows[i]
+		r.Project, r.Run = ui.SafeText(r.Project), ui.SafeText(r.Run)
+		r.Note, r.Control = ui.SafeText(r.Note), ui.SafeText(r.Control)
+	}
+	lines := dash.RenderIndexedRows(buf, now, paintRows, snap.ProjectCount, snap.ActiveProjects, true)
+	b.Lines = strings.Split(strings.TrimSuffix(serviceLines+buf.String(), "\n"), "\n")
+	offset := strings.Count(serviceLines, "\n")
 
 	for i, row := range rows {
 		if lines[i] < 0 {
@@ -411,7 +433,7 @@ func (s *uiSource) buildBoard(now time.Time) (ui.Board, []cliout.ProgramStatus) 
 			md := snap.Runs[key]
 			it := s.item(dash.Row{Project: md.Project, Run: md.ID, Bucket: dash.BucketCompletedRuns}, now, obs)
 			it.Line = len(b.Lines)
-			b.Lines = append(b.Lines, "  "+it.Label()+" · closed")
+			b.Lines = append(b.Lines, "  "+ui.SafeText(it.Label())+" · closed")
 			b.Items = append(b.Items, it)
 		}
 	}

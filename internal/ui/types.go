@@ -68,22 +68,25 @@ type Question struct {
 	Text string
 }
 
-// Art is a bounded set of factory frames and their placement in the board.
+// Art is a bounded set of factory frames in the pinned overview.
 type Art struct {
-	Start, Height int        // explicit zero-based line span in Board.Lines
+	Start, Height int        // explicit zero-based line span in Board.Overview
 	Frames        [][]string // identical dimensions; already styled by the renderer
 }
 
 // Board is one complete board: its painted lines and the items on them,
 // ordered by Line.
 type Board struct {
-	Art   Art
-	Lines []string
-	Items []Item
+	// Banner and Overview are trusted renderer output, separate from scrolling lines.
+	Banner   string
+	Overview []string
+	Art      Art
+	Lines    []string
+	Items    []Item
 	// Issues are current observation failures, without captured text. Unchanged issues are logged once.
 	Issues                        []string
 	ProjectFilter, WorkflowFilter string
-	// Header is the one-line context beside the title (serve state).
+	// Header is board context (filters, observation time and subscriptions).
 	Header string
 	// Seq increases with every board the caller builds; the console
 	// ignores an older one arriving late.

@@ -378,7 +378,7 @@ func TestViewIsSafe(t *testing.T) {
 			t.Fatalf("painted raw %q:\n%q", bad, got)
 		}
 	}
-	if !strings.HasPrefix(f.rows[1], "> \x1b[1mp/a") || !strings.Contains(got, "^[]0;pwned^G") {
+	if !strings.HasPrefix(f.rows[m.layout().boardRow], "> \x1b[1mp/a") || !strings.Contains(got, "^[]0;pwned^G") {
 		t.Fatalf("rows = %q", f.rows[:3])
 	}
 	for i, r := range f.rows {
@@ -525,7 +525,7 @@ func TestDetailWrapsLongLines(t *testing.T) {
 		for range 60 {
 			f := m.view()
 			for i := range m.detailHeight() {
-				r := f.rows[1+m.boardHeight()+1+i]
+				r := f.rows[m.layout().detailRow+i]
 				if w := textWidth(r); w > cols-1 {
 					t.Fatalf("%d cols: row %q is %d cells", cols, r, w)
 				}
@@ -553,7 +553,7 @@ func paintedDetail(t *testing.T, m *model) string {
 	for range 200 {
 		f := m.view()
 		for i := range m.detailHeight() {
-			r := f.rows[1+m.boardHeight()+1+i]
+			r := f.rows[m.layout().detailRow+i]
 			if w := textWidth(r); w > m.width-1 {
 				t.Fatalf("row %q is %d cells wide", r, w)
 			}

@@ -13,8 +13,7 @@ import (
 
 func animatedBoard() Board {
 	b := board(1, run("p", "a"))
-	b.Lines = []string{"smoke A", "fixed rail", "  p/a"}
-	b.Items[0].Line = 2
+	b.Overview = []string{"smoke A", "fixed rail"}
 	b.Art = Art{Start: 0, Height: 2, Frames: [][]string{{"smoke A", "fixed rail"}, {"smoke B", "fixed rail"}}}
 	return b
 }
@@ -42,11 +41,11 @@ func TestAnimationPatchesOnlyVisibleArt(t *testing.T) {
 	if got := m.view(); !slices.Equal(got.rows, old.rows) || got.curRow != old.curRow || got.curCol != old.curCol {
 		t.Fatal("full paint disagrees with animation")
 	}
-	// A board whose art is above the viewport emits no terminal bytes.
+	// Scrolling the board does not move the pinned art.
 	m.board.Lines = append(m.board.Lines, make([]string, 100)...)
 	m.boardTop = 10
-	if p := m.animate(&old); len(p) != 0 {
-		t.Fatalf("offscreen write: %q", p)
+	if p := m.animate(&old); len(p) == 0 {
+		t.Fatal("scroll hid pinned art")
 	}
 	m.boardTop = 0
 	m.board.Art.Frames[1] = slices.Clone(m.board.Art.Frames[0])

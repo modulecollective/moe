@@ -115,6 +115,7 @@ type model struct {
 	retry       map[string]Action   // uncertain control requests, by target+verb
 	pendingSel  *itemKey            // select this item once it appears
 	width, high int
+	color       bool // cliout.Enabled on the actual output writer
 }
 
 type pendingConfirm struct {
@@ -224,7 +225,7 @@ func (m *model) withKept(b Board) Board {
 	b.Items = slices.Clone(b.Items)
 	for _, it := range gone {
 		it.Line = len(b.Lines)
-		b.Lines = append(b.Lines, "  "+it.Label())
+		b.Lines = append(b.Lines, "  "+SafeText(it.Label()))
 		b.Items = append(b.Items, it)
 	}
 	return b
@@ -242,8 +243,11 @@ func (m *model) dropDraft(k draftKey) {
 func (m *model) applyBoard() {
 	b := m.withKept(m.raw)
 	prevIdx := m.selectedIndex()
+	prevSel, _ := m.selected()
+	prevHeight := m.boardHeight()
 	old := m.board
 	m.board = b
+	m.clampBoard()
 	if m.pendingSel != nil {
 		for _, it := range b.Items {
 			if it.Project == m.pendingSel.project && it.Run == m.pendingSel.run {
@@ -263,6 +267,10 @@ func (m *model) applyBoard() {
 		return
 	}
 	if m.selectedIndex() >= 0 {
+		it, _ := m.selected()
+		if it.Line != prevSel.Line || m.boardHeight() != prevHeight {
+			m.scrollToSelection()
+		}
 		return
 	}
 	for _, it := range b.Items {
@@ -322,8 +330,37 @@ func (m *model) clampBoard() {
 	m.boardTop = max(m.boardTop, 0)
 }
 
-// Layout reserves the title, two dividers, console and footer. The
-// remaining space stays two-thirds board and one-third details in every mode.
+// layout is shared by full paints, navigation, cursors and animation.
+// Geometry depends only on size and the complete overview, never input mode.
+type layout struct {
+	overview, board, detail, console int // body heights
+	boardRow, detailRow, consoleRow  int // body starts, after their headings
+}
+
+func (m *model) layout() layout {
+	l := layout{console: m.consoleHeight()}
+	body := m.high - 5 - l.console // banner, three headings, footer
+	if len(m.board.Overview) > 0 && body-len(m.board.Overview) >= 6 {
+		fits := true
+		for _, line := range m.board.Overview {
+			if textWidth(line) > m.width-1 {
+				fits = false
+				break
+			}
+		}
+		if fits {
+			l.overview = len(m.board.Overview)
+		}
+	}
+	body -= l.overview
+	l.board = max(body*2/3, 1)
+	l.detail = max(body-l.board, 2)
+	l.boardRow = 2 + l.overview
+	l.detailRow = l.boardRow + l.board + 1
+	l.consoleRow = l.detailRow + l.detail + 1
+	return l
+}
+
 func (m *model) consoleHeight() int {
 	if m.high < 20 {
 		return 1
@@ -332,12 +369,11 @@ func (m *model) consoleHeight() int {
 }
 
 func (m *model) boardHeight() int {
-	avail := m.high - 4 - m.consoleHeight()
-	return max(avail*2/3, 1)
+	return m.layout().board
 }
 
 func (m *model) detailHeight() int {
-	return max(m.high-4-m.consoleHeight()-m.boardHeight(), 2)
+	return m.layout().detail
 }
 
 // tooSmall is the size below which neither pane is useful.

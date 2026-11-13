@@ -326,3 +326,39 @@ func TestRunOnPTYWordEditing(t *testing.T) {
 	}
 	c.wait(t)
 }
+
+// Capture frames while unwrapping to a real terminal for color detection.
+type chromeOutput struct {
+	strings.Builder
+	terminal *os.File
+}
+
+func (w *chromeOutput) Unwrap() io.Writer { return w.terminal }
+
+func TestLoopChromeUsesOutputColorGate(t *testing.T) {
+	_, slave := openPTY(t)
+	for _, noColor := range []string{"", "1"} {
+		t.Run("NO_COLOR="+noColor, func(t *testing.T) {
+			t.Setenv("NO_COLOR", noColor)
+			out := &chromeOutput{terminal: slave}
+			boards := make(chan Board, 1)
+			boards <- board(1, run("p", "a"))
+			input := make(chan []byte)
+			reported := make(chan struct{})
+			done := make(chan error, 1)
+			go func() {
+				_, err := runLoop(context.Background(), Config{Boards: boards, Report: func(io.Writer, Board) error { close(reported); return nil }}, loopIO{out: out, input: input, size: func() (int, int, error) { return 30, 100, nil }}, make(chan job), make(chan jobResult))
+				done <- err
+			}()
+			<-reported
+			close(input)
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			got := strings.Contains(out.String(), "\x1b[38;5;214m━━ Board")
+			if got != (noColor == "") {
+				t.Fatalf("color gate ignored: %q", out.String())
+			}
+		})
+	}
+}

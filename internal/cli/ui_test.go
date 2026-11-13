@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modulecollective/moe/internal/banner"
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/input"
@@ -529,7 +530,7 @@ func TestUIFactoryFrameCache(t *testing.T) {
 		t.Fatal("missing bounded animation frames")
 	}
 	for i, line := range b.Art.Frames[0] {
-		if b.Lines[b.Art.Start+i] != line {
+		if b.Overview[b.Art.Start+i] != line {
 			t.Fatal("renderer span does not match board art")
 		}
 	}
@@ -560,5 +561,41 @@ func TestUIFactoryFrameCache(t *testing.T) {
 	again = takeBoard(t, s)
 	if &b.Art.Frames[0][0] != &again.Art.Frames[0][0] {
 		t.Fatal("unchanged gather regenerated frames")
+	}
+}
+
+func TestUIBoardSeparatesPinnedRegionsAndEscapesLabels(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	now := time.Date(2026, 11, 12, 12, 30, 0, 0, time.Local)
+	s := newUISource("", DashFilter{}, os.Stdout)
+	s.gathered = now
+	s.serveNow.err = errors.New("serve: hostile \x1b[31m red\nsecond line")
+	s.gerr = errors.New("gather \x1b[2J failed")
+	s.snap.Rows = []dash.Row{{Project: "p", Run: "r", Bucket: dash.BucketBacklog, Note: "title\x1b[31m red\nnext\tcolumn", When: now}}
+	s.snap.Histogram = make([]int, dash.HistDays)
+	s.snap.Histogram[59] = 5
+	b, _ := s.buildBoard(now)
+	var expected strings.Builder
+	banner.Dash(&expected, now, s.serveNow.bannerCluster(now))
+	if b.Banner != strings.TrimSuffix(expected.String(), "\n") {
+		t.Fatalf("not the shared dash banner: %q", b.Banner)
+	}
+	all := strings.Join(b.Lines, "\n")
+	if strings.Contains(all, "MINISTRY OF EVERYTHING") || strings.Contains(all, "last 60 days") {
+		t.Fatal("pinned content leaked into scrolling lines")
+	}
+	if strings.ContainsRune(all, '\x1b') || !strings.Contains(all, "^[[31m") || !strings.Contains(all, "^Jnext^Icolumn") {
+		t.Fatalf("unsafe renderer input: %q", all)
+	}
+	if len(b.Items) != 1 || !strings.Contains(b.Lines[b.Items[0].Line], "p/r") {
+		t.Fatalf("service lines displaced item: %+v", b.Items)
+	}
+	if len(b.Overview) != dash.HistRows+2+1+b.Art.Height {
+		t.Fatal("chart or internal spacing lost")
+	}
+	for i, line := range b.Art.Frames[0] {
+		if b.Overview[b.Art.Start+i] != line {
+			t.Fatal("factory boundary wrong")
+		}
 	}
 }

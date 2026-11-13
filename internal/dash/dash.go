@@ -1357,6 +1357,41 @@ func RenderIndexed(w io.Writer, now time.Time, histogram []string, rows []Row, p
 // The UI caches the styled frames and swaps only this span between gathers.
 func RenderIndexedArt(w io.Writer, now time.Time, histogram []string, rows []Row, projectCount, activeCount int, showAll bool, art []string) (lines []int, artStart int) {
 	lw := &lineWriter{w: w}
+	fmt.Fprintln(lw)
+	start := lw.n
+	artStart = start + RenderOverview(lw, histogram, art)
+	fmt.Fprintln(lw)
+	offset := lw.n
+	lines = RenderIndexedRows(lw, now, rows, projectCount, activeCount, showAll)
+	for i := range lines {
+		if lines[i] >= 0 {
+			lines[i] += offset
+		}
+	}
+	return lines, artStart
+}
+
+// RenderOverview renders the complete histogram and factory without outer
+// blank padding. It returns the factory's zero-based line start.
+func RenderOverview(w io.Writer, histogram, art []string) (artStart int) {
+	if cliout.Enabled(w) {
+		histogram = styleHistogramANSI(histogram)
+	}
+	for _, line := range histogram {
+		fmt.Fprintln(w, line)
+	}
+	fmt.Fprintln(w)
+	artStart = len(histogram) + 1
+	for _, line := range art {
+		fmt.Fprintln(w, line)
+	}
+	return artStart
+}
+
+// RenderIndexedRows renders only run sections and project totals. Positions
+// are relative to this output; omitted rows have position -1.
+func RenderIndexedRows(w io.Writer, now time.Time, rows []Row, projectCount, activeCount int, showAll bool) (lines []int) {
+	lw := &lineWriter{w: w}
 	w = lw
 	lines = make([]int, len(rows))
 	for i := range lines {
@@ -1368,21 +1403,6 @@ func RenderIndexedArt(w io.Writer, now time.Time, histogram []string, rows []Row
 			lines[i] = lw.n + k
 		}
 	}
-	if cliout.Enabled(w) {
-		histogram = styleHistogramANSI(histogram)
-	}
-
-	fmt.Fprintln(w)
-	for _, line := range histogram {
-		fmt.Fprintln(w, line)
-	}
-	fmt.Fprintln(w)
-	artStart = lw.n
-	for _, line := range art {
-		fmt.Fprintln(w, line)
-	}
-	fmt.Fprintln(w)
-
 	var active, intents, backlog, completed []Row
 	var activeAt, intentsAt, backlogAt, completedAt []int // each row's index in rows
 	for i, r := range rows {
@@ -1471,7 +1491,7 @@ func RenderIndexedArt(w io.Writer, now time.Time, histogram []string, rows []Row
 	fmt.Fprintln(w)
 
 	cliout.Printf(w, "%d project(s) registered · %d with active runs\n", projectCount, activeCount)
-	return lines, artStart
+	return lines
 }
 
 // Keep the control before the note so a narrow watch viewport preserves

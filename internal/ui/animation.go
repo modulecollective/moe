@@ -17,15 +17,14 @@ func (m *model) animate(last *frame) []byte {
 	if m.tooSmall() || m.mode == modeConfirm {
 		return nil
 	}
+	l := m.layout()
+	if l.overview == 0 {
+		return nil
+	}
 	var b bytes.Buffer
-	sel, hasSel := m.selected()
 	for i := 0; i < art.Height; i++ {
-		line := art.Start + i
-		if line < m.boardTop || line >= m.boardTop+m.boardHeight() {
-			continue
-		}
-		row := 1 + line - m.boardTop
-		next := boardLine(art.Frames[m.animation][i], hasSel && sel.Line == line, m.width-1)
+		row := 1 + art.Start + i
+		next := boardLine(art.Frames[m.animation][i], false, m.width-1)
 		if next == last.rows[row] {
 			continue
 		}

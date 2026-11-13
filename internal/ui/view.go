@@ -35,6 +35,9 @@ Commands (:)
   tag sdlc | tag design | untag               the selected idea's licence
   terminal | help | quit
 
+Pane headings use a heavy rule for the input recipient (also without color).
+Board ranges count scrollable lines, including headings and blank rows.
+The complete chart and factory stay pinned when space permits; resize restores them.
 Console: arrows/page/Home scroll history; End follows newest messages.
 Confirmations: y accepts, Esc cancels; arrows/page/Home/End scroll the question.
 
@@ -70,26 +73,32 @@ func (m *model) view() frame {
 		top := min(m.confirm.top, max(len(rows)-h, 0))
 		m.confirm.top = top
 		f.rows[0] = m.titleRow(w)
-		f.rows[1] = plain(fmt.Sprintf("── confirmation [%d–%d/%d]", top+1, min(top+h, len(rows)), len(rows)), w)
+		label := "Confirm" + m.statusLabel()
+		label += fmt.Sprintf(" [%d–%d/%d]", top+1, min(top+h, len(rows)), len(rows))
+		f.rows[1] = m.heading(label, true, w)
 		copy(f.rows[2:m.high-1], rows[top:min(top+h, len(rows))])
 		f.rows[m.high-1], _ = m.footerRow(w)
 		return f
 	}
-	bh, dh := m.boardHeight(), m.detailHeight()
-	row := 0
-	f.rows[row] = m.titleRow(w)
-	row++
+	l := m.layout()
+	bh, dh := l.board, l.detail
+	f.rows[0] = m.titleRow(w)
+	for i := range l.overview {
+		line := m.board.Overview[i]
+		art := m.board.Art
+		if i >= art.Start && i < art.Start+art.Height && len(art.Frames) > 0 {
+			line = art.Frames[m.animation%len(art.Frames)][i-art.Start]
+		}
+		f.rows[1+i] = boardLine(line, false, w)
+	}
+	f.rows[l.boardRow-1] = m.boardHeading(w)
+	row := l.boardRow
 
 	sel, hasSel := m.selected()
 	for i := range bh {
 		n := m.boardTop + i
 		if n < len(m.board.Lines) {
-			line := m.board.Lines[n]
-			art := m.board.Art
-			if n >= art.Start && n < art.Start+art.Height && len(art.Frames) > 0 {
-				line = art.Frames[m.animation%len(art.Frames)][n-art.Start]
-			}
-			f.rows[row] = boardLine(line, hasSel && sel.Line == n, w)
+			f.rows[row] = boardLine(m.board.Lines[n], hasSel && sel.Line == n, w)
 		}
 		row++
 	}
@@ -108,14 +117,11 @@ func (m *model) view() frame {
 	}
 	row += dh
 
-	label := "── console"
-	if m.focus == paneConsole {
-		label += " · focus"
-	}
+	label := "Console"
 	if m.console.unread > 0 {
 		label += fmt.Sprintf(" · %d new (End follows)", m.console.unread)
 	}
-	f.rows[row] = plain(label, w)
+	f.rows[row] = m.heading(label, m.paneFocused(paneConsole), w)
 	row++
 	for i, line := range m.consoleLines() {
 		f.rows[row+i] = line
@@ -130,17 +136,59 @@ func (m *model) view() frame {
 }
 
 func (m *model) titleRow(w int) string {
-	s := " MoE ui"
-	if m.busy != nil {
-		s += " · working: " + m.busy.label
+	return boardLine(m.board.Banner, false, w)
+}
+
+// paneFocused follows the actual input recipient, including modal input.
+func (m *model) paneFocused(p pane) bool {
+	switch m.mode {
+	case modeEdit, modeSave, modeHelp:
+		return p == paneDetail
+	case modeCommand, modeChoice, modeConfirm:
+		return false
 	}
+	return m.focus == p
+}
+
+func (m *model) heading(label string, focused bool, w int) string {
+	rule, color := "─", cliout.Dim
+	if focused {
+		rule, color = "━", cliout.Bright
+	}
+	s := plain(strings.Repeat(rule, 2)+" "+label+" ", w)
+	if pad := w - textWidth(s); pad > 0 {
+		s += strings.Repeat(rule, pad)
+	}
+	if m.color {
+		return color + s + cliout.Reset
+	}
+	return s
+}
+
+func (m *model) statusLabel() string {
+	s := ""
+	// Preserve both state cues even when a job's label or filters are long.
 	if n := m.dirtyDrafts(); n > 0 {
 		s += " · " + plural(n, "unsaved draft")
 	}
+	if m.busy != nil {
+		s += " · working: " + m.busy.label
+	}
+	return s
+}
+
+func (m *model) boardHeading(w int) string {
+	s := "Board" + m.statusLabel()
 	if m.board.Header != "" {
 		s += " · " + m.board.Header
 	}
-	return plain(s, w)
+	if len(m.board.Lines) > m.boardHeight() {
+		pos := fmt.Sprintf(" · lines %d–%d of %d", m.boardTop+1, min(m.boardTop+m.boardHeight(), len(m.board.Lines)), len(m.board.Lines))
+		if textWidth(SafeText(s+pos))+4 <= w {
+			s += pos
+		}
+	}
+	return m.heading(s, m.paneFocused(paneBoard), w)
 }
 
 func (m *model) dividerRow(sel Item, ok bool, w int) string {
@@ -154,22 +202,10 @@ func (m *model) dividerRow(sel Item, ok bool, w int) string {
 	if m.mode == modeSave {
 		label = draftWhat(m.saveDraft.key)
 	}
-	focus := "board"
-	if m.focus == paneDetail {
-		focus = "details"
+	if m.mode == modeHelp {
+		label = "Help"
 	}
-	if m.focus == paneConsole {
-		focus = "console"
-	}
-	pos := ""
-	if len(m.board.Lines) > m.boardHeight() {
-		pos = fmt.Sprintf(" [%d–%d/%d]", m.boardTop+1, min(m.boardTop+m.boardHeight(), len(m.board.Lines)), len(m.board.Lines))
-	}
-	s := "── " + label + " ──" + pos + " · focus: " + focus + " "
-	if pad := w - textWidth(s); pad > 0 {
-		s += strings.Repeat("─", pad)
-	}
-	return plain(s, w)
+	return m.heading("Details · "+label, m.paneFocused(paneDetail), w)
 }
 
 // detailLines is the lower pane, already clipped, scrolled to detailTop
@@ -180,6 +216,9 @@ func (m *model) detailLines(sel Item, ok bool, w, h int) ([]string, *cell) {
 	case modeHelp:
 		src = strings.Split(helpText, "\n")
 	case modeSave:
+		if h < 3 {
+			return []string{"g  save + tag sdlc", "d  save + tag design only"}, nil
+		}
 		return []string{"Enter/s  save only", "g  save + tag sdlc", "d  save + tag design only"}, nil
 	case modeEdit:
 		d := m.active
@@ -288,24 +327,27 @@ func (m *model) footerRow(w int) (string, int) {
 	switch m.mode {
 	case modeCommand:
 		hint := commandHint(m.cmd.String(), m.cmdTarget)
-		line, cc := m.cmd.horizontal(max(w-1, 1))
-		if textWidth(line)+3+textWidth(hint) < w-1 {
+		line, cc := m.cmd.horizontal(max(w-4, 1))
+		if textWidth(line)+3+textWidth(hint) < w-4 {
 			line += "   " + hint
 		}
-		return ":" + line, 1 + cc
+		return m.heading(":"+line, true, w), 4 + cc
 	case modeConfirm:
 		if len(m.confirmationRows()) > m.high-3 {
 			return plain("y confirm · Esc cancel · ↑↓/Pg scroll", w), -1
 		}
 		return plain("y confirm · n/Esc cancel", w), -1
 	case modeSave:
-		return plain("Choose above · Esc back", w), -1
+		if m.detailHeight() >= 3 {
+			return plain("Choose above · Esc back", w), -1
+		}
+		return plain("Enter/s  save only · Esc back", w), -1
 	case modeChoice:
 		var parts []string
 		for i, c := range m.choices {
 			parts = append(parts, fmt.Sprintf("%d %s", i+1, c.Label))
 		}
-		return plain("reveal in which Rex app? "+strings.Join(parts, " · ")+" · Esc cancel", w), -1
+		return m.heading("reveal in which Rex app? "+strings.Join(parts, " · ")+" · Esc cancel", true, w), -1
 	case modeEdit:
 		return plain("Ctrl-S save · Esc back · Ctrl-X discard · Ctrl-C quit", w), -1
 	case modeHelp:
@@ -329,6 +371,10 @@ func (m *model) footerRow(w int) (string, int) {
 	keys = append(keys, ": command", "? help", "q quit")
 	return plain(" "+strings.Join(keys, "  "), w), -1
 }
+
+// SafeText escapes external labels before a renderer adds trusted SGR.
+// It also keeps a label on one physical line, preserving indexed row positions.
+func SafeText(s string) string { return sanitize(s) }
 
 // plain makes external text safe and clips it to w cells.
 func plain(s string, w int) string {
@@ -386,6 +432,10 @@ func sanitizeC1(s string) string {
 func textWidth(s string) int {
 	n := 0
 	for p := []byte(s); len(p) > 0; {
+		if size := cliout.CSILen(p); size > 0 {
+			p = p[size:]
+			continue
+		}
 		size, w := cliout.TextUnit(p)
 		n += w
 		p = p[size:]

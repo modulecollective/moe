@@ -86,7 +86,7 @@ func startUIKeyboard(t *testing.T, root string, args ...string) *uiKeyboardChild
 		}
 	}()
 	t.Cleanup(func() { cmd.Process.Kill(); master.Close(); <-readDone })
-	c.wait(t, "MoE ui")
+	c.wait(t, "MINISTRY OF EVERYTHING")
 	return c
 }
 

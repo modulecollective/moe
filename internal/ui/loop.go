@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"time"
+
+	"github.com/modulecollective/moe/internal/cliout"
 )
 
 // Config is what the caller supplies.
@@ -66,6 +68,7 @@ func worker(do func(Action) Result, jobs <-chan job, results chan<- jobResult) {
 // the terminal is restored.
 func runLoop(ctx context.Context, cfg Config, tio loopIO, jobs chan<- job, results <-chan jobResult) (*job, error) {
 	m := newModel(jobs)
+	m.color = cliout.Enabled(tio.out)
 	animation := tio.animation
 	if animation == nil {
 		ticker := time.NewTicker(animationInterval)
