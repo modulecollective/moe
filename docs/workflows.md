@@ -254,16 +254,16 @@ hint.
 
 Every invocation that runs workflow work — a stage, the next-stage prompt, a
 kick, a CI repair, a push — serves a small live endpoint for its run while it
-owns it. `moe dash` (and `--watch`) appends what that owner reports to the
-run's row, in brackets: `[agent running code 4m]`, `[waiting for operator]`,
-`[pause pending]`, `[handed off]`, `[owned · no live status]`. `moe control
-show <project>/<run>` prints the long form: owner and generation, phase and
-since when, why it is waiting, its continuation (`prompt`, `!`, `!!`, `!!!`),
-where it came from (a terminal, serve's local pty, Rex; the parent sweep), its
-Rex block, any hold, the request log, and the exact command that resumes the
-last conversation. A reply proves the owner is alive, not that the agent is
-making progress, and an owner that does not answer is shown as unreachable —
-never as idle, and never as leave to start a replacement.
+owns it. `moe dash` (and `--watch`) appends what that owner reports to the run's
+row, in brackets: `[agent running build 4m]`, `[waiting for operator]`,
+`[pause pending]`, `[handed off]`, `[owned · no live status]`.
+`moe control show <project>/<run>` prints the long form: owner and generation,
+phase and since when, why it is waiting, its continuation (`prompt`, `!`, `!!`,
+`!!!`), where it came from (a terminal, serve's local pty, Rex; the parent
+sweep), its Rex block, any hold, the request log, and the exact command that
+resumes the last conversation. A reply proves the owner is alive, not that the
+agent is making progress, and an owner that does not answer is shown as
+unreachable — never as idle, and never as leave to start a replacement.
 
 Four controls steer a stageful run (SDLC today), from the terminal or the
 run's web page:
@@ -403,8 +403,8 @@ It's a plain doc tree — `index.md` as the catalog, one file per topic flat und
 
 - **A research excursion**: an sdlc run whose design stage researches the
   question and writes the topic files, then closes mid-ladder
-  (`moe sdlc close`). Review, test, and push are meaningless for a
-  bureaucracy-only diff.
+  (`moe sdlc close`). Build, review, and push are unnecessary for this
+  excursion.
 - **A ride-along**: any sdlc run that learned something durable about the
   project's domain writes it up as part of the turn. Agents are told to do this
   on their own initiative, not only when asked.
@@ -530,10 +530,10 @@ due ones; `moe chore open`, or a pulse's chore auto-open, mints the seeded run.
 What happens after that is what you armed: with no `moe serve --dynamic` up, the
 run waits in `moe dash` like any other until you start it, while under an armed
 serve the [heartbeat](#the-heartbeat) notices the chore coming due, sweeps, and
-that sweep both opens the run and rides it on through test, review, and ship.
-A chore coming due is a clock event on an otherwise quiet journal, so the
-heartbeat gate watches for it directly rather than waiting for something else
-to move.
+that sweep both opens the run and rides it on through build, review, and ship. A
+chore coming due is a clock event on an otherwise quiet journal, so the
+heartbeat gate watches for it directly rather than waiting for something else to
+move.
 
 A chore is a directory under `projects/<project>/chores/<name>/` holding a
 `chore.json` of scheduler scalars and a `prompt.md` seed:
@@ -673,22 +673,23 @@ branch. It's what makes "what landed" honest when work reaches the repo without
 going through a run.
 
 Current checks on recorded PRs belonging to pushed sdlc runs appear in a
-separate block, including the head, check URLs and prior repair claims. A
-survey can nominate `{"run":"<exact-slug>","repair":"ci"}` as the only
-entry in a `threads[].runs` group, with no `onto` or `head`; `park` can
-withhold it. Under dynamic consent, code first passes quota admission; the
-harness then rechecks the current PR and claims an attempt in the journal
-before executing code. Fresh test and review follow, then that PR is updated
-without merging or riding other chain members. Safe-mode heartbeats still
-need an operator mark; add a note with `moe input add <project>/<run>` to
-authorize repair. One automatic attempt is allowed per head across restarts.
-A fresh note can authorize a retry on the same head, and each note can license
-only one claim. Quota deferral before the claim spends no attempt. Deferral
-after the claim stops the repair, keeps the claim spent, and requires operator
-recovery or fresh input; it creates no automatic repair continuation.
-Unavailable checks are unknown, and successful, pending or cancelled checks
-do not nominate repair. The survey judges whether failure warrants a repair
-or a concrete hold; the heartbeat never starts code directly.
+separate block, including the head, check URLs and prior repair claims. A survey
+can nominate `{"run":"<exact-slug>","repair":"ci"}` as the only entry in a
+`threads[].runs` group, with no `onto` or `head`; `park` can withhold it. Under
+dynamic consent, build first passes quota admission; the harness then rechecks
+the current PR and claims an attempt in the journal before implementation. That
+build turn implements and verifies the repair, stamping both build canvases
+ready before a fresh review follows. Then that PR is updated without merging or
+riding other chain members. Safe-mode heartbeats still need an operator mark;
+add a note with `moe input add <project>/<run>` to authorize repair. One
+automatic attempt is allowed per head across restarts. A fresh note can
+authorize a retry on the same head, and each note can license only one claim.
+Quota deferral before the claim spends no attempt. Deferral after the claim
+stops the repair, keeps the claim spent, and requires operator recovery or fresh
+input; it creates no automatic repair continuation. Unavailable checks are
+unknown, and successful, pending or cancelled checks do not nominate repair. The
+survey judges whether failure warrants a repair or a concrete hold; the
+heartbeat never starts build directly.
 
 ### Proposed work and grooming
 
@@ -865,33 +866,33 @@ still the run it opened.
 
 The tick decides nothing. It only asks the question you used to ask by typing a
 verb — everything about what a sweep may *do* is unchanged, including the
-settled-design floor, the occupancy guard, the test-and-review walk on every
+settled-design floor, the occupancy guard, the build-and-review walk on every
 ride, and the journal marks on every machine turn. A tick sweeps when the
 project's journal moved since its last heartbeat sweep; when a chore's clock
 says so (a mechanically due chore, or a judged chore whose cooldown has expired
 without a sweep since — one probe per expiry, not one per tick); or when
 startable work is parked with nobody inside it *and no sweep has looked at that
 board since it last changed* — a settled thread, or an open idea you tagged,
-since the tag is the licence to start it. A thread a survey saw and
-deliberately parked with a reason is not re-offered until something moves. That
-parked leg looks one step past a held door: settled work queued behind a thread
-head that is itself waiting on your design still counts, because a sweep grooms
-before it kicks and the groom is what can move that work out from behind the
-head. A `chain` head you minted yourself is the exception — it fences its whole
-batch, since staging one by hand is the point. The heartbeat stands down while
-anything is live in the project — a ride mid-hop, you sitting in a stage, a
-survey mid-turn — and for one full tick after anything you did by hand. A quiet
-board costs no agent turn, run or journal line. Recorded pushed PRs are polled
-at this cadence outside the journal lock. A merged or closed owned PR wakes a
-pulse to reconcile its still-pushed run before the survey reads the board. It
-keeps waking eligible ticks until reconciliation succeeds, including after a
-restart. This follows the twenty-minute cadence and existing holds and failure
-backoff; it is not an immediate refresh. Run `moe sync` for immediate
-reconciliation. A new actionable failure can also wake a survey even when the
-journal has not moved. Stable failure observations are acknowledged only after a
-successful sweep, against the exact snapshot handed to that survey; failures
-arriving during its rides remain visible to the next tick. Healthy and pending
-changes alone spend no turn. No recorded pushed PR means no added network read.
+since the tag is the licence to start it. A thread a survey saw and deliberately
+parked with a reason is not re-offered until something moves. That parked leg
+looks one step past a held door: settled work queued behind a thread head that
+is itself waiting on your design still counts, because a sweep grooms before it
+kicks and the groom is what can move that work out from behind the head. A
+`chain` head you minted yourself is the exception — it fences its whole batch,
+since staging one by hand is the point. The heartbeat stands down while anything
+is live in the project — a ride mid-hop, you sitting in a stage, a survey
+mid-turn — and for one full tick after anything you did by hand. A quiet board
+costs no agent turn, run or journal line. Recorded pushed PRs are polled at this
+cadence outside the journal lock. A merged or closed owned PR wakes a pulse to
+reconcile its still-pushed run before the survey reads the board. It keeps
+waking eligible ticks until reconciliation succeeds, including after a restart.
+This follows the twenty-minute cadence and existing holds and failure backoff;
+it is not an immediate refresh. Run `moe sync` for immediate reconciliation. A
+new actionable failure can also wake a survey even when the journal has not
+moved. Stable failure observations are acknowledged only after a successful
+sweep, against the exact snapshot handed to that survey; failures arriving
+during its rides remain visible to the next tick. Healthy and pending changes
+alone spend no turn. No recorded pushed PR means no added network read.
 
 Known quota exhaustion yields the session and records a retry in the journal.
 The first ordinary heartbeat at or after its date can commission a fresh

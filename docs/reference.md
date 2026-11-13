@@ -294,7 +294,7 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
 
 ### Workflows
 
-- `moe sdlc new|design|code|test|review|push|close|harvest|shell|reopen|cat|log`
+- `moe sdlc new|design|build|review|push|close|harvest|shell|reopen|cat|log`
   drives designed code work.
 - `moe chat new|chat|close|harvest|cat|log` drives thinking-partner sessions.
 - `moe idea new|edit|close|list|move|tag|untag|reopen|cat|log|harvest` manages

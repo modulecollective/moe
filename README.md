@@ -14,13 +14,12 @@ and every turn is committed to a personal Git journal, so the project keeps
 memory that can be resumed, reverted, audited, and reused.
 
 Work travels as far as you license, and no further. Typed, that's a bang
-grammar: `!` runs one stage and parks at the gate, `!!!` ships the run and
-rides the chain queued behind it. Standing, it's an armed
-`moe serve --dynamic`, whose heartbeat surveys each project's board, opens work
-that's ready — a due chore, a tagged idea, a parked chain — and rides it
-through test, review, and ship while you're away. Stopping serve prevents new
-sweeps; already-launched Rex-hosted sweeps and the rides they carry can finish
-independently.
+grammar: `!` runs one stage and parks at the gate, `!!!` ships the run and rides
+the chain queued behind it. Standing, it's an armed `moe serve --dynamic`, whose
+heartbeat surveys each project's board, opens work that's ready — a due chore, a
+tagged idea, a parked chain — and rides it through build, review, and ship while
+you're away. Stopping serve prevents new sweeps; already-launched Rex-hosted
+sweeps and the rides they carry can finish independently.
 
 Underneath is a bet that agents have made careful work cheap. When a designed,
 reviewed, tested change costs one conversation and two keystrokes, the
@@ -168,7 +167,8 @@ Four bureaucracy-side artifacts have no workflow of their own — project
 [knowledge topics](docs/workflows.md#knowledge), and the
 [digital twin](docs/workflows.md#twin). Edit them by hand, or let an sdlc run
 land them: a stage's per-turn commit picks all four up. Such a run ships nothing
-to the target repo — its test gate says so (`ship: none`) and `push` closes it.
+to the target repo — build's `test.md` gate says so (`ship: none`) and `push`
+closes it.
 
 ## Going Deeper
 
