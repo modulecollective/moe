@@ -89,7 +89,8 @@ func TestUIDoCapturesCreationFailure(t *testing.T) {
 				root, _ := controlFixture(t)
 				body := "echo reject-capture >&2\nexit 1\n"
 				if locked {
-					body = "mkdir .git/index.lock\n" + body
+					// Partial commits hold index.lock while this hook runs.
+					body = "if [ -f .git/index.lock ]; then mv .git/index.lock .git/fixture-index.lock; fi\nmkdir .git/index.lock\n" + body
 				}
 				installCreateFailureHook(t, root, body)
 				a := ui.Action{Kind: ui.ActCreate, Project: "moe", Run: "retry-me", Workflow: workflow, Text: "# Mine\n"}

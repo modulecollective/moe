@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -31,6 +32,93 @@ func assertNewAbsent(t *testing.T, root, id string) {
 	}
 	if taken, err := SlugTaken(root, "tele", id); err != nil || taken {
 		t.Fatalf("slug not retryable: taken=%v, err=%v", taken, err)
+	}
+}
+
+func TestNewSuccessPreservesUnrelatedIndex(t *testing.T) {
+	root := newTestRoot(t)
+	seedProject(t, root, "tele")
+	write := func(rel, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, rel), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("notes", "HEAD notes")
+	write("deleted", "delete me")
+	write("executable", "mode change")
+	gittest.Commit(t, root, "fixture")
+	write("notes", "staged notes")
+	write("added", "staged addition")
+	if err := os.Chmod(filepath.Join(root, "executable"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, root, "add", "--", "notes", "added", "executable")
+	gittest.Run(t, root, "rm", "--", "deleted")
+	write("notes", "working notes")
+	write("added", "working addition")
+	write("stray", "untracked")
+	foreign := []string{"notes", "added", "deleted", "executable", "stray"}
+	indexArgs := append([]string{"ls-files", "--stage", "--"}, foreign...)
+	index := gittest.Output(t, root, indexArgs...)
+	if !strings.Contains(index, "100755 ") {
+		t.Fatal("fixture has no executable index entry")
+	}
+	status := gittest.Output(t, root, "status", "--porcelain")
+	head := gittest.Output(t, root, "rev-parse", "HEAD")
+	opts := Options{ID: "fix-it", Workflow: "sdlc", SeedDocs: map[string]string{
+		"design": "# Design\n", "code": "# Code\n",
+	}, Trailers: trailers.Block{Idea: "source", SpawnedBy: "tele/sweep", Consent: "dynamic"}}
+	if md, err := New(root, "tele", opts); md != nil || err == nil || !strings.Contains(err.Error(), "uncommitted changes") {
+		t.Fatalf("default dirty-tree refusal = %+v, %v", md, err)
+	}
+	assertNewAbsent(t, root, opts.ID)
+	opts.AllowDirty = true
+	md, err := New(root, "tele", opts)
+	if err != nil || md.ID != opts.ID || md.Workflow != opts.Workflow || len(md.Documents) != 0 {
+		t.Fatalf("New = %+v, %v", md, err)
+	}
+	if got := gittest.Output(t, root, "rev-list", "--count", head+"..HEAD"); got != "1" {
+		t.Fatalf("open commits = %s, want 1", got)
+	}
+	wantPaths := []string{filepath.Join(Dir("tele", opts.ID), "run.json")}
+	for doc, want := range opts.SeedDocs {
+		rel := ContentPath("tele", opts.ID, doc)
+		wantPaths = append(wantPaths, rel)
+		if got := gittest.Output(t, root, "show", "HEAD:"+rel); got != strings.TrimSpace(want) {
+			t.Fatalf("committed seed %s = %q, want %q", doc, got, want)
+		}
+	}
+	slices.Sort(wantPaths)
+	paths := strings.Fields(gittest.Output(t, root, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"))
+	if !slices.Equal(paths, wantPaths) {
+		t.Fatalf("open commit paths = %v, want %v", paths, wantPaths)
+	}
+	msg := gittest.Output(t, root, "log", "-1", "--format=%B")
+	for _, want := range []string{"Open run tele/fix-it", "MoE-Run: fix-it", "MoE-Project: tele", "MoE-Idea: source", "MoE-Spawned-By: tele/sweep", "MoE-Consent: dynamic"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("commit missing %q: %s", want, msg)
+		}
+	}
+	if strings.Contains(msg, "MoE-Document:") {
+		t.Fatal("seed satisfied a stage")
+	}
+	if got := gittest.Output(t, root, indexArgs...); got != index {
+		t.Fatalf("foreign index changed:\n%s\nwant:\n%s", got, index)
+	}
+	if got := gittest.Output(t, root, "status", "--porcelain"); got != status {
+		t.Fatalf("foreign status changed:\n%s\nwant:\n%s", got, status)
+	}
+	for rel, want := range map[string]string{"notes": "working notes", "added": "working addition", "executable": "mode change", "stray": "untracked"} {
+		if b, err := os.ReadFile(filepath.Join(root, rel)); err != nil || string(b) != want {
+			t.Fatalf("%s = %q, %v", rel, b, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "deleted")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("staged deletion restored: %v", err)
+	}
+	if info, err := os.Stat(filepath.Join(root, "executable")); err != nil || info.Mode().Perm() != 0o755 {
+		t.Fatalf("working executable mode changed: %v, %v", info, err)
 	}
 }
 
@@ -263,7 +351,9 @@ func TestNewCleanupFailureReportsBothCauses(t *testing.T) {
 	seedProject(t, root, "tele")
 	// A directory survives git's removal of its own lock and prevents
 	// rollback from acquiring the index. Git retries for its bounded cap.
-	newFailureHook(t, root, "mkdir .git/index.lock\necho reject-locked >&2\nexit 1\n")
+	// Partial commits hold index.lock during hooks; move that fixture
+	// lock aside before replacing it with the obstruction.
+	newFailureHook(t, root, "if [ -f .git/index.lock ]; then mv .git/index.lock .git/fixture-index.lock; fi\nmkdir .git/index.lock\necho reject-locked >&2\nexit 1\n")
 	md, err := New(root, "tele", Options{ID: "fix-it", Workflow: "sdlc"})
 	if md != nil || err == nil {
 		t.Fatalf("New = %+v, %v", md, err)

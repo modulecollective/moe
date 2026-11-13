@@ -266,9 +266,8 @@ type Options struct {
 
 	// AllowDirty bypasses the working-tree-clean precondition (staged
 	// changes and tracked modifications, never untracked files). The
-	// harvester uses this for modified scratch files. New stages only
-	// its own additions, but a successful commit includes the existing
-	// index too; callers must vet any pre-staged work themselves.
+	// harvester uses this for modified scratch files. New stages and
+	// commits only its own additions, preserving unrelated index entries.
 	AllowDirty bool
 }
 
@@ -312,8 +311,8 @@ func Dir(projectID, id string) string {
 // derivations land on the same day). One of the two must be set.
 //
 // Refuses if the project is not registered, the explicit id collides, or
-// the working tree is dirty (a stray edit shouldn't ride along on the
-// "open run" commit).
+// the working tree is dirty without AllowDirty. Staging and the open
+// commit are scoped to the new metadata and seed files.
 //
 // The caller must hold the repository lock through New. Once New owns
 // a fresh directory with an empty index namespace, returned failures
@@ -470,7 +469,8 @@ func New(root, projectID string, opts Options) (md *Metadata, err error) {
 	tr.Run = id
 	tr.Project = projectID
 	msg := subject + "\n\n" + tr.String()
-	if err := git.Run(root, "commit", "-m", msg); err != nil {
+	commitArgs := append([]string{"commit", "--only", "-m", msg, "--"}, addPaths...)
+	if err := git.Run(root, commitArgs...); err != nil {
 		return nil, fmt.Errorf("run: git commit: %w", err)
 	}
 	return md, nil

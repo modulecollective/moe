@@ -262,8 +262,8 @@ func createIdea(root, projectID, slugBase, body, promoteTo string, extra trailer
 			// Callers (idea new, harvest) gate on dirty state above.
 			// The harvester in particular runs while followups.md is
 			// dirty by design — let those modifications stand and
-			// rely on each call's explicit addPaths to keep the new
-			// run's open commit clean.
+			// rely on New's path-scoped staging and commit to preserve
+			// those edits, including any pre-staged scratch.
 			AllowDirty: true,
 		}
 		md, err := run.New(root, projectID, opts)
