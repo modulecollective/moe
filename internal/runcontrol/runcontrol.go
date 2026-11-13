@@ -618,7 +618,8 @@ func restore(root, rel, abs string, prev []byte, existed bool, index string, cau
 	}
 	var fileErr error
 	if existed {
-		fileErr = os.WriteFile(abs, prev, 0o644)
+		// Readers do not take the writer lock, including during rollback.
+		fileErr = replaceFile(abs, prev)
 	} else if err := os.Remove(abs); err != nil && !errors.Is(err, os.ErrNotExist) {
 		fileErr = err
 	}
@@ -634,9 +635,6 @@ func restore(root, rel, abs string, prev []byte, existed bool, index string, cau
 // writeFile replaces the record atomically: boundaries read it without
 // the lock, and a torn read would read as malformed.
 func writeFile(path string, f File) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
 	if f.Requests == nil {
 		f.Requests = []Request{}
 	}
@@ -644,15 +642,5 @@ func writeFile(path string, f File) error {
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".control-*.json")
-	if err != nil {
-		return err
-	}
-	_, werr := tmp.Write(append(b, '\n'))
-	cerr := tmp.Close()
-	if err := errors.Join(werr, cerr, os.Chmod(tmp.Name(), 0o644)); err != nil {
-		os.Remove(tmp.Name())
-		return err
-	}
-	return os.Rename(tmp.Name(), path)
+	return replaceFile(path, append(b, '\n'))
 }
