@@ -31,7 +31,7 @@ func TestServeRunPageChipsComposeWithRealLookup(t *testing.T) {
 		nextStage string
 		wantChips bool
 	}{
-		{workflow: "sdlc", nextStage: "code", wantChips: true},
+		{workflow: "sdlc", nextStage: "design", wantChips: true},
 		// Undeclared workflows stay read-only: no serve declaration, so
 		// no mark regardless of their CLI dispatcher.
 		{workflow: "idea", nextStage: "idea", wantChips: false},
@@ -180,14 +180,17 @@ ran the suite; two cases still fail
 
 the failing cases
 `
-	writeStageCanvas(t, root, md, "test", blocked)
-	if ok, err := gate(md, "test"); err != nil || ok {
-		t.Errorf("blocked test gate = (%v, %v), want (false, nil)", ok, err)
+	// build's gate is derived from its files: a blocked test.md parks it
+	// even with code.md stamped, through the same seam the web chip uses.
+	writeBuildCanvas(t, root, md, "code.md", stampedBuildCanvas)
+	writeBuildCanvas(t, root, md, "test.md", blocked)
+	if ok, err := gate(md, "build"); err != nil || ok {
+		t.Errorf("blocked build gate = (%v, %v), want (false, nil)", ok, err)
 	}
 
-	writeStageCanvas(t, root, md, "test",
+	writeBuildCanvas(t, root, md, "test.md",
 		strings.Replace(blocked, `{"status":"blocked"}`, `{"status":"ready"}`, 1))
-	if ok, err := gate(md, "test"); err != nil || !ok {
-		t.Errorf("ready test gate = (%v, %v), want (true, nil)", ok, err)
+	if ok, err := gate(md, "build"); err != nil || !ok {
+		t.Errorf("ready build gate = (%v, %v), want (true, nil)", ok, err)
 	}
 }

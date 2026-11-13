@@ -14,7 +14,7 @@ import (
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
-// The SDLC workflow owns the design→code→test→review→push lifecycle. Stages are
+// The SDLC workflow owns the design→build→review→push lifecycle. Stages are
 // nested under `moe sdlc` so other workflows can pick their
 // own short stage names without collision. `moe sdlc new` is the entry
 // point that creates a run in this workflow.
@@ -39,25 +39,30 @@ func init() {
 		argKind: argProjectRun,
 	})
 	g.Register(&Command{
-		Name:    "code",
-		Summary: "open an agent session on the code document in the run's working tree",
-		Run:     runCode,
-		argKind: argProjectRun,
-	})
-	// Registration order is the order both help listings print, so it
-	// tracks the ladder: test before review.
-	g.Register(&Command{
-		Name:    "test",
-		Summary: "open an agent session on the run's test document — verify the code stage's work",
-		Run:     runTest,
+		Name:    "build",
+		Summary: "open an agent session on the run's build canvases — implement, verify and repair the change",
+		Run:     runBuild,
 		argKind: argProjectRun,
 	})
 	g.Register(&Command{
 		Name:    "review",
-		Summary: "open an agent session on the run's review document — judge the coded and tested work",
+		Summary: "open an agent session on the run's review document — judge the built and verified work",
 		Run:     runReview,
 		argKind: argProjectRun,
 	})
+	// code and test were folded into build. Their verbs stay registered,
+	// hidden, so an operator's muscle memory gets pointed at build rather
+	// than an unknown-command error — and never silently starts a
+	// different session than the one typed.
+	for _, retired := range []string{"code", "test"} {
+		g.Register(&Command{
+			Name:    retired,
+			Summary: "retired: use `moe sdlc build`",
+			Run:     runRetiredSDLCStage(retired),
+			Hidden:  true,
+			argKind: argProjectRun,
+		})
+	}
 	g.Register(pushCommand("sdlc"))
 	g.Register(&Command{
 		Name:    "shell",
@@ -89,17 +94,26 @@ func init() {
 
 	w := NewWorkflow("sdlc")
 	w.RegisterStage("design")
-	w.RegisterStage("code", "design")
-	w.RegisterStage("test", "code")
-	w.RegisterStage("review", "test")
+	w.RegisterStage("build", "design")
+	w.RegisterStage("review", "build")
 	w.RegisterStage("push", "review")
+	// Build is directory-form: code.md and test.md each carry their own
+	// gate, and the stage advances only when both are stamped. Declaring
+	// the files is the stage's whole gate — no build-specific gate
+	// function. Each seeds from the same run's retired code/test canvas
+	// when one exists, so an active run started under the old ladder
+	// carries its evidence into its first build turn.
+	w.RegisterStageFiles("build",
+		CanvasFile{Name: "code.md", Skeleton: buildCodeSkeleton, LegacyDoc: "code"},
+		CanvasFile{Name: "test.md", Skeleton: buildTestSkeleton, LegacyDoc: "test"},
+	)
 	w.RegisterStageGate("review", reviewStageGate)
-	// Test stage's anti-theater check: the work-turn commit alone
-	// doesn't tell us whether the agent actually filled the canvas
-	// or just committed the placeholder skeleton. The gate reads the
-	// canvas and refuses to advance until "What was verified" and
-	// "What wasn't verified" both have substantive content.
-	w.RegisterStageGate("test", testStageGate)
+	// The retired code and test documents stay readable (cat, the web
+	// run page) on the runs that carry them; they are no longer stages.
+	w.RegisterDoc("code")
+	w.RegisterDoc("test")
+	w.RetireStage("code", "build")
+	w.RetireStage("test", "build")
 	RegisterWorkflow(w)
 
 	// Serve declaration: offer sdlc as an idea tag destination, and let
@@ -137,33 +151,38 @@ func runDesign(args []string, stdout, stderr io.Writer) int {
 	}, openSdlcDesign), args, stdout, stderr)
 }
 
-func runCode(args []string, stdout, stderr io.Writer) int {
-	return runStageVerb(sdlcStageVerbCfg("code", []string{
-		"Opens an interactive agent session on the code canvas. The agent",
-		"works in the run's working tree: a private clone or a bound named",
-		"workspace. `moe sdlc push` ships via the project's route, unless",
-		"overridden with --pr or --merge.",
-	}, openSdlcCode), args, stdout, stderr)
+func runBuild(args []string, stdout, stderr io.Writer) int {
+	return runStageVerb(sdlcStageVerbCfg("build", []string{
+		"Opens an agent session on the build canvases (content/code.md and",
+		"content/test.md). The agent implements the change in the run's working",
+		"tree — a private clone or a bound named workspace — exercises it",
+		"end-to-end, repairs what it finds, and stamps both canvases ready.",
+		"`moe sdlc push` ships via the project's route, unless overridden with",
+		"--pr or --merge.",
+	}, openSdlcBuild), args, stdout, stderr)
 }
 
 func runReview(args []string, stdout, stderr io.Writer) int {
 	return runStageVerb(sdlcStageVerbCfg("review", []string{
 		"Opens an interactive agent session on the review canvas. The agent",
-		"performs a senior-engineer review of the committed diff and the test",
+		"performs a senior-engineer review of the committed diff and the build",
 		"stage's evidence, ending in a ship verdict — blocking only for",
 		"correctness, scope, maintainability, or reviewability issues that",
-		"should send the run back to code.",
+		"should send the run back to build.",
 	}, openSdlcReview), args, stdout, stderr)
 }
 
-func runTest(args []string, stdout, stderr io.Writer) int {
-	return runStageVerb(sdlcStageVerbCfg("test", []string{
-		"Opens an interactive agent session on the test canvas. The agent",
-		"verifies the code stage's work — running the project's checks, driving",
-		"the change end-to-end, applying small in-place fixes, and narrating what",
-		"was and wasn't verified on the canvas. Review reads that narrative",
-		"downstream; pre-push hooks still gate ship.",
-	}, openSdlcTest), args, stdout, stderr)
+// runRetiredSDLCStage answers a retired stage verb (code, test) with
+// the command that replaced it. Exit 2, a usage error: nothing ran.
+func runRetiredSDLCStage(stage string) func(args []string, stdout, stderr io.Writer) int {
+	return func(args []string, stdout, stderr io.Writer) int {
+		target := "<project>/<run>"
+		if len(args) > 0 && !strings.HasPrefix(args[len(args)-1], "-") {
+			target = args[len(args)-1]
+		}
+		moePrintf(stderr, "moe sdlc %s: retired — code and test are one build stage now.\n  run: moe sdlc build %s\n", stage, target)
+		return 2
+	}
 }
 
 func persistSDLCStageAgent(verb, stage, projectID, runID, agentName string, stdout, stderr io.Writer) (string, int) {
@@ -237,15 +256,18 @@ func openSdlcDesign(projectID, runID string, headless bool, agentOverride string
 		}, stdout, stderr)
 }
 
-// openSdlcCode is the Go-level seam behind `moe sdlc code`. See
-// openSdlcDesign for the broader contract. The extra step here is
-// requireDesignCanvas: code can't drive against a design that was
-// never opened, on either the interactive or headless path. The
-// run-validation step runs *before* the canvas check so a wrong-
-// project typo surfaces as "run not found" instead of sending the
-// operator off to run a design stage that's also going to fail.
-func openSdlcCode(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
-	resolved, code := resolveSDLCRunSlug("sdlc code", projectID, runID, stdout, stderr)
+// openSdlcBuild is the Go-level seam behind `moe sdlc build`. See
+// openSdlcDesign for the broader contract. requireDesignCanvas runs
+// after run validation so a wrong-project typo surfaces as "run not
+// found" rather than sending the operator to a design stage that would
+// also fail.
+//
+// The stage's canvases (content/code.md, content/test.md) are declared
+// on the workflow, so the seeding, the per-entry gate reset and the
+// turn-output check all come from runStageSession's directory-form
+// handling — nothing build-specific here.
+func openSdlcBuild(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
+	resolved, code := resolveSDLCRunSlug("sdlc build", projectID, runID, stdout, stderr)
 	if code != 0 {
 		return code
 	}
@@ -254,7 +276,7 @@ func openSdlcCode(projectID, runID string, headless bool, agentOverride string, 
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	return runStageSession(projectID, runID, "code",
+	return runStageSession(projectID, runID, "build",
 		stageSessionOpts{
 			ValidateEntry:   sdlcSessionEntry,
 			NeedsSandbox:    true,
@@ -265,17 +287,16 @@ func openSdlcCode(projectID, runID string, headless bool, agentOverride string, 
 }
 
 // openSdlcReview is the Go-level seam behind `moe sdlc review`. Same
-// shape as openSdlcCode one stage downstream — requireCodeCanvas
-// stands in for requireDesignCanvas, and the canvas skeleton wires
-// in so the agent's first read sees the structural shape it has to
-// fill.
+// shape as openSdlcBuild one stage downstream — requireBuildCanvases
+// stands in for requireDesignCanvas, and the canvas skeleton wires in
+// so the agent's first read sees the structural shape it has to fill.
 func openSdlcReview(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
 	resolved, code := resolveSDLCRunSlug("sdlc review", projectID, runID, stdout, stderr)
 	if code != 0 {
 		return code
 	}
 	runID = resolved
-	if err := requireCodeCanvas(projectID, runID, "review"); err != nil {
+	if err := requireBuildCanvases(projectID, runID, "review"); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
@@ -292,34 +313,10 @@ func openSdlcReview(projectID, runID string, headless bool, agentOverride string
 		}, stdout, stderr)
 }
 
-// openSdlcTest is the Go-level seam behind `moe sdlc test`. Same
-// shape as openSdlcCode one stage downstream — requireCodeCanvas
-// ensures a code canvas exists before verification starts.
-func openSdlcTest(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int {
-	resolved, code := resolveSDLCRunSlug("sdlc test", projectID, runID, stdout, stderr)
-	if code != 0 {
-		return code
-	}
-	runID = resolved
-	if err := requireCodeCanvas(projectID, runID, "test"); err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-	return runStageSession(projectID, runID, "test",
-		stageSessionOpts{
-			ValidateEntry:   sdlcSessionEntry,
-			NeedsSandbox:    true,
-			Headless:        headless,
-			CanvasSkeleton:  testCanvasSkeleton,
-			Agent:           agentOverride,
-			ExtraStagePaths: stageCommitPathsPresent,
-		}, stdout, stderr)
-}
-
 // openSdlcStage routes the chain prompt's cascade driver
 // (`!` / `!<stage>` / `!!` / `!!!`) and the cascade's pre-push iteration to
 // the right per-stage helper, headless. Knowing the stage names
-// statically (sdlc has four headlessable stages — push is not one
+// statically (sdlc has three headlessable stages — push is not one
 // of them) is what lets a
 // switch beat a registry: the alternative is a typed-CLI re-entry
 // via `cmd.Run` with a flag prepended, which is the pattern the run
@@ -350,12 +347,10 @@ func init() {
 		switch stage {
 		case "design":
 			return openSdlcDesign(projectID, runID, headless, "", stdout, stderr)
-		case "code":
-			return openSdlcCode(projectID, runID, headless, "", stdout, stderr)
+		case "build":
+			return openSdlcBuild(projectID, runID, headless, "", stdout, stderr)
 		case "review":
 			return openSdlcReview(projectID, runID, headless, "", stdout, stderr)
-		case "test":
-			return openSdlcTest(projectID, runID, headless, "", stdout, stderr)
 		default:
 			moePrintf(stderr, "sdlc: openSdlcStage: unknown stage %q\n", stage)
 			return 1
@@ -382,7 +377,7 @@ Allowed values: "ready" or "blocked". Use "blocked" only for a known correctness
 
 ## Evidence Reviewed
 
-(agent fills: design/code canvases, diff ranges, commands or tests read/run)
+(agent fills: design and build canvases, diff ranges, commands or tests read/run)
 
 ## Fixes applied
 
@@ -393,12 +388,11 @@ Allowed values: "ready" or "blocked". Use "blocked" only for a known correctness
 (agent fills: one row per followup filed in the run's followups.md — ` + "`slug`" + ` — why it's deferred; or an explicit "None — every finding was fixed in place, blocks the gate, or wasn't worth deferring.")
 `
 
-// testCanvasSkeleton is the fixed structural shape every test canvas
-// opens with. The Next.satisfied check (see workflow.go) enforces a
-// ready gate plus non-empty "What was verified" and "What wasn't
-// verified" sections; the stage fragment instructs the agent on the
-// anti-theater rules.
-const testCanvasSkeleton = `# Test
+// buildCodeSkeleton seeds content/code.md. Every `## ` section in a
+// directory-form canvas must be filled before the file counts as
+// stamped, so the skeleton seeds only the sections that must be filled;
+// anything optional is the agent's to add.
+const buildCodeSkeleton = `# Code
 
 ## Gate
 
@@ -406,50 +400,85 @@ const testCanvasSkeleton = `# Test
 {"status":"blocked"}
 ` + "```" + `
 
-Allowed values: "ready" or "blocked". Use "blocked" for known failures or unresolved issues that should halt push; do not block merely because some surfaces are explicitly listed under "What wasn't verified".
+Allowed values: "ready", "blocked" or "close". Stamp "ready" only when this file is complete for the current revision. Use "close" when the run should not proceed at all (the change already landed, the premise is falsified) — say why above the gate.
+
+## What changed
+
+(agent fills: the resulting behavior and the important implementation decisions; for a broad change, account for each design requirement and point at its evidence in test.md)
+
+## PR draft
+
+(agent fills: title, then a body whose first two paragraphs say what changed, why, and what to look at first)
+
+## Test plan
+
+(agent fills: the production paths that prove the change, including recovery — bullets, not a template)
+`
+
+// buildTestSkeleton seeds content/test.md: the verification evidence
+// review reads. Its two sections are the anti-theater floor — a ready
+// gate over an unfilled skeleton does not count as tested.
+const buildTestSkeleton = `# Test
+
+## Gate
+
+` + "```json" + `
+{"status":"blocked"}
+` + "```" + `
+
+Allowed values: "ready" or "blocked". Use "blocked" for known failures or unresolved issues that should halt the run; do not block merely because some surfaces are explicitly listed under "What wasn't verified".
 
 When the run deliberately ships no project-repo change — bureaucracy-only work, so the sandbox is clean and moe/<run> has zero commits ahead of the default branch — write {"status":"ready","ship":"none"} instead; push then closes the run rather than refusing that there is nothing to push.
 
 ## What was verified
 
-(agent fills: commands run, end-to-end paths driven, what passed - cite and quote)
+(agent fills: the tested source revision, commands run and their results, production paths exercised end-to-end - cite and quote)
 
 ## What wasn't verified
 
 (agent fills: skipped surfaces + why - needs human eye, needs prod-shaped data, out of scope. "Nothing - automated tests cover the change" is acceptable for pure-backend work.)
-
-## Fixes applied during this stage
-
-(agent fills: one row per in-place fix; empty if none)
 `
 
-// requireDesignCanvas refuses the code stage when the run's design
+// requireDesignCanvas refuses the build stage when the run's design
 // canvas is missing or empty. The fail-loud invariant the design twin
-// records on the commit side carries into the read side: code can't
+// records on the commit side carries into the read side: build can't
 // drive against a design that was never opened. Applies to both
 // interactive and headless paths so an operator skipping straight to
-// `sdlc code` on a fresh run gets the same error either way.
+// `sdlc build` on a fresh run gets the same error either way.
 func requireDesignCanvas(projectID, runID string) error {
-	return requirePriorCanvas(projectID, runID, "design", "code")
+	return requirePriorCanvas(projectID, runID, "design", "build")
 }
 
-// requireCodeCanvas is the analogue for the test and review stages:
-// refuse to open either session when there's no code canvas to work
-// from. Same fail-loud invariant as requireDesignCanvas, one stage
-// downstream.
-//
-// Both downstream stages gate on *code*, not on each other. Test needs
-// the code canvas's `## Test plan`; review needs the code canvas and
-// the diff, and reads the test canvas as evidence when it exists. The
-// `s` shortcut at the post-code gate deliberately reaches review with
-// no test canvas at all, so gating review on test would refuse a path
-// the prompt offers.
-func requireCodeCanvas(projectID, runID, currentStage string) error {
-	return requirePriorCanvas(projectID, runID, "code", currentStage)
+// requireBuildCanvases is the analogue for review: refuse to open a
+// review when either declared build canvas is missing or empty. Review
+// reads design, both build canvases and the diff; judging one without
+// the other is the split ownership build exists to end. Whether the
+// canvases are stamped is the gate's question, asked when the run
+// advances — this only refuses a review with nothing to read.
+func requireBuildCanvases(projectID, runID, currentStage string) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	root, err := bureaucracy.Find(cwd, os.Getenv)
+	if err != nil {
+		return err
+	}
+	md := &run.Metadata{Project: projectID, ID: runID, Workflow: sdlcWorkflow}
+	if _, err := run.Canvases(root, projectID, runID, "build"); err != nil {
+		return fmt.Errorf("build canvases: %w", err)
+	}
+	for _, f := range stageCanvasFiles(md.Workflow, "build") {
+		info, err := os.Stat(filepath.Join(root, run.ContentFilePath(projectID, runID, "build", f.Name)))
+		if err != nil || info.Size() == 0 {
+			return fmt.Errorf("build canvas %s missing — run `moe sdlc build %s/%s` before `moe sdlc %s`",
+				f.Name, projectID, runID, currentStage)
+		}
+	}
+	return nil
 }
 
-// requirePriorCanvas is the shared shape behind requireDesignCanvas and
-// requireCodeCanvas: read the prior stage's canvas and bail with a
+// requirePriorCanvas reads the prior stage's canvas and bails with a
 // pointer at the verb the operator needs to run first.
 //
 // Two failure modes, both fatal at this gate:

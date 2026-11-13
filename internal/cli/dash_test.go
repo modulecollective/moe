@@ -76,19 +76,19 @@ func TestDashEmptyBureaucracy(t *testing.T) {
 // TestDashAfterCodeShowsCodeStage: design + code turns are in, no
 // push turn yet. Under the forward-walking rule the run is parked at
 // code (push has no successor turn after code's), so dash renders
-// "sdlc:code". The operator either re-runs code, which fires the push
+// "sdlc:build". The operator either re-runs code, which fires the push
 // chain prompt again, or types `moe sdlc push` directly to ship.
 func TestDashAfterCodeShowsCodeStage(t *testing.T) {
 	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
-	writeContent(t, root, "tele", "fix-it", "code", "// implementation\n")
+	writeContent(t, root, "tele", "fix-it", "build", "// implementation\n")
 	// Timestamps are relative to now rather than hard-coded so the
 	// fixture doesn't decay as the suite ages.
 	t0 := time.Now().UTC().Add(-3 * 24 * time.Hour)
 	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0)
-	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "code", t0.Add(time.Hour))
+	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "build", t0.Add(time.Hour))
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"dash"}, &out, &errb)
@@ -102,28 +102,28 @@ func TestDashAfterCodeShowsCodeStage(t *testing.T) {
 	if !strings.Contains(got, "fix-it") || !strings.Contains(got, "tele") {
 		t.Fatalf("row missing project/run:\n%s", got)
 	}
-	if !containsRunRow(got, "tele", "fix-it", "sdlc:code") {
-		t.Fatalf("expected run row with stage 'sdlc:code' (parked), got:\n%s", got)
+	if !containsRunRow(got, "tele", "fix-it", "sdlc:build") {
+		t.Fatalf("expected run row with stage 'sdlc:build' (parked), got:\n%s", got)
 	}
 }
 
 // TestDashPrereqReworkedShowsDesignStage: design is re-signed after
 // the code turn. Under the forward-walking rule, design's latest turn
 // is now newer than code's so design is parked. dash should show
-// "design"; the previous backward-walking rule would have shown "code"
+// "design"; the previous backward-walking rule would have shown "build"
 // (code stale because prereq newer).
 func TestDashPrereqReworkedShowsDesignStage(t *testing.T) {
 	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
-	writeContent(t, root, "tele", "fix-it", "code", "// implementation\n")
+	writeContent(t, root, "tele", "fix-it", "build", "// implementation\n")
 
 	// Timestamps are relative to now rather than hard-coded so the
 	// fixture doesn't decay as the suite ages.
 	t0 := time.Now().UTC().Add(-3 * 24 * time.Hour)
 	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0)
-	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "code", t0.Add(time.Hour))
+	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "build", t0.Add(time.Hour))
 	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0.Add(2*time.Hour))
 
 	var out, errb bytes.Buffer
@@ -778,10 +778,10 @@ func TestDashOpenSessionSameDocMarksRunning(t *testing.T) {
 	// fixture doesn't decay as the suite ages.
 	t0 := time.Now().UTC().Add(-3 * 24 * time.Hour)
 	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0)
-	writeContent(t, root, "tele", "fix-it", "code", "// implementation\n")
-	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "code", t0.Add(time.Hour))
+	writeContent(t, root, "tele", "fix-it", "build", "// implementation\n")
+	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "build", t0.Add(time.Hour))
 	// design + code signed: parked at code under the forward-walking rule.
-	sess, err := session.Open(root, "tele", "fix-it", "code")
+	sess, err := session.Open(root, "tele", "fix-it", "build")
 	if err != nil {
 		t.Fatalf("session.Open: %v", err)
 	}
@@ -792,14 +792,14 @@ func TestDashOpenSessionSameDocMarksRunning(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "sdlc:code [running]") {
-		t.Fatalf("expected 'sdlc:code [running]' on the active row, got:\n%s", out.String())
+	if !strings.Contains(out.String(), "sdlc:build [running]") {
+		t.Fatalf("expected 'sdlc:build [running]' on the active row, got:\n%s", out.String())
 	}
 }
 
 // TestDashOpenSessionDifferentDocMarksDocRunning: a code session open
 // on a run still parked at design — the case that motivates this rail
-// — renders "sdlc:design [code running]". Without the marker the dash
+// — renders "sdlc:design [build running]". Without the marker the dash
 // would say "design" while the operator knows code is in flight off
 // the dashboard.
 func TestDashOpenSessionDifferentDocMarksDocRunning(t *testing.T) {
@@ -808,7 +808,7 @@ func TestDashOpenSessionDifferentDocMarksDocRunning(t *testing.T) {
 
 	// Fresh run with no work turns: parked at design.
 	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
-	sess, err := session.Open(root, "tele", "fix-it", "code")
+	sess, err := session.Open(root, "tele", "fix-it", "build")
 	if err != nil {
 		t.Fatalf("session.Open: %v", err)
 	}
@@ -819,8 +819,8 @@ func TestDashOpenSessionDifferentDocMarksDocRunning(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
-	if !strings.Contains(out.String(), "sdlc:design [code running]") {
-		t.Fatalf("expected 'sdlc:design [code running]' on the active row, got:\n%s", out.String())
+	if !strings.Contains(out.String(), "sdlc:design [build running]") {
+		t.Fatalf("expected 'sdlc:design [build running]' on the active row, got:\n%s", out.String())
 	}
 }
 
@@ -872,7 +872,7 @@ func TestBuildFactoryArtPopulatedShape(t *testing.T) {
 		BacklogCount: 2,
 		ActiveStages: []dash.ActiveStation{
 			{Stage: "design"},
-			{Stage: "code"},
+			{Stage: "build"},
 			{Stage: "awaiting merge"},
 		},
 		CompletedCount: 3,
@@ -910,10 +910,10 @@ func TestBuildFactoryArtOverflow(t *testing.T) {
 		BacklogCount: dash.InputCap + 3,
 		ActiveStages: []dash.ActiveStation{ // dash.StationCap=4 + 2 over
 			{Stage: "design"},
-			{Stage: "code"},
+			{Stage: "build"},
 			{Stage: "design"},
-			{Stage: "code"},
-			{Stage: "code"},
+			{Stage: "build"},
+			{Stage: "build"},
 			{Stage: "design"},
 		},
 		CompletedCount: dash.OutputCap + 7,
@@ -960,7 +960,7 @@ func TestBuildFactoryArtUnknownStageFallsBack(t *testing.T) {
 func TestBuildFactoryArtNoSmokeWithoutSession(t *testing.T) {
 	state := dash.FactoryState{ActiveStages: []dash.ActiveStation{
 		{Stage: "design"},
-		{Stage: "code"},
+		{Stage: "build"},
 		{Stage: "awaiting merge"},
 	}}
 	// Sweep seeds so we exercise the RNG; any seed that paints a
@@ -992,7 +992,7 @@ func TestBuildFactoryArtWidth(t *testing.T) {
 		{BacklogCount: 1},
 		{ActiveStages: []dash.ActiveStation{{Stage: "design"}}},
 		{CompletedCount: 1},
-		{BacklogCount: 3, ActiveStages: []dash.ActiveStation{{Stage: "design"}, {Stage: "code"}}, CompletedCount: 4},
+		{BacklogCount: 3, ActiveStages: []dash.ActiveStation{{Stage: "design"}, {Stage: "build"}}, CompletedCount: 4},
 	}
 	for i, st := range cases {
 		r := rand.New(rand.NewSource(int64(i + 1)))
@@ -1016,9 +1016,9 @@ func TestBuildFactoryArtSmokeContainsOnlyPaletteRunes(t *testing.T) {
 		BacklogCount: 3,
 		ActiveStages: []dash.ActiveStation{
 			{Stage: "design", RunningDoc: "design"},
-			{Stage: "code", RunningDoc: "code"},
+			{Stage: "build", RunningDoc: "build"},
 			{Stage: "design", RunningDoc: "design"},
-			{Stage: "code", RunningDoc: "code"},
+			{Stage: "build", RunningDoc: "build"},
 		},
 	}
 	allowed := make(map[rune]struct{}, len(dash.SmokeGlyphs)+1)
@@ -1050,8 +1050,8 @@ func TestBuildFactoryArtSmokeContainsOnlyPaletteRunes(t *testing.T) {
 func TestBuildFactoryArtAlwaysSmokesWhenRunning(t *testing.T) {
 	state := dash.FactoryState{ActiveStages: []dash.ActiveStation{
 		{Stage: "design", RunningDoc: "design"},
-		{Stage: "code", RunningDoc: "code"},
-		{Stage: "awaiting merge", RunningDoc: "code"},
+		{Stage: "build", RunningDoc: "build"},
+		{Stage: "awaiting merge", RunningDoc: "build"},
 	}}
 	for seed := int64(1); seed <= 32; seed++ {
 		r := rand.New(rand.NewSource(seed))
@@ -1088,7 +1088,7 @@ func TestBuildFactoryArtAlwaysSmokesWhenRunning(t *testing.T) {
 // "[code running]" marker that motivates this rail.
 func TestBuildFactoryArtRunningDocOverridesParkedGlyph(t *testing.T) {
 	state := dash.FactoryState{ActiveStages: []dash.ActiveStation{
-		{Stage: "design", RunningDoc: "code"},
+		{Stage: "design", RunningDoc: "build"},
 	}}
 	r := rand.New(rand.NewSource(1))
 	lines := dash.BuildFactoryArt(state, dash.ArtWidth, r)
@@ -1108,7 +1108,7 @@ func TestBuildFactoryArtRunningDocOverridesParkedGlyph(t *testing.T) {
 // so a session against a pushed run reads as work, not as shipped.
 func TestBuildFactoryArtAwaitingMergeRunningSmokesAndSwapsGlyph(t *testing.T) {
 	state := dash.FactoryState{ActiveStages: []dash.ActiveStation{
-		{Stage: "awaiting merge", RunningDoc: "code"},
+		{Stage: "awaiting merge", RunningDoc: "build"},
 	}}
 	// Glyph swap is deterministic.
 	r := rand.New(rand.NewSource(1))
@@ -1147,7 +1147,7 @@ func TestDashOpenSessionSwapsArtGlyph(t *testing.T) {
 
 	// Fresh sdlc run: parked at design.
 	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
-	sess, err := session.Open(root, "tele", "fix-it", "code")
+	sess, err := session.Open(root, "tele", "fix-it", "build")
 	if err != nil {
 		t.Fatalf("session.Open: %v", err)
 	}
@@ -1166,7 +1166,7 @@ func TestDashOpenSessionSwapsArtGlyph(t *testing.T) {
 	}
 	header := got[titleIdx:activeIdx]
 	if !strings.Contains(header, "[⚙]") {
-		t.Fatalf("expected '[⚙]' (running code) in art header, got:\n%q", header)
+		t.Fatalf("expected '[⚙]' (running build) in art header, got:\n%q", header)
 	}
 	if strings.Contains(header, "[⚒]") {
 		t.Fatalf("expected no '[⚒]' (parked design) glyph in art header when code session is open, got:\n%q", header)

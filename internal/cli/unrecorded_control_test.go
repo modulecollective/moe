@@ -45,7 +45,7 @@ func refuseFailedReceipts(t *testing.T, root string) {
 func owedFinishFixture(t *testing.T) (string, *run.Metadata, *[]openSdlcStageInvocation, *[]pushFromCascadeInvocation, map[string]int) {
 	t.Helper()
 	root, md := controlFixture(t)
-	exits := map[string]int{"code": 1}
+	exits := map[string]int{"build": 1}
 	dispatched := stubOpenSdlcStage(t, exits)
 	push := stubPushFromCascade(t, 0, nil)
 	refuseFailedReceipts(t, root)
@@ -110,7 +110,7 @@ func TestOwedFinishReadsAsItsLocalOutcome(t *testing.T) {
 	}
 
 	out, code := runShow(t)
-	for _, want := range []string{"finish owed — failed", "code stopped (exit 1) — receipt not recorded",
+	for _, want := range []string{"finish owed — failed", "build stopped (exit 1) — receipt not recorded",
 		"recording failed when kept: ", receiptRefusal, "the next owner of this run records it before starting work"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("show lacks %q:\n%s", want, out)
@@ -125,7 +125,7 @@ func TestOwedFinishReadsAsItsLocalOutcome(t *testing.T) {
 
 	v, ok, err := serveRunControl(root, "moe", "change-auth")
 	if err != nil || !ok || v.Summary != "finish failed · receipt not recorded" || len(v.Requests) != 1 ||
-		!strings.Contains(v.Requests[0], "failed — code stopped (exit 1) — receipt not recorded") ||
+		!strings.Contains(v.Requests[0], "failed — build stopped (exit 1) — receipt not recorded") ||
 		!slices.Contains(v.Lines, "receipt not recorded: the next owner of this run records it before starting work") {
 		t.Fatalf("web view = %+v, %v, %v", v, ok, err)
 	}
@@ -197,7 +197,7 @@ func TestOwedFinishReadsBackOnResubmission(t *testing.T) {
 func TestOwedFinishClearsAfterRecovery(t *testing.T) {
 	root, md, dispatched, push, exits := owedFinishFixture(t)
 	ran := len(*dispatched)
-	delete(exits, "code")
+	delete(exits, "build")
 	var errs bytes.Buffer
 	if code := chainKickRun(root, md.Project, md.ID, rideDynamic, true, io.Discard, &errs); code != exitYielded || len(*dispatched) != ran {
 		t.Fatalf("kick with the receipt still refused: exit=%d dispatched %d→%d: %s", code, ran, len(*dispatched), errs.String())
@@ -211,7 +211,7 @@ func TestOwedFinishClearsAfterRecovery(t *testing.T) {
 		t.Fatalf("owed after recovery: %v, %v", owed, err)
 	}
 	out, _ := runShow(t)
-	if !strings.Contains(out, "finish owed — failed — code stopped (exit 1)") || strings.Contains(out, "receipt not recorded") {
+	if !strings.Contains(out, "finish owed — failed — build stopped (exit 1)") || strings.Contains(out, "receipt not recorded") {
 		t.Fatalf("show after recovery:\n%s", out)
 	}
 }
@@ -330,7 +330,7 @@ func TestServeShowsOwedOutcomeThroughRealWiring(t *testing.T) {
 		t.Fatalf("POST = %d: %s", rr.Code, rr.Body.String())
 	}
 	rr = do(httptest.NewRequest("GET", strings.TrimSuffix(rr.Header().Get("Location"), "#run-status"), nil))
-	if !strings.Contains(rr.Body.String(), "failed — code stopped (exit 1) — receipt not recorded") {
+	if !strings.Contains(rr.Body.String(), "failed — build stopped (exit 1) — receipt not recorded") {
 		t.Errorf("redirect target lacks the outcome:\n%s", rr.Body.String())
 	}
 }

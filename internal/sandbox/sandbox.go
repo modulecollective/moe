@@ -2,7 +2,7 @@
 // project's submodule, implemented as an object-shared `git clone`
 // against the canonical submodule.
 //
-// On first `moe sdlc code` against a run, Ensure runs `git clone
+// On first `moe sdlc build` against a run, Ensure runs `git clone
 // --local --shared --no-checkout` from `projects/<project>/src/` into
 // `.moe/clones/<project>/<run>/` and checks out HEAD. The resulting
 // clone has its own `.git/` directory (not a worktree gitfile pointing

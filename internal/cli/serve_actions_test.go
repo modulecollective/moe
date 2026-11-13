@@ -15,7 +15,7 @@ func TestLookupServeWorkflowUISdlc(t *testing.T) {
 	if !ok {
 		t.Fatal("sdlc should carry a serve declaration")
 	}
-	if want := []string{"design", "code", "test", "review"}; !slices.Equal(ui.Stages, want) {
+	if want := []string{"design", "build", "review"}; !slices.Equal(ui.Stages, want) {
 		t.Errorf("sdlc web-visible stages = %v, want %v (push excluded)", ui.Stages, want)
 	}
 	if !ui.Close {
@@ -31,7 +31,7 @@ func TestLookupServeWorkflowUIOperatorPaced(t *testing.T) {
 		workflow string
 		stages   []string
 	}{
-		{"sdlc", []string{"design", "code", "test", "review"}},
+		{"sdlc", []string{"design", "build", "review"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.workflow, func(t *testing.T) {

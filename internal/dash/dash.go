@@ -211,7 +211,7 @@ type Row struct {
 
 // NextDecision is the per-run "what's next" decision the caller
 // pre-computes by asking its workflow registry. Stage is the bare
-// stage name (e.g. "code"); for a perpetual Done run, callers set it
+// stage name (e.g. "build"); for a perpetual Done run, callers set it
 // to the repeatable stage dash should keep showing.
 type NextDecision struct {
 	Stage     string

@@ -248,7 +248,7 @@ func TestProposedBackendModelValidation(t *testing.T) {
 		name, body, wantError string
 	}{
 		{"backend choices", backendModelsSheet, ""},
-		{"unknown backend property", backendModelsSheet + "sdlc.code { model-codxe: value; }\n", "model-codxe"},
+		{"unknown backend property", backendModelsSheet + "sdlc.build { model-codxe: value; }\n", "model-codxe"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newPushFixture(t)

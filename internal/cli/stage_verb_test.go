@@ -13,7 +13,7 @@ func TestStageAgentHelpNamesPersistenceBoundary(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"sdlc", "code", "--help"}, "persists to run.json"},
+		{[]string{"sdlc", "build", "--help"}, "persists to run.json"},
 		{[]string{"chat", "chat", "--help"}, "does not persist"},
 	} {
 		t.Run(tc.args[0], func(t *testing.T) {
@@ -85,7 +85,7 @@ func stubCascadeDispatcher(t *testing.T, workflow string, perStageExit map[strin
 func TestStageVerbMutualExclusionAcrossWorkflows(t *testing.T) {
 	verbs := [][]string{
 		{"sdlc", "design"},
-		{"sdlc", "code"},
+		{"sdlc", "build"},
 	}
 	for _, v := range verbs {
 		t.Run(v[0]+"/"+v[1], func(t *testing.T) {
@@ -118,15 +118,15 @@ func TestStageVerbToNamesWorkflowLadder(t *testing.T) {
 	if !bytes.Contains(errb.Bytes(), []byte("is not a stage of sdlc")) {
 		t.Fatalf("expected sdlc ladder in error, got: %q", errb.String())
 	}
-	if !bytes.Contains(errb.Bytes(), []byte("design, code, test, review, push")) {
+	if !bytes.Contains(errb.Bytes(), []byte("design, build, review, push")) {
 		t.Fatalf("expected sdlc stage list, got: %q", errb.String())
 	}
 
 	errb.Reset()
-	if code := Run([]string{"sdlc", "test", "--to=design", "tele/ghost"}, &out, &errb); code != 2 {
+	if code := Run([]string{"sdlc", "build", "--to=design", "tele/ghost"}, &out, &errb); code != 2 {
 		t.Fatalf("sdlc --to=design exit=%d, want 2; stderr=%q", code, errb.String())
 	}
-	if !bytes.Contains(errb.Bytes(), []byte("is at or behind test — pick a stage past test (try: review, push)")) {
+	if !bytes.Contains(errb.Bytes(), []byte("is at or behind build — pick a stage past build (try: review, push)")) {
 		t.Fatalf("expected the at-or-behind branch naming the remaining stages, got: %q", errb.String())
 	}
 }

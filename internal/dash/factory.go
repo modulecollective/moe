@@ -46,8 +46,7 @@ const (
 // not listed falls back to otherStageGlyph — the generic boiler.
 var stageGlyphs = map[string]string{
 	"design":         "⚒",
-	"code":           "⚙",
-	"test":           "✓",
+	"build":          "⚙",
 	"awaiting merge": "▶",
 }
 

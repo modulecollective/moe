@@ -34,11 +34,11 @@ func decisionSurfaces(dispatched *int, args *[]string) []decisionSurface {
 		}}
 	}
 	return []decisionSurface{
-		{name: "next", act: "y", canvas: "code canvas", run: func(_ *testing.T, root string, md *run.Metadata, out, errOut io.Writer) int {
-			return promptStageNextStage(cmd("test"), []*Command{cmd("code")}, cmd("close"), root, md, "hint", out, errOut)
+		{name: "next", act: "y", canvas: "build canvas", run: func(_ *testing.T, root string, md *run.Metadata, out, errOut io.Writer) int {
+			return promptStageNextStage(cmd("review"), []*Command{cmd("build")}, cmd("close"), root, md, "hint", out, errOut)
 		}},
 		{name: "push", act: "m", canvas: "review canvas", run: func(_ *testing.T, root string, md *run.Metadata, out, errOut io.Writer) int {
-			return promptPushNextStage(cmd("push"), []*Command{cmd("code")}, cmd("close"), root, md, "hint", out, errOut)
+			return promptPushNextStage(cmd("push"), []*Command{cmd("build")}, cmd("close"), root, md, "hint", out, errOut)
 		}},
 		{name: "blocked", act: "y", canvas: "never resets the counter", run: func(t *testing.T, root string, md *run.Metadata, out, errOut io.Writer) int {
 			old := openKickbackSession
@@ -62,8 +62,11 @@ func decisionFixture(t *testing.T) (string, *run.Metadata) {
 	if err := run.Save(root, md); err != nil {
 		t.Fatal(err)
 	}
-	for _, stage := range []string{"code", "review"} {
+	for _, stage := range []string{"build", "review"} {
 		path := filepath.Join(root, run.ContentPath(md.Project, md.ID, stage))
+		if stage == "build" {
+			path = filepath.Join(root, run.ContentFilePath(md.Project, md.ID, stage, "code.md"))
+		}
 		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 			t.Fatal(err)
 		}

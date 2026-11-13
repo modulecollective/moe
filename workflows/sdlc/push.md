@@ -1,8 +1,8 @@
 # Stage: push (synthesis)
 
-You are at the push stage. Code is written; test stage has either
-verified it, applied small fixes, or named what's outside automated
-coverage; review has issued its ship verdict on both. **Your job here
+You are at the push stage. Build has implemented and verified the
+change — its code.md carries the PR draft, its test.md what was and
+wasn't verified — and review has issued its ship verdict on both. **Your job here
 is synthesis, not new work** — read the prior canvases and curate them
 into the PR body the reviewer reads, and surface any conflict between
 them so the operator sees it before opening the PR.
@@ -21,39 +21,38 @@ need to re-run them here.
 
 Two things land on the push canvas:
 
-1. **The final PR body.** Code stage drafted a candidate body. Test
-   stage may have surfaced findings — fixes applied, gaps named,
-   deliberate skips — and review may have added findings, in-place
-   fixes, or followups on top of both. Curate the three into a single
-   body the reviewer reads on the PR. The code-stage draft is the
-   baseline; test-stage findings amend it; review's layer is the
-   freshest and wins where they disagree.
+1. **The final PR body.** Build drafted a candidate body in code.md
+   and recorded its verification — gaps named, deliberate skips — in
+   test.md; review may have added findings, in-place fixes, or
+   followups on top. Curate them into a single body the reviewer reads
+   on the PR. The build draft is the baseline; test.md's gaps amend it;
+   review's layer is the freshest and wins where they disagree.
    `gh pr create --body-file` reads the `## PR body` section of this
    canvas directly, so that section *is* the PR description.
 2. **A short ship-readiness narrative.** What was verified, what
    wasn't, and why this is ready to ship. Two or three sentences.
    The narrative is the operator's record of "why this was safe to
-   send for review" — it's not a re-run of the test or review
+   send for review" — it's not a re-run of the build or review
    canvases, it's the synthesis of their bottom lines.
 
 ## What not to do
 
-- **Don't re-verify.** Test and review stages did that. Re-running
-  the suite here is theater — the pre-push hooks will run it again
-  before the branch lands. If you find yourself reaching for a
-  command, you've crossed into test stage's lane.
-- **Don't re-implement.** Same rule as test stage. The diff is set.
+- **Don't re-verify.** Build and review did that. Re-running the
+  suite here is theater — the pre-push hooks will run it again before
+  the branch lands. If you find yourself reaching for a command,
+  you've crossed into build's lane.
+- **Don't re-implement.** The diff is set.
   If you spot a bug while reading the canvases, surface it on the
   push canvas and tell the operator — don't quietly fix it here.
   The operator routes via the chain prompt.
-- **Don't smooth over conflicts.** If code's draft says "added X,
-  fully tested" and test's `What wasn't verified` says "the X
+- **Don't smooth over conflicts.** If code.md's draft says "added X,
+  fully tested" and test.md's `What wasn't verified` says "the X
   surface needs operator spot-check," the PR body has to reflect
   the gap. Smoothing it over is how regressions ship.
 
 ## Conflict surfacing
 
-When the code, test, and review canvases disagree about what's ready,
+When the build and review canvases disagree about what's ready,
 the canvas is where you surface that — explicitly, in its own
 section if it needs one. The operator reads the canvas before the
 PR opens; a conflict that lands on the reviewer's screen unannounced
@@ -76,7 +75,7 @@ the headings.
 is ready to ship — or, if it isn't, what's blocking)
 
 ## Conflicts surfaced
-(disagreements among the code, test, and review canvases; empty if
+(disagreements among the build and review canvases; empty if
 they agree)
 ```
 
@@ -87,8 +86,8 @@ section is a draft record only; the merge commit body stays bare.
 
 ## Fix-or-escalate
 
-If your synthesis pass turns up something none of code, test, or
-review caught — the design contradicts an architecture invariant, the
+If your synthesis pass turns up something neither build nor review
+caught — the design contradicts an architecture invariant, the
 verified behavior doesn't actually match the design, the change has
 a hidden dependency the prior stages missed — **don't paper over it
 on the canvas**. Flag the issue in `Conflicts surfaced` and tell the
@@ -98,7 +97,7 @@ implementation work.
 
 ## Committing
 
-Same shape as test stage: you're in the run's working tree, edits
+Same shape as build: you're in the run's working tree, edits
 don't ship until you commit them. Your one commit here is the push
 canvas write. The pre-push hooks then run as part of the ship
 phase; you don't trigger them.
@@ -108,10 +107,10 @@ phase; you don't trigger them.
 The synthesis stage is ready to hand back when:
 
 1. `PR body` is the final body the operator will paste at the ship
-   prompt — curated from code's draft, amended by test's findings
-   and review's.
+   prompt — curated from build's draft, amended by its verification
+   gaps and review's findings.
 2. `Ship readiness` reads as a two-or-three-sentence "should I ship"
-   summary, not a re-run of the test or review canvases.
+   summary, not a re-run of the build or review canvases.
 3. `Conflicts surfaced` is either empty (the canvases agreed) or
    names the disagreement explicitly.
 4. **Everything is committed in the sandbox** — `git status` is
@@ -122,11 +121,11 @@ The synthesis stage is ready to hand back when:
 
 ## Before you start
 
-Skim the code, test, and review canvases. If any looks incomplete —
-unresolved questions, missing sections, TODOs, or a code canvas
-without a `## Test plan` — stop and alert the operator before doing
-any synthesis. Suggest revisiting the prior stage rather than
-papering over the gap here.
+Skim the build canvases (code.md, test.md) and the review canvas. If
+any looks incomplete — unresolved questions, missing sections, TODOs,
+or a code.md without a `## Test plan` — stop and alert the operator
+before doing any synthesis. Suggest revisiting the prior stage rather
+than papering over the gap here.
 
 This is a soft check, not a gate. If the canvases look done, just
 proceed.

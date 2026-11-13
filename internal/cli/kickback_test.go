@@ -71,10 +71,10 @@ func TestBuildKickbackKickoff(t *testing.T) {
 	}
 }
 
-// TestPromptKickbackDefaultsToCode: blank (reflex Enter) and an explicit
-// `y` both kick back to code — the common "the reviewer is right, go fix
-// the code" path is a single keystroke.
-func TestPromptKickbackDefaultsToCode(t *testing.T) {
+// TestPromptKickbackDefaultsToBuild: blank (reflex Enter) and an explicit
+// `y` both kick back to build — the common "the reviewer is right, go fix
+// it" path is a single keystroke.
+func TestPromptKickbackDefaultsToBuild(t *testing.T) {
 	for _, tc := range []struct{ name, input string }{
 		{name: "blank", input: ""},
 		{name: "explicit-y", input: "y"},
@@ -90,21 +90,21 @@ func TestPromptKickbackDefaultsToCode(t *testing.T) {
 			if !*ran {
 				t.Fatalf("expected a kickback dispatch, got none (stdout=%q)", stdout.String())
 			}
-			if *doc != "code" {
-				t.Fatalf("kickback document = %q, want code", *doc)
+			if *doc != "build" {
+				t.Fatalf("kickback document = %q, want build", *doc)
 			}
 		})
 	}
 }
 
 // TestPromptKickbackDToDesign: `d` routes the kickback to design instead
-// of code — the escape hatch for "this is a design miss, not an impl bug."
+// of build — the escape hatch for "this is a design miss, not an impl bug."
 func TestPromptKickbackDToDesign(t *testing.T) {
 	ran, doc := stubKickback(t)
 	feedStdin(t, "d")
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 	var stdout, stderr bytes.Buffer
-	if code := promptKickback(sdlcGroup(t), nil, t.TempDir(), md, "test", blockedReviewCanvas, &stdout, &stderr); code != 0 {
+	if code := promptKickback(sdlcGroup(t), nil, t.TempDir(), md, "review", blockedReviewCanvas, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	if !*ran || *doc != "design" {
@@ -177,7 +177,7 @@ func TestPromptKickbackPrintsCanvasAndLabel(t *testing.T) {
 	if !strings.Contains(got, "review blocked — kick back to fix? [Y/n/d/x]") {
 		t.Errorf("expected kickback label, got:\n%s", got)
 	}
-	if !strings.Contains(got, "Y = kick back to code · n = decline (park) · d = kick back to design · x = scuttle (close)") {
+	if !strings.Contains(got, "Y = kick back to build · n = decline (park) · d = kick back to design · x = scuttle (close)") {
 		t.Errorf("expected full legend, got:\n%s", got)
 	}
 	if i, j := strings.Index(got, blockedReviewCanvas), strings.Index(got, "[Y/n/d/x]"); i < 0 || j < 0 || i >= j {
@@ -192,7 +192,7 @@ func TestPromptKickbackPrintsCanvasAndLabel(t *testing.T) {
 func TestPromptKickbackNoDesignDropsD(t *testing.T) {
 	ran, _ := stubKickback(t)
 	g := NewCommandGroup("sdlc-nodesign", "")
-	g.Register(&Command{Name: "code", Run: func(_ []string, _, _ io.Writer) int { return 0 }})
+	g.Register(&Command{Name: "build", Run: func(_ []string, _, _ io.Writer) int { return 0 }})
 	feedStdin(t, "d")
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 	var stdout, stderr bytes.Buffer
@@ -213,7 +213,7 @@ func TestPromptKickbackNoDesignDropsD(t *testing.T) {
 
 // TestPromptNextStageOverrideKickbackRouting drives the routing decision
 // at the chain-prompt entry point. Against non-terminal stdin the
-// blocked branch prints a back-pointing nudge (`next: moe sdlc code …`),
+// blocked branch prints a back-pointing nudge (`next: moe sdlc build …`),
 // while a ready gate keeps today's forward nudge (`next: moe sdlc
 // push …`). This is the guard that the kickback reshaping only fires on
 // `blocked`, and that the non-TTY caller never auto-walks forward past a
@@ -224,7 +224,7 @@ func TestPromptNextStageOverrideKickbackRouting(t *testing.T) {
 		status string
 		want   string
 	}{
-		{name: "blocked kicks back", status: "blocked", want: "next: moe sdlc code tele/fix-it (review blocked — kick back to fix)"},
+		{name: "blocked kicks back", status: "blocked", want: "next: moe sdlc build tele/fix-it (review blocked — kick back to fix)"},
 		{name: "ready walks forward", status: "ready", want: "next: moe sdlc push tele/fix-it"},
 	}
 
@@ -264,10 +264,10 @@ func TestPromptNextStageOverrideKickbackRouting(t *testing.T) {
 // kickback contract directly. A kickback opens code/design with
 // NextStageOverride set to the blocked stage; when that recovery turn
 // closes, the chain re-enters promptNextStageOverride with
-// justFinished="code" and override="review". Even with the blocked
+// justFinished="build" and override="review". Even with the blocked
 // review canvas still on disk, the prompt must re-offer the review gate
 // (`next: moe sdlc review …`) — NOT reshape into another kickback. This
-// guards the override-set / justFinished-not-review-test path that stops
+// guards the override-set / justFinished-not-review path that stops
 // the post-fix loop from recursing into a second kickback offer.
 func TestPromptNextStageOverrideRecoveryReoffersGate(t *testing.T) {
 	devnull, err := os.Open(os.DevNull)
@@ -292,8 +292,10 @@ func TestPromptNextStageOverrideRecoveryReoffersGate(t *testing.T) {
 	}
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 	var stdout, stderr bytes.Buffer
-	// Recovery turn: justFinished="code", override="review".
-	if code := promptNextStageOverride(root, md, "code", "review", false, &stdout, &stderr); code != 0 {
+	// Recovery turn: justFinished="build", override="review". The build
+	// is stamped, so the readiness check lets the override through.
+	writeStampedBuild(t, root, md)
+	if code := promptNextStageOverride(root, md, "build", "review", false, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
 	}
 	got := stdout.String()
@@ -306,7 +308,7 @@ func TestPromptNextStageOverrideRecoveryReoffersGate(t *testing.T) {
 }
 
 // TestPromptKickbackEOFParks: a bare Ctrl-D parks the run, same as `n`
-// — the Y default (kick back to code) must not be reachable by an
+// — the Y default (kick back to build) must not be reachable by an
 // abort key. Sibling of TestPromptKickbackNParks; withStdinLine("")
 // rather than feedStdin because feedStdin's appended newline would
 // make this a reflex Enter instead.

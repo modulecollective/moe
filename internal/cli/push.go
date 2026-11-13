@@ -273,7 +273,7 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 		openPR = false
 	}
 
-	if err := checkCodeContent(root, md); err != nil {
+	if err := checkBuildContent(root, md); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1, nil
 	}
@@ -477,8 +477,8 @@ func closeNoShipRun(root string, md *run.Metadata, pj *project.Metadata, clonePa
 		if ahead > 0 {
 			moePrintf(stderr, "push: test gate declares `ship: none`, but %q has %d commit(s) ahead of %q\n", branch, ahead, pj.DefaultBranch)
 			moePrintf(stderr, "       the gate contradicts the branch — to ship them, drop `\"ship\":\"none\"` from the\n"+
-				"       test canvas's gate and re-run push; to confirm they shouldn't ship, re-run\n"+
-				"       `moe %s test %s/%s` (`git -C %s log %s..%s` lists them)\n",
+				"       build test.md gate and re-run push; to confirm they shouldn't ship, re-run\n"+
+				"       `moe %s build %s/%s` (`git -C %s log %s..%s` lists them)\n",
 				md.Workflow, md.Project, md.ID, clonePath, pj.DefaultBranch, branch)
 			return 1, true
 		}
@@ -1065,14 +1065,24 @@ func writeMechanicalPushNote(root string, md *run.Metadata) (string, error) {
 		if stage == "push" {
 			continue
 		}
-		rel := run.ContentPath(md.Project, md.ID, stage)
 		label := strings.ToUpper(stage[:1]) + stage[1:]
-		if _, err := os.Stat(filepath.Join(root, rel)); err == nil {
-			fmt.Fprintf(&b, "- %s-stage record: `%s`.\n", label, rel)
-		} else if errors.Is(err, os.ErrNotExist) {
-			fmt.Fprintf(&b, "- No %s-stage canvas was present at `%s`.\n", stage, rel)
-		} else {
-			return "", fmt.Errorf("push: stat %s canvas: %w", stage, err)
+		// A directory-form stage has one record per declared file
+		// (build: code.md, test.md); a file-form stage has content.md.
+		rels := []string{run.ContentPath(md.Project, md.ID, stage)}
+		if files := wf.StageFiles(stage); files != nil {
+			rels = rels[:0]
+			for _, f := range files {
+				rels = append(rels, run.ContentFilePath(md.Project, md.ID, stage, f.Name))
+			}
+		}
+		for _, rel := range rels {
+			if _, err := os.Stat(filepath.Join(root, rel)); err == nil {
+				fmt.Fprintf(&b, "- %s-stage record: `%s`.\n", label, rel)
+			} else if errors.Is(err, os.ErrNotExist) {
+				fmt.Fprintf(&b, "- No %s-stage canvas was present at `%s`.\n", stage, rel)
+			} else {
+				return "", fmt.Errorf("push: stat %s canvas: %w", stage, err)
+			}
 		}
 	}
 	b.WriteString("- Target git history and the terminal commit trailers on this push record.\n")
@@ -1147,17 +1157,27 @@ func extractMarkdownSection(md, name string) string {
 	return strings.TrimSpace(strings.Join(lines[start:end], "\n"))
 }
 
-func checkCodeContent(root string, md *run.Metadata) error {
-	path := filepath.Join(root, run.ContentPath(md.Project, md.ID, "code"))
-	info, err := os.Stat(path)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("push: code document not written yet; run `moe %s code %s/%s` first", md.Workflow, md.Project, md.ID)
-		}
-		return fmt.Errorf("push: stat %s: %w", path, err)
+// checkBuildContent refuses push before the build stage has written its
+// canvases: every declared build file must exist and be non-empty, read
+// through the shared layout resolver so an ambiguous document refuses
+// too. Whether they are stamped is the ladder's question (review's
+// prereq), not this pre-flight's.
+func checkBuildContent(root string, md *run.Metadata) error {
+	if _, err := run.Canvases(root, md.Project, md.ID, "build"); err != nil {
+		return fmt.Errorf("push: build canvases: %w", err)
 	}
-	if info.Size() == 0 {
-		return fmt.Errorf("push: code document is empty; run `moe %s code %s/%s` and produce a PR body first", md.Workflow, md.Project, md.ID)
+	for _, f := range stageCanvasFiles(md.Workflow, "build") {
+		path := filepath.Join(root, run.ContentFilePath(md.Project, md.ID, "build", f.Name))
+		info, err := os.Stat(path)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("push: build %s not written yet; run `moe %s build %s/%s` first", f.Name, md.Workflow, md.Project, md.ID)
+			}
+			return fmt.Errorf("push: stat %s: %w", path, err)
+		}
+		if info.Size() == 0 {
+			return fmt.Errorf("push: build %s is empty; run `moe %s build %s/%s` first", f.Name, md.Workflow, md.Project, md.ID)
+		}
 	}
 	return nil
 }

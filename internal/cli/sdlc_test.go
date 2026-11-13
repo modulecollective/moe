@@ -41,7 +41,7 @@ func TestSDLCDesignWrongProjectFailsFast(t *testing.T) {
 // TestRequireDesignCanvasRefusesUnchangedKickoffStub: when the design
 // canvas at HEAD is byte-identical to the blob at its kickoff commit
 // (the `Open run` commit that seeded the stub — or any other "the
-// canvas was created and never edited" shape), `sdlc code` must
+// canvas was created and never edited" shape), `sdlc build` must
 // refuse with "unchanged from kickoff" so a `!!` cascade can't carry
 // downstream stages forward against an unwritten canvas. This is the
 // read-side defense in depth behind session.Close's primary gate —
@@ -73,7 +73,7 @@ func TestRequireDesignCanvasRefusesUnchangedKickoffStub(t *testing.T) {
 	// (requirePriorCanvas walks up from cwd).
 	t.Chdir(root)
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "code", "tele/" + runID}, &out, &errb)
+	code := Run([]string{"sdlc", "build", "tele/" + runID}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on unchanged-kickoff canvas, stdout=%q errb=%q", out.String(), errb.String())
 	}
@@ -88,7 +88,7 @@ func TestRequireDesignCanvasRefusesUnchangedKickoffStub(t *testing.T) {
 
 // TestRequireDesignCanvasAcceptsEditedCanvas: when the design canvas
 // blob at HEAD differs from the kickoff blob (the agent — or the
-// operator via `git commit` — wrote to the canvas), `sdlc code` must
+// operator via `git commit` — wrote to the canvas), `sdlc build` must
 // proceed past the gate. The negative side of the unchanged-from-
 // kickoff check; without it, the new gate would have to be opt-in to
 // avoid breaking every existing caller.
@@ -408,7 +408,7 @@ exit 0
 	}
 }
 
-// TestSDLCCodeWrongProjectSaysRunNotFound: on `sdlc code` with a typo,
+// TestSDLCCodeWrongProjectSaysRunNotFound: on `sdlc build` with a typo,
 // the operator must see "run not found" and not "design canvas
 // missing" — the latter sends them off to run a design stage that's
 // also going to fail. The pre-flight beats requireDesignCanvas to the
@@ -421,7 +421,7 @@ func TestSDLCCodeWrongProjectSaysRunNotFound(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "code", "wrongproj/ghost"}, &out, &errb)
+	code := Run([]string{"sdlc", "build", "wrongproj/ghost"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on wrong-project typo, stdout=%q", out.String())
 	}
@@ -434,17 +434,11 @@ func TestSDLCCodeWrongProjectSaysRunNotFound(t *testing.T) {
 	}
 }
 
-// TestRequireCodeCanvasGatesBothDownstreamStages: after the review↔test
-// swap, both downstream stages gate on the *code* canvas, not on each
-// other. Test needs the code canvas's `## Test plan`; review needs the
-// diff and reads the test canvas as evidence when it exists.
-//
-// Review deliberately does not gate on test: the `s` shortcut at the
-// post-code chain prompt reaches review with no test canvas at all, so
-// gating review on test would refuse a path the prompt offers. This
-// test is the pin on that — it drives `sdlc review` against a run that
-// has a code canvas and no test canvas.
-func TestRequireCodeCanvasGatesBothDownstreamStages(t *testing.T) {
+// TestRequireBuildCanvasesGatesReview pins review's prerequisite: both
+// declared build canvases must exist and be non-empty. One without the
+// other is the split ownership build exists to end, so a code.md alone
+// still refuses, and the refusal points at `moe sdlc build`.
+func TestRequireBuildCanvasesGatesReview(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	trailerstest.SeedProject(t, root, "tele")
@@ -462,22 +456,21 @@ func TestRequireCodeCanvasGatesBothDownstreamStages(t *testing.T) {
 	runID := findFirstRunID(t, root, "tele")
 	t.Chdir(root)
 
-	// No code canvas yet: both stages refuse, both point at `sdlc code`.
-	for _, stage := range []string{"test", "review"} {
-		if err := requireCodeCanvas("tele", runID, stage); err == nil {
-			t.Fatalf("%s must refuse without a code canvas", stage)
-		} else if !strings.Contains(err.Error(), "moe sdlc code tele/"+runID) {
-			t.Fatalf("%s error should point at `moe sdlc code`, got: %v", stage, err)
-		}
+	if err := requireBuildCanvases("tele", runID, "review"); err == nil {
+		t.Fatal("review must refuse without build canvases")
+	} else if !strings.Contains(err.Error(), "moe sdlc build tele/"+runID) {
+		t.Fatalf("error should point at `moe sdlc build`, got: %v", err)
 	}
 
-	// Code canvas lands (and only the code canvas — no test canvas).
-	gittest.WriteAndCommit(t, root, run.ContentPath("tele", runID, "code"),
-		"# Code\n\nThe diff.\n\n## Test plan\n\n- run the suite\n", "work: update code")
+	gittest.WriteAndCommit(t, root, run.ContentFilePath("tele", runID, "build", "code.md"),
+		"# Code\n\nThe diff.\n\n## Test plan\n\n- run the suite\n", "work: update build")
+	if err := requireBuildCanvases("tele", runID, "review"); err == nil || !strings.Contains(err.Error(), "test.md") {
+		t.Fatalf("review must refuse with test.md missing, got: %v", err)
+	}
 
-	for _, stage := range []string{"test", "review"} {
-		if err := requireCodeCanvas("tele", runID, stage); err != nil {
-			t.Fatalf("%s should pass on a written code canvas, got: %v", stage, err)
-		}
+	gittest.WriteAndCommit(t, root, run.ContentFilePath("tele", runID, "build", "test.md"),
+		"# Test\n\n## What was verified\n\nran it\n", "work: update build")
+	if err := requireBuildCanvases("tele", runID, "review"); err != nil {
+		t.Fatalf("review should pass with both build canvases written, got: %v", err)
 	}
 }

@@ -566,7 +566,7 @@ func TestRunNewShipCascadesToShip(t *testing.T) {
 	if !strings.Contains(out.String(), "opened run tele/ship-me") {
 		t.Fatalf("missing open confirmation: %q", out.String())
 	}
-	want := []string{"design", "code", "test", "review"}
+	want := []string{"design", "build", "review"}
 	if len(*stages) != len(want) {
 		t.Fatalf("openSdlcStage invocations: got %d, want %d (%+v)", len(*stages), len(want), *stages)
 	}
@@ -760,8 +760,8 @@ func TestRunNewSeedShipComposition(t *testing.T) {
 	if !strings.Contains(string(body), "ship this seed") {
 		t.Fatalf("edited seed body not on the first-stage canvas: %q", body)
 	}
-	if len(*stages) != 4 {
-		t.Fatalf("openSdlcStage invocations: got %d, want 4 (%+v)", len(*stages), *stages)
+	if len(*stages) != 3 {
+		t.Fatalf("openSdlcStage invocations: got %d, want 3 (%+v)", len(*stages), *stages)
 	}
 	if len(*pushes) != 1 {
 		t.Fatalf("pushFromCascade invocations = %d, want 1 (%+v)", len(*pushes), *pushes)
@@ -796,8 +796,8 @@ func TestRunNewShipFromIdea(t *testing.T) {
 	if !strings.Contains(out.String(), "opened run tele/"+dated) {
 		t.Fatalf("missing open confirmation for promoted run: %q", out.String())
 	}
-	if len(*stages) != 4 {
-		t.Fatalf("openSdlcStage invocations: got %d, want 4 (%+v)", len(*stages), *stages)
+	if len(*stages) != 3 {
+		t.Fatalf("openSdlcStage invocations: got %d, want 3 (%+v)", len(*stages), *stages)
 	}
 	for _, inv := range *stages {
 		if inv.runID != dated {

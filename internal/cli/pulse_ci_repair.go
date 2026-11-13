@@ -194,13 +194,14 @@ func kickCIRepair(root, key string, groomed groomResult, stdout, stderr io.Write
 }
 
 // A repair is one bounded same-run continuation. Ordinary cascade terminal
-// guards stay intact. Registered dispatch and gate checks still own test
-// and review; neither old passes nor a push recovery can skip those turns.
+// guards stay intact. The repair is a build turn whose canvases must be
+// stamped ready (the derived gate) before a fresh review runs; neither old
+// passes nor a push recovery can skip those checks.
 func driveCIRepair(root string, md *run.Metadata, p ownedPRChecks, stdout, stderr io.Writer) (code int) {
 	claimed := false
 	// stopped is the repair step under way: a stop is the outcome of a
 	// finish the operator asked for during the repair.
-	stopped := "code"
+	stopped := "build"
 	if clockQuota != nil {
 		previous := clockQuota.repairClaimed
 		defer func() { clockQuota.repairClaimed = previous }()
@@ -231,10 +232,11 @@ func driveCIRepair(root string, md *run.Metadata, p ownedPRChecks, stdout, stder
 			fmt.Fprintf(&kickoff, "- %s: %s — %s\n", c.Name, c.Verdict, c.URL)
 		}
 	}
-	kickoff.WriteString("\nInvestigate the linked failures, fix and commit. Fresh test and review turns follow, then this PR is updated. Operator input is delivered through the normal run input channel.\n")
-	if code := runStageSession(md.Project, md.ID, "code", stageSessionOpts{
+	kickoff.WriteString("\nInvestigate the linked failures, fix and commit. Record the verification in the build test.md and stamp both build canvases ready. A fresh review turn follows, then this PR is updated. Operator input is delivered through the normal run input channel.\n")
+	if code := runStageSession(md.Project, md.ID, "build", stageSessionOpts{
 		ValidateEntry: sdlcSessionEntry,
-		NeedsSandbox:  true, Headless: true, InitialPrompt: kickoff.String(), NextStageOverride: "test",
+		NeedsSandbox:  true, Headless: true, InitialPrompt: kickoff.String(), NextStageOverride: "review",
+		ExtraStagePaths: stageCommitPathsPresent,
 		AfterAdmission: func(sess *session.Session) error {
 			if _, err := claimCIRepair(root, p, sess); err != nil {
 				return err
@@ -250,13 +252,16 @@ func driveCIRepair(root string, md *run.Metadata, p ownedPRChecks, stdout, stder
 		return code
 	}
 	after, err := git.RevParse(clone, "refs/heads/"+branchPrefix+md.ID)
-	if err != nil || before == after || stageNominatedClose(root, md, "code") {
-		moePrintln(stderr, "CI repair: code produced no repair commit or nominated close; keeping the pushed run and spent attempt")
+	if err != nil || before == after || stageNominatedClose(root, md, "build") {
+		moePrintln(stderr, "CI repair: build produced no repair commit or nominated close; keeping the pushed run and spent attempt")
 		return 1
+	}
+	if code := requireStageReady(root, md, "build", stdout, stderr); code != 0 {
+		return code
 	}
 	wf, _ := LookupWorkflow(md.Workflow)
 	dispatcher := lookupCascadeDispatcher(md.Workflow)
-	for _, stage := range []string{"test", "review"} {
+	for _, stage := range []string{"review"} {
 		stopped = stage
 		if code := dispatcher(stage, md.Project, md.ID, true, stdout, stderr); code != 0 {
 			return code

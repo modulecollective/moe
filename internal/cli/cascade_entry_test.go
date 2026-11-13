@@ -129,13 +129,13 @@ func TestDispatchCascadeTailAfterRedeferSaysNothingMore(t *testing.T) {
 	})
 
 	var stdout, stderr bytes.Buffer
-	code := dispatchCascade("!!", "code", root, md, &stdout, &stderr)
+	code := dispatchCascade("!!", "build", root, md, &stdout, &stderr)
 
 	if code != 0 {
 		t.Fatalf("exit=%d, want 0 (both recoveries exited cleanly); stderr=%q", code, stderr.String())
 	}
 	got := stdout.String()
-	wantSummary := "cascade tele/fix-it: code ok · test ok · review ok · push deferred to recovery (rebase conflict) · push deferred to recovery (rebase conflict) — stopped\n"
+	wantSummary := "cascade tele/fix-it: build ok · review ok · push deferred to recovery (rebase conflict) · push deferred to recovery (rebase conflict) — stopped\n"
 	if !strings.HasSuffix(got, wantSummary) {
 		t.Fatalf("stdout = %q, want it to end with the cascade summary %q", got, wantSummary)
 	}

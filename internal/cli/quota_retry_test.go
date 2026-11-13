@@ -399,6 +399,10 @@ func TestClockRideDefersOneThreadAndRunsAnotherBackend(t *testing.T) {
 				if failure {
 					return "", errors.New("real agent failure")
 				}
+				if doc == "build" {
+					writeStampedBuild(t, r.Root, &run.Metadata{Project: "moe", ID: minted["healthy"]})
+					return "", nil
+				}
 				return "", os.WriteFile(filepath.Join(r.Root, run.ContentPath("moe", minted["healthy"], doc)), []byte("# Completed "+doc+"\n"), 0644)
 			}}
 			agent.Register("quota-healthy", a)
@@ -420,7 +424,7 @@ func TestClockRideDefersOneThreadAndRunsAnotherBackend(t *testing.T) {
 			stubPushFromCascade(t, 0, nil)
 			var out bytes.Buffer
 			code := pulseSelfKick(root, groomed, &out, &out)
-			want, turns := exitQuotaDeferred, 4
+			want, turns := exitQuotaDeferred, 3
 			if failure {
 				want, turns = 1, 1
 			}
@@ -438,7 +442,7 @@ func TestClockRideDefersOneThreadAndRunsAnotherBackend(t *testing.T) {
 }
 
 func TestCIRepairClaimsAfterQuotaAdmission(t *testing.T) {
-	for _, scenario := range []string{"blocked", "test blocked", "occupied", "moved"} {
+	for _, scenario := range []string{"blocked", "review blocked", "occupied", "moved"} {
 		t.Run(scenario, func(t *testing.T) {
 			realStageSession := runStageSession
 			f := newPushFixture(t)
@@ -506,7 +510,8 @@ func TestCIRepairClaimsAfterQuotaAdmission(t *testing.T) {
 					t.Fatal(err)
 				}
 				gittest.Run(t, f.clonePath, "commit", "--allow-empty", "-m", "repair CI")
-				return "", os.WriteFile(filepath.Join(r.Root, run.ContentPath(md.Project, md.ID, "code")), []byte("# CI repaired\n"), 0644)
+				writeStampedBuild(t, r.Root, md)
+				return "", nil
 			}}
 			agent.Register("quota-repair", a)
 			t.Cleanup(func() { agent.Unregister("quota-repair") })
@@ -521,13 +526,13 @@ func TestCIRepairClaimsAfterQuotaAdmission(t *testing.T) {
 				wantCode = exitQuotaDeferred
 				wantRetries = 1
 			}
-			if scenario == "test blocked" {
+			if scenario == "review blocked" {
 				wantClaims, wantExec, wantReads = 1, 1, 2
 			}
 			if code != wantCode || len(idx.CIRepairAttempts[p.Run]) != wantClaims || executions != wantExec || reads != wantReads || len(idx.QuotaRetries) != wantRetries {
 				t.Fatalf("code=%d claims=%v executions=%d reads=%d retries=%v: %s", code, idx.CIRepairAttempts[p.Run], executions, reads, idx.QuotaRetries, &log)
 			}
-			if scenario == "test blocked" {
+			if scenario == "review blocked" {
 				if !strings.Contains(log.String(), "attempt remains spent") {
 					t.Fatal(log.String())
 				}

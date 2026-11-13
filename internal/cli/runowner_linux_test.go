@@ -139,7 +139,7 @@ func TestUnansweredPromptHoldsItsRunAgainstAKick(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			root, threadRoot, groomed, stages := advancedKickFixture(t)
 			defer withRideMode(rideDynamic)()
-			for _, stage := range []string{"design", "code"} {
+			for _, stage := range []string{"design", "build"} {
 				if openSessionStage(root, groomed.byKey[threadRoot]) != "" {
 					t.Fatalf("fixture has a live %s session; the prompt must be the only occupant", stage)
 				}
@@ -188,13 +188,13 @@ func TestUnansweredPromptHoldsItsRunAgainstAKick(t *testing.T) {
 			if got := strings.Count(out, "STAGE "); tc.wantStage != (got == 1) || got > 1 {
 				t.Fatalf("stage handoffs = %d, want stage=%v:\n%s", got, tc.wantStage, out)
 			}
-			if tc.wantStage && !strings.Contains(out, "STAGE moe/advanced-run code busy=true err=<nil> held=true") {
+			if tc.wantStage && !strings.Contains(out, "STAGE moe/advanced-run build busy=true err=<nil> held=true") {
 				t.Fatalf("the chosen stage did not start under continuous ownership:\n%s", out)
 			}
 
 			errb.Reset()
 			pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot}), io.Discard, &errb)
-			if got := kickStages(*stages); len(got) == 0 || got[0] != "advanced-run:code" {
+			if got := kickStages(*stages); len(got) == 0 || got[0] != "advanced-run:build" {
 				t.Fatalf("pickup after the invocation left: drove %v, stderr=%q", got, errb.String())
 			}
 		})

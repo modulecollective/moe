@@ -33,9 +33,8 @@ func TestBackTargetsIncludesJustFinished(t *testing.T) {
 	}{
 		{name: "fresh gate", justFinished: "", want: nil},
 		{name: "post design", justFinished: "design", want: []string{"design"}},
-		{name: "post code", justFinished: "code", want: []string{"design", "code"}},
-		{name: "post test", justFinished: "test", want: []string{"design", "code", "test"}},
-		{name: "post review", justFinished: "review", want: []string{"design", "code", "test", "review"}},
+		{name: "post build", justFinished: "build", want: []string{"design", "build"}},
+		{name: "post review", justFinished: "review", want: []string{"design", "build", "review"}},
 	}
 
 	for _, tc := range cases {
@@ -56,14 +55,16 @@ func TestBackTargetsIncludesJustFinished(t *testing.T) {
 }
 
 // TestPromptNextStageOverrideOffersStage pins the recovery contract:
-// promptNextStageOverride("push") offers the push retry, not code's
-// ordinary successor (test). An empty override falls through to the
+// promptNextStageOverride("push") offers the push retry, not build's
+// ordinary successor (review). An empty override falls through to the
 // successor lookup unchanged — the guard that every non-recovery caller
 // is byte-for-byte the old behaviour.
 //
 // Driven against non-terminal stdin so the prompt takes its print-only
 // branch (`next: <hint>`); the hint is what the operator would see and
-// is enough to distinguish push from test.
+// is enough to distinguish push from review. Build is stamped first: an
+// unready build parks on every exit, override or not (see
+// TestPromptNextStageUnreadyBuildParksEveryExit).
 func TestPromptNextStageOverrideOffersStage(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -71,7 +72,7 @@ func TestPromptNextStageOverrideOffersStage(t *testing.T) {
 		want     string
 	}{
 		{name: "override push", override: "push", want: "moe sdlc push tele/fix-it"},
-		{name: "no override uses successor", override: "", want: "moe sdlc test tele/fix-it"},
+		{name: "no override uses successor", override: "", want: "moe sdlc review tele/fix-it"},
 	}
 
 	devnull, err := os.Open(os.DevNull)
@@ -87,11 +88,54 @@ func TestPromptNextStageOverrideOffersStage(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 			var stdout, stderr bytes.Buffer
-			if code := promptNextStageOverride(t.TempDir(), md, "code", tc.override, false, &stdout, &stderr); code != 0 {
+			root := t.TempDir()
+			writeStampedBuild(t, root, md)
+			if code := promptNextStageOverride(root, md, "build", tc.override, false, &stdout, &stderr); code != 0 {
 				t.Fatalf("exit=%d stderr=%q", code, stderr.String())
 			}
 			if !strings.Contains(stdout.String(), "next: "+tc.want) {
 				t.Fatalf("want offered stage %q, got: %q", tc.want, stdout.String())
+			}
+		})
+	}
+}
+
+// TestPromptNextStageUnreadyBuildParksEveryExit: a build whose canvases
+// are not all stamped parks with each file's reason named — on the
+// ordinary exit and on a recovery override alike, so a push retry or a
+// re-review never runs over unverified work. It never kicks back to
+// build itself.
+func TestPromptNextStageUnreadyBuildParksEveryExit(t *testing.T) {
+	devnull, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { devnull.Close() })
+	oldStdin := os.Stdin
+	os.Stdin = devnull
+	t.Cleanup(func() { os.Stdin = oldStdin })
+
+	for _, override := range []string{"", "push", "review"} {
+		t.Run("override="+override, func(t *testing.T) {
+			md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+			root := t.TempDir()
+			writeBuildCanvas(t, root, md, "code.md", stampedBuildCanvas)
+			writeBuildCanvas(t, root, md, "test.md", buildTestSkeleton)
+			var stdout, stderr bytes.Buffer
+			if code := promptNextStageOverride(root, md, "build", override, false, &stdout, &stderr); code != 0 {
+				t.Fatalf("exit=%d stderr=%q", code, stderr.String())
+			}
+			got := stdout.String()
+			for _, want := range []string{"build not ready — parked at build:", "test.md: gate blocked", "next: moe sdlc build tele/fix-it"} {
+				if !strings.Contains(got, want) {
+					t.Fatalf("missing %q in:\n%s", want, got)
+				}
+			}
+			if strings.Contains(got, "code.md:") {
+				t.Fatalf("a stamped file must not be named: %s", got)
+			}
+			if strings.Contains(got, "next: moe sdlc push") || strings.Contains(got, "next: moe sdlc review") {
+				t.Fatalf("an unready build must not offer its destination: %s", got)
 			}
 		})
 	}
@@ -105,7 +149,7 @@ func TestPromptNextStageOverrideOffersStage(t *testing.T) {
 func TestPromptStageNextStagePrintsDesignCanvas(t *testing.T) {
 	rec := &promptDispatchRecord{}
 	next := &Command{
-		Name: "code",
+		Name: "build",
 		Run: func(args []string, _, _ io.Writer) int {
 			rec.ran = true
 			return 0
@@ -156,7 +200,7 @@ func TestPromptStageNextStagePrintsDesignCanvas(t *testing.T) {
 func TestPromptStageNextStageMissingDesignCanvasFallsThrough(t *testing.T) {
 	rec := &promptDispatchRecord{}
 	next := &Command{
-		Name: "code",
+		Name: "build",
 		Run: func(args []string, _, _ io.Writer) int {
 			rec.ran = true
 			return 0
@@ -194,7 +238,7 @@ func TestPromptStageNextStageMissingDesignCanvasFallsThrough(t *testing.T) {
 func TestPromptStageNextStageWhitespaceDesignCanvasFallsThrough(t *testing.T) {
 	rec := &promptDispatchRecord{}
 	next := &Command{
-		Name: "code",
+		Name: "build",
 		Run: func(args []string, _, _ io.Writer) int {
 			rec.ran = true
 			return 0
@@ -289,7 +333,7 @@ func TestPromptStageNextStageNonCodeStageSkipsCanvas(t *testing.T) {
 func TestPromptStageNextStageOffersBackWhenJustFinished(t *testing.T) {
 	rec := &promptDispatchRecord{}
 	next := &Command{
-		Name: "code",
+		Name: "build",
 		Run: func(args []string, _, _ io.Writer) int {
 			rec.ran = true
 			rec.args = append([]string(nil), args...)
@@ -329,7 +373,7 @@ func TestPromptStageNextStageOffersBackWhenJustFinished(t *testing.T) {
 	if !strings.Contains(got, "[Y/n/a/b/!]") {
 		t.Fatalf("expected [Y/n/a/b/!] label in prompt, got: %q", got)
 	}
-	if !strings.Contains(got, "Y = run · n = decline · a = decline, advance to code · b = back to design · ! = cascade one stage") {
+	if !strings.Contains(got, "Y = run · n = decline · a = decline, advance to build · b = back to design · ! = cascade one stage") {
 		t.Fatalf("expected legend with back target in prompt, got: %q", got)
 	}
 	if rec.ran {
@@ -350,7 +394,7 @@ func TestPromptStageNextStageOffersBackWhenJustFinished(t *testing.T) {
 func TestPromptStageNextStageNoBackWhenNil(t *testing.T) {
 	rec := &promptDispatchRecord{}
 	next := &Command{
-		Name: "code",
+		Name: "build",
 		Run: func(args []string, _, _ io.Writer) int {
 			rec.ran = true
 			return 0
@@ -460,7 +504,7 @@ func TestPromptStageNextStageAdvanceMarksAndDeclines(t *testing.T) {
 
 	rec := &promptDispatchRecord{}
 	next := &Command{
-		Name: "code",
+		Name: "build",
 		Run: func(args []string, _, _ io.Writer) int {
 			rec.ran = true
 			rec.args = append([]string(nil), args...)
@@ -509,7 +553,7 @@ func TestPromptStageNextStageAdvanceMarksAndDeclines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kind != NextKindStage || stage != "code" {
+	if kind != NextKindStage || stage != "build" {
 		t.Fatalf("after advance: Next should return code, got kind=%v stage=%q", kind, stage)
 	}
 }
@@ -529,7 +573,7 @@ func TestPromptStageNextStageAdvanceCommitsMarkerLocally(t *testing.T) {
 	gittest.Run(t, root, "push", "-u", "origin", "main")
 	originBefore := gittest.HeadSHA(t, origin)
 
-	next := &Command{Name: "code", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
+	next := &Command{Name: "build", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 	if err := run.Save(root, md); err != nil {
 		t.Fatal(err)
@@ -595,7 +639,7 @@ func TestPromptStageNextStageNoAdvanceForNonSdlcWorkflow(t *testing.T) {
 // The next stage and back command must not fire on the scuttle path.
 func TestPromptStageNextStageOffersScuttleWhenRegistered(t *testing.T) {
 	next := &Command{
-		Name: "code",
+		Name: "build",
 		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
 	}
 	var nextRan bool
@@ -657,7 +701,7 @@ func TestPromptStageNextStageOffersScuttleWhenRegistered(t *testing.T) {
 // memory.
 func TestPromptStageNextStageScuttleWithBack(t *testing.T) {
 	next := &Command{
-		Name: "code",
+		Name: "build",
 		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
 	}
 	back := &Command{
@@ -691,7 +735,7 @@ func TestPromptStageNextStageScuttleWithBack(t *testing.T) {
 	if !strings.Contains(got, "[Y/n/x/a/b/!]") {
 		t.Fatalf("expected [Y/n/x/a/b/!] label, got: %q", got)
 	}
-	if !strings.Contains(got, "Y = run · n = decline · x = scuttle (close) · a = decline, advance to code · b = back to design · ! = cascade one stage") {
+	if !strings.Contains(got, "Y = run · n = decline · x = scuttle (close) · a = decline, advance to build · b = back to design · ! = cascade one stage") {
 		t.Fatalf("expected full legend with scuttle adjacent to decline, got: %q", got)
 	}
 }
@@ -702,7 +746,7 @@ func TestPromptStageNextStageScuttleWithBack(t *testing.T) {
 // future workflow without close stays honest.
 func TestPromptStageNextStageNoScuttleWhenNil(t *testing.T) {
 	next := &Command{
-		Name: "code",
+		Name: "build",
 		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
 	}
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
@@ -736,25 +780,24 @@ func TestPromptStageNextStageNoScuttleWhenNil(t *testing.T) {
 	}
 }
 
-// TestPromptStageNextStageOffersSkipTest: at the post-code gate
-// (next.Name == "test", workflow == "sdlc") the prompt grows the
-// label to include `s` and the legend names "skip to review". This is
-// the shortcut that opens the review prompt directly, bypassing
-// test — useful for doc-only diffs and trivial fixes where
-// the anti-theater rule would just produce a rubber-stamp canvas.
-func TestPromptStageNextStageOffersSkipTest(t *testing.T) {
+// TestPromptStageNextStageOffersNoSkip: build owns verification, so
+// there is no separate stage to step over — the post-build gate offers
+// no `s` key, and typing `s` declines like any other typo rather than
+// jumping to review.
+func TestPromptStageNextStageOffersNoSkip(t *testing.T) {
+	var ran bool
 	next := &Command{
-		Name: "test",
-		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
+		Name: "review",
+		Run:  func(_ []string, _, _ io.Writer) int { ran = true; return 0 },
 	}
-	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
 
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer r.Close()
-	if _, err := io.WriteString(w, "n\n"); err != nil {
+	if _, err := io.WriteString(w, "s\n"); err != nil {
 		t.Fatal(err)
 	}
 	w.Close()
@@ -763,201 +806,14 @@ func TestPromptStageNextStageOffersSkipTest(t *testing.T) {
 	t.Cleanup(func() { os.Stdin = oldStdin })
 
 	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc test tele fix-it", &stdout, &stderr); code != 0 {
-		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
+	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc review tele/fix-it", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
 	}
-	got := stdout.String()
-	if !strings.Contains(got, "[Y/n/a/s/!]") {
-		t.Fatalf("expected [Y/n/a/s/!] label, got: %q", got)
+	if got := stdout.String(); strings.Contains(got, "skip") || strings.Contains(got, "/s/") {
+		t.Fatalf("post-build gate must not offer a skip, got: %q", got)
 	}
-	if !strings.Contains(got, "s = skip to review") {
-		t.Fatalf("expected legend with skip-to-review entry, got: %q", got)
-	}
-}
-
-// TestPromptStageNextStageNoSkipAtPostDesign: the post-design gate
-// (next.Name == "code") must not offer `s`. The shortcut is anchored
-// to "next is test"; offering it post-design would mean shipping
-// without implementation, which isn't a thing.
-func TestPromptStageNextStageNoSkipAtPostDesign(t *testing.T) {
-	next := &Command{
-		Name: "code",
-		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
-	}
-	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
-
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-	if _, err := io.WriteString(w, "n\n"); err != nil {
-		t.Fatal(err)
-	}
-	w.Close()
-	oldStdin := os.Stdin
-	os.Stdin = r
-	t.Cleanup(func() { os.Stdin = oldStdin })
-
-	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
-		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
-	}
-	got := stdout.String()
-	if strings.Contains(got, "/s/") || strings.Contains(got, "/s]") {
-		t.Fatalf("post-design prompt must not offer /s, got: %q", got)
-	}
-	if strings.Contains(got, "s = skip") {
-		t.Fatalf("post-design legend must not name skip-to-review, got: %q", got)
-	}
-}
-
-// TestPromptStageNextStageNoSkipForNonSdlcWorkflow: a non-sdlc
-// workflow must not offer `s` even if its next stage happens to be
-// named "test". The shortcut is gated on md.Workflow == "sdlc" —
-// future workflows that grow a test-like stage opt in deliberately.
-func TestPromptStageNextStageNoSkipForNonSdlcWorkflow(t *testing.T) {
-	next := &Command{
-		Name: "test",
-		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
-	}
-	md := &run.Metadata{ID: "dns-basics", Project: "tele", Workflow: "chat", Status: run.StatusInProgress}
-
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-	if _, err := io.WriteString(w, "n\n"); err != nil {
-		t.Fatal(err)
-	}
-	w.Close()
-	oldStdin := os.Stdin
-	os.Stdin = r
-	t.Cleanup(func() { os.Stdin = oldStdin })
-
-	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe chat chat tele dns-basics", &stdout, &stderr); code != 0 {
-		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
-	}
-	got := stdout.String()
-	if strings.Contains(got, "/s/") || strings.Contains(got, "/s]") {
-		t.Fatalf("non-sdlc prompt must not offer /s, got: %q", got)
-	}
-	if strings.Contains(got, "s = skip") {
-		t.Fatalf("non-sdlc legend must not name skip-to-review, got: %q", got)
-	}
-}
-
-// TestPromptStageNextStageSkipDispatchesReviewPrompt: typing `s` at
-// the post-code gate opens the review prompt — the hint reads "moe
-// sdlc review <project>/<run>". The test does not drive the review
-// command itself (stdin EOFs at the review prompt → decline), but the
-// hint transition is proof the dispatch happened. The next.Run stub
-// for the test stage must not be invoked on the `s` path.
-//
-// `s` skips test, not judgment: review is the ship gate, so the
-// shortcut lands there rather than jumping the operator straight to
-// push with nothing having read the diff.
-func TestPromptStageNextStageSkipDispatchesReviewPrompt(t *testing.T) {
-	var testRan bool
-	next := &Command{
-		Name: "test",
-		Run: func(_ []string, _, _ io.Writer) int {
-			testRan = true
-			return 0
-		},
-	}
-	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
-
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-	// "s" picks skip; "n" then declines at the review prompt so no real
-	// review command is dispatched. The review prompt's default is Y
-	// (run), unlike the push prompt's N, so the decline has to be typed.
-	if _, err := io.WriteString(w, "s\nn\n"); err != nil {
-		t.Fatal(err)
-	}
-	w.Close()
-	oldStdin := os.Stdin
-	os.Stdin = r
-	t.Cleanup(func() { os.Stdin = oldStdin })
-
-	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc test tele fix-it", &stdout, &stderr); code != 0 {
-		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
-	}
-	if testRan {
-		t.Errorf("`s` must not dispatch the test stage")
-	}
-	got := stdout.String()
-	if !strings.Contains(got, "moe sdlc review tele/fix-it") {
-		t.Fatalf("expected review prompt hint with project/run, got: %q", got)
-	}
-	// `s` must not skip past review to push — that would leave the
-	// diff unjudged, which is the whole point of the stage.
-	if strings.Contains(got, "[N/m/p]") {
-		t.Fatalf("`s` must not open the push prompt, got: %q", got)
-	}
-	// The test prompt's [Y/n/a/s/!] label must appear before the review
-	// prompt's hint — proves the cascade order.
-	if i, j := strings.Index(got, "[Y/n/a/s/!]"), strings.Index(got, "moe sdlc review tele/fix-it"); i < 0 || j < 0 || i >= j {
-		t.Fatalf("expected post-code prompt before review prompt; post-code=%d review=%d", i, j)
-	}
-}
-
-// TestPromptStageNextStageSkipForwardsBackTarget: the review prompt
-// reached via `s` should carry the post-code prompt's back target
-// through — the operator's mental "just finished" is code (test was
-// the one they skipped), so `b` at the review prompt should re-open
-// code, not test.
-func TestPromptStageNextStageSkipForwardsBackTarget(t *testing.T) {
-	next := &Command{
-		Name: "test",
-		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
-	}
-	var backRan bool
-	var backArgs []string
-	back := &Command{
-		Name: "code",
-		Run: func(args []string, _, _ io.Writer) int {
-			backRan = true
-			backArgs = append([]string(nil), args...)
-			return 0
-		},
-	}
-	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
-
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-	// `s` → review prompt opens with back=code → `b` → back.Run fires.
-	if _, err := io.WriteString(w, "s\nb\n"); err != nil {
-		t.Fatal(err)
-	}
-	w.Close()
-	oldStdin := os.Stdin
-	os.Stdin = r
-	t.Cleanup(func() { os.Stdin = oldStdin })
-
-	var stdout, stderr bytes.Buffer
-	if code := promptStageNextStage(next, []*Command{back}, nil, t.TempDir(), md, "moe sdlc test tele fix-it", &stdout, &stderr); code != 0 {
-		t.Fatalf("exit=%d stderr=%s", code, stderr.String())
-	}
-	if !backRan {
-		t.Fatalf("expected back to fire at the review prompt's `b`")
-	}
-	if got, want := strings.Join(backArgs, " "), "tele/fix-it"; got != want {
-		t.Fatalf("back args = %q, want %q", got, want)
-	}
-	got := stdout.String()
-	if !strings.Contains(got, "b = back to code") {
-		t.Fatalf("expected review prompt legend to name `back to code`, got: %q", got)
+	if ran {
+		t.Fatal("`s` must decline, not dispatch")
 	}
 }
 
@@ -968,7 +824,7 @@ func TestPromptStageNextStageSkipForwardsBackTarget(t *testing.T) {
 // stage to re-open.
 func TestPromptStageNextStageMultipleBackOffersSubPrompt(t *testing.T) {
 	next := &Command{
-		Name: "test",
+		Name: "review",
 		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
 	}
 	var designRan bool
@@ -981,7 +837,7 @@ func TestPromptStageNextStageMultipleBackOffersSubPrompt(t *testing.T) {
 	}
 	var codeRan bool
 	code := &Command{
-		Name: "code",
+		Name: "build",
 		Run: func(_ []string, _, _ io.Writer) int {
 			codeRan = true
 			return 0
@@ -1014,7 +870,7 @@ func TestPromptStageNextStageMultipleBackOffersSubPrompt(t *testing.T) {
 	if !strings.Contains(got, "back to:") {
 		t.Fatalf("expected sub-prompt 'back to:' line, got: %q", got)
 	}
-	if !strings.Contains(got, "d=design") || !strings.Contains(got, "c=code") {
+	if !strings.Contains(got, "d=design") || !strings.Contains(got, "b=build") {
 		t.Fatalf("expected sub-prompt to list both stage keys, got: %q", got)
 	}
 	if !designRan {
@@ -1031,13 +887,13 @@ func TestPromptStageNextStageMultipleBackOffersSubPrompt(t *testing.T) {
 // the call returns 0.
 func TestPromptStageNextStageMultipleBackSubPromptDeclines(t *testing.T) {
 	next := &Command{
-		Name: "test",
+		Name: "review",
 		Run:  func(_ []string, _, _ io.Writer) int { return 0 },
 	}
 	var anyRan bool
 	mark := func(_ []string, _, _ io.Writer) int { anyRan = true; return 0 }
 	design := &Command{Name: "design", Run: mark}
-	code := &Command{Name: "code", Run: mark}
+	code := &Command{Name: "build", Run: mark}
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	r, w, err := os.Pipe()
@@ -1075,14 +931,14 @@ func TestPromptPushNextStageMultipleBackOffersSubPrompt(t *testing.T) {
 	}
 	var testRan bool
 	testCmd := &Command{
-		Name: "test",
+		Name: "review",
 		Run: func(_ []string, _, _ io.Writer) int {
 			testRan = true
 			return 0
 		},
 	}
 	design := &Command{Name: "design", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
-	code := &Command{Name: "code", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
+	code := &Command{Name: "build", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	r, w, err := os.Pipe()
@@ -1090,7 +946,7 @@ func TestPromptPushNextStageMultipleBackOffersSubPrompt(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer r.Close()
-	if _, err := io.WriteString(w, "b\nt\n"); err != nil {
+	if _, err := io.WriteString(w, "b\nr\n"); err != nil {
 		t.Fatal(err)
 	}
 	w.Close()
@@ -1110,7 +966,7 @@ func TestPromptPushNextStageMultipleBackOffersSubPrompt(t *testing.T) {
 		t.Fatalf("expected sub-prompt 'back to:' line, got: %q", got)
 	}
 	if !testRan {
-		t.Fatalf("expected test to fire after `b` then `t`")
+		t.Fatalf("expected review to fire after `b` then `r`")
 	}
 }
 
@@ -1123,7 +979,7 @@ func TestPromptPushNextStageMultipleBackOffersSubPrompt(t *testing.T) {
 func TestPromptStageNextStageEOFDeclines(t *testing.T) {
 	var ran bool
 	next := &Command{
-		Name: "code",
+		Name: "build",
 		Run: func(_ []string, _, _ io.Writer) int {
 			ran = true
 			return 0

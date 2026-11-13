@@ -263,7 +263,7 @@ func TestStageCommitsStampConsentOnlyInsideAWalk(t *testing.T) {
 			root := newTestBureaucracy(t)
 			md := &run.Metadata{ID: "stamp-me", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress,
 				Documents: map[string]*run.Document{}}
-			if _, _, err := ensureClaudeDocument(root, md, "code"); err != nil {
+			if _, _, err := ensureClaudeDocument(root, md, "design"); err != nil {
 				t.Fatal(err)
 			}
 			if err := run.Save(root, md); err != nil {
@@ -284,24 +284,24 @@ func TestStageCommitsStampConsentOnlyInsideAWalk(t *testing.T) {
 				}
 			}
 
-			if err := commitSessionStart(root, md, "code", md.Documents["code"].Sessions["claude"]); err != nil {
+			if err := commitSessionStart(root, md, "design", md.Documents["design"].Sessions["claude"]); err != nil {
 				t.Fatal(err)
 			}
-			check("work: start session for code")
+			check("work: start session for design")
 
-			canvas := filepath.Join(root, run.ContentPath("tele", "stamp-me", "code"))
+			canvas := filepath.Join(root, run.ContentPath("tele", "stamp-me", "design"))
 			if err := os.WriteFile(canvas, []byte("# hello\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			if err := commitTurn(root, md, "code", "claude", 0); err != nil {
+			if err := commitTurn(root, md, "design", "claude", 0); err != nil {
 				t.Fatal(err)
 			}
-			check("work: update code")
+			check("work: update design")
 
-			if err := commitAdvance(root, md, "code"); err != nil {
+			if err := commitAdvance(root, md, "design"); err != nil {
 				t.Fatal(err)
 			}
-			check("advance: code")
+			check("advance: design")
 		})
 	}
 }

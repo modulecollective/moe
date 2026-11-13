@@ -27,6 +27,13 @@ func seedRun(t *testing.T, root, projectID, id, workflow, status string, created
 	}
 	for docID, body := range canvases {
 		md.Documents[docID] = &run.Document{}
+		// build is directory-form: the body seeds both declared files.
+		if docID == "build" {
+			for _, name := range []string{"code.md", "test.md"} {
+				writeFile(t, filepath.Join(root, run.ContentFilePath(projectID, id, docID, name)), body)
+			}
+			continue
+		}
 		rel := run.ContentPath(projectID, id, docID)
 		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, rel)), 0o755); err != nil {
 			t.Fatal(err)

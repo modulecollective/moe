@@ -2,6 +2,7 @@ package cli
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/modulecollective/moe/internal/stylesheet"
@@ -18,9 +19,28 @@ func TestStylesheetVocab(t *testing.T) {
 	if !ok {
 		t.Fatalf("vocab missing sdlc workflow; got %v", v.Workflows)
 	}
-	for _, stage := range []string{"design", "code", "test", "review", "push"} {
+	for _, stage := range []string{"design", "build", "review", "push"} {
 		if !slices.Contains(sdlc, stage) {
 			t.Errorf("sdlc vocab missing stage %q; got %v", stage, sdlc)
+		}
+	}
+	// Retired stages are not selectable, but the vocab names their
+	// replacement so a stale rule refuses with a pointer at build.
+	for _, retired := range []string{"code", "test"} {
+		if slices.Contains(sdlc, retired) {
+			t.Errorf("retired stage %q still selectable: %v", retired, sdlc)
+		}
+		if got := v.Retired["sdlc"][retired]; got != "build" {
+			t.Errorf("Retired[sdlc][%s] = %q, want build", retired, got)
+		}
+	}
+	for _, rule := range []string{"sdlc.code { model: x; }\n", ".test { model: x; }\n"} {
+		s, err := stylesheet.Parse([]byte(rule))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Validate(v); err == nil || !strings.Contains(err.Error(), "retired") || !strings.Contains(err.Error(), `use "build"`) {
+			t.Errorf("rule %q: want a retired-stage refusal naming build, got %v", rule, err)
 		}
 	}
 	if pulse, ok := v.Workflows["pulse"]; !ok || !slices.Contains(pulse, "pulse") {

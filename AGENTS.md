@@ -36,14 +36,12 @@ you're about to run these two commands first.
 
 ## Running moe itself
 
-In code stage, don't run `moe` itself. It's easy to screw up state
-unless you configure things exactly right, so do implementation testing
-through Go's tests only.
-
-In test stage, it is OK to run `moe` when the test plan calls for an
-end-to-end CLI path. Use the run's configured dev environment, keep the
-invocation scoped to the surface under test, and record the command and
-result on the test canvas.
+In build stage, it is OK to run `moe` when exercising the change calls for
+an end-to-end CLI path. It's easy to screw up state unless you configure
+things exactly right: use the run's configured dev environment and a
+scratch bureaucracy, keep the invocation scoped to the surface under test,
+and record the command and result in build's `content/test.md`. Prefer Go
+tests for everything they can reach.
 
 When the surface under test sits behind an agent turn — the rendered
 prompt text a stage hands its agent, the sandbox boundary gate — don't
@@ -52,11 +50,14 @@ its argv to a file and writes the stage canvas itself. Both backends
 resolve their binary through `exec.LookPath` — the same seam the
 `fakeClaudeOnPath` test helper uses — so real `moe sdlc` / `twin` /
 `pulse` invocations against a scratch bureaucracy run end-to-end with no
-session spent. One gotcha: stage ladders are ordered (walk from the
-first stage). Full recipe: the project's knowledge topic
+session spent. Two gotchas: stage ladders are ordered (walk from the
+first stage), and a build turn names its two canvases under "Your
+canvases for this document are these files" rather than a single file,
+so the fake has to write and stamp both (`fakeBuildCanvasesSnippet` is
+the shape). Full recipe: the project's knowledge topic
 `knowledge/topics/driving-moe-end-to-end.md`.
 
-In test stage, **don't** spawn `moe serve` to check rendered HTML or
+In build stage, **don't** spawn `moe serve` to check rendered HTML or
 HTTP status — assert it in-process with `httptest` against
 `s.Handler()` (the existing `internal/serve` test idiom). If a live
 server is genuinely unavoidable, run it inside a single Bash call:

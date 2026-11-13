@@ -69,9 +69,16 @@ func TestCompleteTopLevelVerbs(t *testing.T) {
 // the group's own dispatch table for the second word.
 func TestCompleteGroupSubcommands(t *testing.T) {
 	got := completeWords("", []string{"sdlc", ""})
-	for _, want := range []string{"design", "code", "test", "review", "push"} {
+	for _, want := range []string{"design", "build", "review", "push"} {
 		if !slices.Contains(got, want) {
 			t.Fatalf("sdlc subcommands missing %q: %v", want, got)
+		}
+	}
+	// The retired code and test verbs stay registered (hidden) only to
+	// point at build; completion must not offer them.
+	for _, retired := range []string{"code", "test"} {
+		if slices.Contains(got, retired) {
+			t.Fatalf("retired verb %q offered by completion: %v", retired, got)
 		}
 	}
 	// Prefix filter applies to subcommands too.
@@ -92,7 +99,7 @@ func TestCompleteProjectRunValues(t *testing.T) {
 	seedRunJSON(t, root, "other", "spike", "sdlc", run.StatusInProgress)
 	seedRunJSON(t, root, "tele", "an-idea", dash.IdeaWorkflow, run.StatusInProgress)
 
-	got := completeWords(root, []string{"sdlc", "code", ""})
+	got := completeWords(root, []string{"sdlc", "build", ""})
 	for _, want := range []string{"tele/fix-bug", "tele/add-thing", "other/spike"} {
 		if !slices.Contains(got, want) {
 			t.Fatalf("argProjectRun missing %q: %v", want, got)
@@ -104,7 +111,7 @@ func TestCompleteProjectRunValues(t *testing.T) {
 	}
 
 	// Prefix on the project half narrows the set.
-	tele := completeWords(root, []string{"sdlc", "code", "tele/"})
+	tele := completeWords(root, []string{"sdlc", "build", "tele/"})
 	for _, c := range tele {
 		if !strings.HasPrefix(c, "tele/") {
 			t.Fatalf("prefix tele/ leaked %q: %v", c, tele)
@@ -207,14 +214,14 @@ func TestCompleteValueFlagSuppressesPositional(t *testing.T) {
 	markBureaucracy(t, root)
 	seedRunJSON(t, root, "tele", "fix-bug", "sdlc", run.StatusInProgress)
 
-	got := completeWords(root, []string{"sdlc", "code", "--agent", ""})
+	got := completeWords(root, []string{"sdlc", "build", "--agent", ""})
 	if len(got) != 0 {
 		t.Fatalf("--agent value slot should not offer runs, got %v", got)
 	}
 
 	// And the run after the flag's value still completes as the first
 	// positional (the value was consumed, not counted as positional).
-	after := completeWords(root, []string{"sdlc", "code", "--agent", "codex", ""})
+	after := completeWords(root, []string{"sdlc", "build", "--agent", "codex", ""})
 	if !slices.Contains(after, "tele/fix-bug") {
 		t.Fatalf("first positional after a consumed flag value should offer runs: %v", after)
 	}
@@ -242,7 +249,7 @@ func TestCompleteOutsideBureaucracyStillCompletesTree(t *testing.T) {
 	if !slices.Contains(verbs, "sdlc") {
 		t.Fatalf("tree completion should work outside a bureaucracy: %v", verbs)
 	}
-	values := completeWords("", []string{"sdlc", "code", ""})
+	values := completeWords("", []string{"sdlc", "build", ""})
 	if len(values) != 0 {
 		t.Fatalf("value completion outside a bureaucracy should be empty, got %v", values)
 	}
@@ -255,7 +262,7 @@ func TestRunCompleteAlwaysExitsZero(t *testing.T) {
 		nil,
 		{""},
 		{"totally-unknown-verb", "x"},
-		{"sdlc", "code", "tele/x", "y", "z"},
+		{"sdlc", "build", "tele/x", "y", "z"},
 		{"--", "--"},
 	}
 	for _, args := range cases {

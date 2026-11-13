@@ -234,14 +234,16 @@ func TestFinishAfterOneStageKickDoesNotRepeatSettledStage(t *testing.T) {
 	}
 }
 
-// A one-stage kick whose test closes blocked stops the finish there:
+// A one-stage kick whose review closes blocked stops the finish there:
 // finish obeys the gates and is not queued for another ride.
 func TestFinishAfterOneStageKickStopsAtBlockedGate(t *testing.T) {
 	root, md := controlFixture(t)
 	base := time.Now().Add(-time.Hour)
-	for i, s := range []string{"design", "code", "test"} { // parked at test
+	for i, s := range []string{"design", "build"} { // parked at review
 		trailerstest.CommitWorkTurnAt(t, root, md.Project, md.ID, "sdlc", s, base.Add(time.Duration(i)*time.Minute))
 	}
+	trailerstest.CommitAdvanceAt(t, root, md.Project, md.ID, "sdlc", "build", base.Add(2*time.Minute))
+	writeStampedBuild(t, root, md)
 	captured := stubOpenSdlcStage(t, nil)
 	push := stubPushFromCascade(t, 0, nil)
 	inner := openSdlcStage
@@ -251,7 +253,7 @@ func TestFinishAfterOneStageKickStopsAtBlockedGate(t *testing.T) {
 		if err := os.MkdirAll(filepath.Dir(canvas), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(canvas, []byte("# Test\n\n## Gate\n\n```json\n{\"status\":\"blocked\"}\n```\n"), 0o644); err != nil {
+		if err := os.WriteFile(canvas, []byte("# Review\n\n## Gate\n\n```json\n{\"status\":\"blocked\"}\n```\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		return inner(s, p, r, h, o, e)
@@ -261,7 +263,7 @@ func TestFinishAfterOneStageKickStopsAtBlockedGate(t *testing.T) {
 		t.Fatalf("exit %d: %s", code, &errs)
 	}
 	f, _ := controlRecord(t, root).Find("finish-blocked")
-	if len(*captured) != 1 || (*captured)[0].stage != "test" || len(*push) != 0 {
+	if len(*captured) != 1 || (*captured)[0].stage != "review" || len(*push) != 0 {
 		t.Fatalf("walked past a blocked gate: dispatches=%+v pushes=%d", *captured, len(*push))
 	}
 	if f.State != runcontrol.StateFailed || !strings.Contains(f.Outcome, "gate blocked") {
@@ -273,7 +275,7 @@ func TestFinishAfterOneStageKickStopsAtBlockedGate(t *testing.T) {
 // failed, not left accepted to widen a later invocation.
 func TestFinishDuringFailedFullKickSettles(t *testing.T) {
 	root, _ := controlFixture(t)
-	stubOpenSdlcStage(t, map[string]int{"code": 1})
+	stubOpenSdlcStage(t, map[string]int{"build": 1})
 	inner := openSdlcStage
 	openSdlcStage = func(s, p, r string, h bool, o, e io.Writer) int {
 		if s == "design" {
@@ -351,7 +353,7 @@ func TestParkRetryAfterOwnerReplacement(t *testing.T) {
 // one stage it asked for rather than shipping under the stale finish.
 func TestFinishDuringFailedTypedCascadeSettles(t *testing.T) {
 	root, md := controlFixture(t)
-	exits := map[string]int{"code": 1}
+	exits := map[string]int{"build": 1}
 	stubOpenSdlcStage(t, exits)
 	push := stubPushFromCascade(t, 0, nil)
 	inner := openSdlcStage
@@ -365,10 +367,10 @@ func TestFinishDuringFailedTypedCascadeSettles(t *testing.T) {
 		t.Fatalf("want stage failure, got %d", code)
 	}
 	f, _ := controlRecord(t, root).Find("finish-typed")
-	if f.State != runcontrol.StateFailed || !strings.Contains(f.Outcome, "code stopped") {
+	if f.State != runcontrol.StateFailed || !strings.Contains(f.Outcome, "build stopped") {
 		t.Fatalf("failed typed cascade retained reusable finish authority: %+v", f)
 	}
-	delete(exits, "code")
+	delete(exits, "build")
 	if code := chainKickRun(root, "moe", "change-auth", rideDynamic, true, io.Discard, io.Discard); code != 0 {
 		t.Fatalf("later kick exit %d", code)
 	}
@@ -383,7 +385,7 @@ func TestFinishDuringFailedChildRideSettles(t *testing.T) {
 	root, _ := controlFixture(t)
 	parent := seedParkedRun(t, root, "parent-run")
 	chainEdgeCommit(t, root, "moe/parent-run", "moe/change-auth")
-	stubOpenSdlcStage(t, map[string]int{"code": 1})
+	stubOpenSdlcStage(t, map[string]int{"build": 1})
 	push := stubPushFromCascade(t, 0, nil)
 	inner := openSdlcStage
 	openSdlcStage = func(s, p, r string, h bool, o, e io.Writer) int {
@@ -396,7 +398,7 @@ func TestFinishDuringFailedChildRideSettles(t *testing.T) {
 		t.Fatalf("want child stage failure, got %d", code)
 	}
 	f, _ := controlRecord(t, root).Find("finish-child")
-	if f.State != runcontrol.StateFailed || !strings.Contains(f.Outcome, "code stopped") {
+	if f.State != runcontrol.StateFailed || !strings.Contains(f.Outcome, "build stopped") {
 		t.Fatalf("failed child ride retained reusable finish authority: %+v", f)
 	}
 	if len(*push) != 0 {
@@ -457,11 +459,11 @@ func TestFinishDuringFailedStandaloneStageSettles(t *testing.T) {
 func TestFinishDuringFailedCIRepairSettles(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		code  int // the repair's code stage
+		code  int // the repair's build stage
 		stage string
 	}{
-		{"code fails", 1, "code"},
-		{"test gate blocks", 0, "test"},
+		{"build fails", 1, "build"},
+		{"review gate blocks", 0, "review"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newPushFixture(t)
@@ -488,13 +490,14 @@ func TestFinishDuringFailedCIRepairSettles(t *testing.T) {
 				}
 				if tc.code == 0 {
 					gittest.Run(t, f.clonePath, "commit", "--allow-empty", "-m", "repair")
+					writeStampedBuild(t, f.root, md)
 				}
 				return tc.code
 			}
 			stubOpenSdlcStage(t, nil)
 			priorGate := checkCascadeStageGate
 			t.Cleanup(func() { checkCascadeStageGate = priorGate })
-			checkCascadeStageGate = func(_ *Workflow, _ *run.Metadata, stage string, _ io.Writer) (bool, int) { return stage != "test", 1 }
+			checkCascadeStageGate = func(_ *Workflow, _ *run.Metadata, stage string, _ io.Writer) (bool, int) { return stage != "review", 1 }
 			push := stubPushFromCascade(t, 0, nil)
 			if code := driveCIRepair(f.root, md, redPR(md.Project+"/"+md.ID, "observed-head"), io.Discard, io.Discard); code == 0 {
 				t.Fatal("repair succeeded; want a stop")
@@ -526,7 +529,7 @@ func TestFinishFailedReceiptCannotReplay(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, md := controlFixture(t)
-			exits := map[string]int{"code": 1}
+			exits := map[string]int{"build": 1}
 			stubOpenSdlcStage(t, exits)
 			push := stubPushFromCascade(t, 0, nil)
 			refuseFailedReceipts(t, root)
@@ -550,7 +553,7 @@ func TestFinishFailedReceiptCannotReplay(t *testing.T) {
 			if !tc.hookStays {
 				gittest.Run(t, root, "config", "--unset", "core.hooksPath")
 			}
-			delete(exits, "code")
+			delete(exits, "build")
 			later := chainKickRun(root, md.Project, md.ID, rideDynamic, true, io.Discard, &errs)
 			if len(*push) != 0 {
 				t.Fatalf("later kick shipped under the stale grant: pushes=%d stderr=%s", len(*push), errs.String())
@@ -566,7 +569,7 @@ func TestFinishFailedReceiptCannotReplay(t *testing.T) {
 				}
 				return
 			}
-			if r.State != runcontrol.StateFailed || !strings.Contains(r.Outcome, "code stopped") || len(owed) != 0 {
+			if r.State != runcontrol.StateFailed || !strings.Contains(r.Outcome, "build stopped") || len(owed) != 0 {
 				t.Fatalf("later owner did not record the owed receipt: %+v owed=%v", r, owed)
 			}
 		})

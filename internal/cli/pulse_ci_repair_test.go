@@ -249,14 +249,14 @@ func TestRepairClaimRechecksLocalHolds(t *testing.T) {
 			case "paused":
 				setMode(t, root, "moe", project.ModePaused)
 			case "occupied":
-				gittest.Run(t, root, "branch", session.BranchName("moe", "fix-ci", "code"))
+				gittest.Run(t, root, "branch", session.BranchName("moe", "fix-ci", "build"))
 			case "staging":
 				trailerstest.SeedRun(t, root, "moe", "batch", chainWorkflow, run.StatusInProgress)
 				seedGitHubProject(t, root, "moe")
 				gittest.Run(t, root, "commit", "--allow-empty", "-m", "stage\n\n"+trailers.Block{ChainedTo: []string{"moe/batch " + p.Run}}.String())
 			case "reaped":
 				md, _ := run.Load(root, "moe", "fix-ci")
-				md.Reaped = &run.ReapNote{Doc: "code", At: "2999-01-01T00:00:00Z"}
+				md.Reaped = &run.ReapNote{Doc: "build", At: "2999-01-01T00:00:00Z"}
 				if err := run.Save(root, md); err != nil {
 					t.Fatal(err)
 				}
@@ -333,7 +333,7 @@ func TestHeartbeatWakesOnlyForNewOfferedPRFailures(t *testing.T) {
 }
 
 func TestRepairDriveRunsFreshStagesAndPinsPR(t *testing.T) {
-	for _, stop := range []string{"", "code", "test", "review", "no change", "deferred push"} {
+	for _, stop := range []string{"", "build", "unstamped", "review", "no change", "deferred push"} {
 		t.Run(stop, func(t *testing.T) {
 			f := newPushFixture(t)
 			md, _ := run.Load(f.root, f.projectID, f.runID)
@@ -346,7 +346,7 @@ func TestRepairDriveRunsFreshStagesAndPinsPR(t *testing.T) {
 			priorSession := runStageSession
 			runStageSession = func(projectID, runID, doc string, opts stageSessionOpts, _, _ io.Writer) int {
 				stages = append(stages, doc)
-				if !opts.Headless || opts.NextStageOverride != "test" || !strings.Contains(opts.InitialPrompt, p.PR) {
+				if !opts.Headless || opts.NextStageOverride != "review" || !strings.Contains(opts.InitialPrompt, p.PR) {
 					t.Fatalf("recovery options: %+v", opts)
 				}
 				if doc == stop {
@@ -354,6 +354,11 @@ func TestRepairDriveRunsFreshStagesAndPinsPR(t *testing.T) {
 				}
 				if stop != "no change" {
 					gittest.Run(t, f.clonePath, "commit", "--allow-empty", "-m", "repair CI")
+				}
+				// A repair that leaves build unstamped must stop before
+				// review: the derived gate is checked on this exit too.
+				if stop != "unstamped" {
+					writeStampedBuild(t, f.root, md)
 				}
 				return 0
 			}
@@ -381,7 +386,7 @@ func TestRepairDriveRunsFreshStagesAndPinsPR(t *testing.T) {
 			var log bytes.Buffer
 			code := driveCIRepair(f.root, md, p, io.Discard, &log)
 			if stop == "" {
-				if code != 0 || !slices.Equal(stages, []string{"code", "test", "review"}) || len(*pushes) != 1 {
+				if code != 0 || !slices.Equal(stages, []string{"build", "review"}) || len(*pushes) != 1 {
 					t.Fatalf("drive code=%d stages=%v pushes=%v: %s", code, stages, *pushes, log.String())
 				}
 				push := (*pushes)[0]
@@ -477,15 +482,17 @@ func TestRepairShipUpdatesSamePRWithoutMerging(t *testing.T) {
 				if !opts.Headless {
 					t.Fatal("repair became interactive")
 				}
-				if doc == "code" {
+				if doc == "build" {
 					writeFile(t, filepath.Join(f.clonePath, "ci-fix.txt"), "fixed\n")
 					gittest.Run(t, f.clonePath, "add", "ci-fix.txt")
 					gittest.Run(t, f.clonePath, "commit", "-m", "fix CI")
+					writeStampedBuild(t, f.root, md)
+					gittest.Run(t, f.root, "add", run.ContentDir(projectID, runID, doc))
+					gittest.Run(t, f.root, "commit", "-m", "work: update build\n\n"+trailers.Block{Project: projectID, Run: runID, Document: doc, Workflow: sdlcWorkflow, Consent: "dynamic"}.String())
+					return 0
 				}
 				body := "# " + doc + "\n\nRepair work for this iteration.\n"
 				switch doc {
-				case "test":
-					body += "\n## What was verified\n\nThe failing CI path passes in the fixture.\n\n## What wasn't verified\n\nLive GitHub runners are outside this fixture.\n\n## Gate\n\n```json\n{\"status\":\"ready\"}\n```\n"
 				case "review":
 					body += "\n## Gate\n\n```json\n{\"status\":\"ready\"}\n```\n"
 					if state == "CLOSED" {
@@ -506,7 +513,7 @@ func TestRepairShipUpdatesSamePRWithoutMerging(t *testing.T) {
 			var log bytes.Buffer
 			code := driveCIRepair(f.root, md, p, io.Discard, &log)
 			if state == "OPEN" {
-				if code != 0 || !slices.Equal(stages, []string{"code", "test", "review", "push"}) {
+				if code != 0 || !slices.Equal(stages, []string{"build", "review", "push"}) {
 					t.Fatalf("code=%d stages=%v log=%s", code, stages, log.String())
 				}
 				remoteHead := strings.TrimSpace(gittest.Output(t, f.origin, "rev-parse", "refs/heads/"+f.branch))

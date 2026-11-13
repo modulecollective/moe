@@ -20,11 +20,11 @@ func TestStageVerbAgentFlagRejectsUnknown(t *testing.T) {
 		args []string
 	}{
 		// sdlc stages — backfilled validation (the design's "Plus: fix
-		// sdlc design/code/review/test to validate" subsection).
+		// sdlc design/code/review/test to validate" subsection; code and
+		// test are build now — their retired verbs are pinned separately).
 		{"sdlc design", []string{"sdlc", "design", "--agent=gpt", "moe/x"}},
-		{"sdlc code", []string{"sdlc", "code", "--agent=gpt", "moe/x"}},
+		{"sdlc build", []string{"sdlc", "build", "--agent=gpt", "moe/x"}},
 		{"sdlc review", []string{"sdlc", "review", "--agent=gpt", "moe/x"}},
-		{"sdlc test", []string{"sdlc", "test", "--agent=gpt", "moe/x"}},
 		// Group A — stage-entry verbs gaining --agent.
 		{"chat chat", []string{"chat", "chat", "--agent=gpt", "moe/x"}},
 		// The two edit verbs validate only on the --chat path; without
@@ -94,6 +94,26 @@ func TestEditChatAgentFlagNeedsChat(t *testing.T) {
 			}
 			if !strings.Contains(errb.String(), "--agent needs --chat") {
 				t.Fatalf("expected --agent-needs---chat error, got: %q", errb.String())
+			}
+		})
+	}
+}
+
+// TestRetiredSDLCStageVerbsPointAtBuild: `moe sdlc code` and `moe sdlc
+// test` no longer start a session. They exit 2 with the build command
+// for the run named, and never silently open a different stage.
+func TestRetiredSDLCStageVerbsPointAtBuild(t *testing.T) {
+	for _, verb := range []string{"code", "test"} {
+		t.Run(verb, func(t *testing.T) {
+			var out, errb bytes.Buffer
+			if code := Run([]string{"sdlc", verb, "moe/x"}, &out, &errb); code != 2 {
+				t.Fatalf("exit=%d, want 2; stderr=%q", code, errb.String())
+			}
+			if !strings.Contains(errb.String(), "retired") || !strings.Contains(errb.String(), "moe sdlc build moe/x") {
+				t.Fatalf("expected a retirement pointing at build, got: %q", errb.String())
+			}
+			if out.Len() != 0 {
+				t.Fatalf("retired verb must not print to stdout: %q", out.String())
 			}
 		})
 	}

@@ -377,7 +377,7 @@ func dispatchCascadeForStage(cfg stageVerbCfg, projectID, runID, answer, to stri
 // dispatchCascade re-loads and re-checks the same terminal class as a
 // backstop for every entry, so these guards are not the only thing
 // standing between a sealed run and a cascade. They stay because the
-// typed leg earns the verb-prefixed refusal ("moe sdlc code: …", not
+// typed leg earns the verb-prefixed refusal ("moe sdlc build: …", not
 // "cascade: …") and refuses before resolving anything further. The pushed
 // case can only occur for a workflow with a push stage (sdlc today);
 // leaving it in the shared switch is harmless for the workflows that

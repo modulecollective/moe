@@ -267,15 +267,15 @@ func TestSelfKickSkipsADesignClosedButNotAdvancedRoot(t *testing.T) {
 
 // TestSelfKickRidesARootParkedByDownstreamWork is the one genuinely new
 // admitted class: nobody clicked `a` and no machine minted it, but
-// design and code turns have both landed, so the run is unambiguously
+// design and build turns have both landed, so the run is unambiguously
 // past its first stage. Real downstream work is a settled design.
 func TestSelfKickRidesARootParkedByDownstreamWork(t *testing.T) {
 	root, stages, _ := kickFixture(t)
 	now := time.Now().Local()
 	seedRun(t, root, "moe", "mid-ladder", "sdlc", run.StatusInProgress, now,
-		map[string]string{"design": "# Half built\n\nbody\n", "code": "# The diff\n\nbody\n"})
+		map[string]string{"design": "# Half built\n\nbody\n", "build": stampedBuildCanvas})
 	trailerstest.CommitWorkTurnAt(t, root, "moe", "mid-ladder", "sdlc", "design", now.Add(-2*time.Hour))
-	trailerstest.CommitWorkTurnAt(t, root, "moe", "mid-ladder", "sdlc", "code", now.Add(-time.Hour))
+	trailerstest.CommitWorkTurnAt(t, root, "moe", "mid-ladder", "sdlc", "build", now.Add(-time.Hour))
 	groomed := groomChains(root, "moe", "pulse-groom",
 		[]groomGroup{{Runs: runsFrom("mid-ladder")}}, nil /*kickoff edges*/, os.Stderr)
 
@@ -283,10 +283,10 @@ func TestSelfKickRidesARootParkedByDownstreamWork(t *testing.T) {
 	var errb bytes.Buffer
 	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: "moe/mid-ladder"}), io.Discard, &errb)
 
-	// Next parks at the last stage worked (code has no successor turn and
+	// Next parks at the last stage worked (build has no successor turn and
 	// no marker), so the ride resumes there rather than at design.
-	if got := kickStages(*stages); len(got) == 0 || got[0] != "mid-ladder:code" {
-		t.Fatalf("drove %v, want the ride to resume at code; stderr=%q", got, errb.String())
+	if got := kickStages(*stages); len(got) == 0 || got[0] != "mid-ladder:build" {
+		t.Fatalf("drove %v, want the ride to resume at build; stderr=%q", got, errb.String())
 	}
 }
 
@@ -399,10 +399,10 @@ func TestSelfKickRidesAnOperatorAdvancedRoot(t *testing.T) {
 	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot}), io.Discard, &errb)
 
 	// Mid-ladder pickup: design is already satisfied by the marker, so
-	// the ride starts at code rather than re-opening the stage the
+	// the ride starts at build rather than re-opening the stage the
 	// operator finished.
-	if got := kickStages(*stages); len(got) == 0 || got[0] != "advanced-run:code" {
-		t.Fatalf("drove %v, want the ride to start at code; stderr=%q", got, errb.String())
+	if got := kickStages(*stages); len(got) == 0 || got[0] != "advanced-run:build" {
+		t.Fatalf("drove %v, want the ride to start at build; stderr=%q", got, errb.String())
 	}
 	if !strings.Contains(errb.String(), "kicking "+threadRoot) {
 		t.Errorf("stderr = %q, want the kick announced", errb.String())
@@ -415,7 +415,7 @@ func TestSelfKickRidesAnOperatorAdvancedRoot(t *testing.T) {
 // is still running.
 func TestSelfKickSkipsAnAdvancedRootWithALiveSession(t *testing.T) {
 	root, threadRoot, groomed, stages := advancedKickFixture(t)
-	if _, err := session.Open(root, "moe", "advanced-run", "code"); err != nil {
+	if _, err := session.Open(root, "moe", "advanced-run", "build"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -426,7 +426,7 @@ func TestSelfKickSkipsAnAdvancedRootWithALiveSession(t *testing.T) {
 	if len(*stages) != 0 {
 		t.Fatalf("drove %v, want nothing while the operator has the stage open", kickStages(*stages))
 	}
-	if !strings.Contains(errb.String(), "live session at code") {
+	if !strings.Contains(errb.String(), "live session at build") {
 		t.Errorf("stderr = %q, want the occupancy skip to name the stage", errb.String())
 	}
 }
@@ -637,7 +637,7 @@ func TestSelfKickSkipsASettledThreadRoot(t *testing.T) {
 }
 
 // strandedThreadFixture is the run this change opened on: an sdlc run
-// the operator opened and drove through design, code, and test, parked
+// the operator opened and drove through design and build, parked
 // at review, correctly ordered and therefore invisible to a survey with
 // no ordering opinion to write. Its gate is empty, which is what the two
 // pulses of 2026-08-13 actually wrote.
@@ -649,10 +649,9 @@ func strandedThreadFixture(t *testing.T) (root, runKey string, groomed groomResu
 	root, stages, _ = kickFixture(t)
 	now := time.Now().Local()
 	seedRun(t, root, "moe", "stalled-at-review", "sdlc", run.StatusInProgress, now,
-		map[string]string{"design": "# The fix\n\nbody\n", "code": "# The diff\n\nbody\n", "test": readyFilledTestCanvas})
+		map[string]string{"design": "# The fix\n\nbody\n", "build": stampedBuildCanvas})
 	advanceAt(t, root, "moe", "stalled-at-review", "design", now.Add(-4*time.Hour))
-	advanceAt(t, root, "moe", "stalled-at-review", "code", now.Add(-3*time.Hour))
-	advanceAt(t, root, "moe", "stalled-at-review", "test", now.Add(-2*time.Hour))
+	advanceAt(t, root, "moe", "stalled-at-review", "build", now.Add(-2*time.Hour))
 
 	groomed = groomChains(root, "moe", "pulse-groom",
 		nil /*empty gate*/, nil /*kickoff edges*/, os.Stderr)
@@ -745,11 +744,11 @@ func TestSelfKickHoldsEnumeratedFloorMisses(t *testing.T) {
 			name: "session open",
 			setUp: func(t *testing.T, root string) {
 				advanceAt(t, root, "moe", "promoted-sketch", "design", time.Now().Local().Add(-2*time.Hour))
-				if _, err := session.Open(root, "moe", "promoted-sketch", "code"); err != nil {
+				if _, err := session.Open(root, "moe", "promoted-sketch", "build"); err != nil {
 					t.Fatal(err)
 				}
 			},
-			want: "live session at code",
+			want: "live session at build",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

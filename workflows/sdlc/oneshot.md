@@ -37,13 +37,11 @@ questions you cannot resolve, the change is too large for one headless
 turn, or verification requires a human surface you cannot drive from
 tools (a rendered UI, agent behaviour against real Claude, a prompt
 change whose only signal is human-shaped, anything that needs an
-operator's eyes and nothing else covers it). Refuse silently: leave the
-canvas at its seeded placeholders (test stage) or exit without writing
-to the canvas file (everywhere else). For design and code, the runner
-asserts canvas existence at commit time; for test, the stage gate
-catches the unfilled skeleton at advance time. Either way, refusal
-stops the chain and the run parks. The operator picks it up
-interactively (`moe sdlc <stage>`) from there.
+operator's eyes and nothing else covers it). Refuse silently: exit
+without writing to your canvas. The runner refuses a turn that left its
+canvases unchanged — for build, that means both seeded files untouched —
+so the refusal stops the chain and the run parks. The operator picks it
+up interactively (`moe sdlc <stage>`) from there.
 
 Don't ask questions in your output. There is nobody on the other end to
 answer. Either ship the canvas, nominate the close, or refuse silently.

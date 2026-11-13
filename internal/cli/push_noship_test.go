@@ -34,16 +34,16 @@ nothing — the run's whole deliverable is bureaucracy commits
 // behaviour, whatever the branch looks like.
 var plainReadyGate = strings.Replace(noShipGate, `{"status":"ready","ship":"none"}`, `{"status":"ready"}`, 1)
 
-// writeTestGate commits a test canvas into the run, the way the test
-// stage's own turn would. Committing matters: close refuses a dirty
+// writeTestGate commits build's test.md into the run, the way a build
+// turn would. Committing matters: close refuses a dirty
 // bureaucracy tree, so a canvas left uncommitted would fail the close
 // for the wrong reason.
 func (f *pushFixture) writeTestGate(body string) {
 	f.t.Helper()
-	writeContent(f.t, f.root, f.projectID, f.runID, "test", body)
-	gittest.Run(f.t, f.root, "add", run.ContentPath(f.projectID, f.runID, "test"))
+	writeFile(f.t, filepath.Join(f.root, run.ContentFilePath(f.projectID, f.runID, "build", "test.md")), body)
+	gittest.Run(f.t, f.root, "add", run.ContentFilePath(f.projectID, f.runID, "build", "test.md"))
 	gittest.Run(f.t, f.root, "commit", "-m",
-		"work: update test\n\nMoE-Run: "+f.runID+"\nMoE-Document: test\n")
+		"work: update build\n\nMoE-Run: "+f.runID+"\nMoE-Document: build\n")
 }
 
 // rewindBranchToDefault drops the fixture's feature commit so moe/<run>

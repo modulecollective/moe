@@ -42,56 +42,32 @@ func reviewStageGate(root string, md *run.Metadata) (bool, error) {
 	return true, nil
 }
 
-// testStageGate is the satisfiability gate registered on sdlc's test
-// stage. It refuses to advance the run when the test canvas left the
-// JSON gate blocked or left the two load-bearing sections (What was
-// verified, What wasn't verified) empty or sitting on their seeded
-// placeholder paragraphs — the anti-theater move the design twin
-// records: committing the skeleton without filling it should not count
-// as "tested."
-//
-// The "Fixes applied" section is intentionally exempt — it's
-// legitimately empty for clean runs.
-func testStageGate(root string, md *run.Metadata) (bool, error) {
-	canvas := filepath.Join(root, run.ContentPath(md.Project, md.ID, "test"))
-	body, err := os.ReadFile(canvas)
-	if err != nil {
-		// A missing canvas means the stage hasn't run yet — the
-		// work-turn check would have already short-circuited above
-		// us. Tolerate so the gate doesn't manufacture an error for a
-		// pre-stage run.
-		if errors.Is(err, fs.ErrNotExist) {
-			return false, nil
-		}
-		return false, err
-	}
-	sections := parseTestCanvasSections(string(body))
-	status, ok := stageGateStatus(string(body))
-	return ok &&
-		status == "ready" &&
-		testSectionFilled(sections["What was verified"]) &&
-		testSectionFilled(sections["What wasn't verified"]), nil
-}
-
-// testGateShipNone reports whether the run's test canvas declares, on a
-// ready gate, that the run deliberately ships no project-repo change —
-// `{"status":"ready","ship":"none"}`. Push reads it to route a
+// testGateShipNone reports whether the run's build test.md declares, on
+// a ready gate, that the run deliberately ships no project-repo change
+// — `{"status":"ready","ship":"none"}`. Push reads it to route a
 // bureaucracy-only run (a knowledge topic, canvas prose, twin feedback)
 // into close instead of refusing "nothing to push".
 //
 // `ship` is orthogonal to `status`: it names the terminal action, not
-// the test verdict, so it's only honoured on a ready gate — a blocked
-// gate keeps its existing meaning whatever else the fence carries.
-// Absent, empty, or any other value means today's behaviour, and the
-// status-only parsers above ignore the field entirely, so old canvases
-// need no migration.
+// the verification verdict, so it's only honoured on a ready gate — a
+// blocked gate keeps its existing meaning whatever else the fence
+// carries. Absent, empty, or any other value means today's behaviour,
+// and the status-only parsers ignore the field entirely.
 //
-// Every read failure — missing canvas, unparsable fence, malformed JSON
-// — reports false. This is a permission to do something destructive
-// (close deletes the sandbox clone), so absence of the signal must never
-// read as presence.
+// The declaration is read from test.md alone — the owning file, never a
+// concatenation of the build canvases — after the layout check refuses
+// an ambiguous document. The build entry reset drops `ship` with
+// `ready`, so a stale declaration cannot outlive a resumed build.
+//
+// Every read failure — missing canvas, ambiguous layout, unparsable
+// fence, malformed JSON — reports false. This is a permission to do
+// something destructive (close deletes the sandbox clone), so absence
+// of the signal must never read as presence.
 func testGateShipNone(root string, md *run.Metadata) bool {
-	body, err := os.ReadFile(filepath.Join(root, run.ContentPath(md.Project, md.ID, "test")))
+	if _, err := run.Canvases(root, md.Project, md.ID, "build"); err != nil {
+		return false
+	}
+	body, err := os.ReadFile(filepath.Join(root, run.ContentFilePath(md.Project, md.ID, "build", "test.md")))
 	if err != nil {
 		return false
 	}

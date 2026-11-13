@@ -46,12 +46,12 @@ func TestWorkflowNextWalksStages(t *testing.T) {
 		t.Fatalf("after design (no code yet): expected stage design (parked), got kind=%v name=%q", kind, next)
 	}
 
-	trailerstest.CommitWorkTurnAt(t, root, "p", "r", "sdlc", "code", t0.Add(time.Hour))
+	trailerstest.CommitWorkTurnAt(t, root, "p", "r", "sdlc", "build", t0.Add(time.Hour))
 	next, kind, err = wf.Next(root, md)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kind != NextKindStage || next != "code" {
+	if kind != NextKindStage || next != "build" {
 		t.Fatalf("after code (no push yet): expected stage code (parked), got kind=%v name=%q", kind, next)
 	}
 
@@ -88,7 +88,7 @@ func TestWorkflowNextReopensStaleStage(t *testing.T) {
 
 	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
 	trailerstest.CommitWorkTurnAt(t, root, "p", "r", "sdlc", "design", t0)
-	trailerstest.CommitWorkTurnAt(t, root, "p", "r", "sdlc", "code", t0.Add(time.Hour))
+	trailerstest.CommitWorkTurnAt(t, root, "p", "r", "sdlc", "build", t0.Add(time.Hour))
 	// Design reworked after the code turn — design becomes parked
 	// again, awaiting a fresh code turn.
 	trailerstest.CommitWorkTurnAt(t, root, "p", "r", "sdlc", "design", t0.Add(2*time.Hour))
@@ -103,12 +103,12 @@ func TestWorkflowNextReopensStaleStage(t *testing.T) {
 
 	// Land a fresh code turn — design's successor is now newer than
 	// design, so design satisfies and code becomes the parked stage.
-	trailerstest.CommitWorkTurnAt(t, root, "p", "r", "sdlc", "code", t0.Add(3*time.Hour))
+	trailerstest.CommitWorkTurnAt(t, root, "p", "r", "sdlc", "build", t0.Add(3*time.Hour))
 	next, kind, err = wf.Next(root, md)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kind != NextKindStage || next != "code" {
+	if kind != NextKindStage || next != "build" {
 		t.Fatalf("re-coded after re-design: expected stage code, got kind=%v name=%q", kind, next)
 	}
 }
@@ -147,7 +147,7 @@ func TestWorkflowNextAdvanceMarkerSatisfiesStage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kind != NextKindStage || next != "code" {
+	if kind != NextKindStage || next != "build" {
 		t.Fatalf("after advance: expected stage code, got kind=%v name=%q", kind, next)
 	}
 
@@ -233,7 +233,7 @@ func TestWorkflowNextIgnoresOtherProjectSameSlug(t *testing.T) {
 	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
 	// Project "a" has a full sdlc run for slug "fix-bug".
 	trailerstest.CommitWorkTurnAt(t, root, "a", "fix-bug", "sdlc", "design", t0)
-	trailerstest.CommitWorkTurnAt(t, root, "a", "fix-bug", "sdlc", "code", t0.Add(time.Hour))
+	trailerstest.CommitWorkTurnAt(t, root, "a", "fix-bug", "sdlc", "build", t0.Add(time.Hour))
 
 	// Project "b" opens the same slug fresh. Should start at design.
 	md := &run.Metadata{ID: "fix-bug", Project: "b", Workflow: "sdlc", Status: run.StatusInProgress}
@@ -308,9 +308,9 @@ func TestWorkflowNextWithIndexMatchesForkingPath(t *testing.T) {
 		func() {
 			trailerstest.CommitAdvanceAt(t, root, "a", "fix-bug", "sdlc", "design", t0.Add(30*time.Minute))
 		},
-		func() { trailerstest.CommitWorkTurnAt(t, root, "a", "fix-bug", "sdlc", "code", t0.Add(time.Hour)) },
+		func() { trailerstest.CommitWorkTurnAt(t, root, "a", "fix-bug", "sdlc", "build", t0.Add(time.Hour)) },
 		func() { trailerstest.CommitWorkTurnAt(t, root, "a", "fix-bug", "sdlc", "design", t0.Add(2*time.Hour)) },
-		func() { trailerstest.CommitWorkTurnAt(t, root, "a", "fix-bug", "sdlc", "code", t0.Add(3*time.Hour)) },
+		func() { trailerstest.CommitWorkTurnAt(t, root, "a", "fix-bug", "sdlc", "build", t0.Add(3*time.Hour)) },
 	}
 	for i, step := range checkpoints {
 		step()
@@ -349,9 +349,8 @@ func TestWorkflowSuccessor(t *testing.T) {
 		stage string
 		want  string // "" means no successor or unknown stage
 	}{
-		{"design", "code"},
-		{"code", "test"},
-		{"test", "review"},
+		{"design", "build"},
+		{"build", "review"},
 		{"review", "push"},
 		{"push", ""}, // terminal stage
 		{"bogus", ""},
@@ -361,5 +360,53 @@ func TestWorkflowSuccessor(t *testing.T) {
 		if got := wf.Successor(tc.stage); got != tc.want {
 			t.Errorf("Successor(%q) = %q, want %q", tc.stage, got, tc.want)
 		}
+	}
+}
+
+// TestWorkflowNextLegacyRunNeedsABuildTurn: a run started under the old
+// design → code → test → review ladder recorded its progress as code and
+// test turns. Those still prove design was followed — the run must not
+// fall back to design — but they never satisfy build, and neither do the
+// run's old review turn or advance markers: the run waits at build for a
+// verification turn of its own. No run.json migration is involved.
+func TestWorkflowNextLegacyRunNeedsABuildTurn(t *testing.T) {
+	root := newTestBureaucracy(t)
+	wf, err := LookupWorkflow("sdlc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	md := &run.Metadata{ID: "r", Project: "p", Workflow: "sdlc", Status: run.StatusInProgress}
+
+	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
+	trailerstest.CommitWorkTurnAt(t, root, "p", "r", "sdlc", "design", t0)
+	trailerstest.CommitWorkTurnAt(t, root, "p", "r", "sdlc", "code", t0.Add(time.Hour))
+	trailerstest.CommitWorkTurnAt(t, root, "p", "r", "sdlc", "test", t0.Add(2*time.Hour))
+	trailerstest.CommitAdvanceAt(t, root, "p", "r", "sdlc", "test", t0.Add(3*time.Hour))
+	trailerstest.CommitWorkTurnAt(t, root, "p", "r", "sdlc", "review", t0.Add(4*time.Hour))
+	trailerstest.CommitAdvanceAt(t, root, "p", "r", "sdlc", "review", t0.Add(5*time.Hour))
+
+	next, kind, err := wf.Next(root, md)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kind != NextKindStage || next != "build" {
+		t.Fatalf("legacy run: expected stage build, got kind=%v name=%q", kind, next)
+	}
+
+	// A build turn whose canvases aren't stamped still parks at build:
+	// the derived gate, not the turn alone, decides.
+	trailerstest.CommitWorkTurnAt(t, root, "p", "r", "sdlc", "build", t0.Add(6*time.Hour))
+	if next, _, _ := wf.Next(root, md); next != "build" {
+		t.Fatalf("unstamped build: expected build, got %q", next)
+	}
+	writeStampedBuild(t, root, md)
+	// Stamped, build still waits: the old review turn predates it, so
+	// only a fresh review satisfies it.
+	if next, _, _ := wf.Next(root, md); next != "build" {
+		t.Fatalf("stamped build with stale review: expected build (parked), got %q", next)
+	}
+	trailerstest.CommitWorkTurnAt(t, root, "p", "r", "sdlc", "review", t0.Add(7*time.Hour))
+	if next, _, _ := wf.Next(root, md); next != "review" {
+		t.Fatalf("fresh review after build: expected review (parked), got %q", next)
 	}
 }

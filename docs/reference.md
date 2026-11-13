@@ -417,7 +417,7 @@ float with releases; full ids (`claude-fable-5`) pin. Empty values are invalid;
 there is no reset keyword.
 
 **Selectors** have two axes — workflow and stage. Because a bare stage name
-could be ambiguous across workflows (`code` is a stage of `sdlc`, `chat` of
+could be ambiguous across workflows (`build` is a stage of `sdlc`, `chat` of
 `chat`), stage-only selectors take a leading dot:
 
 | Selector      | Matches                     | Specificity |
@@ -430,6 +430,11 @@ could be ambiguous across workflows (`code` is a stage of `sdlc`, `chat` of
 Highest specificity wins per property; equal specificity breaks to the last
 rule in the file. Every property cascades independently: a `model-codex` rule
 does not clear an inherited `model-claude`, `model`, or `agent`.
+
+A selector naming a retired stage — sdlc's `code` or `test`, both replaced by
+`build` — refuses at load and names the replacement. Rewrite the rule; it never
+silently selects build, because the two retired stages' settings may have
+differed.
 
 **Precedence.** The stylesheet sits below your explicit per-run bindings and
 above the background defaults, mirroring "explicit beats the stylesheet":
@@ -478,8 +483,8 @@ moe completion fish | source
 ```
 
 Completion covers verbs and subcommands (`moe sd⇥` → `sdlc`, `moe sdlc ⇥` →
-`design code test review …`) and the `<project>/<run>` slug for run-taking verbs
-(`moe sdlc code ⇥`), plus idea slugs (including `--from-idea`) and named
+`design build review …`) and the `<project>/<run>` slug for run-taking verbs
+(`moe sdlc build ⇥`), plus idea slugs (including `--from-idea`) and named
 workspaces. The script itself never changes as commands are added — all the
 logic lives in `moe` and is best-effort, so completion stays silent outside a
 bureaucracy rather than erroring.
@@ -495,7 +500,7 @@ bureaucracy:
   leave the run's cache warm.
 - `dev-env-teardown.d/*` cleans up when a run or workspace closes.
 - `pre-push.d/*` is an invocation-time ship gate; a failing script halts the
-  push path and opens a recovery code session.
+  push path and opens a recovery build session.
 
 Use `moe hook fire <project> dev-env|dev-env-teardown|pre-push` to exercise one
 event in a transient sandbox without creating a run.
@@ -503,7 +508,7 @@ event in a transient sandbox without creating a run.
 Hooks, chore definitions, knowledge topics, and twin documents are
 bureaucracy-side artifacts: edit them by hand, or let an sdlc run land them. An
 sdlc stage's per-turn commit picks up `projects/<project>/hooks`, `chores`,
-`knowledge`, and `digital-twin`, so `moe sdlc design → code → close` is the
+`knowledge`, and `digital-twin`, so `moe sdlc design → build → close` is the
 journaled route with no push involved.
 
 ### Chore definitions

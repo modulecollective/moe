@@ -159,31 +159,57 @@ func TestBuildSystemPromptInjectsSdlcDesignFragment(t *testing.T) {
 	}
 }
 
-func TestBuildSystemPromptInjectsSdlcCodeFragment(t *testing.T) {
+// TestBuildSystemPromptInjectsSdlcBuildFragment: a build turn gets the
+// build fragment, and its canvas paragraph names both writable content
+// files by absolute path — not the single content.md other stages get.
+func TestBuildSystemPromptInjectsSdlcBuildFragment(t *testing.T) {
 	root := newTestBureaucracy(t)
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
-	got, _, err := buildSystemPrompt(root, md, "code", "", false, "claude")
+	got, _, err := buildSystemPrompt(root, md, "build", "", false, "claude")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(got, "# Stage: code") {
-		t.Fatalf("prompt missing code fragment heading:\n%s", got)
+	if !strings.Contains(got, "# Stage: build") {
+		t.Fatalf("prompt missing build fragment heading:\n%s", got)
 	}
-	// Both formerly-shared blocks are now inlined into stages/sdlc/code.md.
-	if !strings.Contains(got, "## Before you start") {
-		t.Errorf("code fragment missing inlined completeness block:\n%s", got)
+	for _, block := range []string{"## Before you start", "## Only edit this run"} {
+		if !strings.Contains(got, block) {
+			t.Errorf("build fragment missing %q:\n%s", block, got)
+		}
 	}
-	if !strings.Contains(got, "## Only edit this run") {
-		t.Errorf("code fragment missing inlined cross-run block:\n%s", got)
+	for _, name := range []string{"code.md", "test.md"} {
+		want := "  " + filepath.Join(root, run.ContentFilePath("tele", "fix-it", "build", name)) + "\n"
+		if !strings.Contains(got, want) {
+			t.Errorf("prompt missing writable path %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "single file:") || strings.Contains(got, filepath.Join("documents", "build", "content.md")) {
+		t.Errorf("build prompt must not name a single content.md:\n%s", got)
+	}
+	// The old handoff language must not survive the merge.
+	for _, stale := range []string{"handoff to test stage", "# Stage: code", "# Stage: test"} {
+		if strings.Contains(got, stale) {
+			t.Errorf("build prompt carries retired handoff text %q", stale)
+		}
 	}
 }
 
-func TestSdlcTestFragmentAllowsScopedMoeInvocations(t *testing.T) {
-	got := moe.Stage("sdlc", "test")
-	want := "When the target project is moe itself, this stage may\n  run `moe` for those scoped end-to-end checks"
-	if !strings.Contains(got, want) {
-		t.Fatalf("test fragment should explicitly allow scoped moe invocations during test stage:\n%s", got)
+func TestSdlcBuildFragmentKeepsCloseAndShipNoneRules(t *testing.T) {
+	got := moe.Stage("sdlc", "build")
+	for _, want := range []string{
+		`set code.md's gate to ` + "`" + `{"status":"close"}` + "`",
+		`stamp test.md ` + "`" + `{"status":"ready","ship":"none"}` + "`",
+		"resets to\n`{\"status\":\"blocked\"}` whenever build opens",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("build fragment missing %q", want)
+		}
+	}
+	for _, retired := range []string{"code", "test"} {
+		if moe.Stage("sdlc", retired) != "" {
+			t.Errorf("retired %s fragment still embedded", retired)
+		}
 	}
 }
 
@@ -324,7 +350,7 @@ func TestBuildSystemPromptSectionsEndWithNewline(t *testing.T) {
 	}
 
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
-	got, _, err := buildSystemPrompt(root, md, "code", "", false, "claude")
+	got, _, err := buildSystemPrompt(root, md, "build", "", false, "claude")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -337,17 +363,17 @@ func TestBannerFiresWhenPrereqDocMovedAfterWorkTurn(t *testing.T) {
 
 	runID := "fix-it"
 	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
-	// First turn on design, then on code, then design is touched again.
+	// First turn on design, then on build, then design is touched again.
 	trailerstest.CommitWorkTurnAt(t, root, "tele", runID, "sdlc", "design", t0)
-	workSHA := trailerstest.CommitWorkTurnAt(t, root, "tele", runID, "sdlc", "code", t0.Add(10*time.Second))
+	workSHA := trailerstest.CommitWorkTurnAt(t, root, "tele", runID, "sdlc", "build", t0.Add(10*time.Second))
 	trailerstest.CommitWorkTurnAt(t, root, "tele", runID, "sdlc", "design", t0.Add(20*time.Second))
 
 	md := &run.Metadata{ID: runID, Project: "tele", Workflow: "sdlc"}
-	got, _, err := buildSystemPrompt(root, md, "code", "", false, "claude")
+	got, _, err := buildSystemPrompt(root, md, "build", "", false, "claude")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(got, `Since your last turn on "code"`) {
+	if !strings.Contains(got, `Since your last turn on "build"`) {
 		t.Errorf("expected banner header, got:\n%s", got)
 	}
 	if !strings.Contains(got, workSHA) {

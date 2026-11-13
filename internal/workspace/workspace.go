@@ -146,7 +146,7 @@ func readClaim(workspacePath string) (*Claim, error) {
 // Acquire ensures the workspace exists and claims it for runRef
 // ("<project>/<runID>"). A workspace already claimed by a different
 // run is refused with *AlreadyClaimedError; one already claimed by
-// runRef is a no-op (re-acquire is idempotent — second `sdlc code`
+// runRef is a no-op (re-acquire is idempotent — second `sdlc build`
 // turn against the same run reaches this path).
 //
 // Acquire does NOT switch branches or touch the working tree — that is

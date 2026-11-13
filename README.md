@@ -156,7 +156,7 @@ full treatment.
 
 | Workflow | Stages | Use it for |
 | --- | --- | --- |
-| [`sdlc`](docs/workflows.md#sdlc) | `design` -> `code` -> `test` -> `review` -> `push` | designed code changes with a ship gate |
+| [`sdlc`](docs/workflows.md#sdlc) | `design` -> `build` -> `review` -> `push` | designed code changes with a ship gate |
 | [`chat`](docs/workflows.md#chat) | one `chat` session, resumed across sittings | a read-only thinking partner that reviews the project and grooms the backlog |
 | [`idea`](docs/workflows.md#ideas) | one `idea` canvas, edited through verbs | backlog capture before a full run exists |
 | [`intent`](docs/workflows.md#intents) | one `intent` canvas, edited through verbs | operator-authored standing direction agents read but never originate |

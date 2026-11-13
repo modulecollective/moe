@@ -292,7 +292,7 @@ func TestCascadeFromGateRidesIntoLiveChainChild(t *testing.T) {
 	pushCaptured := stubPushFromCascade(t, 0, nil)
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "", false, true, parentMD, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "", false, true, parentMD, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
 	}
@@ -310,7 +310,7 @@ func TestCascadeFromGateRidesIntoLiveChainChild(t *testing.T) {
 	// seven dispatches: parent (code, test, review), child (design,
 	// code, test, review).
 	// push happens via pushFromCascade for both.
-	wantStages := []string{"code", "test", "review", "design", "code", "test", "review"}
+	wantStages := []string{"build", "review", "design", "build", "review"}
 	gotStages := make([]string, 0, len(*openCaptured))
 	for _, inv := range *openCaptured {
 		gotStages = append(gotStages, inv.stage)
@@ -362,7 +362,7 @@ func TestCascadeFromGateShipDoesNotRide(t *testing.T) {
 	pushCaptured := stubPushFromCascade(t, 0, nil)
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "", false, false, parentMD, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "", false, false, parentMD, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
 	}
@@ -373,7 +373,7 @@ func TestCascadeFromGateShipDoesNotRide(t *testing.T) {
 	if got := len(*pushCaptured); got != 1 {
 		t.Fatalf("pushFromCascade dispatched %d times, want 1 (`!!` ships this run only)", got)
 	}
-	wantStages := []string{"code", "test", "review"}
+	wantStages := []string{"build", "review"}
 	gotStages := make([]string, 0, len(*openCaptured))
 	for _, inv := range *openCaptured {
 		gotStages = append(gotStages, inv.stage)
@@ -467,7 +467,7 @@ func TestCascadeFromGateRidesPastPRShippedParent(t *testing.T) {
 	t.Cleanup(func() { pushFromCascade = prevPush })
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "", false, true, parentMD, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "", false, true, parentMD, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
 	}
@@ -475,13 +475,11 @@ func TestCascadeFromGateRidesPastPRShippedParent(t *testing.T) {
 		t.Fatalf("parent cascade must ship: %+v", res)
 	}
 	wantEvents := []string{
-		"open parent-run:code parent=in_progress",
-		"open parent-run:test parent=in_progress",
+		"open parent-run:build parent=in_progress",
 		"open parent-run:review parent=in_progress",
 		"push parent-run",
 		"open child-run:design parent=pushed",
-		"open child-run:code parent=pushed",
-		"open child-run:test parent=pushed",
+		"open child-run:build parent=pushed",
 		"open child-run:review parent=pushed",
 		"push child-run",
 	}
@@ -560,7 +558,7 @@ func TestPromptPushNextStageBangBangBangRidesChain(t *testing.T) {
 		t.Fatalf("`!!!` at push gate must not dispatch through Command.Run")
 	}
 	// The child opens at design and walks to its own push.
-	wantStages := []string{"design", "code", "test", "review"}
+	wantStages := []string{"design", "build", "review"}
 	gotStages := make([]string, 0, len(*openCaptured))
 	for _, inv := range *openCaptured {
 		gotStages = append(gotStages, inv.stage)
@@ -656,7 +654,7 @@ func TestCascadeFromGateRideInterruptHaltsParent(t *testing.T) {
 	pushCaptured := stubPushFromCascade(t, 0, nil)
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "", false, true, parentMD, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "", false, true, parentMD, &stdout, &stderr)
 	if code != exitInterrupted {
 		t.Fatalf("cascade exit=%d, want %d (interrupt propagates from the ride); stderr=%q", code, exitInterrupted, stderr.String())
 	}
@@ -665,7 +663,7 @@ func TestCascadeFromGateRideInterruptHaltsParent(t *testing.T) {
 	}
 	// Parent: code, test, review, push (ship). Child: design only —
 	// interrupted there, so the child's code/test/review never dispatch.
-	wantStages := []string{"code", "test", "review", "design"}
+	wantStages := []string{"build", "review", "design"}
 	gotStages := make([]string, 0, len(*openCaptured))
 	for _, inv := range *openCaptured {
 		gotStages = append(gotStages, inv.stage)
@@ -712,7 +710,7 @@ func TestCascadeFromGateRideOrdinaryFailurePropagates(t *testing.T) {
 	stubPushFromCascade(t, 0, nil)
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "", false, true, parentMD, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "", false, true, parentMD, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("cascade exit=%d, want 1 (the child's code, propagated verbatim); stderr=%q", code, stderr.String())
 	}
@@ -720,7 +718,7 @@ func TestCascadeFromGateRideOrdinaryFailurePropagates(t *testing.T) {
 		t.Fatalf("parent cascade must still ship — the exit code reports the ride, not the parent: %+v", res)
 	}
 	// Child interrupted-free failure: design dispatched, code/review/test did not.
-	wantStages := []string{"code", "test", "review", "design"}
+	wantStages := []string{"build", "review", "design"}
 	gotStages := make([]string, 0, len(*openCaptured))
 	for _, inv := range *openCaptured {
 		gotStages = append(gotStages, inv.stage)
@@ -770,7 +768,7 @@ func TestCascadeFromGateSkipsRideWhenChildTerminal(t *testing.T) {
 	stubPushFromCascade(t, 0, nil)
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "", false, true, parentMD, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "", false, true, parentMD, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
 	}
@@ -778,7 +776,7 @@ func TestCascadeFromGateSkipsRideWhenChildTerminal(t *testing.T) {
 		t.Fatalf("parent cascade must ship: %+v", res)
 	}
 	// Only parent's code+test dispatched. No child stages.
-	wantStages := []string{"code", "test", "review"}
+	wantStages := []string{"build", "review"}
 	gotStages := make([]string, 0, len(*openCaptured))
 	for _, inv := range *openCaptured {
 		gotStages = append(gotStages, inv.stage)
@@ -819,14 +817,14 @@ func TestCascadeFromGateSkipsRideWhenChainCleared(t *testing.T) {
 	stubPushFromCascade(t, 0, nil)
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "", false, true, parentMD, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "", false, true, parentMD, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
 	}
 	if !res.shipped {
 		t.Fatalf("parent cascade must ship: %+v", res)
 	}
-	wantStages := []string{"code", "test", "review"}
+	wantStages := []string{"build", "review"}
 	gotStages := make([]string, 0, len(*openCaptured))
 	for _, inv := range *openCaptured {
 		gotStages = append(gotStages, inv.stage)
@@ -947,7 +945,7 @@ func TestActiveSDLCChainItemsMatchDashOrder(t *testing.T) {
 	// The same inputs through the dash must yield the same ACTIVE order.
 	next := map[string]dash.NextDecision{}
 	for _, md := range mds {
-		next[md.Project+"/"+md.ID] = dash.NextDecision{Stage: "code"}
+		next[md.Project+"/"+md.ID] = dash.NextDecision{Stage: "build"}
 	}
 	rows, err := dash.BuildRows(dash.Inputs{
 		Now:       base.Add(time.Hour),

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/modulecollective/moe/internal/project"
@@ -61,9 +60,9 @@ func promptNextStageParked(root string, md *run.Metadata, stdout, stderr io.Writ
 // for the offered stage. When override is non-empty it replaces the
 // stage the prompt offers, leaving back-targets keyed off justFinished
 // untouched. The push-gate recovery session passes override="push": the
-// recovery is a code turn, so justFinished is "code" (back offers
-// code/design to re-fix the rebase), but the next step to offer is the
-// push retry, not code's successor (test). Every other caller goes
+// recovery is a build turn, so justFinished is "build" (back offers
+// build/design to re-fix the rebase), but the next step to offer is the
+// push retry, not build's successor (review). Every other caller goes
 // through promptNextStage with override="" — byte-for-byte the old path.
 //
 // park forces the print-only branch regardless of whether stdin is a
@@ -104,6 +103,23 @@ func promptNextStageOverride(root string, md *run.Metadata, justFinished, overri
 	// re-offered, not a fresh verdict to read.
 	if override == "" && stageNominatedClose(root, md, justFinished) {
 		return closeNominatedRun(md, justFinished, stdout, stderr)
+	}
+	// A directory-form stage that just ran advances only when every
+	// canvas file is stamped — on every exit, the recovery overrides
+	// (push retry after a hook repair, re-review after a kickback)
+	// included, which is why this sits ahead of the override switch.
+	// An unready build parks with each file's reason named; it never
+	// kicks back to itself.
+	if justFinished != "" && wf.StageFiles(justFinished) != nil {
+		problems, err := wf.StageGateProblems(root, md, justFinished)
+		if err != nil {
+			moePrintf(stderr, "%s gate: %v\n", justFinished, err)
+			return 1
+		}
+		if len(problems) > 0 {
+			moePrintf(stdout, "%s", stageNotReadyMessage(wf.Name, md, justFinished, problems))
+			return 0
+		}
 	}
 	var stage string
 	switch {
@@ -157,23 +173,22 @@ func promptNextStageOverride(root string, md *run.Metadata, justFinished, overri
 	// (none today, but the prompt should stay honest) simply don't see
 	// the option.
 	scuttle := g.Lookup("close")
-	// sdlc review/test closed `blocked` → kick back, don't walk forward.
+	// sdlc review closed `blocked` → kick back, don't walk forward.
 	// The gate said the run isn't ready to advance, so offering its
 	// successor on a reflex Enter would step past the objection. Reshape
 	// into a kickback offer (interactive) or a back-pointing nudge
 	// (non-TTY). Gated to override == "" so the kickback's own recovery
 	// turn — which re-enters here with override set to the blocked stage —
 	// re-offers that gate instead of recursing into another kickback.
-	if override == "" && md.Workflow == "sdlc" &&
-		(justFinished == "review" || justFinished == "test") {
+	if override == "" && md.Workflow == "sdlc" && justFinished == "review" {
 		if canvas := readPrintableCanvas(root, md, justFinished); canvas != "" {
 			if status, ok := stageGateStatus(canvas); ok && status == "blocked" {
 				// Finish obeys the gates: a blocked one is its outcome.
 				finishGateBlocked(root, md, justFinished, stderr)
 				if park || !stdinIsTerminal() {
-					// No operator to choose; point the nudge back at code
+					// No operator to choose; point the nudge back at build
 					// (where the fix lives), not the forward stage.
-					moePrintf(stdout, "next: moe %s code %s/%s (%s blocked — kick back to fix)\n",
+					moePrintf(stdout, "next: moe %s build %s/%s (%s blocked — kick back to fix)\n",
 						wf.Name, md.Project, md.ID, justFinished)
 					return 0
 				}
@@ -288,20 +303,23 @@ func backHint(back []*Command) string {
 	return "back to stage"
 }
 
-// readPrintableCanvas returns the named stage's content.md body if it
-// exists and contains non-whitespace, or the empty string otherwise.
-// Read errors collapse to empty — the canvas is operator-facing context,
-// not load-bearing state, so a missing file falls through silently.
+// readPrintableCanvas returns the named stage's canvas for display — a
+// file-form content.md verbatim, or a directory-form stage's files
+// concatenated under their labels — if it exists and contains
+// non-whitespace, or the empty string otherwise. Read errors (an
+// ambiguous layout included) collapse to empty: the canvas is
+// operator-facing context, not load-bearing state. Never feed the
+// result to a gate parser for a directory-form stage; gates read each
+// file on its own.
 func readPrintableCanvas(root string, md *run.Metadata, stage string) string {
-	canvasPath := filepath.Join(root, run.ContentPath(md.Project, md.ID, stage))
-	body, err := os.ReadFile(canvasPath)
+	body, err := run.ReadCanvas(root, md.Project, md.ID, stage)
 	if err != nil {
 		return ""
 	}
-	if strings.TrimSpace(string(body)) == "" {
+	if strings.TrimSpace(body) == "" {
 		return ""
 	}
-	return string(body)
+	return body
 }
 
 // promptOption is one entry in a chain prompt's label/legend pair. key
@@ -351,35 +369,29 @@ func renderPromptLegend(opts []promptOption) string {
 }
 
 // promptStageNextStage offers the non-push stage prompt: [Y/n] for
-// most workflows, with `s` appended when the next stage is sdlc's test
-// (the skip shortcut jumps straight to the review prompt), and optional
-// /x and /b suffixes when scuttle / back are non-nil. Y still defaults
-// so a reflex Enter chains the next stage interactively, the same as
-// before. Workflows with a registered cascade dispatcher (sdlc)
+// most workflows, with optional /x and /b suffixes when scuttle /
+// back are non-nil. Y still defaults so a reflex Enter chains the next
+// stage interactively, the same as before. Workflows with a registered cascade dispatcher (sdlc)
 // also surface `!` as a peer in the bracket and main legend — single
 // keystroke, dispatch one stage headless — while `!<stage>` / `!!` /
 // `!!!` stay on a second cascade-extras line below. `b` re-invokes the
 // just-finished stage interactively. `x` dispatches the workflow's
 // close command for the current run — the "abandon ship" path the
-// operator forms at the same surface they decline from. `s` opens
-// the review prompt early without satisfying the test stage: useful
-// for doc-only diffs and trivial fixes where the anti-theater rule
-// that test stage enforces would just produce a rubber-stamp canvas.
-// Hardcoding the sdlc gate keeps the prompt honest — no other
-// workflow has a test stage today, and we'd rather widen deliberately
-// than offer affordances that don't exist.
+// operator forms at the same surface they decline from. There is no
+// skip key: build owns verification, so there is no separate stage to
+// step over on the way to review.
 //
 // `x` is positioned adjacent to `n` (decline) because both read as "no":
 // scuttle is "no, and also close this run." Grouping the two negatives
 // reads better than appending `x` at the tail, and it leaves the
-// forward-leaning `s` / `b` slots in their familiar positions.
+// forward-leaning `a` / `b` slots in their familiar positions.
 //
-// When the next stage is code, the just-finished design canvas is
+// When the next stage is build, the just-finished design canvas is
 // printed above the prompt — same shape as promptPushNextStage prints
-// the code canvas above [N/m/p]. This is the operator's one chance to
-// read the canvas at the design→code gate before authorising the next
-// stage. The [Y/n] default stays Y: design→code is reversible (re-design
-// after a botched code run), so the canvas read is informative, not
+// the review canvas above [N/m/p]. This is the operator's one chance to
+// read the canvas at the design→build gate before authorising the next
+// stage. The [Y/n] default stays Y: design→build is reversible (re-design
+// after a botched build run), so the canvas read is informative, not
 // gating. Whitespace-only or missing canvas falls through to the bare
 // prompt, no header or decoration.
 //
@@ -404,12 +416,10 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 	}
 	if priorCanvas == "" {
 		switch next.Name {
-		case "code":
+		case "build":
 			priorCanvas = "design"
-		case "test":
-			priorCanvas = "code"
 		case "review":
-			priorCanvas = "test"
+			priorCanvas = "build"
 		}
 	}
 	body := ""
@@ -442,21 +452,6 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 		opts = append(opts, promptOption{key: 'a', hint: "decline, advance to " + next.Name})
 	}
 	dispatcher := lookupCascadeDispatcher(md.Workflow)
-	// `s` is the shortcut that steps over the test stage: from post-code
-	// straight to the review prompt. Gated to sdlc + next.Name == "test"
-	// so the option only shows up at the exact gate it makes sense:
-	// post-code, where the next thing the chain would do is open test.
-	// Other prompts (post-design, non-sdlc workflows) leave this off —
-	// they have no test stage to skip over.
-	//
-	// It skips test, not judgment. Review is the ship gate, so `s` lands
-	// on review's prompt rather than push's — the operator still gets
-	// the final verdict on a doc-only diff, just without a rubber-stamp
-	// test canvas in front of it.
-	offerSkipTest := md.Workflow == "sdlc" && next.Name == "test"
-	if offerSkipTest {
-		opts = append(opts, promptOption{key: 's', hint: "skip to review"})
-	}
 	if len(back) > 0 {
 		opts = append(opts, promptOption{key: 'b', hint: backHint(back)})
 	}
@@ -500,30 +495,6 @@ func promptStageNextStage(next *Command, back []*Command, scuttle *Command, root
 	}
 	if scuttle != nil && answer == "x" {
 		return scuttle.Run([]string{md.Project + "/" + md.ID}, stdout, stderr)
-	}
-	if offerSkipTest && answer == "s" {
-		// Skip opens the review prompt directly without satisfying
-		// test. The review command lives in the same group as the
-		// just-decline-able test stage; look it up the same way
-		// promptNextStage does for the natural cascade. `back` is the
-		// same prior-stage list this prompt is offering (justFinished ==
-		// "code" upstream, so back contains design+code as appropriate),
-		// which is the right back target for the review prompt: the
-		// operator's mental "just finished" is code; test was the one
-		// they elected to skip. A workflow that registers test but no
-		// review wouldn't make sense, but we stay nil-safe just in case.
-		g, err := LookupGroup(md.Workflow)
-		if err != nil {
-			moePrintf(stderr, "%v\n", err)
-			return 1
-		}
-		reviewCmd := g.Lookup("review")
-		if reviewCmd == nil {
-			moePrintf(stderr, "workflow %q has no review command\n", md.Workflow)
-			return 1
-		}
-		reviewHint := fmt.Sprintf("moe %s %s %s/%s", md.Workflow, reviewCmd.Name, md.Project, md.ID)
-		return promptStageNextStage(reviewCmd, back, scuttle, root, md, reviewHint, stdout, stderr)
 	}
 	if len(back) > 0 && answer == "b" {
 		return dispatchBack(back, md, stdout, stderr)
@@ -585,7 +556,7 @@ func promptKickback(g *CommandGroup, scuttle *Command, root string, md *run.Meta
 	}
 	hasDesign := g.Lookup("design") != nil
 	opts := []promptOption{
-		{key: 'Y', hint: "kick back to code"},
+		{key: 'Y', hint: "kick back to build"},
 		{key: 'n', hint: "decline (park)"},
 	}
 	if hasDesign {
@@ -623,13 +594,13 @@ func promptKickback(g *CommandGroup, scuttle *Command, root string, md *run.Meta
 	case answer == "n":
 		return 0
 	case answer == "" || strings.HasPrefix(answer, "y"):
-		return openKickbackSession(md, "code", blockedStage, canvas, false, stdout, stderr)
+		return openKickbackSession(md, "build", blockedStage, canvas, false, stdout, stderr)
 	}
 	// Anything else — a typo — declines, same as the other chain prompts.
 	return 0
 }
 
-// openKickbackSession opens the chosen back-target document ("code" or
+// openKickbackSession opens the chosen back-target document ("build" or
 // "design") as a recovery turn carrying the blocking findings, with the
 // chain set to re-offer the stage that blocked. headless distinguishes
 // the two callers: the interactive kickback (promptKickback) passes
@@ -681,13 +652,12 @@ func runKickbackSession(md *run.Metadata, document, blockedStage, canvas string,
 // they're deciding whether to ship. That's the review canvas: review
 // is the last gate before push, and its ship verdict — the findings,
 // the fixes it applied in place, the reason the gate reads ready — is
-// what the ship decision is actually about. Missing or
-// whitespace-only, it falls back to test, then to code: the operator's
-// last reading material before the ship decision should be the most
-// recent thing the agent wrote, whichever layer that turns out to be.
-// Both fallbacks are reachable: `moe sdlc push` invoked directly on a
-// run that finished test but not review lands on test; a run that took
-// the post-code `s` shortcut and then declined review lands on code.
+// what the ship decision is actually about. Missing or whitespace-only,
+// it falls back to build's canvases (code.md and test.md, labelled):
+// the operator's last reading material before the ship decision should
+// be the most recent thing the agent wrote. The fallback is reachable:
+// `moe sdlc push` invoked directly on a run that finished build but not
+// review lands on build.
 // The chain is walked freshest-first rather than resolved through the
 // workflow registry's prereq edge — push's prereq is review either
 // way, and what sits below it is a staleness fallback, not a prereq
@@ -703,10 +673,10 @@ func runKickbackSession(md *run.Metadata, document, blockedStage, canvas string,
 // runs inside the chosen push command, not at chain-prompt time, so by
 // the time the operator reads this preamble the push canvas (if any) may
 // be left over from a prior push attempt — stale relative to whatever
-// the operator's about to do. Review → test → code is the live story.
+// the operator's about to do. Review → build is the live story.
 func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root string, md *run.Metadata, hint string, stdout, stderr io.Writer) int {
 	body := ""
-	for _, stage := range []string{"review", "test", "code"} {
+	for _, stage := range []string{"review", "build"} {
 		if body = readPrintableCanvas(root, md, stage); body != "" {
 			break
 		}
@@ -1093,13 +1063,16 @@ var checkCascadeStageGate = func(wf *Workflow, md *run.Metadata, stage string, s
 	if err != nil {
 		return false, 1
 	}
-	ok, err := wf.CheckStageGate(root, md, stage)
+	problems, err := wf.StageGateProblems(root, md, stage)
 	if err != nil {
 		moePrintf(stderr, "cascade: %s gate: %v\n", stage, err)
 		return false, 1
 	}
-	if !ok {
+	if len(problems) > 0 {
 		moePrintf(stderr, "cascade: %s gate not satisfied; parked at %s\n", stage, stage)
+		for _, p := range problems {
+			moePrintf(stderr, "  %s\n", p)
+		}
 		return false, 1
 	}
 	return true, 0
@@ -1120,7 +1093,7 @@ var checkCascadeStageGate = func(wf *Workflow, md *run.Metadata, stage string, s
 // review/test gate does not dead-end: it returns parked=true (code 0,
 // no steps), and cascadeFromGate stops the walk so dispatchCascade's
 // tail re-enters the chain prompt at the blocked stage. There the
-// kickback offer fires on a TTY, or the `moe sdlc code <run> (review
+// kickback offer fires on a TTY, or the `moe sdlc build <run> (review
 // blocked — kick back to fix)` nudge prints when headless — the "offer
 // when a human is present, launch when headless" line the design draws.
 // Any other non-yolo gate failure (test gate refusing an unfilled
@@ -1144,7 +1117,7 @@ var checkCascadeStageGate = func(wf *Workflow, md *run.Metadata, stage string, s
 // the exit code to propagate (0 = gate satisfied, proceed; non-zero =
 // park).
 func cascadeStageGate(wf *Workflow, dispatcher cascadeDispatcher, md *run.Metadata, stage string, yolo bool, stdout, stderr io.Writer) (steps []cascadeStepResult, parked bool, code int) {
-	if !yolo && md.Workflow == "sdlc" && (stage == "review" || stage == "test") {
+	if !yolo && md.Workflow == "sdlc" && stage == "review" {
 		if _, blocked := cascadeStageBlocked(md, stage, stderr); blocked {
 			moePrintf(stderr, "cascade: %s closed blocked; parking at its gate\n", stage)
 			return nil, true, 0
@@ -1152,18 +1125,18 @@ func cascadeStageGate(wf *Workflow, dispatcher cascadeDispatcher, md *run.Metada
 	}
 	retries := 0
 	for {
-		if yolo && retries < 1 && md.Workflow == "sdlc" && (stage == "review" || stage == "test") {
+		if yolo && retries < 1 && md.Workflow == "sdlc" && stage == "review" {
 			if canvas, blocked := cascadeStageBlocked(md, stage, stderr); blocked {
-				if cc := cascadeCheckpoint(md, "gate kickback to code", stderr); cc != 0 {
-					steps = append(steps, cascadeStepResult{stage: "code", code: cc})
+				if cc := cascadeCheckpoint(md, "gate kickback to build", stderr); cc != 0 {
+					steps = append(steps, cascadeStepResult{stage: "build", code: cc})
 					return steps, false, cc
 				}
 				retries++
 				// One headless kickback to code, carrying the blocking
 				// canvas as kickoff — the same seam the interactive
 				// kickback uses, run headless and re-checked by the loop.
-				recCode := openKickbackSession(md, "code", stage, canvas, true, stdout, stderr)
-				steps = append(steps, cascadeStepResult{stage: "code", code: recCode})
+				recCode := openKickbackSession(md, "build", stage, canvas, true, stdout, stderr)
+				steps = append(steps, cascadeStepResult{stage: "build", code: recCode})
 				if recCode != 0 {
 					return steps, false, recCode
 				}
@@ -1226,6 +1199,11 @@ func cascadeStageBlocked(md *run.Metadata, stage string, stderr io.Writer) (canv
 func stageNominatedClose(root string, md *run.Metadata, stage string) bool {
 	if md.Workflow != "sdlc" || stage == "" {
 		return false
+	}
+	// A directory-form stage is asked file by file: its display
+	// concatenation must never decide which fence binds.
+	if stageCanvasFiles(md.Workflow, stage) != nil {
+		return canvasFilesNominateClose(root, md, stage)
 	}
 	canvas := readPrintableCanvas(root, md, stage)
 	if canvas == "" {

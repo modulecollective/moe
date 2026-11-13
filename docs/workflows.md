@@ -11,16 +11,16 @@ Designed, reviewed, tested changes used to cost enough that the discipline got
 skipped under deadline. The bet here is that agents changed the price: when
 each stage is one conversation and the handoff is a canvas the next stage
 reads, the full lifecycle becomes the cheap default path rather than the
-ceremony you cut first. The gates earn their place too — `test` and `review`
-exist to kick work back to `code` or `design`, not to decorate the ladder.
+ceremony you cut first. The gates earn their place too — build's evidence gate
+keeps unverified work from reaching review, and `review` exists to kick work
+back to `build` or `design`, not to decorate the ladder.
 
 `moe sdlc` is the main software-development workflow:
 
 ```sh
 moe sdlc new [--workspace <name>] [--agent <name>] [--seed] [--park|--ship|--chain] <project>/<slug>
 moe sdlc design [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
-moe sdlc code   [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
-moe sdlc test   [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
+moe sdlc build  [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
 moe sdlc review [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
 moe sdlc push [--pr|--merge] <project>/<run>
 moe sdlc shell  <project>/<run>
@@ -31,24 +31,32 @@ A full pass spelled out by hand:
 ```sh
 moe sdlc new my-project/add-batch-support
 moe sdlc design my-project/add-batch-support
-moe sdlc code my-project/add-batch-support
-moe sdlc test my-project/add-batch-support
+moe sdlc build my-project/add-batch-support
 moe sdlc review my-project/add-batch-support
 moe sdlc push my-project/add-batch-support
 ```
 
 The `new` command opens the run and writes the first files into the
-bureaucracy. `design` shapes the request into a reviewable plan. `code` gives
-the agent write access inside an isolated clone of the target project and
-requires it to commit the implementation there. `test` verifies the behavior
-and records what was run. `review` is the last judgment before push: an
-independent pass over the diff *and* the test evidence, ending in a ship
-verdict — trivial zero-risk findings (a typo, comment drift) it fixes and
-commits in place; anything bigger blocks the gate and kicks the run back.
-`push` ships the branch by the project's ship route. New registrations use a
-fast-forward merge; existing projects keep their settings, with an absent ship
-field still meaning PR. `moe project ship <id> pr` selects PRs, and `--pr` /
-`--merge` override the route for one invocation.
+bureaucracy. `design` shapes the request into a reviewable plan. `build` gives
+the agent write access inside an isolated clone of the target project, requires
+it to commit the implementation there, and has it exercise and repair the
+change in the same session. Build keeps two canvases, `content/code.md`
+(behavior, decisions, PR draft, test plan) and `content/test.md` (what was and
+wasn't verified), each with its own gate; the run moves on only when both are
+stamped ready, and every build entry resets both to blocked. `review` is the
+last judgment before push: an independent pass over the diff *and* build's
+evidence, ending in a ship verdict — trivial zero-risk findings (a typo,
+comment drift) it fixes and commits in place; anything bigger blocks the gate
+and kicks the run back to build. `push` ships the branch by the project's ship
+route. New registrations use a fast-forward merge; existing projects keep their
+settings, with an absent ship field still meaning PR. `moe project ship <id>
+pr` selects PRs, and `--pr` / `--merge` override the route for one invocation.
+
+`moe sdlc code` and `moe sdlc test` are retired: they print the build command
+and start nothing. A run started before build existed keeps its code and test
+canvases readable (`moe sdlc cat`, `moe sdlc log`, the web run page); its first
+build turn seeds `content/code.md` and `content/test.md` from them and must
+restamp both before the run can reach review.
 
 Closing a run and marking a stage advanced both refuse while any session branch
 remains for that run, even after its claimant dies. This applies to terminal
@@ -70,8 +78,8 @@ and launches nothing.
 
 A run whose work landed entirely as bureaucracy commits — project hooks,
 chores, knowledge topics, the bureaucracy's own docs — can declare `ship: none`
-on its test gate, and `push` then closes the run rather than refusing an empty
-branch, so a ride carries on instead of stalling. It honors that only when the
+on build's test.md gate, and `push` then closes the run rather than refusing an
+empty branch, so a ride carries on instead of stalling. It honors that only when the
 branch verifiably has zero commits ahead of the default branch: a gate and a
 branch that disagree refuse loudly, because the alternative is a mis-written
 gate deleting a sandbox that still held reviewed work.
@@ -117,7 +125,7 @@ Every cascade is headless — the axis is *how far*, not *how*:
   chain** — cascading into the next live chained run. It is the top rung: what
   is chained when you type it is what runs, because nothing sweeps mid-ride.
 
-The cascade mode flags on `design`/`code`/`test`/`review` mirror the chain
+The cascade mode flags on `design`/`build`/`review` mirror the chain
 prompt's bang vocabulary at the CLI: `--once` (= `!`) dispatches one stage
 headless and parks at the next gate; `--to=<stage>` (= `!<stage>`) walks
 headless to a named gate; `--ship` (= `!!`) cascades headless through push
@@ -137,22 +145,28 @@ typed before the Ctrl-D still counts as the answer.
 above its menu. Review source changes with ordinary tools — `git diff`, an
 editor, a pager.
 
-**Blocked gates.** When a `test` or `review` session closes blocked, the gate
-kicks the run back rather than parking. Interactively the chain prompt becomes a
-kickback offer `[Y/n/d/x]`: `Y` (default) reopens `code` seeded with the
-blocking canvas, `d` kicks back to `design`, `n` parks, and `x` scuttles the
-run; after the fix, MoE re-offers the gate that blocked instead of walking
-forward. Headless ship cascades (`!!` / `!!!`, and serve's ship) take
-one bounded `code` kickback carrying the blocking canvas, then re-dispatch the
-blocked stage and re-check its gate once — if the fix doesn't stick, it parks as
-before. `!` and `!<stage>` take no recovery turn of their own: they stop at the
-blocked gate and fall through to that same chain prompt (headless, a
-back-pointing `kick back to fix` nudge prints instead).
+**Blocked gates.** When a `review` session closes blocked, the gate kicks the
+run back rather than parking. Interactively the chain prompt becomes a kickback
+offer `[Y/n/d/x]`: `Y` (default) reopens `build` seeded with the blocking
+canvas, `d` kicks back to `design`, `n` parks, and `x` scuttles the run; after
+the fix, MoE re-offers the gate that blocked instead of walking forward.
+Headless ship cascades (`!!` / `!!!`, and serve's ship) take one bounded
+`build` kickback carrying the blocking canvas, then re-dispatch the blocked
+stage and re-check its gate once — if the fix doesn't stick, it parks as before.
+`!` and `!<stage>` take no recovery turn of their own: they stop at the blocked
+gate and fall through to that same chain prompt (headless, a back-pointing `kick
+back to fix` nudge prints instead).
+
+A build that ends with either canvas unstamped parks at build on every exit —
+the chain prompt, a cascade, a review kickback, a push-hook or rebase recovery,
+and a CI repair alike — and names each unstamped file and why. It never kicks
+back to itself; resume it with `moe sdlc build`.
 
 **Nominated closes.** A blocked gate says "this diff isn't ready"; a stage
 that concludes the *run* is moot — the change already landed, the premise
 doesn't survive the code — says so instead by writing its canvas normally
-and ending it with `{"status":"close"}` in the gate. MoE closes the run
+and ending it with `{"status":"close"}` in the gate (for build, in either
+content file; the prompt asks for code.md). MoE closes the run
 through the same `moe sdlc close` every other path uses, in the cascade and
 at the interactive chain prompt alike. The reasoning is durable (it is the
 committed canvas) and the run stops being re-offered on every sweep;
@@ -313,7 +327,7 @@ carry on.
 **Pause and handoff hold the run** from the moment they are accepted until
 an explicit resume — across sweeps, restarts and disconnects, and against
 CI repair on a pushed run. Handoff prints the stage command for the last
-conversation that actually ran, e.g. `moe sdlc code moe/change-auth --agent
+conversation that actually ran, e.g. `moe sdlc build moe/change-auth --agent
 codex`. Two ways out: `moe control resume` (or the web's resume) releases the
 hold for a later eligible sweep and starts nothing; typing that stage command
 at a terminal resumes the conversation now, and clears the hold once it is
@@ -575,7 +589,7 @@ cooling down. Pass `--now` to open it anyway when it's cooling down or not yet
 due — it still refuses if a run is already open.
 
 Editing a definition is a plain file edit, or an sdlc run: a stage's per-turn
-commit picks up `projects/<project>/chores/`, so `moe sdlc design → code →
+commit picks up `projects/<project>/chores/`, so `moe sdlc design → build →
 close` is the journaled route. For a mechanical chore, due-ness notices either
 way: subject to the open-run and cooldown guards, a definition edit committed
 by any means makes the chore due as "definition changed." A judged chore's
@@ -969,7 +983,7 @@ by directory.
 sandbox, runs one event's scripts once, prints the sandbox path, and exits — no
 run needed to test a 30-line bash change. Landing a change is a plain file edit,
 or an sdlc run whose per-turn commit picks up `projects/<project>/hooks/`
-(`moe sdlc design → code → close`) when you want the edit journaled with a
+(`moe sdlc design → build → close`) when you want the edit journaled with a
 canvas.
 
 The hook events themselves (`dev-env.d`, `dev-env-teardown.d`, `pre-push.d`) and
@@ -1003,7 +1017,7 @@ command to skip checks for the entire invocation, including its cascade
 and chain ride. For example:
 
 ```sh
-moe sdlc code --no-cooldown --chain myproject/my-run
+moe sdlc build --no-cooldown --chain myproject/my-run
 ```
 
 A quota refusal returns 75 and leaves the stage unstarted; a clock pulse with

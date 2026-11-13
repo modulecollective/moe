@@ -55,7 +55,11 @@ func stubSdlcStageWritingCanvas(t *testing.T, root string, md *run.Metadata, sta
 	openSdlcStage = func(s, _, _ string, _ bool, _, _ io.Writer) int {
 		dispatched = append(dispatched, s)
 		if s == stage {
-			writeStageCanvas(t, root, md, stage, body)
+			if stage == "build" {
+				writeBuildCanvas(t, root, md, "code.md", body)
+			} else {
+				writeStageCanvas(t, root, md, stage, body)
+			}
 		}
 		return 0
 	}
@@ -71,17 +75,17 @@ func stubSdlcStageWritingCanvas(t *testing.T, root string, md *run.Metadata, sta
 func TestCascadeHonorsCloseNomination(t *testing.T) {
 	root := isolateCascadeMoeHome(t)
 	md := &run.Metadata{ID: "already-done", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
-	dispatched := stubSdlcStageWritingCanvas(t, root, md, "code", closeGatedCodeCanvas)
+	dispatched := stubSdlcStageWritingCanvas(t, root, md, "build", closeGatedCodeCanvas)
 	closeCaptured := stubGroupCloseCommand(t, "sdlc", 0)
 	pushCaptured := stubPushFromCascade(t, 0, nil)
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "", false, false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "", false, false, md, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade exit=%d, want 0; stderr=%q", code, stderr.String())
 	}
-	if got := strings.Join(*dispatched, ","); got != "code" {
-		t.Fatalf("dispatched %q, want just code — the walk must stop at the nomination", got)
+	if got := strings.Join(*dispatched, ","); got != "build" {
+		t.Fatalf("dispatched %q, want just build — the walk must stop at the nomination", got)
 	}
 	if len(*pushCaptured) != 0 {
 		t.Fatalf("a closed run must not ship: %+v", *pushCaptured)
@@ -92,7 +96,7 @@ func TestCascadeHonorsCloseNomination(t *testing.T) {
 	if got, want := strings.Join((*closeCaptured)[0].args, " "), "--no-edit tele/already-done"; got != want {
 		t.Fatalf("close args = %q, want %q", got, want)
 	}
-	wantSteps := []string{"code", "close"}
+	wantSteps := []string{"build", "close"}
 	if len(res.ran) != len(wantSteps) {
 		t.Fatalf("ran = %+v, want %v", res.ran, wantSteps)
 	}
@@ -106,7 +110,7 @@ func TestCascadeHonorsCloseNomination(t *testing.T) {
 	if !res.shipped {
 		t.Fatalf("a nominated close must mark the cascade terminal: %+v", res)
 	}
-	if !strings.Contains(stdout.String(), "code nominated close") {
+	if !strings.Contains(stdout.String(), "build nominated close") {
 		t.Fatalf("expected the nomination named on stdout, got %q", stdout.String())
 	}
 }
@@ -118,11 +122,11 @@ func TestCascadeHonorsCloseNomination(t *testing.T) {
 func TestCascadeCloseNominationFailureLeavesRunOpen(t *testing.T) {
 	root := isolateCascadeMoeHome(t)
 	md := &run.Metadata{ID: "already-done", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
-	stubSdlcStageWritingCanvas(t, root, md, "code", closeGatedCodeCanvas)
+	stubSdlcStageWritingCanvas(t, root, md, "build", closeGatedCodeCanvas)
 	stubGroupCloseCommand(t, "sdlc", 1)
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "", false, false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "", false, false, md, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("cascade exit=%d, want 1; stderr=%q", code, stderr.String())
 	}
@@ -155,15 +159,15 @@ func TestCascadeCloseNominationReallyCloses(t *testing.T) {
 	// The real close refuses a dirty tree, so the canvas the stage turn
 	// "wrote" has to arrive committed — exactly as a real stage commit
 	// lands it before the cascade reads the gate.
-	writeStageCanvas(t, root, md, "code", closeGatedCodeCanvas)
+	writeBuildCanvas(t, root, md, "code.md", closeGatedCodeCanvas)
 	gittest.Run(t, root, "add", "-A")
-	gittest.Run(t, root, "commit", "-m", "work: code canvas nominating close")
+	gittest.Run(t, root, "commit", "-m", "work: build canvas nominating close")
 	prev := openSdlcStage
 	openSdlcStage = func(string, string, string, bool, io.Writer, io.Writer) int { return 0 }
 	t.Cleanup(func() { openSdlcStage = prev })
 
 	var stdout, stderr bytes.Buffer
-	if _, code := cascadeFromGate("code", "", false, false, md, &stdout, &stderr); code != 0 {
+	if _, code := cascadeFromGate("build", "", false, false, md, &stdout, &stderr); code != 0 {
 		t.Fatalf("cascade exit=%d, want 0; stderr=%q", code, stderr.String())
 	}
 	reloaded, err := run.Load(root, "tele", "already-done")
@@ -182,11 +186,11 @@ func TestCascadeCloseNominationReallyCloses(t *testing.T) {
 func TestPromptNextStageHonorsCloseNomination(t *testing.T) {
 	root := isolateCascadeMoeHome(t)
 	md := &run.Metadata{ID: "already-done", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
-	writeStageCanvas(t, root, md, "code", closeGatedCodeCanvas)
+	writeBuildCanvas(t, root, md, "code.md", closeGatedCodeCanvas)
 	closeCaptured := stubGroupCloseCommand(t, "sdlc", 0)
 
 	var stdout, stderr bytes.Buffer
-	if code := promptNextStageOverride(root, md, "code", "", false, &stdout, &stderr); code != 0 {
+	if code := promptNextStageOverride(root, md, "build", "", false, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d, want 0; stderr=%q", code, stderr.String())
 	}
 	if len(*closeCaptured) != 1 {
@@ -196,7 +200,7 @@ func TestPromptNextStageHonorsCloseNomination(t *testing.T) {
 	if !strings.Contains(out, "moe sdlc reopen tele/already-done") {
 		t.Fatalf("expected reopen named as the takeback, got %q", out)
 	}
-	if strings.Contains(out, "next: moe sdlc test") {
+	if strings.Contains(out, "next: moe sdlc review") {
 		t.Fatalf("a closed run must not be offered its successor: %q", out)
 	}
 }
@@ -208,11 +212,11 @@ func TestPromptNextStageHonorsCloseNomination(t *testing.T) {
 func TestPromptNextStageCloseNominationSkippedOnOverride(t *testing.T) {
 	root := isolateCascadeMoeHome(t)
 	md := &run.Metadata{ID: "already-done", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
-	writeStageCanvas(t, root, md, "code", closeGatedCodeCanvas)
+	writeBuildCanvas(t, root, md, "code.md", closeGatedCodeCanvas)
 	closeCaptured := stubGroupCloseCommand(t, "sdlc", 0)
 
 	var stdout, stderr bytes.Buffer
-	if code := promptNextStageOverride(root, md, "code", "push", false, &stdout, &stderr); code != 0 {
+	if code := promptNextStageOverride(root, md, "build", "push", false, &stdout, &stderr); code != 0 {
 		t.Fatalf("exit=%d, want 0; stderr=%q", code, stderr.String())
 	}
 	if len(*closeCaptured) != 0 {
@@ -228,7 +232,7 @@ func TestCloseGateDoesNotMisfireThroughExistingReaders(t *testing.T) {
 	root := isolateCascadeMoeHome(t)
 	md := &run.Metadata{ID: "already-done", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 	writeStageCanvas(t, root, md, "review", closeGatedReviewCanvas)
-	writeStageCanvas(t, root, md, "test", strings.Replace(closeGatedReviewCanvas, "# Review", "# Test", 1))
+	writeBuildCanvas(t, root, md, "test.md", strings.Replace(closeGatedReviewCanvas, "# Review", "# Test", 1))
 
 	var stderr bytes.Buffer
 	if _, blocked := cascadeStageBlocked(md, "review", &stderr); blocked {
@@ -237,8 +241,8 @@ func TestCloseGateDoesNotMisfireThroughExistingReaders(t *testing.T) {
 	if ok, err := reviewStageGate(root, md); err != nil || ok {
 		t.Fatalf("reviewStageGate = (%v, %v), want (false, nil) — a close gate must not advance", ok, err)
 	}
-	if ok, err := testStageGate(root, md); err != nil || ok {
-		t.Fatalf("testStageGate = (%v, %v), want (false, nil) — a close gate must not advance", ok, err)
+	if ok, err := testFileStamped(root, md); err != nil || ok {
+		t.Fatalf("testFileStamped = (%v, %v), want (false, nil) — a close gate must not advance", ok, err)
 	}
 	if testGateShipNone(root, md) {
 		t.Fatal("a close gate must not read as ship:none")
@@ -252,7 +256,7 @@ func TestStageNominatedCloseScope(t *testing.T) {
 	root := isolateCascadeMoeHome(t)
 	sdlcMD := &run.Metadata{ID: "already-done", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 	chatMD := &run.Metadata{ID: "groom-2026-05-17", Project: "moe", Workflow: "chat", Status: run.StatusInProgress}
-	writeStageCanvas(t, root, sdlcMD, "code", closeGatedCodeCanvas)
+	writeBuildCanvas(t, root, sdlcMD, "code.md", closeGatedCodeCanvas)
 	writeStageCanvas(t, root, chatMD, "chat", closeGatedCodeCanvas)
 	writeStageCanvas(t, root, sdlcMD, "design", readyReviewCanvas)
 	writeStageCanvas(t, root, sdlcMD, "review", "# Review\n\n## Gate\n\n```json\n{\"status\":\n```\n")
@@ -263,7 +267,7 @@ func TestStageNominatedCloseScope(t *testing.T) {
 		stage string
 		want  bool
 	}{
-		{"sdlc close gate", sdlcMD, "code", true},
+		{"sdlc close gate", sdlcMD, "build", true},
 		{"non-sdlc is out of scope", chatMD, "chat", false},
 		{"ready gate", sdlcMD, "design", false},
 		{"unparseable gate", sdlcMD, "review", false},
@@ -327,5 +331,29 @@ The retry reset this run asks for already landed in foo.go:42.
 		if out := stripCloseGateSection(body); out != body {
 			t.Fatalf("%s: canvas must pass through unchanged, got:\n%s", name, out)
 		}
+	}
+}
+
+// TestBuildCloseNominationReadsEachFileOnItsOwn: a close gate in either
+// build file nominates the close, and the display concatenation never
+// decides it — a test.md whose first fence is ready must not hide a
+// close in code.md, and a quoted close inside one file's evidence body
+// (second Gate heading) must not count.
+func TestBuildCloseNominationReadsEachFileOnItsOwn(t *testing.T) {
+	root := isolateCascadeMoeHome(t)
+	md := &run.Metadata{ID: "already-done", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+	writeBuildCanvas(t, root, md, "code.md", closeGatedCodeCanvas)
+	writeBuildCanvas(t, root, md, "test.md", stampedBuildCanvas)
+	if !stageNominatedClose(root, md, "build") {
+		t.Fatal("a close in code.md must nominate")
+	}
+	quoted := stampedBuildCanvas + "\n## Gate\n\n```json\n{\"status\":\"close\"}\n```\n"
+	writeBuildCanvas(t, root, md, "code.md", quoted)
+	if stageNominatedClose(root, md, "build") {
+		t.Fatal("a quoted second Gate section must not nominate")
+	}
+	writeBuildCanvas(t, root, md, "test.md", strings.Replace(closeGatedCodeCanvas, "# Code", "# Test", 1))
+	if !stageNominatedClose(root, md, "build") {
+		t.Fatal("a close in test.md must nominate too")
 	}
 }

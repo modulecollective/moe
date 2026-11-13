@@ -113,12 +113,12 @@ func TestKickPlanNamesEachFloorHold(t *testing.T) {
 				seedRun(t, root, "moe", "promoted-sketch", "sdlc", run.StatusInProgress, time.Now().Local(),
 					map[string]string{"design": "# A thought I had\n\nseed\n"})
 				advanceAt(t, root, "moe", "promoted-sketch", "design", time.Now().Local().Add(-2*time.Hour))
-				if _, err := session.Open(root, "moe", "promoted-sketch", "code"); err != nil {
+				if _, err := session.Open(root, "moe", "promoted-sketch", "build"); err != nil {
 					t.Fatal(err)
 				}
 				return "moe/promoted-sketch"
 			},
-			want: "has a live session at code — skipping",
+			want: "has a live session at build — skipping",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -159,7 +159,7 @@ func TestRenderKickSectionReadsAsAQueueNotAPromise(t *testing.T) {
 		{Root: "moe/serve-pause", Gate: true},
 		{Root: "moe/rebase-failure", Gate: false},
 		{Root: "moe/half-recorded", Gate: true, Park: "the reflect would read a half-finished record"},
-		{Root: "moe/occupied", Gate: false, Hold: "has a live session at code — skipping"},
+		{Root: "moe/occupied", Gate: false, Hold: "has a live session at build — skipping"},
 	}})
 	for _, want := range []string{
 		"## Kick\n",
@@ -167,7 +167,7 @@ func TestRenderKickSectionReadsAsAQueueNotAPromise(t *testing.T) {
 		"1. moe/serve-pause — gate thread, queued — floor re-checked at start\n",
 		"2. moe/rebase-failure — parked board, queued — floor re-checked at start\n",
 		"3. moe/half-recorded — gate thread, parked by the survey — the reflect would read a half-finished record\n",
-		"4. moe/occupied — parked board, has a live session at code — skipping\n",
+		"4. moe/occupied — parked board, has a live session at build — skipping\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("section =\n%s\nwant %q", got, want)

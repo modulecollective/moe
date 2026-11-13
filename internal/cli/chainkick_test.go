@@ -77,8 +77,8 @@ func TestChainKickChainRunHeadClosesAndRides(t *testing.T) {
 	// Both children rode the full ladder and shipped.
 	got := kickStages(*stages)
 	want := []string{
-		"fix-one:design", "fix-one:code", "fix-one:test", "fix-one:review",
-		"fix-two:design", "fix-two:code", "fix-two:test", "fix-two:review",
+		"fix-one:design", "fix-one:build", "fix-one:review",
+		"fix-two:design", "fix-two:build", "fix-two:review",
 	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("dispatched %v, want %v\nstdout=%q", got, want, out.String())
@@ -109,8 +109,8 @@ func TestChainKickRegularHeadCascadesThenRides(t *testing.T) {
 
 	got := kickStages(*stages)
 	want := []string{
-		"head-run:design", "head-run:code", "head-run:test", "head-run:review",
-		"child-run:design", "child-run:code", "child-run:test", "child-run:review",
+		"head-run:design", "head-run:build", "head-run:review",
+		"child-run:design", "child-run:build", "child-run:review",
 	}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("dispatched %v, want %v", got, want)
@@ -134,8 +134,8 @@ func TestChainKickChildlessRunIsAChainOfOne(t *testing.T) {
 	if code := runChainKick([]string{"moe/lone-run"}, io.Discard, &errb); code != 0 {
 		t.Fatalf("chain kick exit=%d stderr=%q", code, errb.String())
 	}
-	if got := len(*stages); got != 4 {
-		t.Errorf("dispatched %d stages (%v), want the lone run's four", got, kickStages(*stages))
+	if got := len(*stages); got != 3 {
+		t.Errorf("dispatched %d stages (%v), want the lone run's three", got, kickStages(*stages))
 	}
 	if len(*pushes) != 1 {
 		t.Errorf("pushes=%d, want 1 — it ships and rides nothing", len(*pushes))

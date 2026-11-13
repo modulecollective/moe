@@ -97,21 +97,17 @@ func stubHeadlessKickback(t *testing.T, exit int, onFire func()) *[]kickbackCall
 }
 
 // TestCascadeStageGateRecoversBlockedReview: a headless ship cascade that
-// hits a blocked review gate makes one headless kickback to code, then
+// hits a blocked review gate makes one headless kickback to build, then
 // re-dispatches review. When the recovery turn resolves the finding (the
 // re-dispatch leaves a ready canvas), the gate passes and the cascade
-// proceeds — recovery steps recorded as `code · review`.
+// proceeds — recovery steps recorded as `build · review`.
 func TestCascadeStageGateRecoversBlockedReview(t *testing.T) {
-	for _, stage := range []string{"review", "test"} {
+	for _, stage := range []string{"review"} {
 		t.Run(stage, func(t *testing.T) {
 			root := isolateCascadeMoeHome(t)
 			md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 			ready := readyReviewCanvas
 			blocked := blockedReviewCanvas
-			if stage == "test" {
-				ready = readyFilledTestCanvas
-				blocked = blockedTestCanvas
-			}
 			writeStageCanvas(t, root, md, stage, blocked)
 
 			// The re-dispatch (second openSdlcStage call for this stage)
@@ -144,10 +140,10 @@ func TestCascadeStageGateRecoversBlockedReview(t *testing.T) {
 			if len(*kicks) != 1 {
 				t.Fatalf("kickbacks = %d, want 1: %+v", len(*kicks), *kicks)
 			}
-			if got := (*kicks)[0]; got.document != "code" || got.blockedStage != stage || !got.headless {
-				t.Fatalf("kickback = %+v, want {code %s headless}", got, stage)
+			if got := (*kicks)[0]; got.document != "build" || got.blockedStage != stage || !got.headless {
+				t.Fatalf("kickback = %+v, want {build %s headless}", got, stage)
 			}
-			wantSteps := []string{"code", stage}
+			wantSteps := []string{"build", stage}
 			if len(steps) != len(wantSteps) {
 				t.Fatalf("steps = %+v, want %v", steps, wantSteps)
 			}
@@ -188,7 +184,7 @@ func TestCascadeStageGateRecoveryExhausted(t *testing.T) {
 	if !strings.Contains(stderr.String(), "cascade: review gate not satisfied; parked at review") {
 		t.Fatalf("expected park message, got stderr=%q", stderr.String())
 	}
-	wantSteps := []string{"code", "review"}
+	wantSteps := []string{"build", "review"}
 	if len(steps) != len(wantSteps) {
 		t.Fatalf("steps = %+v, want %v", steps, wantSteps)
 	}
@@ -221,8 +217,8 @@ func TestCascadeStageGateKickbackTurnFails(t *testing.T) {
 	if dispatched != 0 {
 		t.Fatalf("blocked stage re-dispatched %d times after a failed recovery turn, want 0", dispatched)
 	}
-	if len(steps) != 1 || steps[0].stage != "code" || steps[0].code != 2 {
-		t.Fatalf("steps = %+v, want [{code 2}]", steps)
+	if len(steps) != 1 || steps[0].stage != "build" || steps[0].code != 2 {
+		t.Fatalf("steps = %+v, want [{build 2}]", steps)
 	}
 }
 
@@ -280,7 +276,7 @@ func TestCascadeStageGateNoRecoveryWhenReady(t *testing.T) {
 
 // TestCascadeFromGateHeadlessReviewRecoversAndShips is the end-to-end
 // headline: a `!!` cascade starting at a blocked review gate recovers via
-// one headless code kickback and rides through push to a clean ship. The
+// one headless build kickback and rides through push to a clean ship. The
 // summary records the recovery as `review ok · code ok · review ok ·
 // push ok — shipped`.
 //
@@ -294,7 +290,7 @@ func TestCascadeFromGateHeadlessReviewRecoversAndShips(t *testing.T) {
 	root := isolateCascadeMoeHome(t)
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 	writeStageCanvas(t, root, md, "review", blockedReviewCanvas)
-	writeStageCanvas(t, root, md, "test", readyFilledTestCanvas)
+	writeStampedBuild(t, root, md)
 
 	reviewCalls := 0
 	prev := openSdlcStage
@@ -320,13 +316,13 @@ func TestCascadeFromGateHeadlessReviewRecoversAndShips(t *testing.T) {
 	if !res.shipped {
 		t.Fatalf("recovered cascade must ship: %+v", res)
 	}
-	if len(*kicks) != 1 || !(*kicks)[0].headless || (*kicks)[0].document != "code" {
-		t.Fatalf("expected one headless code kickback, got %+v", *kicks)
+	if len(*kicks) != 1 || !(*kicks)[0].headless || (*kicks)[0].document != "build" {
+		t.Fatalf("expected one headless build kickback, got %+v", *kicks)
 	}
 	if len(*pushCaptured) != 1 {
 		t.Fatalf("push dispatched %d times, want 1", len(*pushCaptured))
 	}
-	wantSteps := []string{"review", "code", "review", "push"}
+	wantSteps := []string{"review", "build", "review", "push"}
 	if len(res.ran) != len(wantSteps) {
 		t.Fatalf("ran = %+v, want %v", res.ran, wantSteps)
 	}
@@ -386,7 +382,7 @@ func TestDispatchCascadeBlockedReviewParksToPrompt(t *testing.T) {
 			if code != 0 {
 				t.Fatalf("dispatchCascade(%q) exit=%d, want 0; stderr=%q", answer, code, stderr.String())
 			}
-			if !strings.Contains(stdout.String(), "next: moe sdlc code tele/fix-it (review blocked — kick back to fix)") {
+			if !strings.Contains(stdout.String(), "next: moe sdlc build tele/fix-it (review blocked — kick back to fix)") {
 				t.Fatalf("expected back-pointing nudge, got stdout=%q", stdout.String())
 			}
 			if !strings.Contains(stderr.String(), "cascade: review closed blocked; parking at its gate") {
@@ -403,15 +399,16 @@ func TestDispatchCascadeBlockedReviewParksToPrompt(t *testing.T) {
 }
 
 // TestCascadeStageGateNonBlockedFailureParksHard: a non-yolo cascade that
-// hits a gate failure which is *not* a `blocked` finding — here a test
-// canvas with status "ready" but placeholder skeleton sections — keeps
-// the hard park (exit 1, "gate not satisfied"), not the park-to-prompt
-// affordance. Only a literal `blocked` earns the kickback route; a stage
-// refusal a code turn can't act on stops the chain.
+// hits a gate failure which is *not* a review `blocked` finding — here a
+// build whose test.md reads "ready" over placeholder sections — keeps the
+// hard park (exit 1, "gate not satisfied"), not the park-to-prompt
+// affordance, and names the unstamped file and why. Only review's literal
+// `blocked` earns the kickback route.
 func TestCascadeStageGateNonBlockedFailureParksHard(t *testing.T) {
 	root := isolateCascadeMoeHome(t)
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
-	writeStageCanvas(t, root, md, "test", `# Test
+	writeBuildCanvas(t, root, md, "code.md", stampedBuildCanvas)
+	writeBuildCanvas(t, root, md, "test.md", `# Test
 
 ## Gate
 
@@ -432,15 +429,20 @@ func TestCascadeStageGateNonBlockedFailureParksHard(t *testing.T) {
 
 	wf, _ := LookupWorkflow("sdlc")
 	var stdout, stderr bytes.Buffer
-	steps, parked, code := cascadeStageGate(wf, cascadeDispatchers["sdlc"], md, "test", false, &stdout, &stderr)
+	steps, parked, code := cascadeStageGate(wf, cascadeDispatchers["sdlc"], md, "build", false, &stdout, &stderr)
 	if parked {
 		t.Fatalf("parked=true, want false (unfilled skeleton is not a blocked finding)")
 	}
 	if code != 1 {
 		t.Fatalf("gate code=%d, want 1 (hard park); stderr=%q", code, stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "cascade: test gate not satisfied; parked at test") {
-		t.Fatalf("expected gate-not-satisfied line, got stderr=%q", stderr.String())
+	for _, want := range []string{"cascade: build gate not satisfied; parked at build", `test.md: section "What was verified" unfilled`} {
+		if !strings.Contains(stderr.String(), want) {
+			t.Fatalf("expected %q, got stderr=%q", want, stderr.String())
+		}
+	}
+	if strings.Contains(stderr.String(), "code.md") {
+		t.Fatalf("a stamped file must not be named, got stderr=%q", stderr.String())
 	}
 	if len(*kicks) != 0 || len(steps) != 0 {
 		t.Fatalf("no recovery expected: kicks=%+v steps=%+v", *kicks, steps)
@@ -457,6 +459,9 @@ func TestRunKickbackSessionThreadsHeadless(t *testing.T) {
 			name = "headless"
 		}
 		t.Run(name, func(t *testing.T) {
+			// A headless recovery checks build's readiness before it hands
+			// back; stamp it so this test isolates the opts threading.
+			writeStampedBuild(t, isolateCascadeMoeHome(t), &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"})
 			var gotOpts stageSessionOpts
 			var gotDoc string
 			prev := runStageSession
@@ -469,11 +474,11 @@ func TestRunKickbackSessionThreadsHeadless(t *testing.T) {
 
 			md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 			var stdout, stderr bytes.Buffer
-			if code := runKickbackSession(md, "code", "review", blockedReviewCanvas, headless, &stdout, &stderr); code != 0 {
+			if code := runKickbackSession(md, "build", "review", blockedReviewCanvas, headless, &stdout, &stderr); code != 0 {
 				t.Fatalf("exit=%d stderr=%q", code, stderr.String())
 			}
-			if gotDoc != "code" {
-				t.Fatalf("document = %q, want code", gotDoc)
+			if gotDoc != "build" {
+				t.Fatalf("document = %q, want build", gotDoc)
 			}
 			if gotOpts.Headless != headless {
 				t.Fatalf("opts.Headless = %v, want %v", gotOpts.Headless, headless)

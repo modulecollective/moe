@@ -40,11 +40,10 @@ func TestSDLCStageRefusesTerminalRunAtInteractiveDoor(t *testing.T) {
 		status string
 	}{
 		{verb: "design", status: run.StatusMerged},
-		{verb: "code", status: run.StatusMerged},
+		{verb: "build", status: run.StatusMerged},
 		{verb: "review", status: run.StatusMerged},
-		{verb: "test", status: run.StatusMerged},
-		{verb: "code", status: run.StatusClosed},
-		{verb: "code", status: run.StatusPromoted},
+		{verb: "build", status: run.StatusClosed},
+		{verb: "build", status: run.StatusPromoted},
 	}
 	for _, tc := range cases {
 		t.Run(tc.verb+"-"+tc.status, func(t *testing.T) {
@@ -75,7 +74,7 @@ func TestSDLCStageAllowsPushedRunAtInteractiveDoor(t *testing.T) {
 	seedTerminalSDLCRun(t, "tele", "awaiting", run.StatusPushed)
 
 	var out, errb bytes.Buffer
-	resolved, code := resolveSDLCReentryWithMode("sdlc code", "tele", "awaiting", false, &out, &errb)
+	resolved, code := resolveSDLCReentryWithMode("sdlc build", "tele", "awaiting", false, &out, &errb)
 	if code != 0 {
 		t.Fatalf("code=%d, want 0; stderr=%q", code, errb.String())
 	}
@@ -90,7 +89,7 @@ func TestSDLCStageInProgressPassesThrough(t *testing.T) {
 	seedTerminalSDLCRun(t, "tele", "live", run.StatusInProgress)
 
 	var out, errb bytes.Buffer
-	resolved, code := resolveSDLCReentryWithMode("sdlc code", "tele", "live", true, &out, &errb)
+	resolved, code := resolveSDLCReentryWithMode("sdlc build", "tele", "live", true, &out, &errb)
 	if code != 0 {
 		t.Fatalf("code=%d, want 0; stderr=%q", code, errb.String())
 	}
@@ -121,14 +120,14 @@ func TestSDLCStageForwardHintNoTTY(t *testing.T) {
 	seedMergedWithLiveDescendant(t)
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "code", "tele/foo-2026-05-14"}, &out, &errb)
+	code := Run([]string{"sdlc", "build", "tele/foo-2026-05-14"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero; stdout=%q stderr=%q", out.String(), errb.String())
 	}
-	if !strings.Contains(errb.String(), "sdlc code: tele/foo-2026-05-14 is merged; foo-2026-05-14-2 carries it forward") {
+	if !strings.Contains(errb.String(), "sdlc build: tele/foo-2026-05-14 is merged; foo-2026-05-14-2 carries it forward") {
 		t.Fatalf("missing forward refusal:\n%s", errb.String())
 	}
-	if !strings.Contains(errb.String(), "hint: moe sdlc code tele/foo-2026-05-14-2") {
+	if !strings.Contains(errb.String(), "hint: moe sdlc build tele/foo-2026-05-14-2") {
 		t.Fatalf("missing forward hint:\n%s", errb.String())
 	}
 	if strings.Contains(errb.String(), "sdlc reopen") {
@@ -144,7 +143,7 @@ func TestSDLCReentryTTYForwardsToDescendant(t *testing.T) {
 	withStdinLine(t, "y\n")
 
 	var out, errb bytes.Buffer
-	resolved, code := resolveSDLCReentryWithMode("sdlc code", "tele", "foo-2026-05-14", true, &out, &errb)
+	resolved, code := resolveSDLCReentryWithMode("sdlc build", "tele", "foo-2026-05-14", true, &out, &errb)
 	if code != 0 {
 		t.Fatalf("code=%d, want 0; stderr=%q", code, errb.String())
 	}
@@ -165,7 +164,7 @@ func TestSDLCReentryTTYDeclineRefuses(t *testing.T) {
 	withStdinLine(t, "n\n")
 
 	var out, errb bytes.Buffer
-	_, code := resolveSDLCReentryWithMode("sdlc code", "tele", "foo-2026-05-14", true, &out, &errb)
+	_, code := resolveSDLCReentryWithMode("sdlc build", "tele", "foo-2026-05-14", true, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on decline; stdout=%q", out.String())
 	}
@@ -185,7 +184,7 @@ func TestSDLCReentryTTYMintsReopen(t *testing.T) {
 	withStdinLine(t, "y\n")
 
 	var out, errb bytes.Buffer
-	resolved, code := resolveSDLCReentryWithMode("sdlc code", "tele", "widget", true, &out, &errb)
+	resolved, code := resolveSDLCReentryWithMode("sdlc build", "tele", "widget", true, &out, &errb)
 	if code != 0 {
 		t.Fatalf("code=%d, want 0; stderr=%q", code, errb.String())
 	}
@@ -220,7 +219,7 @@ func TestSDLCReentryTTYDeclineOfMintRefuses(t *testing.T) {
 	withStdinLine(t, "n\n")
 
 	var out, errb bytes.Buffer
-	_, code := resolveSDLCReentryWithMode("sdlc code", "tele", "zombie", true, &out, &errb)
+	_, code := resolveSDLCReentryWithMode("sdlc build", "tele", "zombie", true, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on decline; stdout=%q", out.String())
 	}
@@ -244,7 +243,7 @@ func TestSDLCReentryTTYEOFRefusesMint(t *testing.T) {
 	withStdinLine(t, "")
 
 	var out, errb bytes.Buffer
-	_, code := resolveSDLCReentryWithMode("sdlc code", "tele", "widget", true, &out, &errb)
+	_, code := resolveSDLCReentryWithMode("sdlc build", "tele", "widget", true, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on EOF; stdout=%q", out.String())
 	}
@@ -277,7 +276,7 @@ func TestSDLCReentryAmbiguousChainLists(t *testing.T) {
 
 	var out, errb bytes.Buffer
 	// tty=true: ambiguity refuses on both stdin modes, no default to offer.
-	_, code := resolveSDLCReentryWithMode("sdlc code", "tele", "foo-2026-05-14", true, &out, &errb)
+	_, code := resolveSDLCReentryWithMode("sdlc build", "tele", "foo-2026-05-14", true, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on ambiguous chain; stdout=%q", out.String())
 	}
@@ -285,7 +284,7 @@ func TestSDLCReentryAmbiguousChainLists(t *testing.T) {
 		t.Fatalf("missing ambiguity preamble:\n%s", errb.String())
 	}
 	for _, slug := range []string{"foo-2026-05-14-2", "foo-2026-05-14-3"} {
-		if !strings.Contains(errb.String(), "  moe sdlc code tele/"+slug) {
+		if !strings.Contains(errb.String(), "  moe sdlc build tele/"+slug) {
 			t.Fatalf("missing candidate %s:\n%s", slug, errb.String())
 		}
 	}
@@ -304,11 +303,11 @@ func TestSDLCReentrySkipsTerminalDescendant(t *testing.T) {
 		time.Now().UTC().Add(-1*time.Hour))
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "code", "tele/foo-2026-05-14"}, &out, &errb)
+	code := Run([]string{"sdlc", "build", "tele/foo-2026-05-14"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero; stdout=%q stderr=%q", out.String(), errb.String())
 	}
-	if !strings.Contains(errb.String(), "hint: moe sdlc code tele/foo-2026-05-14-3") {
+	if !strings.Contains(errb.String(), "hint: moe sdlc build tele/foo-2026-05-14-3") {
 		t.Fatalf("expected the live tail of the chain in the hint:\n%s", errb.String())
 	}
 }
@@ -322,7 +321,7 @@ func TestSDLCStageGuardRunsBeforeAgentPersist(t *testing.T) {
 	root := seedTerminalSDLCRun(t, "tele", "zombie", run.StatusMerged)
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "code", "--agent", "codex", "tele/zombie"}, &out, &errb)
+	code := Run([]string{"sdlc", "build", "--agent", "codex", "tele/zombie"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero; stdout=%q", out.String())
 	}

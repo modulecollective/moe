@@ -66,6 +66,7 @@ done
 canvas=$(printf '%s' "$prompt" | awk '/Your canvas for this document is the single file:/ {getline; gsub(/^ +| +$/, ""); print; exit}')
 ` + failOnSnippet(failOn, failExit) + `
 if [ -n "$canvas" ]; then printf '` + marker + `\n' >> "$canvas"; fi
+` + fakeBuildCanvasesSnippet(marker) + `
 exit 0
 `
 	fakeClaudeOnPath(t, script)
@@ -78,8 +79,13 @@ func failOnSnippet(failOn string, failExit int) string {
 	if failOn == "" {
 		return ""
 	}
+	// A directory-form stage (build) has no single canvas line; its own
+	// prompt is the only one that lists paths under its content/ dir.
 	return `case "$canvas" in
   */documents/` + failOn + `/content.md) exit ` + strconv.Itoa(failExit) + ` ;;
+esac
+case "$prompt" in
+  */documents/` + failOn + `/content/*) exit ` + strconv.Itoa(failExit) + ` ;;
 esac
 `
 }
@@ -149,10 +155,10 @@ exit 0
 	}
 }
 
-// Headless code (via openSdlcCode) runs under the sandbox clone with
-// the design canvas pre-seeded. Canvas lands; design canvas keeps
-// the content the design turn wrote.
-func TestRunCodeOneShot(t *testing.T) {
+// Headless build (via openSdlcBuild) runs under the sandbox clone with
+// the design canvas pre-seeded. Both build canvases land; the design
+// canvas keeps the content the design turn wrote.
+func TestRunBuildOneShot(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	seedSdlcOneShotProject(t, root, "tele")
@@ -166,7 +172,7 @@ func TestRunCodeOneShot(t *testing.T) {
 	if code := runNew("sdlc", []string{"tele/per-stage-code"}, &out, &errb); code != 0 {
 		t.Fatalf("runNew exit=%d stderr=%q", code, errb.String())
 	}
-	// Land the design canvas first so the precheck passes and code has
+	// Land the design canvas first so the precheck passes and build has
 	// something to work against.
 	out.Reset()
 	errb.Reset()
@@ -181,31 +187,36 @@ func TestRunCodeOneShot(t *testing.T) {
 
 	out.Reset()
 	errb.Reset()
-	if code := openSdlcCode("tele", "per-stage-code", true, "", &out, &errb); code != 0 {
-		t.Fatalf("openSdlcCode headless exit=%d stderr=%q stdout=%q", code, errb.String(), out.String())
+	if code := openSdlcBuild("tele", "per-stage-code", true, "", &out, &errb); code != 0 {
+		t.Fatalf("openSdlcBuild headless exit=%d stderr=%q stdout=%q", code, errb.String(), out.String())
 	}
 
-	body, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", "per-stage-code", "documents", "code", "content.md"))
-	if err != nil {
-		t.Fatalf("code canvas missing: %v", err)
+	for _, name := range []string{"code.md", "test.md"} {
+		body, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", "per-stage-code", "documents", "build", "content", name))
+		if err != nil {
+			t.Fatalf("build %s missing: %v", name, err)
+		}
+		if !strings.Contains(string(body), "written by fake claude") {
+			t.Fatalf("build %s missing fake-claude marker: %q", name, body)
+		}
 	}
-	if !strings.Contains(string(body), "written by fake claude") {
-		t.Fatalf("code canvas missing fake-claude marker: %q", body)
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "per-stage-code", "documents", "build", "content.md")); !os.IsNotExist(err) {
+		t.Fatalf("build must not grow a content.md: stat err=%v", err)
 	}
 
-	// Design canvas is unchanged by the code stage.
+	// Design canvas is unchanged by the build stage.
 	afterDesign, err := os.ReadFile(designCanvas)
 	if err != nil {
-		t.Fatalf("design canvas missing after code stage: %v", err)
+		t.Fatalf("design canvas missing after build stage: %v", err)
 	}
 	if string(beforeDesign) != string(afterDesign) {
-		t.Fatalf("code stage mutated design canvas:\nbefore: %q\nafter: %q", beforeDesign, afterDesign)
+		t.Fatalf("build stage mutated design canvas:\nbefore: %q\nafter: %q", beforeDesign, afterDesign)
 	}
 
-	log := gitLog(t, root, "--format=%s%n%b", "--grep=^work: update code")
+	log := gitLog(t, root, "--format=%s%n%b", "--grep=^work: update build")
 	for _, want := range []string{
-		"work: update code",
-		"MoE-Document: code",
+		"work: update build",
+		"MoE-Document: build",
 		"MoE-Run: per-stage-code",
 		"MoE-Workflow: sdlc",
 	} {
@@ -215,11 +226,11 @@ func TestRunCodeOneShot(t *testing.T) {
 	}
 }
 
-// runCode refuses — both interactive and headless — when the run has
+// runBuild refuses — both interactive and headless — when the run has
 // no design canvas yet. The precheck fires before any session work, so
-// the run dir gets no code/ subdirectory and no `work: update code`
+// the run dir gets no build/ subdirectory and no `work: update build`
 // commit lands.
-func TestRunCodeRefusesWithoutDesignCanvas(t *testing.T) {
+func TestRunBuildRefusesWithoutDesignCanvas(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
 	seedSdlcOneShotProject(t, root, "tele")
@@ -239,15 +250,15 @@ func TestRunCodeRefusesWithoutDesignCanvas(t *testing.T) {
 	}
 	for _, call := range []codeCall{
 		{
-			label: "runCode interactive",
+			label: "runBuild interactive",
 			run: func(o, e *bytes.Buffer) int {
-				return runCode([]string{"tele/no-design"}, o, e)
+				return runBuild([]string{"tele/no-design"}, o, e)
 			},
 		},
 		{
-			label: "openSdlcCode headless",
+			label: "openSdlcBuild headless",
 			run: func(o, e *bytes.Buffer) int {
-				return openSdlcCode("tele", "no-design", true, "", o, e)
+				return openSdlcBuild("tele", "no-design", true, "", o, e)
 			},
 		},
 	} {
@@ -264,11 +275,11 @@ func TestRunCodeRefusesWithoutDesignCanvas(t *testing.T) {
 		}
 	}
 
-	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "no-design", "documents", "code")); !os.IsNotExist(err) {
-		t.Fatalf("code dir should not exist after refusals: err=%v", err)
+	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "no-design", "documents", "build")); !os.IsNotExist(err) {
+		t.Fatalf("build dir should not exist after refusals: err=%v", err)
 	}
-	if log := gitLog(t, root, "--format=%s", "--grep=^work: update code"); strings.TrimSpace(log) != "" {
-		t.Fatalf("no code commit should land on refusal; got:\n%s", log)
+	if log := gitLog(t, root, "--format=%s", "--grep=^work: update build"); strings.TrimSpace(log) != "" {
+		t.Fatalf("no build commit should land on refusal; got:\n%s", log)
 	}
 }
 
@@ -290,7 +301,7 @@ func TestPromptNextStageBangAdvancesOne(t *testing.T) {
 		wantArgs     []string
 		wantHeadless string
 	}{
-		{name: "sdlc-bang-runs-headless", workflow: "sdlc", input: "!\n", wantLabel: "[Y/n/a/!]", wantHeadless: "code"},
+		{name: "sdlc-bang-runs-headless", workflow: "sdlc", input: "!\n", wantLabel: "[Y/n/a/!]", wantHeadless: "build"},
 		{name: "sdlc-default-runs-interactive", workflow: "sdlc", input: "\n", wantLabel: "[Y/n/a/!]", wantArgs: []string{"tele/fix-it"}},
 		{name: "sdlc-y-runs-interactive", workflow: "sdlc", input: "y\n", wantLabel: "[Y/n/a/!]", wantArgs: []string{"tele/fix-it"}},
 		{name: "sdlc-n-declines", workflow: "sdlc", input: "n\n", wantLabel: "[Y/n/a/!]"},
@@ -302,7 +313,7 @@ func TestPromptNextStageBangAdvancesOne(t *testing.T) {
 			headless := stubOpenSdlcStage(t, nil)
 			rec := &promptDispatchRecord{}
 			next := &Command{
-				Name: "code",
+				Name: "build",
 				Run: func(args []string, _, _ io.Writer) int {
 					rec.ran = true
 					rec.args = append([]string(nil), args...)

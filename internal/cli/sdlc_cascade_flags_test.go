@@ -50,8 +50,7 @@ type stageVerb struct {
 
 var sdlcStageVerbs = []stageVerb{
 	{name: "design", run: runDesign},
-	{name: "code", run: runCode},
-	{name: "test", run: runTest},
+	{name: "build", run: runBuild},
 	{name: "review", run: runReview},
 }
 
@@ -70,7 +69,7 @@ func TestCascadeAnswerFromFlagsMapping(t *testing.T) {
 	}{
 		{name: "no-flag", want: ""},
 		{name: "once", once: true, want: "!"},
-		{name: "to-test", to: "test", want: "!test"},
+		{name: "to-review", to: "review", want: "!review"},
 		{name: "to-push", to: "push", want: "!push"},
 		{name: "ship", ship: true, want: "!!"},
 		{name: "chain", chain: true, want: "!!!"},
@@ -289,7 +288,7 @@ func TestSDLCStageUnknownDestinationStage(t *testing.T) {
 			if !strings.Contains(errb.String(), "--to=nonsense is not a stage of sdlc") {
 				t.Fatalf("expected unknown-stage error, got: %q", errb.String())
 			}
-			if !strings.Contains(errb.String(), "design, code, test, review, push") {
+			if !strings.Contains(errb.String(), "design, build, review, push") {
 				t.Fatalf("expected sdlc stage list in error, got: %q", errb.String())
 			}
 		})
@@ -336,12 +335,10 @@ func TestSDLCStageRejectsToAtOrBehindStart(t *testing.T) {
 		to    string
 		label string
 	}{
-		{verb: sdlcStageVerbs[1], to: "code", label: "code-to-code"},
-		{verb: sdlcStageVerbs[1], to: "design", label: "code-to-design"},
-		{verb: sdlcStageVerbs[2], to: "test", label: "test-to-test"},
-		{verb: sdlcStageVerbs[2], to: "code", label: "test-to-code"},
-		{verb: sdlcStageVerbs[3], to: "review", label: "review-to-review"},
-		{verb: sdlcStageVerbs[3], to: "test", label: "review-to-test"},
+		{verb: sdlcStageVerbs[1], to: "build", label: "build-to-build"},
+		{verb: sdlcStageVerbs[1], to: "design", label: "build-to-design"},
+		{verb: sdlcStageVerbs[2], to: "review", label: "review-to-review"},
+		{verb: sdlcStageVerbs[2], to: "build", label: "review-to-build"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.label, func(t *testing.T) {
@@ -422,15 +419,10 @@ func TestSDLCStageRoutesEachCascadeMode(t *testing.T) {
 		{
 			verb:   sdlcStageVerbs[1],
 			flags:  []string{"--once"},
-			expect: expect{stages: []string{"code"}, wantHeadless: true},
+			expect: expect{stages: []string{"build"}, wantHeadless: true},
 		},
 		{
 			verb:   sdlcStageVerbs[2],
-			flags:  []string{"--once"},
-			expect: expect{stages: []string{"test"}, wantHeadless: true},
-		},
-		{
-			verb:   sdlcStageVerbs[3],
 			flags:  []string{"--once"},
 			expect: expect{stages: []string{"review"}, wantHeadless: true},
 		},
@@ -439,31 +431,26 @@ func TestSDLCStageRoutesEachCascadeMode(t *testing.T) {
 		{
 			verb:   sdlcStageVerbs[0],
 			flags:  []string{"--to=review"},
-			expect: expect{stages: []string{"design", "code", "test"}, wantHeadless: true},
+			expect: expect{stages: []string{"design", "build"}, wantHeadless: true},
 		},
 		{
 			verb:   sdlcStageVerbs[1],
 			flags:  []string{"--to=push"},
-			expect: expect{stages: []string{"code", "test", "review"}, wantHeadless: true},
+			expect: expect{stages: []string{"build", "review"}, wantHeadless: true},
 		},
 		// --ship: headless cascade through push, ship this run.
 		{
 			verb:   sdlcStageVerbs[0],
 			flags:  []string{"--ship"},
-			expect: expect{stages: []string{"design", "code", "test", "review"}, wantHeadless: true, wantShipPushed: true},
+			expect: expect{stages: []string{"design", "build", "review"}, wantHeadless: true, wantShipPushed: true},
 		},
 		{
 			verb:   sdlcStageVerbs[1],
 			flags:  []string{"--ship"},
-			expect: expect{stages: []string{"code", "test", "review"}, wantHeadless: true, wantShipPushed: true},
+			expect: expect{stages: []string{"build", "review"}, wantHeadless: true, wantShipPushed: true},
 		},
 		{
 			verb:   sdlcStageVerbs[2],
-			flags:  []string{"--ship"},
-			expect: expect{stages: []string{"test", "review"}, wantHeadless: true, wantShipPushed: true},
-		},
-		{
-			verb:   sdlcStageVerbs[3],
 			flags:  []string{"--ship"},
 			expect: expect{stages: []string{"review"}, wantHeadless: true, wantShipPushed: true},
 		},
@@ -474,20 +461,15 @@ func TestSDLCStageRoutesEachCascadeMode(t *testing.T) {
 		{
 			verb:   sdlcStageVerbs[0],
 			flags:  []string{"--chain"},
-			expect: expect{stages: []string{"design", "code", "test", "review"}, wantHeadless: true, wantShipPushed: true},
+			expect: expect{stages: []string{"design", "build", "review"}, wantHeadless: true, wantShipPushed: true},
 		},
 		{
 			verb:   sdlcStageVerbs[1],
 			flags:  []string{"--chain"},
-			expect: expect{stages: []string{"code", "test", "review"}, wantHeadless: true, wantShipPushed: true},
+			expect: expect{stages: []string{"build", "review"}, wantHeadless: true, wantShipPushed: true},
 		},
 		{
 			verb:   sdlcStageVerbs[2],
-			flags:  []string{"--chain"},
-			expect: expect{stages: []string{"test", "review"}, wantHeadless: true, wantShipPushed: true},
-		},
-		{
-			verb:   sdlcStageVerbs[3],
 			flags:  []string{"--chain"},
 			expect: expect{stages: []string{"review"}, wantHeadless: true, wantShipPushed: true},
 		},

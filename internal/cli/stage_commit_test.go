@@ -74,9 +74,9 @@ func TestCommitTurnStagesProposedStylesheet(t *testing.T) {
 		final      string
 		wantChange string
 	}{
-		{name: "modify", initial: "sdlc.code { model: old; }\n", final: "sdlc.code { model: new; }\n", wantChange: "M"},
-		{name: "create", final: "sdlc.code { model: new; }\n", wantChange: "A"},
-		{name: "delete", initial: "sdlc.code { model: old; }\n", wantChange: "D"},
+		{name: "modify", initial: "sdlc.build { model: old; }\n", final: "sdlc.build { model: new; }\n", wantChange: "M"},
+		{name: "create", final: "sdlc.build { model: new; }\n", wantChange: "A"},
+		{name: "delete", initial: "sdlc.build { model: old; }\n", wantChange: "D"},
 		{name: "never existed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -172,7 +172,7 @@ func TestNonSDLCCommitPathsExcludeStylesheet(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(proposed), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(proposed, []byte("sdlc.code { model: new; }\n"), 0o644); err != nil {
+	if err := os.WriteFile(proposed, []byte("sdlc.build { model: new; }\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	for _, workflow := range []string{chatWorkflow, "pulse", "idea"} {

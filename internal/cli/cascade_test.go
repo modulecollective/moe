@@ -219,14 +219,14 @@ func TestCascadeFromGateRunsBetweenStartAndDestination(t *testing.T) {
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "push", false, false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "push", false, false, md, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
 	}
 	if res.shipped {
 		t.Fatalf("!<stage> cascade must not ship: %+v", res)
 	}
-	wantSteps := []string{"code", "test", "review"}
+	wantSteps := []string{"build", "review"}
 	if len(res.ran) != len(wantSteps) {
 		t.Fatalf("ran %d steps, want %d (%+v)", len(res.ran), len(wantSteps), res.ran)
 	}
@@ -304,14 +304,14 @@ func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "", false, false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "", false, false, md, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
 	}
 	if !res.shipped {
 		t.Fatalf("cascade-ship must ship: %+v", res)
 	}
-	wantSteps := []string{"code", "test", "review", "push"}
+	wantSteps := []string{"build", "review", "push"}
 	if len(res.ran) != len(wantSteps) {
 		t.Fatalf("ran %d steps, want %d (%+v)", len(res.ran), len(wantSteps), res.ran)
 	}
@@ -321,7 +321,7 @@ func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 		}
 	}
 	// code and test go through openSdlcStage; push must NOT.
-	for _, stage := range []string{"code", "test", "review"} {
+	for _, stage := range []string{"build", "review"} {
 		if got := countInvocations(*openCaptured, stage); got != 1 {
 			t.Fatalf("stage %s openSdlcStage dispatched %d times, want 1", stage, got)
 		}
@@ -349,7 +349,7 @@ func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 		t.Fatalf("!!! push terminal option SkipTerminalEdit = false, want true")
 	}
 	// Summary line tags the headless mode per stage.
-	if got := stdout.String(); !strings.Contains(got, "cascade: code (headless)") {
+	if got := stdout.String(); !strings.Contains(got, "cascade: build (headless)") {
 		t.Fatalf("expected per-stage `(headless)` mode tag in stdout, got: %q", got)
 	}
 }
@@ -410,18 +410,18 @@ func isolateCascadeMoeHome(t *testing.T) string {
 // the cascade and surfaces the failure in the summary. Stages
 // downstream of the failure never dispatch.
 func TestCascadeFromGateStopsOnFailure(t *testing.T) {
-	captured := stubOpenSdlcStage(t, map[string]int{"code": 1})
+	captured := stubOpenSdlcStage(t, map[string]int{"build": 1})
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "push", false, false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "push", false, false, md, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("cascade exit=%d, want 1; stderr=%q", code, stderr.String())
 	}
-	if len(res.ran) != 1 || res.ran[0].stage != "code" || res.ran[0].code != 1 {
+	if len(res.ran) != 1 || res.ran[0].stage != "build" || res.ran[0].code != 1 {
 		t.Fatalf("ran = %+v, want [{code 1}]", res.ran)
 	}
-	if got := countInvocations(*captured, "test"); got != 0 {
+	if got := countInvocations(*captured, "review"); got != 0 {
 		t.Fatalf("test must not dispatch after code failed: got %d invocations", got)
 	}
 }
@@ -433,29 +433,29 @@ func TestCascadeFromGateStopsOnFailure(t *testing.T) {
 // can tell stop-the-chain from a stage failure. Stages downstream of
 // the interrupt never dispatch.
 func TestCascadeFromGateStopsOnInterrupt(t *testing.T) {
-	captured := stubOpenSdlcStage(t, map[string]int{"test": exitInterrupted})
+	captured := stubOpenSdlcStage(t, map[string]int{"review": exitInterrupted})
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "", false, false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "", false, false, md, &stdout, &stderr)
 	if code != exitInterrupted {
 		t.Fatalf("cascade exit=%d, want %d (exitInterrupted); stderr=%q", code, exitInterrupted, stderr.String())
 	}
 	if res.shipped {
 		t.Fatalf("an interrupted cascade must not mark shipped: %+v", res)
 	}
-	wantRan := []cascadeStepResult{{stage: "code", code: 0}, {stage: "test", code: exitInterrupted}}
+	wantRan := []cascadeStepResult{{stage: "build", code: 0}, {stage: "review", code: exitInterrupted}}
 	if len(res.ran) != len(wantRan) || res.ran[1].code != exitInterrupted {
-		t.Fatalf("ran = %+v, want code ok then test interrupted", res.ran)
+		t.Fatalf("ran = %+v, want build ok then review interrupted", res.ran)
 	}
-	// review and push never dispatched — the cascade stopped at the
-	// interrupted test.
-	for _, stage := range []string{"review", "push"} {
+	// push never dispatched — the cascade stopped at the interrupted
+	// review.
+	for _, stage := range []string{"push"} {
 		if got := countInvocations(*captured, stage); got != 0 {
 			t.Fatalf("%s must not dispatch after an interrupt: got %d", stage, got)
 		}
 	}
-	if got := renderCascadeSummary("tele/fix-it", res); got != "cascade tele/fix-it: code ok · test interrupted — stopped" {
+	if got := renderCascadeSummary("tele/fix-it", res); got != "cascade tele/fix-it: build ok · review interrupted — stopped" {
 		t.Fatalf("summary = %q, want interrupted shape", got)
 	}
 }
@@ -469,7 +469,7 @@ func TestCascadeFromGateNoOpBehindStart(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	// startStage=code, destination=design — design is behind code.
-	res, code := cascadeFromGate("code", "design", false, false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "design", false, false, md, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("no-op cascade exit=%d, want 0; stderr=%q", code, stderr.String())
 	}
@@ -490,7 +490,7 @@ func TestCascadeFromGateNoOpDestinationEqualsStart(t *testing.T) {
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "code", false, false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "build", false, false, md, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("destination=start cascade exit=%d, want 0", code)
 	}
@@ -511,20 +511,20 @@ func TestCascadeFromGateOneStepDispatchesStartStageOnly(t *testing.T) {
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "", true, false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "", true, false, md, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
 	}
 	if res.shipped {
 		t.Fatalf("oneStep cascade must not ship: %+v", res)
 	}
-	if len(res.ran) != 1 || res.ran[0].stage != "code" {
+	if len(res.ran) != 1 || res.ran[0].stage != "build" {
 		t.Fatalf("ran = %+v, want one step at code", res.ran)
 	}
-	if got := countInvocations(*captured, "code"); got != 1 {
+	if got := countInvocations(*captured, "build"); got != 1 {
 		t.Fatalf("code dispatched %d times, want 1", got)
 	}
-	if got := countInvocations(*captured, "test"); got != 0 {
+	if got := countInvocations(*captured, "review"); got != 0 {
 		t.Fatalf("test must not dispatch on oneStep: got %d", got)
 	}
 }
@@ -537,7 +537,7 @@ func TestCascadeFromGateOneStepDispatchesStartStageOnly(t *testing.T) {
 // dispatcher-direct path.
 func TestPromptStageNextStageBangAdvancesOneStage(t *testing.T) {
 	captured := stubOpenSdlcStage(t, nil)
-	next := &Command{Name: "code", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
+	next := &Command{Name: "build", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	r, w, err := os.Pipe()
@@ -557,13 +557,13 @@ func TestPromptStageNextStageBangAdvancesOneStage(t *testing.T) {
 	if code := promptStageNextStage(next, nil, nil, cascadeFixtureRoot(t, md), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("prompt exit=%d stderr=%q", code, stderr.String())
 	}
-	if got := stdout.String(); !strings.Contains(got, "cascade tele/fix-it: code ok") {
-		t.Fatalf("expected `cascade tele/fix-it: code ok` summary in stdout, got: %q", got)
+	if got := stdout.String(); !strings.Contains(got, "cascade tele/fix-it: build ok") {
+		t.Fatalf("expected `cascade tele/fix-it: build ok` summary in stdout, got: %q", got)
 	}
-	if got := countInvocations(*captured, "code"); got != 1 {
+	if got := countInvocations(*captured, "build"); got != 1 {
 		t.Fatalf("code dispatched %d times, want 1", got)
 	}
-	if got := countInvocations(*captured, "test"); got != 0 {
+	if got := countInvocations(*captured, "review"); got != 0 {
 		t.Fatalf("test must not dispatch on bare `!`: got %d", got)
 	}
 	for _, inv := range *captured {
@@ -573,13 +573,13 @@ func TestPromptStageNextStageBangAdvancesOneStage(t *testing.T) {
 	}
 }
 
-// TestPromptStageNextStageDispatchesCascade: typing `!test` at the
-// design→code gate cascades through code (only) and re-prompts at
-// the test gate. The summary line lands on stdout.
+// TestPromptStageNextStageDispatchesCascade: typing `!review` at the
+// design→build gate cascades through build (only) and re-prompts at
+// the review gate. The summary line lands on stdout.
 func TestPromptStageNextStageDispatchesCascade(t *testing.T) {
 	captured := stubOpenSdlcStage(t, nil)
-	// next is the post-design gate's "next" — code.
-	next := &Command{Name: "code", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
+	// next is the post-design gate's "next" — build.
+	next := &Command{Name: "build", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	r, w, err := os.Pipe()
@@ -587,9 +587,9 @@ func TestPromptStageNextStageDispatchesCascade(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer r.Close()
-	// `!test` cascades to the test gate. The re-entered prompt sees
+	// `!review` cascades to the review gate. The re-entered prompt sees
 	// EOF after the cascade dispatch and declines.
-	if _, err := io.WriteString(w, "!test\n"); err != nil {
+	if _, err := io.WriteString(w, "!review\n"); err != nil {
 		t.Fatal(err)
 	}
 	w.Close()
@@ -601,15 +601,15 @@ func TestPromptStageNextStageDispatchesCascade(t *testing.T) {
 	if code := promptStageNextStage(next, nil, nil, cascadeFixtureRoot(t, md), md, "moe sdlc code tele fix-it", &stdout, &stderr); code != 0 {
 		t.Fatalf("prompt exit=%d stderr=%q", code, stderr.String())
 	}
-	if got := stdout.String(); !strings.Contains(got, "cascade tele/fix-it: code ok") {
+	if got := stdout.String(); !strings.Contains(got, "cascade tele/fix-it: build ok") {
 		t.Fatalf("expected summary line in stdout, got: %q", got)
 	}
-	// code dispatched once; test must NOT dispatch (it's the
+	// build dispatched once; review must NOT dispatch (it's the
 	// destination, parked at its gate).
-	if got := countInvocations(*captured, "code"); got != 1 {
-		t.Fatalf("code dispatched %d times, want 1", got)
+	if got := countInvocations(*captured, "build"); got != 1 {
+		t.Fatalf("build dispatched %d times, want 1", got)
 	}
-	if got := countInvocations(*captured, "test"); got != 0 {
+	if got := countInvocations(*captured, "review"); got != 0 {
 		t.Fatalf("test must not dispatch on !test: got %d", got)
 	}
 }
@@ -623,7 +623,7 @@ func TestPromptStageNextStageDispatchesCascade(t *testing.T) {
 func TestPromptStageNextStageBangBangDispatchesHeadless(t *testing.T) {
 	captured := stubOpenSdlcStage(t, nil)
 	stubPushFromCascade(t, 0, nil)
-	next := &Command{Name: "code", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
+	next := &Command{Name: "build", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	r, w, err := os.Pipe()
@@ -667,7 +667,7 @@ func TestPromptStageNextStageBangBangDispatchesHeadless(t *testing.T) {
 func TestPromptStageNextStageBangBangBangDispatchesHeadless(t *testing.T) {
 	captured := stubOpenSdlcStage(t, nil)
 	stubPushFromCascade(t, 0, nil)
-	next := &Command{Name: "code", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
+	next := &Command{Name: "build", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	r, w, err := os.Pipe()
@@ -704,7 +704,7 @@ func TestPromptStageNextStageBangBangBangDispatchesHeadless(t *testing.T) {
 // prints a list of valid stages and declines.
 func TestPromptStageNextStageRejectsUnknownStage(t *testing.T) {
 	captured := stubOpenSdlcStage(t, nil)
-	next := &Command{Name: "code", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
+	next := &Command{Name: "build", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	r, w, err := os.Pipe()
@@ -727,7 +727,7 @@ func TestPromptStageNextStageRejectsUnknownStage(t *testing.T) {
 	if !strings.Contains(stderr.String(), "unknown stage") {
 		t.Fatalf("expected unknown-stage error, got stderr=%q", stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "design, code, test, review, push") {
+	if !strings.Contains(stderr.String(), "design, build, review, push") {
 		t.Fatalf("expected stage list in error, got stderr=%q", stderr.String())
 	}
 	if len(*captured) != 0 {
@@ -738,7 +738,7 @@ func TestPromptStageNextStageRejectsUnknownStage(t *testing.T) {
 // TestPromptStageNextStageShowsCascadeLegend: the prompt legend
 // names the cascade syntax for sdlc workflows.
 func TestPromptStageNextStageShowsCascadeLegend(t *testing.T) {
-	next := &Command{Name: "code", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
+	next := &Command{Name: "build", Run: func(_ []string, _, _ io.Writer) int { return 0 }}
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	r, w, err := os.Pipe()
@@ -946,7 +946,7 @@ func TestCascadeFromGateHeadlessRecoveryFailedStops(t *testing.T) {
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "", false, false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "", false, false, md, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("cascade exit=%d, want 1 (recovery gave up); stderr=%q", code, stderr.String())
 	}
@@ -956,7 +956,7 @@ func TestCascadeFromGateHeadlessRecoveryFailedStops(t *testing.T) {
 	if len(*pushCaptured) != 1 {
 		t.Fatalf("push dispatched %d times, want 1 (no retry after a non-zero recovery): %+v", len(*pushCaptured), *pushCaptured)
 	}
-	wantSummary := "cascade tele/fix-it: code ok · test ok · review ok · push deferred to recovery (pre-push hook) — stopped"
+	wantSummary := "cascade tele/fix-it: build ok · review ok · push deferred to recovery (pre-push hook) — stopped"
 	if got := renderCascadeSummary("tele/fix-it", res); got != wantSummary {
 		t.Fatalf("summary = %q, want %q", got, wantSummary)
 	}
@@ -983,15 +983,15 @@ func TestCascadeFromGateHeadlessCleanRecoveryRetriesAndShips(t *testing.T) {
 			md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 			var stdout, stderr bytes.Buffer
-			res, code := cascadeFromGate("code", "", false, false, md, &stdout, &stderr)
+			res, code := cascadeFromGate("build", "", false, false, md, &stdout, &stderr)
 			if code != 0 {
 				t.Fatalf("cascade exit=%d, want 0 (clean recovery then ship); stderr=%q", code, stderr.String())
 			}
 			if !res.shipped {
 				t.Fatalf("res.shipped = false after a clean recovery + retry that passed the gate: %+v", res)
 			}
-			// code, test, review, push (deferred), push (ok) — five steps.
-			wantStages := []string{"code", "test", "review", "push", "push"}
+			// build, review, push (deferred), push (ok) — four steps.
+			wantStages := []string{"build", "review", "push", "push"}
 			if len(res.ran) != len(wantStages) {
 				t.Fatalf("ran %d steps, want %d (%+v)", len(res.ran), len(wantStages), res.ran)
 			}
@@ -1000,10 +1000,10 @@ func TestCascadeFromGateHeadlessCleanRecoveryRetriesAndShips(t *testing.T) {
 					t.Fatalf("ran[%d].stage = %q, want %q", i, res.ran[i].stage, s)
 				}
 			}
-			if got := res.ran[3].deferred; got != recovery {
+			if got := res.ran[2].deferred; got != recovery {
 				t.Fatalf("first push step deferred tag = %q, want %q", got, recovery)
 			}
-			if got := res.ran[4]; got.deferred != "" || got.code != 0 {
+			if got := res.ran[3]; got.deferred != "" || got.code != 0 {
 				t.Fatalf("second push step = %+v, want a clean ship (no deferred, code 0)", got)
 			}
 			// Push dispatched exactly twice: the deferral and the retry.
@@ -1017,7 +1017,7 @@ func TestCascadeFromGateHeadlessCleanRecoveryRetriesAndShips(t *testing.T) {
 			}
 			// Summary shows the recover-then-ship as two steps and
 			// ends with the ship marker, not "— stopped".
-			wantSummary := "cascade tele/fix-it: code ok · test ok · review ok · push deferred to recovery (" +
+			wantSummary := "cascade tele/fix-it: build ok · review ok · push deferred to recovery (" +
 				deferredLabel(recovery) + ") · push ok — shipped"
 			if got := renderCascadeSummary("tele/fix-it", res); got != wantSummary {
 				t.Fatalf("summary = %q, want %q", got, wantSummary)
@@ -1049,7 +1049,7 @@ func TestCascadeFromGateHeadlessRetryRedefersStopsAtBound(t *testing.T) {
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "", false, false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "", false, false, md, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade exit=%d, want 0 (both recoveries exited cleanly); stderr=%q", code, stderr.String())
 	}
@@ -1060,7 +1060,7 @@ func TestCascadeFromGateHeadlessRetryRedefersStopsAtBound(t *testing.T) {
 	if len(*pushCaptured) != 2 {
 		t.Fatalf("push dispatched %d times, want 2 (one retry, then stop): %+v", len(*pushCaptured), *pushCaptured)
 	}
-	wantStages := []string{"code", "test", "review", "push", "push"}
+	wantStages := []string{"build", "review", "push", "push"}
 	if len(res.ran) != len(wantStages) {
 		t.Fatalf("ran %d steps, want %d (%+v)", len(res.ran), len(wantStages), res.ran)
 	}
@@ -1069,7 +1069,7 @@ func TestCascadeFromGateHeadlessRetryRedefersStopsAtBound(t *testing.T) {
 			t.Fatalf("ran[%d].stage = %q, want %q", i, res.ran[i].stage, s)
 		}
 	}
-	wantSummary := "cascade tele/fix-it: code ok · test ok · review ok · push deferred to recovery (rebase conflict) · push deferred to recovery (rebase conflict) — stopped"
+	wantSummary := "cascade tele/fix-it: build ok · review ok · push deferred to recovery (rebase conflict) · push deferred to recovery (rebase conflict) — stopped"
 	if got := renderCascadeSummary("tele/fix-it", res); got != wantSummary {
 		t.Fatalf("summary = %q, want %q", got, wantSummary)
 	}

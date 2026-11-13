@@ -169,7 +169,7 @@ func seedChainedFixture(t *testing.T, withReopen bool) string {
 	return root
 }
 
-// TestSDLCCodeNotFoundLineageHintsNoTTY: operator typed `sdlc code
+// TestSDLCCodeNotFoundLineageHintsNoTTY: operator typed `sdlc build
 // tele foo` after foo was promoted. With stdin not a tty (the test
 // process), the resolver prints the standard not-found error plus a
 // `hint:` line pointing at the dated descendant. Non-zero exit.
@@ -179,17 +179,17 @@ func TestSDLCCodeNotFoundLineageHintsNoTTY(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "code", "tele/foo"}, &out, &errb)
+	code := Run([]string{"sdlc", "build", "tele/foo"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero, stdout=%q stderr=%q", out.String(), errb.String())
 	}
 	// Typed slug is the idea itself, so the resolver names the
 	// workflow mismatch rather than a bare "run not found". The hint
 	// line still points at the live descendant.
-	if !strings.Contains(errb.String(), "sdlc code: tele/foo is a idea run, not sdlc") {
+	if !strings.Contains(errb.String(), "sdlc build: tele/foo is a idea run, not sdlc") {
 		t.Fatalf("missing workflow-mismatch preamble:\n%s", errb.String())
 	}
-	if !strings.Contains(errb.String(), "hint: moe sdlc code tele/foo-2026-05-14") {
+	if !strings.Contains(errb.String(), "hint: moe sdlc build tele/foo-2026-05-14") {
 		t.Fatalf("missing hint:\n%s", errb.String())
 	}
 }
@@ -203,7 +203,7 @@ func TestSDLCCodeNotFoundMultiDescendantList(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "code", "tele/foo"}, &out, &errb)
+	code := Run([]string{"sdlc", "build", "tele/foo"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero, stdout=%q stderr=%q", out.String(), errb.String())
 	}
@@ -216,7 +216,7 @@ func TestSDLCCodeNotFoundMultiDescendantList(t *testing.T) {
 	var order []string
 	for line := range strings.SplitSeq(errb.String(), "\n") {
 		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "moe sdlc code tele/foo") {
+		if !strings.HasPrefix(trimmed, "moe sdlc build tele/foo") {
 			continue
 		}
 		order = append(order, trimmed)
@@ -224,10 +224,10 @@ func TestSDLCCodeNotFoundMultiDescendantList(t *testing.T) {
 	if len(order) != 2 {
 		t.Fatalf("expected 2 suggested invocations, got %d:\n%s", len(order), errb.String())
 	}
-	if order[0] != "moe sdlc code tele/foo-2026-05-14-2" {
+	if order[0] != "moe sdlc build tele/foo-2026-05-14-2" {
 		t.Fatalf("most-recent first: order[0]=%q, want foo-2026-05-14-2", order[0])
 	}
-	if order[1] != "moe sdlc code tele/foo-2026-05-14" {
+	if order[1] != "moe sdlc build tele/foo-2026-05-14" {
 		t.Fatalf("order[1]=%q, want foo-2026-05-14", order[1])
 	}
 }
@@ -242,11 +242,11 @@ func TestSDLCCodeNotFoundZeroDescendants(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "code", "tele/ghost"}, &out, &errb)
+	code := Run([]string{"sdlc", "build", "tele/ghost"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero, stdout=%q stderr=%q", out.String(), errb.String())
 	}
-	if !strings.Contains(errb.String(), "sdlc code: run not found: tele/ghost") {
+	if !strings.Contains(errb.String(), "sdlc build: run not found: tele/ghost") {
 		t.Fatalf("missing not-found:\n%s", errb.String())
 	}
 	if strings.Contains(errb.String(), "hint:") || strings.Contains(errb.String(), "did you mean") {
@@ -265,7 +265,7 @@ func TestResolveSDLCRunSlugTTYAcceptsDescendant(t *testing.T) {
 	withStdinLine(t, "y\n")
 
 	var out, errb bytes.Buffer
-	resolved, code := resolveSDLCRunSlugWithMode("sdlc code", "tele", "foo", true, &out, &errb)
+	resolved, code := resolveSDLCRunSlugWithMode("sdlc build", "tele", "foo", true, &out, &errb)
 	if code != 0 {
 		t.Fatalf("expected code=0, got %d (stderr=%q)", code, errb.String())
 	}
@@ -287,7 +287,7 @@ func TestResolveSDLCRunSlugTTYAcceptsOnBlank(t *testing.T) {
 	withStdinLine(t, "\n")
 
 	var out, errb bytes.Buffer
-	resolved, code := resolveSDLCRunSlugWithMode("sdlc code", "tele", "foo", true, &out, &errb)
+	resolved, code := resolveSDLCRunSlugWithMode("sdlc build", "tele", "foo", true, &out, &errb)
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%q", code, errb.String())
 	}
@@ -307,11 +307,11 @@ func TestResolveSDLCRunSlugTTYDeclinesOnN(t *testing.T) {
 	withStdinLine(t, "n\n")
 
 	var out, errb bytes.Buffer
-	_, code := resolveSDLCRunSlugWithMode("sdlc code", "tele", "foo", true, &out, &errb)
+	_, code := resolveSDLCRunSlugWithMode("sdlc build", "tele", "foo", true, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on decline, stdout=%q stderr=%q", out.String(), errb.String())
 	}
-	if !strings.Contains(errb.String(), "sdlc code: tele/foo is a idea run, not sdlc") {
+	if !strings.Contains(errb.String(), "sdlc build: tele/foo is a idea run, not sdlc") {
 		t.Fatalf("decline should surface the workflow-mismatch error for the typed slug:\n%s", errb.String())
 	}
 }
@@ -327,7 +327,7 @@ func TestResolveSDLCRunSlugExactMatchPassthrough(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	resolved, code := resolveSDLCRunSlugWithMode("sdlc code", "tele", "live", false, &out, &errb)
+	resolved, code := resolveSDLCRunSlugWithMode("sdlc build", "tele", "live", false, &out, &errb)
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%q", code, errb.String())
 	}

@@ -74,7 +74,7 @@ func freshenRunBranch(workTree, branch, defaultBranch string) {
 // the workspace if it doesn't exist. Used by verbs (push, shell) that
 // need to point at an already-attached workspace; refuses with a clear
 // error when the workspace doesn't exist on disk so the operator
-// notices that `sdlc code` was never run.
+// notices that `sdlc build` was never run.
 func resolveRunWorkspacePath(root string, md *run.Metadata) (string, error) {
 	if md.Workspace == "" {
 		if !sandbox.Exists(root, md.Project, md.ID) {
@@ -102,7 +102,7 @@ func resolveRunWorkspacePath(root string, md *run.Metadata) (string, error) {
 // explicit `moe workspace refresh` or `moe workspace remove`, since
 // the workspace's env is expected to outlive the run.
 //
-// Idempotent: a run that never reached `sdlc code` (no clone, no
+// Idempotent: a run that never reached `sdlc build` (no clone, no
 // claim) is a no-op either way. Teardown is invoked best-effort —
 // a non-zero exit is logged but doesn't block sandbox removal,
 // because a half-removed sandbox is worse than a half-cleaned dev

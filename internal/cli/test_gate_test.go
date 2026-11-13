@@ -96,16 +96,16 @@ Allowed values: "ready" or "blocked".
 
 ## Fixes applied during this stage
 
-(none)
+None.
 `)
-	ok, err := testStageGate(root, md)
+	ok, err := testFileStamped(root, md)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !ok {
 		t.Fatal("expected gate to pass: the real gate is ready, the blocked one is quoted evidence")
 	}
-	body, err := os.ReadFile(filepath.Join(root, run.ContentPath(md.Project, md.ID, "test")))
+	body, err := os.ReadFile(filepath.Join(root, run.ContentFilePath(md.Project, md.ID, "build", "test.md")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,9 +288,9 @@ nothing — automated tests cover the change
 
 ## Fixes applied during this stage
 
-(none)
+None.
 `)
-	ok, err := testStageGate(root, md)
+	ok, err := testFileStamped(root, md)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,8 +304,8 @@ nothing — automated tests cover the change
 func TestTestStageGateRefusesPlaceholderCanvas(t *testing.T) {
 	root := t.TempDir()
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
-	writeTestCanvas(t, root, md, testCanvasSkeleton)
-	ok, err := testStageGate(root, md)
+	writeTestCanvas(t, root, md, buildTestSkeleton)
+	ok, err := testFileStamped(root, md)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,7 +336,7 @@ ran tests
 
 (agent fills: skipped surfaces)
 `)
-	ok, err := testStageGate(root, md)
+	ok, err := testFileStamped(root, md)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +364,7 @@ ran tests
 
 nothing
 `)
-	ok, err := testStageGate(root, md)
+	ok, err := testFileStamped(root, md)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -380,7 +380,7 @@ nothing
 func TestTestStageGateMissingCanvasIsUnsatisfied(t *testing.T) {
 	root := t.TempDir()
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc"}
-	ok, err := testStageGate(root, md)
+	ok, err := testFileStamped(root, md)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -411,7 +411,7 @@ func TestTestGateShipNone(t *testing.T) {
 		{"ship none without status", gate(`{"ship":"none"}`), false},
 		{"malformed json", gate(`{"status":"ready","ship":`), false},
 		{"no gate section", "# Test\n\n## What was verified\n\nran tests\n", false},
-		{"unfilled skeleton", testCanvasSkeleton, false},
+		{"unfilled skeleton", buildTestSkeleton, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -457,7 +457,7 @@ ran `+"`go test ./...`"+`
 
 nothing — the run ships no project change
 `)
-	ok, err := testStageGate(root, md)
+	ok, err := testFileStamped(root, md)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -466,10 +466,35 @@ nothing — the run ships no project change
 	}
 }
 
-// writeTestCanvas seeds the test stage's canvas file under root.
+// writeTestCanvas seeds build's test.md under root.
 func writeTestCanvas(t *testing.T, root string, md *run.Metadata, body string) {
 	t.Helper()
-	writeStageCanvas(t, root, md, "test", body)
+	writeBuildCanvas(t, root, md, "test.md", body)
+}
+
+// writeBuildCanvas seeds one of build's content files under root.
+func writeBuildCanvas(t *testing.T, root string, md *run.Metadata, name, body string) {
+	t.Helper()
+	path := filepath.Join(root, run.ContentFilePath(md.Project, md.ID, "build", name))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// testFileStamped is the test.md half of build's derived gate: the
+// file's own stamped check, as canvasFileProblems applies it.
+func testFileStamped(root string, md *run.Metadata) (bool, error) {
+	body, err := os.ReadFile(filepath.Join(root, run.ContentFilePath(md.Project, md.ID, "build", "test.md")))
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return canvasFileProblem(string(body)) == "", nil
 }
 
 func writeStageCanvas(t *testing.T, root string, md *run.Metadata, stage, body string) {

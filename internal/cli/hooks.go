@@ -151,7 +151,7 @@ func runProjectHookScripts(root string, event hookEvent, env hookEnv, stdout, st
 
 // openCodeSessionForHookFailure builds the generic chain-back kickoff for
 // project hook failures. It names the failing event + script, dumps the
-// captured output verbatim, and opens a fresh code session against the same
+// captured output verbatim, and opens a fresh build session against the same
 // run. The session's exit code is propagated so a clean fix-and-commit lets
 // the workflow's chain prompt offer push next — same shape `moe <wf> code`
 // already produces (interactive recovery). A headless recovery skips that
@@ -169,25 +169,25 @@ var openCodeSessionForHookFailure = func(md *run.Metadata, fail *hookFailure, he
 }
 
 // openCodeRecoverySession owns the common push-recovery session shape:
-// code document, sandbox on, optional headless one-shot, and typed
+// build document, sandbox on, optional headless one-shot, and typed
 // deferral for the cascade. The post-turn chain prompt is preserved for
 // interactive recovery (so the operator is offered the push retry) but
 // suppressed for headless, so the recovery returns cleanly and the
 // cascade's push retry loop regains control instead of blocking on a
 // prompt no one can answer.
 //
-// The recovery is a "code" turn, but the stage it should chain to is
-// push, not code's successor (test): NextStageOverride: "push" makes the
+// The recovery is a "build" turn, but the stage it should chain to is
+// push, not build's successor (review): NextStageOverride: "push" makes the
 // interactive prompt offer the push retry. "push" is a literal because
 // the recovery is only ever reached from the push gate (see push.go) —
 // push is, by construction, the stage being retried.
 func openCodeRecoverySession(md *run.Metadata, recovery string, headless bool, kickoff string, stdout, stderr io.Writer) (int, error) {
 	if headless {
-		moePrintf(stderr, "       opening a headless code recovery turn for %s; will retry push if recovery resolves cleanly\n", recovery)
+		moePrintf(stderr, "       opening a headless build recovery turn for %s; will retry push if recovery resolves cleanly\n", recovery)
 	} else {
-		moePrintf(stderr, "       opening a fresh code session for %s; the chain prompt will offer push next\n", recovery)
+		moePrintf(stderr, "       opening a fresh build session for %s; the chain prompt will offer push next\n", recovery)
 	}
-	code := openRecoveryStageSession(md, "code", "push", headless, kickoff, stdout, stderr)
+	code := openRecoveryStageSession(md, "build", "push", headless, kickoff, stdout, stderr)
 	return code, &PushDeferredError{
 		Recovery: recovery,
 		Project:  md.Project,
@@ -196,17 +196,17 @@ func openCodeRecoverySession(md *run.Metadata, recovery string, headless bool, k
 }
 
 // openRecoveryStageSession is the bare recovery-turn seam both the
-// push-gate recovery and the review/test-gate kickback share: open the
+// push-gate recovery and the review-gate kickback share: open the
 // named document with the sandbox on and the kickoff as its initial
 // prompt, and set NextStageOverride so the post-turn chain prompt
 // re-offers the stage being retried rather than the document's ordinary
 // successor.
 //
-//   - document is the stage to open — "code" for both push recovery and
-//     a review/test kickback that lands in code, "design" for a kickback
+//   - document is the stage to open — "build" for both push recovery and
+//     a review kickback that lands in build, "design" for a kickback
 //     the operator routes to design instead.
 //   - override is the stage to re-offer once the document commits —
-//     "push" for push recovery, or the blocked stage ("review"/"test")
+//     "push" for push recovery, or the blocked stage ("review")
 //     for a kickback, so the chain re-runs the gate that blocked.
 //   - headless runs it as a one-shot (the push cascade's recovery loop);
 //     interactive keeps the post-turn chain prompt.
@@ -216,14 +216,51 @@ func openCodeRecoverySession(md *run.Metadata, recovery string, headless bool, k
 // the deferred-error bookkeeping in openCodeRecoverySession rather than
 // here is deliberate: a kickback is not a push deferral, so it should
 // not manufacture one.
+//
+// A directory-form document (build) must be stamped ready before the
+// recovery hands on to its destination. The interactive path gets that
+// check from the post-turn chain prompt; a headless recovery has no
+// prompt, so the check runs here and an unready build exits 1 — the
+// caller's retry (push) or re-dispatch (review) never runs over
+// unverified work.
 func openRecoveryStageSession(md *run.Metadata, document, override string, headless bool, kickoff string, stdout, stderr io.Writer) int {
-	return runStageSession(md.Project, md.ID, document, stageSessionOpts{
+	code := runStageSession(md.Project, md.ID, document, stageSessionOpts{
 		ValidateEntry:     sdlcSessionEntry,
 		NeedsSandbox:      true,
 		Headless:          headless,
 		InitialPrompt:     kickoff,
 		NextStageOverride: override,
+		ExtraStagePaths:   stageCommitPathsPresent,
 	}, stdout, stderr)
+	if code != 0 || !headless {
+		return code
+	}
+	root, err := findRoot(stderr)
+	if err != nil {
+		return 1
+	}
+	return requireStageReady(root, md, document, stdout, stderr)
+}
+
+// requireStageReady checks a directory-form stage's derived gate after
+// an automatic exit and prints the per-file refusal when it fails.
+// File-form stages pass: their gates are checked where they always
+// were.
+func requireStageReady(root string, md *run.Metadata, stage string, stdout, stderr io.Writer) int {
+	wf, err := LookupWorkflow(md.Workflow)
+	if err != nil || wf.StageFiles(stage) == nil {
+		return 0
+	}
+	problems, err := wf.StageGateProblems(root, md, stage)
+	if err != nil {
+		moePrintf(stderr, "%s gate: %v\n", stage, err)
+		return 1
+	}
+	if len(problems) > 0 {
+		moePrintf(stderr, "%s", stageNotReadyMessage(wf.Name, md, stage, problems))
+		return 1
+	}
+	return 0
 }
 
 // buildHookFailureKickoff is the agent-facing kickoff for a generic
@@ -267,7 +304,7 @@ func buildKickbackKickoff(workflow, blockedStage, canvas string) string {
 		b.WriteString("\n")
 	}
 	b.WriteString("\n")
-	b.WriteString("Read the findings, apply the fix in the sandbox, commit, and exit the session. ")
+	b.WriteString("Every blocking finding above needs a disposition before you hand back: fix it and verify the fix, or say why it does not apply. Record each disposition and its verification on your canvas, commit the fixes in the sandbox, and exit the session. ")
 	fmt.Fprintf(&b, "The post-turn chain prompt will re-offer `moe %s %s` so the gate that blocked gets another look.\n", workflow, blockedStage)
 	return b.String()
 }

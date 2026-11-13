@@ -112,7 +112,9 @@ func runLog(workflow, defaultStage string) func(args []string, stdout, stderr io
 			return 1
 		}
 		artifacts := run.NewArtifactReader(root)
-		stages := wf.Stages()
+		// Docs, not Stages: a retired stage (sdlc code/test) keeps its
+		// historical transcript readable after it leaves the ladder.
+		stages := wf.Docs()
 		if md.Workflow != workflow {
 			if _, err := LookupWorkflow(md.Workflow); err == nil {
 				moePrintf(stderr, "moe %s log: %s is a %s run, use 'moe %s log'\n", workflow, runID, md.Workflow, md.Workflow)

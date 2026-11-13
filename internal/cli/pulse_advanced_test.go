@@ -33,7 +33,7 @@ func TestAdvancedRunsBlockListsAdvancedRun(t *testing.T) {
 	advanceAt(t, root, "moe", "evolution", "design", now.Add(-3*time.Hour))
 
 	got := advancedRunsBlock(mustPulseScan(t, root), "moe")
-	for _, want := range []string{"`evolution` (sdlc)", "waiting at **code**", "Evolve the ladder"} {
+	for _, want := range []string{"`evolution` (sdlc)", "waiting at **build**", "Evolve the ladder"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("block missing %q:\n%s", want, got)
 		}
@@ -81,13 +81,13 @@ func TestAdvancedRunsBlockSkipsStartedSuccessor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := ensureClaudeDocument(root, md, "code"); err != nil {
+	if _, _, err := ensureClaudeDocument(root, md, "build"); err != nil {
 		t.Fatal(err)
 	}
 	if err := run.Save(root, md); err != nil {
 		t.Fatal(err)
 	}
-	if err := commitSessionStart(root, md, "code", md.Documents["code"].Sessions["claude"]); err != nil {
+	if err := commitSessionStart(root, md, "build", md.Documents["build"].Sessions["claude"]); err != nil {
 		t.Fatal(err)
 	}
 
@@ -114,7 +114,7 @@ func TestAdvancedRunsBlockSkipsLiveSession(t *testing.T) {
 		t.Fatalf("precondition: run should be eligible before its code session opens:\n%s", got)
 	}
 
-	if _, err := session.Open(root, "moe", "picked-up-live", "code"); err != nil {
+	if _, err := session.Open(root, "moe", "picked-up-live", "build"); err != nil {
 		t.Fatal(err)
 	}
 

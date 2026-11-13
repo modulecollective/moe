@@ -531,7 +531,7 @@ func finishAfterKick(root string, md *run.Metadata, res cascadeResult, code int,
 	}
 	last := res.ran[len(res.ran)-1].stage
 	blocked := false
-	if md.Workflow == "sdlc" && (last == "review" || last == "test") {
+	if md.Workflow == "sdlc" && last == "review" {
 		_, blocked = cascadeStageBlocked(md, last, io.Discard)
 	}
 	if blocked {

@@ -153,7 +153,7 @@ func TestFactorySpans(t *testing.T) {
 		BacklogCount: 2,
 		ActiveStages: []ActiveStation{
 			{Stage: "design", RunningDoc: "design"}, // live → ⚒
-			{Stage: "code"},                         // parked → ⚙
+			{Stage: "build"},                        // parked → ⚙
 		},
 		CompletedCount: 1,
 	}
@@ -238,7 +238,7 @@ func TestStyleANSIMapsBands(t *testing.T) {
 	counts[0] = 24
 	state := FactoryState{
 		BacklogCount:   2,
-		ActiveStages:   []ActiveStation{{Stage: "design", RunningDoc: "design"}, {Stage: "code"}},
+		ActiveStages:   []ActiveStation{{Stage: "design", RunningDoc: "design"}, {Stage: "build"}},
 		CompletedCount: 1,
 	}
 

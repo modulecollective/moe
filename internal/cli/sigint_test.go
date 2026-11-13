@@ -167,7 +167,7 @@ func (b *blockingReader) Read(p []byte) (int, error) {
 func TestPromptStageNextStageDeclinesOnSignal(t *testing.T) {
 	rec := &promptDispatchRecord{}
 	next := &Command{
-		Name: "code",
+		Name: "build",
 		Run: func(args []string, _, _ io.Writer) int {
 			rec.ran = true
 			return 0

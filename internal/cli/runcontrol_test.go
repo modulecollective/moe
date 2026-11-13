@@ -65,21 +65,21 @@ func TestHoldStopsCascadeAtNextBoundary(t *testing.T) {
 	push := stubPushFromCascade(t, 0, nil)
 	inner := openSdlcStage
 	openSdlcStage = func(stage, p, r string, headless bool, o, e io.Writer) int {
-		if stage == "code" {
+		if stage == "build" {
 			submitControl(t, root, runcontrol.KindPause, "p1")
 		}
 		return inner(stage, p, r, headless, o, e)
 	}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("code", "", false, true, md, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "", false, true, md, &stdout, &stderr)
 	if code != exitYielded {
 		t.Fatalf("exit = %d, want %d; stderr:\n%s", code, exitYielded, stderr.String())
 	}
-	if n := countInvocations(*captured, "code"); n != 1 {
-		t.Fatalf("code dispatched %d times, want 1", n)
+	if n := countInvocations(*captured, "build"); n != 1 {
+		t.Fatalf("build dispatched %d times, want 1", n)
 	}
-	for _, s := range []string{"test", "review"} {
+	for _, s := range []string{"review"} {
 		if n := countInvocations(*captured, s); n != 0 {
 			t.Fatalf("%s dispatched after the hold", s)
 		}
@@ -88,10 +88,10 @@ func TestHoldStopsCascadeAtNextBoundary(t *testing.T) {
 		t.Fatal("pushed after the hold")
 	}
 	p1, _ := controlRecord(t, root).Find("p1")
-	if p1.State != runcontrol.StateCompleted || p1.Boundary != "stage test" {
-		t.Fatalf("receipt = %+v, want completed at stage test", p1)
+	if p1.State != runcontrol.StateCompleted || p1.Boundary != "stage review" {
+		t.Fatalf("receipt = %+v, want completed at stage review", p1)
 	}
-	if got := renderCascadeSummary("moe/change-auth", res); !strings.Contains(got, "test held by operator control — stopped") {
+	if got := renderCascadeSummary("moe/change-auth", res); !strings.Contains(got, "review held by operator control — stopped") {
 		t.Fatalf("summary = %q", got)
 	}
 }
@@ -157,7 +157,7 @@ func TestFinishWidensKickToBangBang(t *testing.T) {
 	if code := chainKickRun(root, "moe", "change-auth", rideDynamic, true, &stdout, &stderr); code != 0 {
 		t.Fatalf("kick exit = %d; stderr:\n%s", code, stderr.String())
 	}
-	for _, s := range []string{"design", "code", "test", "review"} {
+	for _, s := range []string{"design", "build", "review"} {
 		if countInvocations(*captured, s) != 1 {
 			t.Fatalf("%s dispatched %d times, want 1 (%+v)", s, countInvocations(*captured, s), *captured)
 		}
@@ -269,7 +269,7 @@ func TestDecisionPromptYieldsToControlOverBufferedAnswer(t *testing.T) {
 		t.Fatalf("err = %v, want errControlWake", err)
 	}
 	var stderr bytes.Buffer
-	if code := controlAtDecision(root, md, "test", false, io.Discard, &stderr); code != exitYielded {
+	if code := controlAtDecision(root, md, "review", false, io.Discard, &stderr); code != exitYielded {
 		t.Fatalf("controlAtDecision = %d; stderr:\n%s", code, stderr.String())
 	}
 }

@@ -61,11 +61,11 @@ Design is ready to hand back when:
 
 Before you hand it over, offer to walk the open questions with the
 operator one by one. Each should leave the walk as one of three things:
-a decision, recorded in the doc with its reasoning; a test-stage probe,
-named in the doc so the code stage's test plan carries it; or an
+a decision, recorded in the doc with its reasoning; a verification
+probe, named in the doc so build's test plan carries it; or an
 explicitly parked unknown, with why proceeding without the answer is
-safe. An open question nobody triaged is a decision the code stage will
-make by accident.
+safe. An open question nobody triaged is a decision build will make by
+accident.
 
 If you're polishing prose, you're done. Stop and hand it over.
 
@@ -104,7 +104,7 @@ decision.
 
 ## The project sandbox is read-only
 
-You have the same per-run sandbox clone code and test stages get,
+You have the same per-run sandbox clone build and review get,
 plus the project's dev-env (so `go doc`, `git log`, running the
 existing tests, etc. all work). The point is to **verify facts** —
 check an API shape, confirm a command's output, sanity-check an

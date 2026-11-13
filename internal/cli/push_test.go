@@ -84,11 +84,13 @@ func newPushFixture(t *testing.T) *pushFixture {
 	gittest.Run(t, root, "add", "bureaucracy.conf", ".gitmodules", subPath,
 		filepath.Join("projects", projectID, "project.json"))
 	gittest.Run(t, root, "commit", "-m", "Register project "+projectID)
-	writeContent(t, root, projectID, runID, "code", "# code doc\n")
-	gittest.Run(t, root, "add", filepath.Join("projects", projectID, "runs", runID, "documents", "code", "content.md"))
-	gittest.Run(t, root, "commit", "-m", "work: update code\n\nMoE-Run: "+runID+"\nMoE-Document: code\n")
+	for _, name := range []string{"code.md", "test.md"} {
+		writeFile(t, filepath.Join(root, run.ContentFilePath(projectID, runID, "build", name)), "# build "+name+"\n")
+	}
+	gittest.Run(t, root, "add", filepath.Join("projects", projectID, "runs", runID, "documents", "build"))
+	gittest.Run(t, root, "commit", "-m", "work: update build\n\nMoE-Run: "+runID+"\nMoE-Document: build\n")
 
-	// Bring the sandbox up — mirrors what `moe sdlc code` does.
+	// Bring the sandbox up — mirrors what `moe sdlc build` does.
 	clonePath, err := sandbox.Ensure(root, projectID, runID)
 	if err != nil {
 		t.Fatal(err)
@@ -221,9 +223,9 @@ func TestPushMergeFFAdvancesOriginAndMarksMerged(t *testing.T) {
 	for _, want := range []string{
 		"Shipped by fast-forward merge. No push synthesis was run for this path.",
 		"No design-stage canvas was present at `projects/tele/runs/fix-it/documents/design/content.md`.",
-		"Code-stage record: `projects/tele/runs/fix-it/documents/code/content.md`.",
+		"Build-stage record: `projects/tele/runs/fix-it/documents/build/content/code.md`.",
+		"Build-stage record: `projects/tele/runs/fix-it/documents/build/content/test.md`.",
 		"No review-stage canvas was present at `projects/tele/runs/fix-it/documents/review/content.md`.",
-		"No test-stage canvas was present at `projects/tele/runs/fix-it/documents/test/content.md`.",
 	} {
 		if !strings.Contains(gotCanvas, want) {
 			t.Fatalf("merge push canvas missing %q:\n%s", want, canvas)
@@ -1183,10 +1185,13 @@ func TestWritePRBodyFileMissingSection(t *testing.T) {
 	}
 }
 
-func TestWriteMechanicalPushNoteMentionsTestCanvasWhenPresent(t *testing.T) {
+// TestWriteMechanicalPushNoteNamesEachBuildCanvas: build is
+// directory-form, so the note carries one line per declared file — a
+// present test.md reads as a record, a missing code.md says so.
+func TestWriteMechanicalPushNoteNamesEachBuildCanvas(t *testing.T) {
 	root := t.TempDir()
 	md := &run.Metadata{Project: "tele", ID: "fix-it", Workflow: "sdlc"}
-	testPath := filepath.Join(root, run.ContentPath(md.Project, md.ID, "test"))
+	testPath := filepath.Join(root, run.ContentFilePath(md.Project, md.ID, "build", "test.md"))
 	if err := os.MkdirAll(filepath.Dir(testPath), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1206,11 +1211,11 @@ func TestWriteMechanicalPushNoteMentionsTestCanvasWhenPresent(t *testing.T) {
 		t.Fatalf("read push note: %v", err)
 	}
 	got := string(canvas)
-	if !strings.Contains(got, "Test-stage record: `projects/tele/runs/fix-it/documents/test/content.md`.") {
-		t.Fatalf("push note should name present test canvas, got:\n%s", got)
+	if !strings.Contains(got, "Build-stage record: `projects/tele/runs/fix-it/documents/build/content/test.md`.") {
+		t.Fatalf("push note should name present test.md, got:\n%s", got)
 	}
-	if strings.Contains(got, "No test-stage canvas") {
-		t.Fatalf("push note should not claim test canvas is absent, got:\n%s", got)
+	if !strings.Contains(got, "No build-stage canvas was present at `projects/tele/runs/fix-it/documents/build/content/code.md`.") {
+		t.Fatalf("push note should name the missing code.md, got:\n%s", got)
 	}
 }
 
@@ -1222,7 +1227,8 @@ func TestWriteMechanicalPushNoteMentionsTestCanvasWhenPresent(t *testing.T) {
 func TestWriteMechanicalPushNoteEnumeratesWorkflowStages(t *testing.T) {
 	root := t.TempDir()
 	md := &run.Metadata{Project: "tele", ID: "fix-it", Workflow: "sdlc"}
-	for _, stage := range []string{"design", "code", "review"} {
+	writeBuildCanvas(t, root, md, "code.md", "# code\n")
+	for _, stage := range []string{"design", "review"} {
 		p := filepath.Join(root, run.ContentPath(md.Project, md.ID, stage))
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 			t.Fatal(err)
@@ -1243,9 +1249,9 @@ func TestWriteMechanicalPushNoteEnumeratesWorkflowStages(t *testing.T) {
 	got := string(canvas)
 	for _, want := range []string{
 		"Design-stage record: `projects/tele/runs/fix-it/documents/design/content.md`.",
-		"Code-stage record: `projects/tele/runs/fix-it/documents/code/content.md`.",
+		"Build-stage record: `projects/tele/runs/fix-it/documents/build/content/code.md`.",
 		"Review-stage record: `projects/tele/runs/fix-it/documents/review/content.md`.",
-		"No test-stage canvas was present at `projects/tele/runs/fix-it/documents/test/content.md`.",
+		"No build-stage canvas was present at `projects/tele/runs/fix-it/documents/build/content/test.md`.",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("push note missing %q:\n%s", want, got)
@@ -1495,10 +1501,9 @@ func TestPromptPushNextStageBlankDeclines(t *testing.T) {
 
 // TestPromptPushNextStagePrintsReviewCanvas: the canvas printed above
 // the [N/m/p] prompt is the freshest layer on disk, verbatim (no
-// header, no decoration), and the chain is review → test → code.
-// Review wins because it is the last gate before push and its verdict
-// is what the ship decision is about; test and code stand in when the
-// layers above them never landed. This is the operator's one chance to
+// header, no decoration), and the chain is review → build. Review wins
+// because it is the last gate before push and its verdict is what the
+// ship decision is about; build stands in when review never landed. This is the operator's one chance to
 // read a canvas at the merge decision.
 func TestPromptPushNextStagePrintsReviewCanvas(t *testing.T) {
 	// Each case writes every canvas named in `on disk`, then asserts
@@ -1506,17 +1511,15 @@ func TestPromptPushNextStagePrintsReviewCanvas(t *testing.T) {
 	// order, not just "some canvas prints".
 	bodies := map[string]string{
 		"review": "## Gate\n\n```json\n{\"status\":\"ready\"}\n```\n",
-		"test":   "## What was verified\n\n`go test ./...` passes.\n",
-		"code":   "## Draft PR\n\n**Title:** `fix: it`\n",
+		"build":  "## What was verified\n\n`go test ./...` passes.\n",
 	}
 	for _, tc := range []struct {
 		name    string
 		onDisk  []string
 		printed string
 	}{
-		{"review wins", []string{"review", "test", "code"}, "review"},
-		{"test when review is missing", []string{"test", "code"}, "test"},
-		{"code when only code landed", []string{"code"}, "code"},
+		{"review wins", []string{"review", "build"}, "review"},
+		{"build when review is missing", []string{"build"}, "build"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			next := &Command{
@@ -1527,6 +1530,10 @@ func TestPromptPushNextStagePrintsReviewCanvas(t *testing.T) {
 
 			root := t.TempDir()
 			for _, stage := range tc.onDisk {
+				if stage == "build" {
+					writeBuildCanvas(t, root, md, "test.md", bodies[stage])
+					continue
+				}
 				canvas := filepath.Join(root, run.ContentPath("tele", "fix-it", stage))
 				if err := os.MkdirAll(filepath.Dir(canvas), 0o755); err != nil {
 					t.Fatal(err)
@@ -2017,7 +2024,7 @@ func TestPushSynthesisDispatchesHeadlessStage(t *testing.T) {
 // Synthesis runs inside the chosen push command, not at chain-prompt
 // time, so by the time the operator reads this preamble the push canvas
 // (if any) may be left over from a prior push attempt — stale relative
-// to whatever the operator's about to do. Test → code is the live story.
+// to whatever the operator's about to do. Review → build is the live story.
 func TestPromptPushNextStageIgnoresPushCanvas(t *testing.T) {
 	next := &Command{
 		Name: "push",
@@ -2026,14 +2033,8 @@ func TestPromptPushNextStageIgnoresPushCanvas(t *testing.T) {
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	root := t.TempDir()
-	testCanvas := filepath.Join(root, run.ContentPath("tele", "fix-it", "test"))
-	if err := os.MkdirAll(filepath.Dir(testCanvas), 0o755); err != nil {
-		t.Fatal(err)
-	}
 	const testBody = "## What was verified\n\nLive test canvas — this is what should appear.\n"
-	if err := os.WriteFile(testCanvas, []byte(testBody), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeBuildCanvas(t, root, md, "test.md", testBody)
 	pushCanvas := filepath.Join(root, run.ContentPath("tele", "fix-it", "push"))
 	if err := os.MkdirAll(filepath.Dir(pushCanvas), 0o755); err != nil {
 		t.Fatal(err)
@@ -2345,13 +2346,15 @@ exit 7
 // Stubs runStageSession so the chain-back closures can be exercised
 // without spinning a real session worktree, and asserts the opts the
 // closure passes through (SkipNextStage tracks headless,
-// NextStageOverride="push", docID="code", sandbox on).
+// NextStageOverride="push", docID="build", sandbox on). A headless
+// recovery also has to leave build stamped before it hands back.
 func TestChainBackPropagatesStageExitAndChainsForward(t *testing.T) {
 	cases := []struct {
 		name         string
 		invoke       func(md *run.Metadata) (int, error)
 		stubReturns  int
 		wantRecovery string
+		unstamped    bool
 		wantHeadless bool
 	}{
 		{
@@ -2392,6 +2395,20 @@ func TestChainBackPropagatesStageExitAndChainsForward(t *testing.T) {
 			wantHeadless: true,
 		},
 		{
+			name: "hook failure headless, build left unstamped",
+			invoke: func(md *run.Metadata) (int, error) {
+				return openCodeSessionForHookFailure(md, &hookFailure{
+					event:  hookEventPrePush,
+					script: "10-fail.sh",
+					output: "boom\n",
+				}, true, io.Discard, io.Discard)
+			},
+			stubReturns:  0,
+			wantRecovery: "hook-failure",
+			wantHeadless: true,
+			unstamped:    true,
+		},
+		{
 			name: "rebase conflict",
 			invoke: func(md *run.Metadata) (int, error) {
 				return openCodeSessionForRebaseConflict(md, &push.RebaseConflictError{
@@ -2422,9 +2439,17 @@ func TestChainBackPropagatesStageExitAndChainsForward(t *testing.T) {
 				Project:  "tele",
 				Workflow: "sdlc",
 			}
+			root := isolateCascadeMoeHome(t)
+			if !tc.unstamped {
+				writeStampedBuild(t, root, md)
+			}
+			want := tc.stubReturns
+			if tc.unstamped {
+				want = 1 // the readiness check refuses the hand-back
+			}
 			got, err := tc.invoke(md)
-			if got != tc.stubReturns {
-				t.Fatalf("chain-back exit code: want propagated %d, got %d", tc.stubReturns, got)
+			if got != want {
+				t.Fatalf("chain-back exit code: want %d, got %d", want, got)
 			}
 			// The typed-error contract: every chain-back surfaces a
 			// *PushDeferredError tagged with the recovery flavour and
@@ -2443,11 +2468,11 @@ func TestChainBackPropagatesStageExitAndChainsForward(t *testing.T) {
 				t.Fatalf("deferred identity: want (%s,%s), got (%s,%s)",
 					md.Project, md.ID, deferred.Project, deferred.Run)
 			}
-			if capturedDoc != "code" {
-				t.Fatalf("docID: want %q, got %q", "code", capturedDoc)
+			if capturedDoc != "build" {
+				t.Fatalf("docID: want %q, got %q", "build", capturedDoc)
 			}
 			if !capturedOpts.NeedsSandbox {
-				t.Fatalf("NeedsSandbox: want true (chain-back is a code stage)")
+				t.Fatalf("NeedsSandbox: want true (chain-back is a build stage)")
 			}
 			// Headless recovery suppresses the post-turn prompt so the
 			// cascade's push retry loop regains control; interactive
