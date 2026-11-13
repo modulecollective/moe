@@ -242,3 +242,28 @@ func sanitize(s string) string {
 	}
 	return b.String()
 }
+
+// horizontal keeps the command cursor reachable without splitting runes.
+func (e *editor) horizontal(width int) (string, int) {
+	start, col := e.cur, 0
+	for start > 0 && col+displayWidth(e.text[start-1]) < width-1 {
+		start--
+		col += displayWidth(e.text[start])
+	}
+	var b strings.Builder
+	used := 0
+	if start > 0 {
+		b.WriteByte('<')
+		used++
+		col++
+	}
+	for _, r := range e.text[start:] {
+		n := displayWidth(r)
+		if used+n > width {
+			break
+		}
+		b.WriteString(visible(r))
+		used += n
+	}
+	return b.String(), col
+}

@@ -569,8 +569,7 @@ func paintedDetail(t *testing.T, m *model) string {
 }
 
 // An outcome — a refusal with its recovery, or a save whose tag failed —
-// is marked in the title at any supported width, with the real board
-// header present, and its whole text is in the target's details.
+// stays reachable in the console and target details at every width.
 func TestOutcomeReachable(t *testing.T) {
 	const refusal = "the canvas changed since you opened it; nothing saved — Ctrl-X discards your draft, then e opens the current text"
 	for _, cols := range []int{40, 80, 100} {
@@ -583,8 +582,8 @@ func TestOutcomeReachable(t *testing.T) {
 		typed(m, "more")
 		press(m, Key{Code: KeyCtrlS}, Key{Code: KeyRune, Rune: 's'})
 		m.finished(jobResult{job: <-q, results: []Result{{Changed: true, Message: refusal}}})
-		if title := m.view().rows[0]; !strings.HasPrefix(title, " MoE ui · ! the") {
-			t.Fatalf("%d cols: title %q does not show the failure", cols, title)
+		if got := strings.Join(m.consoleRows(), ""); !strings.Contains(got, refusal) {
+			t.Fatalf("%d cols: console missing refusal: %q", cols, got)
 		}
 		if got := paintedDetail(t, m); !strings.Contains(got, refusal) {
 			t.Fatalf("%d cols: refusal not reachable in details:\n%s", cols, got)
@@ -596,8 +595,8 @@ func TestOutcomeReachable(t *testing.T) {
 		}
 		press(m, Key{Code: KeyCtrlS}, Key{Code: KeyRune, Rune: 'g'})
 		m.finished(jobResult{job: <-q, results: []Result{{OK: true, Message: "saved p/i"}, {Message: "tag: idea p/i is promoted, not in progress"}}})
-		if title := m.view().rows[0]; !strings.HasPrefix(title, " MoE ui · ! saved") {
-			t.Fatalf("%d cols: partial title %q", cols, title)
+		if got := strings.Join(m.consoleRows(), ""); !strings.Contains(got, "saved p/i") || !strings.Contains(got, "tag: idea p/i") {
+			t.Fatalf("console missing partial outcome: %q", got)
 		}
 		got := paintedDetail(t, m)
 		for _, want := range []string{"saved p/i", "tag: idea p/i is promoted, not in progress", "retry with :tag sdlc"} {

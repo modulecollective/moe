@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"github.com/modulecollective/moe/internal/cliout"
@@ -179,6 +178,9 @@ func Run(ctx context.Context, cfg Config, stdout *os.File, stderr io.Writer) err
 	if pending != nil {
 		fmt.Fprintf(stderr, "moe ui: waiting for %s to finish — quitting does not cancel or undo it\n", pending.label)
 		r := <-results
+		for r.progress {
+			r = <-results
+		}
 		for i, res := range r.results {
 			fmt.Fprintf(stderr, "moe ui: %s: %s\n", outcomeWord(res), r.job.steps[i].describe())
 			if res.Message != "" {
@@ -193,37 +195,4 @@ func Run(ctx context.Context, cfg Config, stdout *os.File, stderr io.Writer) err
 		return nil
 	}
 	return loopErr
-}
-
-func outcomeWord(r Result) string {
-	switch {
-	case r.OK:
-		return "done"
-	case r.Uncertain:
-		return "outcome unknown"
-	}
-	return "failed"
-}
-
-func (a Action) describe() string {
-	target := a.Project + "/" + a.Run
-	switch a.Kind {
-	case ActNote:
-		return "note to " + target
-	case ActAnswer:
-		return "answer to " + target
-	case ActControl:
-		return a.Control + " " + target
-	case ActCreate:
-		return "create " + a.Workflow + " " + target
-	case ActEdit:
-		return "edit " + target
-	case ActClose:
-		return "close " + target
-	case ActTag:
-		return strings.TrimSpace(tagLabel(a.Workflow, a.DesignOnly) + " " + target)
-	case ActReveal:
-		return "reveal " + target
-	}
-	return target
 }

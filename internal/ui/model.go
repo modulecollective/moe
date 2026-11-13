@@ -11,6 +11,7 @@ type pane int
 const (
 	paneBoard pane = iota
 	paneDetail
+	paneConsole
 )
 
 type mode int
@@ -69,8 +70,9 @@ type job struct {
 }
 
 type jobResult struct {
-	job     job
-	results []Result // one per step run
+	job      job
+	results  []Result // one per step run
+	progress bool     // a successful save, before its tag completes
 }
 
 // effect is what a key asks of the loop beyond redrawing.
@@ -103,9 +105,12 @@ type model struct {
 	choices     []Choice
 	choiceFor   Action
 	saveDraft   *draft
+	progress    int // already reported steps of the in-flight job
 	busy        *job
 	queue       chan<- job
-	message     string
+	message     string // latest summary; retained events live in the console
+	console     console
+	observed    map[string]bool
 	lastResult  map[string][]string // by project/run
 	retry       map[string]Action   // uncertain control requests, by target+verb
 	pendingSel  *itemKey            // select this item once it appears
@@ -123,6 +128,8 @@ func newModel(queue chan<- job) *model {
 		lastResult: map[string][]string{},
 		retry:      map[string]Action{},
 		queue:      queue,
+		console:    console{follow: true},
+		observed:   map[string]bool{},
 	}
 }
 
@@ -155,6 +162,14 @@ func (m *model) setBoard(b Board) {
 	if b.Seq != 0 && b.Seq < m.raw.Seq {
 		return
 	}
+	issues := map[string]bool{}
+	for _, issue := range b.Issues {
+		issues[issue] = true
+		if !m.observed[issue] {
+			m.say(issue)
+		}
+	}
+	m.observed = issues
 	m.raw = b
 	m.applyBoard()
 }
@@ -255,7 +270,7 @@ func (m *model) applyBoard() {
 		if it.Project == m.sel.project && it.Run == m.sel.run {
 			m.sel = keyOf(it)
 			if it.Bucket == keptBucket {
-				m.message = it.Label() + " left the board; its kept draft is listed under " + keptHeading
+				m.say(it.Label() + " left the board; its kept draft is listed under " + keptHeading)
 			}
 			m.scrollToSelection()
 			return
@@ -268,7 +283,7 @@ func (m *model) applyBoard() {
 	}
 	m.sel = keyOf(b.Items[i])
 	m.detailTop = 0
-	m.message = gone + " left the board; selected " + b.Items[i].Label()
+	m.say(gone + " left the board; selected " + b.Items[i].Label())
 	m.scrollToSelection()
 }
 
@@ -310,13 +325,20 @@ func (m *model) clampBoard() {
 
 // Layout: one title row, the board, one divider, details, one footer.
 // The board keeps about two thirds of the rest, whatever the mode.
+func (m *model) consoleHeight() int {
+	if m.high < 20 {
+		return 1
+	}
+	return 3
+}
+
 func (m *model) boardHeight() int {
-	avail := m.high - 3
+	avail := m.high - 4 - m.consoleHeight()
 	return max(avail*2/3, 1)
 }
 
 func (m *model) detailHeight() int {
-	return max(m.high-3-m.boardHeight(), 1)
+	return max(m.high-4-m.consoleHeight()-m.boardHeight(), 2)
 }
 
 // tooSmall is the size below which neither pane is useful.
@@ -372,7 +394,11 @@ func (m *model) normalKey(k Key) effect {
 		return m.quit()
 	}
 	if k.Code == KeyTab || k.Code == KeyBackTab {
-		m.focus = 1 - m.focus
+		if k.Code == KeyBackTab {
+			m.focus = (m.focus + 2) % 3
+		} else {
+			m.focus = (m.focus + 1) % 3
+		}
 		return effNone
 	}
 	if k.Code == KeyRune {
@@ -407,6 +433,10 @@ func (m *model) normalKey(k Key) effect {
 // scrollKey moves through a pane: selection on the board, lines in the
 // details.
 func (m *model) scrollKey(k Key, p pane) effect {
+	if p == paneConsole {
+		m.scrollConsole(k)
+		return effNone
+	}
 	if p == paneBoard {
 		switch k.Code {
 		case KeyUp:
@@ -454,6 +484,7 @@ func (m *model) quit() effect {
 }
 
 func (m *model) ask(prompt string, yes func(*model)) {
+	m.say(prompt + " y/N")
 	m.confirm = &pendingConfirm{prompt: prompt, yes: yes}
 	m.mode = modeConfirm
 }
@@ -472,7 +503,7 @@ func (m *model) confirmKey(k Key) effect {
 		return effQuit // a second Ctrl-C at the quit prompt means it
 	}
 	m.confirm, m.mode = nil, modeNormal
-	m.message = "cancelled"
+	m.say("cancelled")
 	return effNone
 }
 
@@ -482,7 +513,7 @@ func (m *model) openDraft(key draftKey, seed string) {
 	// The save's outcome settles the draft it submitted; text added
 	// while it is pending would be cleared by its acknowledgement.
 	if m.busy != nil && m.busy.draft != nil && *m.busy.draft == key {
-		m.message = "saving this " + draftWhat(key) + " — wait for its outcome"
+		m.say("saving this " + draftWhat(key) + " — wait for its outcome")
 		return
 	}
 	d, ok := m.drafts[key]
@@ -496,7 +527,16 @@ func (m *model) openDraft(key draftKey, seed string) {
 		}
 		m.drafts[key] = d
 	}
+	if strings.HasPrefix(key.purpose, "new-") && d.seen == nil {
+		kind := ItemIdea
+		if key.purpose == "new-intent" {
+			kind = ItemIntent
+		}
+		d.seen = &Item{Project: key.project, Run: key.run, Kind: kind, Detail: []string{draftWhat(key) + ": not created until save"}}
+		m.applyBoard()
+	}
 	m.active, m.mode, m.detailTop = d, modeEdit, 0
+	m.say("opened " + draftWhat(key))
 }
 
 func (m *model) startNote() {
@@ -505,7 +545,7 @@ func (m *model) startNote() {
 		return
 	}
 	if !ok || !it.Notes {
-		m.message = "notes: select a live run or an open idea"
+		m.say("notes: select a live run or an open idea")
 		return
 	}
 	m.openDraft(draftKey{project: it.Project, run: it.Run, purpose: "note"}, "")
@@ -526,7 +566,7 @@ func (m *model) reopenKept(key draftKey) bool {
 func (m *model) startAnswer() {
 	it, ok := m.selected()
 	if !ok {
-		m.message = "answer: the selected run has no open question"
+		m.say("answer: the selected run has no open question")
 		return
 	}
 	// An answer kept from a question since answered or replaced comes
@@ -537,7 +577,7 @@ func (m *model) startAnswer() {
 		return
 	}
 	if it.Question == nil {
-		m.message = "answer: the selected run has no open question"
+		m.say("answer: the selected run has no open question")
 		return
 	}
 	m.openDraft(draftKey{project: it.Project, run: it.Run, purpose: "answer", question: it.Question.ID}, "")
@@ -546,7 +586,7 @@ func (m *model) startAnswer() {
 func (m *model) startEditBody() {
 	it, ok := m.selected()
 	if !ok {
-		m.message = "edit: select an open idea or intent"
+		m.say("edit: select an open idea or intent")
 		return
 	}
 	m.startEditBodyOf(&it)
@@ -567,7 +607,7 @@ func (m *model) editKey(k Key) effect {
 		m.ask("Discard this "+draftWhat(d.key)+"?", func(m *model) {
 			m.active = nil
 			m.dropDraft(d.key)
-			m.message = "draft discarded"
+			m.say("draft discarded")
 		})
 		return effNone
 	case KeyCtrlS:
@@ -578,11 +618,11 @@ func (m *model) editKey(k Key) effect {
 	}
 	if !d.ed.key(k) {
 		if k.Code == KeyRune || k.Code == KeyPaste || k.Code == KeyEnter {
-			m.message = fmt.Sprintf("text limit reached (%d KiB); nothing was inserted", maxText>>10)
+			m.say(fmt.Sprintf("text limit reached (%d KiB); nothing was inserted", maxText>>10))
 		}
 	}
 	if k.Code == KeyPaste && k.Truncated {
-		m.message = fmt.Sprintf("paste longer than %d KiB: only its start was inserted", maxPaste>>10)
+		m.say(fmt.Sprintf("paste longer than %d KiB: only its start was inserted", maxPaste>>10))
 	}
 	return effNone
 }
@@ -619,16 +659,16 @@ func (m *model) isIdea(k draftKey) bool {
 
 func (m *model) submitDraft(d *draft) {
 	if m.busy != nil {
-		m.message = "busy: " + m.busy.label + " — wait for its outcome"
+		m.say("busy: " + m.busy.label + " — wait for its outcome")
 		return
 	}
 	if strings.TrimSpace(d.ed.String()) == "" {
-		m.message = "nothing to save"
+		m.say("nothing to save")
 		return
 	}
 	if d.uncertain != nil && !d.confirmed {
 		d.confirmed = true
-		m.message = "the last save of this draft has an unknown outcome (see details); Ctrl-S again to submit anyway"
+		m.say("the last save of this draft has an unknown outcome (see details); Ctrl-S again to submit anyway")
 		return
 	}
 	if m.isIdea(d.key) {
@@ -694,16 +734,23 @@ func tagLabel(workflow string, designOnly bool) string {
 
 func (m *model) start(j job) {
 	if m.busy != nil {
-		m.message = "busy: " + m.busy.label + " — wait for its outcome"
+		m.say("busy: " + m.busy.label + " — wait for its outcome")
 		return
 	}
-	m.busy = &j
-	m.message = j.label + "…"
+	m.busy, m.progress = &j, 0
+	m.say(j.label + "…")
 	m.queue <- j
 }
 
 // finished applies a worker result.
 func (m *model) finished(r jobResult) {
+	if r.progress {
+		for i := m.progress; i < len(r.results); i++ {
+			m.resultEvent(r.job.steps[i], r.results[i])
+		}
+		m.progress = len(r.results)
+		return
+	}
 	m.busy = nil
 	j := r.job
 	var lines []string
@@ -711,6 +758,9 @@ func (m *model) finished(r jobResult) {
 	for i, res := range r.results {
 		step := j.steps[i]
 		msgs = append(msgs, res.Message)
+		if i >= m.progress {
+			m.resultEvent(step, res)
+		}
 		lines = append(lines, res.Lines...)
 		if res.RequestID != "" {
 			key := step.Project + "/" + step.Run + " " + step.Control
@@ -728,15 +778,24 @@ func (m *model) finished(r jobResult) {
 			m.choices, m.choiceFor, m.mode = res.Choices, step, modeChoice
 		}
 		if step.Kind == ActCreate && res.OK {
-			m.pendingSel = &itemKey{project: step.Project, run: step.Run}
+			if m.raw.ProjectFilter != "" && m.raw.ProjectFilter != step.Project || m.raw.WorkflowFilter != "" && m.raw.WorkflowFilter != step.Workflow {
+				msg := step.Project + "/" + step.Run + " was created; hidden by current filters"
+				msgs = append(msgs, msg)
+				m.say(msg)
+			} else {
+				m.pendingSel = &itemKey{project: step.Project, run: step.Run}
+			}
 		}
 	}
 	if len(r.results) == 1 && len(j.steps) == 2 {
 		msgs = append(msgs, "not tagged: the save did not succeed")
+		m.say("not tagged: the save did not succeed")
 	}
 	if len(r.results) == 2 && !r.results[1].OK {
 		t := j.steps[1]
-		msgs = append(msgs, "retry with :"+strings.TrimPrefix(tagCommand(t.Workflow, t.DesignOnly), ":"))
+		retry := "retry with :" + tagCommand(t.Workflow, t.DesignOnly) + " (tag only; saved " + t.Project + "/" + t.Run + ")"
+		msgs = append(msgs, retry)
+		m.say(retry)
 	}
 	msgs = slices.DeleteFunc(msgs, func(s string) bool { return s == "" })
 	m.message = strings.Join(msgs, " · ")
@@ -746,6 +805,19 @@ func (m *model) finished(r jobResult) {
 		m.message = "! " + m.message
 	}
 	m.lastResult[j.target.project+"/"+j.target.run] = append(msgs, lines...)
+	m.progress = 0
+	m.applyBoard()
+}
+
+func (m *model) resultEvent(step Action, res Result) {
+	text := outcomeWord(res) + ": " + step.describe()
+	if res.Message != "" {
+		text += " — " + res.Message
+	}
+	if len(res.Lines) > 0 {
+		text += "\n" + strings.Join(res.Lines, "\n")
+	}
+	m.say(text)
 }
 
 func tagCommand(workflow string, designOnly bool) string {
@@ -797,7 +869,12 @@ func (m *model) commandKey(k Key) effect {
 		m.mode, m.cmd = modeNormal, nil
 		return m.runCommand(line, m.cmdTarget)
 	}
-	m.cmd.key(k)
+	if !m.cmd.key(k) && (k.Code == KeyRune || k.Code == KeyPaste) {
+		m.say("command text limit reached; nothing inserted")
+	}
+	if k.Code == KeyPaste && k.Truncated {
+		m.say("command paste truncated at 256 KiB")
+	}
 	return effNone
 }
 
@@ -840,7 +917,7 @@ func commandHint(line string, target *Item) string {
 		if target != nil {
 			return "→ " + target.Label()
 		}
-	case "new":
+	case "new", "new-idea", "new-intent":
 		return "creates on save"
 	}
 	if target == nil {
@@ -854,16 +931,25 @@ func (m *model) runCommand(line string, target *Item) effect {
 	if len(f) == 0 {
 		return effNone
 	}
+	if f[0] == "new-idea" || f[0] == "new-intent" {
+		f = append([]string{"new", strings.TrimPrefix(f[0], "new-")}, f[1:]...)
+	}
 	need := func(ok bool, why string) bool {
 		if !ok {
-			m.message = f[0] + ": " + why
+			m.say(f[0] + ": " + why)
 		}
 		return ok
 	}
 	switch verb := f[0]; verb {
 	case "help":
+		if !need(len(f) == 1, "takes no arguments") {
+			return effNone
+		}
 		m.mode, m.detailTop = modeHelp, 0
 	case "quit", "q":
+		if !need(len(f) == 1, "takes no arguments") {
+			return effNone
+		}
 		return m.quit()
 	case "pause", "handoff", "park", "finish", "resume":
 		if !need(len(f) == 1, "takes no arguments") ||
@@ -921,14 +1007,17 @@ func (m *model) runCommand(line string, target *Item) effect {
 		case verb == "tag" && len(f) == 2 && f[1] == "design":
 			a.Workflow, a.DesignOnly = "sdlc", true
 		default:
-			m.message = "usage: tag sdlc | tag design | untag"
+			m.say("usage: tag sdlc | tag design | untag")
 			return effNone
 		}
 		m.start(job{label: tagLabel(a.Workflow, a.DesignOnly) + " " + target.Label(), steps: []Action{a}, target: keyOf(*target)})
 	case "terminal":
+		if !need(len(f) == 1, "takes no arguments") {
+			return effNone
+		}
 		m.revealOf(target, "")
 	default:
-		m.message = "unknown command " + quote(verb) + " — ? lists them"
+		m.say("unknown command " + quote(verb) + " — ? lists them")
 	}
 	return effNone
 }
@@ -938,7 +1027,7 @@ func (m *model) startEditBodyOf(target *Item) {
 		return
 	}
 	if target == nil || !target.Editable {
-		m.message = "edit: select an open idea or intent"
+		m.say("edit: select an open idea or intent")
 		return
 	}
 	m.openDraft(draftKey{project: target.Project, run: target.Run, purpose: "body"}, target.Body)
@@ -963,6 +1052,7 @@ func quote(s string) string { return "\"" + sanitize(s) + "\"" }
 func (m *model) reveal(client string) {
 	it, ok := m.selected()
 	if !ok {
+		m.say("terminal: select a run reporting a Rex terminal")
 		return
 	}
 	m.revealOf(&it, client)
@@ -970,7 +1060,7 @@ func (m *model) reveal(client string) {
 
 func (m *model) revealOf(target *Item, client string) {
 	if target == nil || !target.Terminal {
-		m.message = "terminal: the selected run reports no Rex terminal"
+		m.say("terminal: the selected run reports no Rex terminal")
 		return
 	}
 	a := Action{Kind: ActReveal, Project: target.Project, Run: target.Run, Generation: target.Generation, Client: client}

@@ -12,7 +12,10 @@
 // stays live while a write waits on the repository lock.
 package ui
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // ItemKind is what a board entry is.
 type ItemKind int
@@ -70,6 +73,9 @@ type Question struct {
 type Board struct {
 	Lines []string
 	Items []Item
+	// Issues are current observation failures, without captured text. Unchanged issues are logged once.
+	Issues                        []string
+	ProjectFilter, WorkflowFilter string
 	// Header is the one-line context beside the title (serve state).
 	Header string
 	// Seq increases with every board the caller builds; the console
@@ -138,3 +144,36 @@ type Result struct {
 
 // Choice is one option in a pick list.
 type Choice struct{ ID, Label string }
+
+func outcomeWord(r Result) string {
+	switch {
+	case r.OK:
+		return "done"
+	case r.Uncertain:
+		return "outcome unknown"
+	}
+	return "failed"
+}
+
+func (a Action) describe() string {
+	target := a.Project + "/" + a.Run
+	switch a.Kind {
+	case ActNote:
+		return "note to " + target
+	case ActAnswer:
+		return "answer to " + target
+	case ActControl:
+		return a.Control + " " + target
+	case ActCreate:
+		return "create " + a.Workflow + " " + target
+	case ActEdit:
+		return "edit " + target
+	case ActClose:
+		return "close " + target
+	case ActTag:
+		return strings.TrimSpace(tagLabel(a.Workflow, a.DesignOnly) + " " + target)
+	case ActReveal:
+		return "reveal " + target
+	}
+	return target
+}

@@ -335,8 +335,27 @@ func (s *uiSource) overlay(now time.Time) ([]dash.Row, map[string]RunObservation
 // live repaint does not re-roll it. s.mu is held.
 func (s *uiSource) buildBoard(now time.Time) (ui.Board, []cliout.ProgramStatus) {
 	s.seq++
-	b := ui.Board{Seq: s.seq, At: now}
+	b := ui.Board{Seq: s.seq, At: now, ProjectFilter: s.filter.ProjectFilter, WorkflowFilter: s.filter.WorkflowFilter}
 	rows, obs := s.overlay(now)
+	if s.gerr != nil {
+		b.Issues = append(b.Issues, "observation failed: "+s.gerr.Error()+" (showing the last good board)")
+	}
+	for key, o := range obs {
+		for name, err := range map[string]error{"control": o.ControlErr, "owner": o.OwnerErr, "live": o.LiveErr, "receipts": o.UnrecordedErr} {
+			if err != nil {
+				b.Issues = append(b.Issues, key+": "+name+" observation failed: "+err.Error())
+			}
+		}
+	}
+	for key, ex := range s.extra {
+		if ex.inputErr != nil {
+			b.Issues = append(b.Issues, key+": input record unreadable: "+ex.inputErr.Error())
+		}
+		if ex.bodyErr != nil {
+			b.Issues = append(b.Issues, key+": canvas unreadable: "+ex.bodyErr.Error())
+		}
+	}
+	slices.Sort(b.Issues)
 	snap := s.snap
 	snap.Rows, snap.Observations = rows, obs
 

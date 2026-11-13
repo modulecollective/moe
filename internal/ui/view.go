@@ -11,7 +11,7 @@ import (
 const helpText = `Keys
   Up/Down, j/k   select the previous/next board item
   PgUp/PgDn      page the focused pane; Home/End jump to its ends
-  Tab            switch focus between the board and the details
+  Tab/Shift-Tab  cycle board, details and console
   n              write a note to the selected run or idea
   a              answer the selected run's open question
   e              edit the selected open idea or intent
@@ -23,14 +23,19 @@ const helpText = `Keys
 Editor
   Ctrl-S save · Esc back (the draft is kept) · Ctrl-X discard
   Enter is a newline; arrows, Home/End, Backspace/Delete, paste
+  Alt-Backspace / Ctrl-W delete the previous whitespace-delimited word
+  Alt-Left/Right or Alt-b/f move by a word
 
 Commands (:)
   pause | handoff | park | finish | resume    the selected run
   new idea <project>/<slug>                   opens a draft; creates on save
   new intent <project>/<slug>
+  new-idea / new-intent <project>/<slug>       aliases
   edit | close                                the selected idea or intent
   tag sdlc | tag design | untag               the selected idea's licence
   terminal | help | quit
+
+Console: arrows/page/Home scroll history; End follows newest messages.
 
 Notes reach the run's next prompt; they never pause, resume or start
 work. finish ships the run (!!) from its next boundary. resume releases
@@ -84,6 +89,19 @@ func (m *model) view() frame {
 	}
 	row += dh
 
+	label := "── console"
+	if m.focus == paneConsole {
+		label += " · focus"
+	}
+	if m.console.unread > 0 {
+		label += fmt.Sprintf(" · %d new (End follows)", m.console.unread)
+	}
+	f.rows[row] = plain(label, w)
+	row++
+	for i, line := range m.consoleLines() {
+		f.rows[row+i] = line
+	}
+	row += m.consoleHeight()
 	footer, fcur := m.footerRow(w)
 	f.rows[row] = footer
 	if fcur >= 0 {
@@ -93,12 +111,7 @@ func (m *model) view() frame {
 }
 
 func (m *model) titleRow(w int) string {
-	// The newest outcome first: the board header is the part to lose
-	// when the row is narrow.
 	s := " MoE ui"
-	if m.message != "" {
-		s += " · " + m.message
-	}
 	if m.busy != nil {
 		s += " · working: " + m.busy.label
 	}
@@ -116,9 +129,18 @@ func (m *model) dividerRow(sel Item, ok bool, w int) string {
 	if ok {
 		label = sel.Label()
 	}
+	if m.mode == modeEdit && m.active != nil {
+		label = draftWhat(m.active.key)
+	}
+	if m.mode == modeSave {
+		label = draftWhat(m.saveDraft.key)
+	}
 	focus := "board"
 	if m.focus == paneDetail {
 		focus = "details"
+	}
+	if m.focus == paneConsole {
+		focus = "console"
 	}
 	pos := ""
 	if len(m.board.Lines) > m.boardHeight() {
@@ -138,11 +160,10 @@ func (m *model) detailLines(sel Item, ok bool, w, h int) ([]string, *cell) {
 	switch m.mode {
 	case modeHelp:
 		src = strings.Split(helpText, "\n")
-	case modeEdit, modeSave:
+	case modeSave:
+		return []string{"Enter/s  save only", "g  save + tag sdlc", "d  save + tag design only"}, nil
+	case modeEdit:
 		d := m.active
-		if m.mode == modeSave {
-			d = m.saveDraft
-		}
 		var head []string
 		for _, l := range m.draftNotes(d) {
 			head = append(head, wrapRows(l, w)...)
@@ -161,7 +182,7 @@ func (m *model) detailLines(sel Item, ok bool, w, h int) ([]string, *cell) {
 		for i := top; i < len(rows) && len(out) < h; i++ {
 			out = append(out, rows[i]) // layout already made it safe and fit
 		}
-		if m.mode == modeSave || visible <= 0 {
+		if visible <= 0 {
 			return out, nil
 		}
 		return out, &cell{row: len(head) + cr - top, col: cc}
@@ -248,14 +269,15 @@ func (m *model) footerRow(w int) (string, int) {
 	switch m.mode {
 	case modeCommand:
 		hint := commandHint(m.cmd.String(), m.cmdTarget)
-		rows, _, cc := m.cmd.layout(1 << 20)
-		s := ":" + rows[0]
-		line := plain(s+"   "+hint, w)
-		return line, min(1+cc, w)
+		line, cc := m.cmd.horizontal(max(w-1, 1))
+		if textWidth(line)+3+textWidth(hint) < w-1 {
+			line += "   " + hint
+		}
+		return ":" + line, 1 + cc
 	case modeConfirm:
-		return plain(m.confirm.prompt+" y/N", w), -1
+		return plain("y confirm · any other key cancel", w), -1
 	case modeSave:
-		return plain("Enter/s save only · g save + tag sdlc · d save + tag design only · Esc back", w), -1
+		return plain("Choose above · Esc back", w), -1
 	case modeChoice:
 		var parts []string
 		for i, c := range m.choices {
@@ -369,7 +391,7 @@ func (f frame) paint() []byte {
 // keys, then why its last save failed or may not have landed, and
 // whether its question has closed.
 func (m *model) draftNotes(d *draft) []string {
-	out := []string{"editing " + draftWhat(d.key) + " — Ctrl-S save · Esc back (kept) · Ctrl-X discard"}
+	out := []string{"editing " + draftWhat(d.key)}
 	if m.answerClosed(d.key) {
 		out = append(out, fmt.Sprintf("! question #%d is no longer open: saving will be refused; Ctrl-X discards this answer", d.key.question))
 	}

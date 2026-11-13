@@ -45,11 +45,14 @@ var errStopped = errors.New("moe ui: stopped by signal")
 func worker(do func(Action) Result, jobs <-chan job, results chan<- jobResult) {
 	for j := range jobs {
 		r := jobResult{job: j}
-		for _, a := range j.steps {
+		for i, a := range j.steps {
 			res := do(a)
 			r.results = append(r.results, res)
 			if !res.OK {
 				break
+			}
+			if i+1 < len(j.steps) {
+				results <- jobResult{job: j, results: append([]Result(nil), r.results...), progress: true}
 			}
 		}
 		results <- r
