@@ -85,6 +85,11 @@ func TestUIBoardIndexesDashRows(t *testing.T) {
 	if d := strings.Join(i.Detail, "\n"); !strings.Contains(d, "tagged sdlc (design only)") {
 		t.Fatalf("idea detail:\n%s", d)
 	}
+	for _, hint := range []string{"g set sdlc", "d set design only", "u clear either licence", ":tag sdlc | :tag design | :untag"} {
+		if !strings.Contains(strings.Join(i.Detail, "\n"), hint) {
+			t.Fatalf("idea detail missing %q: %v", hint, i.Detail)
+		}
+	}
 }
 
 // A published owner update reaches the console as a pushed board, with

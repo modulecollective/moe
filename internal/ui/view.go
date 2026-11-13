@@ -15,6 +15,9 @@ const helpText = `Keys
   n              write a note to the selected run or idea
   a              answer the selected run's open question
   e              edit the selected open idea or intent
+  g              set the selected open idea's SDLC licence
+  d              set its design-only licence
+  u              clear either idea licence
   t              reveal the selected run's Rex terminal
   :              command line for the selected item
   ?              this help (Esc closes)
@@ -355,7 +358,11 @@ func (m *model) footerRow(w int) (string, int) {
 	case modeHelp:
 		return plain("Esc close help", w), -1
 	}
-	keys := []string{"↑↓ select", "Tab pane"}
+	var keys []string
+	if it, ok := m.selected(); ok && it.Kind == ItemIdea && it.Editable {
+		keys = append(keys, "g sdlc", "d design", "u untag")
+	}
+	keys = append(keys, "↑↓ select", "Tab pane")
 	if it, ok := m.selected(); ok {
 		if it.Notes {
 			keys = append(keys, "n note")

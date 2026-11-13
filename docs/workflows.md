@@ -324,6 +324,14 @@ Alt-arrows or Alt-b/f moves by words. Words are whitespace-delimited, including
 newlines, so project/run tokens stay together. Esc keeps a draft, Ctrl-X
 discards it.
 
+On the selected open idea, press `g` to set the SDLC licence, `d` to set a
+design-only licence, or `u` to clear either licence. These are explicit
+settings: repeating one creates no extra commit. They keep the selection,
+work from any pane in normal navigation, and launch nothing; a later sweep
+may pick up a tagged idea. Use `j`/`k` or arrows to continue to the next row.
+The command equivalents remain `:tag sdlc`, `:tag design`, and `:untag`.
+In editors and the command line, the letters remain text.
+
 In the command prompt, Tab completes a fixed command word and cycles matches
 in lexical order; Shift-Tab cycles backward. Type spaces between words and
 press Enter to submit. `new` completes `idea` or `intent`; `tag` completes

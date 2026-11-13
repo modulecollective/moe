@@ -472,6 +472,19 @@ func (m *model) normalKey(k Key) effect {
 		case 't':
 			m.reveal("")
 			return effNone
+		case 'g', 'd', 'u':
+			var target *Item
+			if it, ok := m.selected(); ok {
+				target = &it
+			}
+			switch k.Rune {
+			case 'g':
+				return m.runCommand("tag sdlc", target)
+			case 'd':
+				return m.runCommand("tag design", target)
+			default:
+				return m.runCommand("untag", target)
+			}
 		}
 	}
 	return m.scrollKey(k, m.focus)

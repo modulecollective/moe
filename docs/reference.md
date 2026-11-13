@@ -41,34 +41,38 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   `Shift-Tab` cycle board, details and console. In the console, arrows, page
   keys and Home scroll history; End follows new messages. `?` lists keys. `n`
   writes a note to the selected run or idea, `a` answers its open question, `e`
-  edits an open idea or intent, and `t` reveals the run's existing Rex terminal.
-  `:` opens a closed command line — `pause|handoff|park|finish|resume` for the
-  selected run, `new idea|intent <project>/<slug>`, `edit`, `close`, `tag
-  sdlc|design`, `untag` — never a shell. These go through the same writers as
-  `moe input`, `moe control` and `moe idea|intent`, so they mean the same thing:
-  a note reaches the run's next prompt, resume and tagging start nothing, and
-  only submitting `finish` ships. Text is edited inline (`Ctrl-S` saves, `Esc`
-  keeps the draft, `Ctrl-X` discards). Alt-Backspace or Ctrl-W deletes the
-  previous word; Alt-Left/Right or Alt-b/f moves by whitespace-delimited words.
-  Saving an idea offers save only, save and tag sdlc, or save and tag
-  design-only. Enter opens a labelled draft and Ctrl-S creates it. An edit
-  refuses to overwrite a canvas someone else changed meanwhile. Runs update as
-  their owners publish, not only on the 3s refresh; a lost owner's facts stay,
-  labelled stale. Smoke cycles cached art every 500 ms without scans, socket
-  reads or status reports. The shared dash banner stays visible; the complete
-  histogram and factory are pinned above the scrolling board when they fit, and
-  collapse together on short or narrow terminals. Resizing restores them. Pane
-  separators have a blank row on either side, and the console shows six message
-  rows. The minimum terminal size is 40 columns by 20 rows. Moving to the first
-  board item reveals the section headings above it. A heavy, bright amber pane
-  heading identifies where keys go; without color the heavy rule remains. The
-  selected target retains its `>` marker. A board heading's `lines … of …`
-  counts scrollable display lines (including headings and blanks), not runs. The
+  edits an open idea or intent, and `t` reveals the run's existing Rex
+  terminal. On an open idea, `g` sets the SDLC licence, `d` sets design only,
+  and `u` clears either licence. Repeating a setting leaves it unchanged. These
+  keys keep the selection and work from any pane in normal navigation; in
+  editors and the command line they remain text. `:` opens a closed command
+  line — `pause|handoff|park|finish|resume` for the selected run, `new
+  idea|intent <project>/<slug>`, `edit`, `close`, `tag sdlc|design`, `untag` —
+  never a shell. These go through the same writers as `moe input`, `moe
+  control` and `moe idea|intent`, so they mean the same thing: a note reaches
+  the run's next prompt, resume and tagging start nothing, and only submitting
+  `finish` ships. Text is edited inline (`Ctrl-S` saves, `Esc` keeps the draft,
+  `Ctrl-X` discards). Alt-Backspace or Ctrl-W deletes the previous word;
+  Alt-Left/Right or Alt-b/f moves by whitespace-delimited words. Saving an idea
+  offers save only, save and tag sdlc, or save and tag design-only. Enter opens
+  a labelled draft and Ctrl-S creates it. An edit refuses to overwrite a canvas
+  someone else changed meanwhile. Runs update as their owners publish, not only
+  on the 3s refresh; a lost owner's facts stay, labelled stale. Smoke cycles
+  cached art every 500 ms without scans, socket reads or status reports. The
+  shared dash banner stays visible; the complete histogram and factory are
+  pinned above the scrolling board when they fit, and collapse together on
+  short or narrow terminals. Resizing restores them. Pane separators have a
+  blank row on either side, and the console shows six message rows. The minimum
+  terminal size is 40 columns by 20 rows. Moving to the first board item
+  reveals the section headings above it. A heavy, bright amber pane heading
+  identifies where keys go; without color the heavy rule remains. The selected
+  target retains its `>` marker. A board heading's `lines … of …` counts
+  scrollable display lines (including headings and blanks), not runs. The
   console retains 100 events in memory, with bounded, labelled message
   truncation; it never logs note or capture bodies. It needs a terminal on
-  stdout (Linux or macOS) and restores it on every exit; quitting mid-save waits
-  for and prints that save's outcome. In a Rex terminal it reports the same OSC
-  7501 status as `dash --watch`.
+  stdout (Linux or macOS) and restores it on every exit; quitting mid-save
+  waits for and prints that save's outcome. In a Rex terminal it reports the
+  same OSC 7501 status as `dash --watch`.
 
   In the command prompt, Tab completes fixed words and cycles matches in lexical
   order; Shift-Tab cycles backward. Type spaces between words; Enter submits.

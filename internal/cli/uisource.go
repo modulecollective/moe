@@ -524,6 +524,7 @@ func (s *uiSource) captureDetail(md *run.Metadata, ex uiExtra) []string {
 	if md.Status == run.StatusInProgress {
 		out = append(out, "e edit · :close retire")
 		if md.Workflow == dash.IdeaWorkflow {
+			out = append(out, "g set sdlc · d set design only · u clear either licence")
 			out = append(out, "n note · :tag sdlc | :tag design | :untag")
 		}
 	}

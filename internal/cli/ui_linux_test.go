@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +14,8 @@ import (
 	"unsafe"
 
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/input"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/trailers"
@@ -289,6 +292,98 @@ func TestUIKeyboardCaptureEditLicenceAndClose(t *testing.T) {
 	body, err := os.ReadFile(root + "/" + run.ContentPath("moe", "capture", dash.IdeaDocID))
 	if err != nil || string(body) != "# Capture\noperator text" {
 		t.Fatalf("edited body: %q %v", body, err)
+	}
+}
+
+func TestUIKeyboardIdeaTagKeys(t *testing.T) {
+	root, _ := controlFixture(t)
+	for _, slug := range []string{"first", "second"} {
+		if _, err := createIdea(root, "moe", slug, "# "+slug+"\n", "", trailers.Block{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := newUISource(root, DashFilter{WorkflowFilter: "idea"}, os.Stdout)
+	if err := s.refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	b := takeBoard(t, s)
+	if len(b.Items) != 2 {
+		t.Fatalf("idea board = %+v", b.Items)
+	}
+	first, second := b.Items[0].Run, b.Items[1].Run
+	c := startUIKeyboard(t, root, "--workflow", "idea")
+	c.wait(t, "idea moe/"+first+" · in_progress")
+
+	// Wait for a complete working frame followed by a completed frame
+	// from this send. Old done messages repainted in console history
+	// cannot satisfy a repeat's wait.
+	sendTag := func(key, result string) {
+		t.Helper()
+		offset := len(c.text())
+		c.send(t, key)
+		until := time.Now().Add(5 * time.Second)
+		for {
+			frames := strings.Split(c.text()[offset:], "\x1b[?2026l")
+			working := false
+			for _, frame := range frames[:len(frames)-1] {
+				if strings.Contains(frame, " · working: ") {
+					working = true
+				} else if working && strings.Contains(frame, result) {
+					return
+				}
+			}
+			if time.Now().After(until) {
+				t.Fatalf("key %q never completed %q: %q", key, result, c.text()[offset:])
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	check := func(slug, workflow string, design bool) {
+		t.Helper()
+		md, err := run.Load(root, "moe", slug)
+		if err != nil || md.PromoteTo != workflow || md.DesignOnly != design || md.Workflow != "idea" || md.Status != run.StatusInProgress {
+			t.Fatalf("idea %s = %+v, %v", slug, md, err)
+		}
+		body, err := os.ReadFile(root + "/" + run.ContentPath("moe", slug, dash.IdeaDocID))
+		if err != nil || string(body) != "# "+slug+"\n" {
+			t.Fatalf("idea body %s = %q, %v", slug, body, err)
+		}
+	}
+	for _, tc := range []struct {
+		key, workflow, label string
+		design, unchanged    bool
+	}{
+		{"g", "sdlc", "tag sdlc", false, false},
+		{"g", "sdlc", "tag sdlc", false, true},
+		{"d", "sdlc", "tag sdlc (design only)", true, false},
+		{"d", "sdlc", "tag sdlc (design only)", true, true},
+		{"g", "sdlc", "tag sdlc", false, false},
+		{"u", "", "untag", false, false},
+		{"u", "", "untag", false, true},
+	} {
+		before := gittest.HeadSHA(t, root)
+		sendTag(tc.key, "done: "+tc.label+" moe/"+first)
+		check(first, tc.workflow, tc.design)
+		check(second, "", false)
+		if after := gittest.HeadSHA(t, root); (before == after) != tc.unchanged {
+			t.Fatalf("key %q unchanged=%v: HEAD %s → %s", tc.key, tc.unchanged, before, after)
+		}
+	}
+	// The selection stayed on the first idea through all mutations and
+	// refreshes. Move to the other row and set its independent licence.
+	c.send(t, "j")
+	c.wait(t, "idea moe/"+second+" · in_progress")
+	sendTag("d", "done: tag sdlc (design only) moe/"+second)
+	check(first, "", false)
+	check(second, "sdlc", true)
+	c.quit(t)
+	entries, err := os.ReadDir(root + "/projects/moe/runs")
+	if err != nil || len(entries) != 3 { // the existing SDLC run plus two ideas
+		t.Fatalf("tag keys minted a run: %v, %v", entries, err)
+	}
+	refs, err := git.Output(root, "for-each-ref", "--format=%(refname)", "refs/heads/session/")
+	if err != nil || strings.TrimSpace(refs) != "" {
+		t.Fatalf("tag keys launched a session: %q, %v", refs, err)
 	}
 }
 
