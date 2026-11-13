@@ -192,3 +192,30 @@ func TestCaptureCommitFailureRestoresStagedAndUnstaged(t *testing.T) {
 		})
 	}
 }
+
+func TestPromoteFailedOpenPreservesSource(t *testing.T) {
+	root := newIdeaBureaucracy(t, "alpha", "my-idea", "# Original idea\n")
+	head := gittest.Output(t, root, "rev-parse", "HEAD")
+	before := gittest.Output(t, root, "ls-tree", "-r", "HEAD")
+	failCommits(t, root)
+	result, err := Promote(root, "alpha", "my-idea", PromoteOptions{
+		Workflow: "sdlc", FirstStage: "design",
+	}, nil, nil)
+	if result.Run != nil || err == nil || !strings.Contains(err.Error(), "nothing recorded") {
+		t.Fatalf("Promote = %+v, %v", result, err)
+	}
+	if gittest.Output(t, root, "rev-parse", "HEAD") != head || gittest.Output(t, root, "ls-tree", "-r", "HEAD") != before {
+		t.Fatal("failed promotion changed history")
+	}
+	md, err := run.Load(root, "alpha", "my-idea")
+	if err != nil || md.Status != run.StatusInProgress || canvas(t, root) != "# Original idea\n" {
+		t.Fatalf("source after failed promotion = %+v, %v", md, err)
+	}
+	if got := gittest.Output(t, root, "status", "--porcelain"); got != "" {
+		t.Fatalf("failed destination left files or index entries: %s", got)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, "projects", "alpha", "runs"))
+	if err != nil || len(entries) != 1 || entries[0].Name() != "my-idea" {
+		t.Fatalf("destination survived: %v, %v", entries, err)
+	}
+}
