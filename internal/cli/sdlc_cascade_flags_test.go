@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
 )
 
@@ -159,6 +160,8 @@ func TestSDLCStagePersistsAgentWithCascadeFlag(t *testing.T) {
 
 			stages := stubOpenSdlcStage(t, nil)
 			stubPushFromCascade(t, 0, nil)
+			assertUnrelatedUnchanged := seedAgentSwitchStaging(t, root, slug)
+			before := gittest.HeadSHA(t, root)
 
 			out.Reset()
 			errb.Reset()
@@ -179,6 +182,8 @@ func TestSDLCStagePersistsAgentWithCascadeFlag(t *testing.T) {
 			if len(*stages) != 1 {
 				t.Fatalf("openSdlcStage invocations = %d, want 1", len(*stages))
 			}
+			assertAgentSwitchCommit(t, root, slug, before)
+			assertUnrelatedUnchanged()
 			log := gitLogFormat(t, root, 1, "HEAD", "%s%n%B")
 			for _, want := range []string{
 				"switch agent: tele/" + slug + " to codex",
@@ -208,8 +213,12 @@ func TestSDLCStagePersistsAgentWithoutCascadeFlag(t *testing.T) {
 	if code := runNew("sdlc", []string{"tele/single-agent"}, &out, &errb); code != 0 {
 		t.Fatalf("runNew exit=%d stderr=%q", code, errb.String())
 	}
+	assertUnrelatedUnchanged := seedAgentSwitchStaging(t, root, "single-agent")
+	before := gittest.HeadSHA(t, root)
+	calls := 0
 	prev := runStageSession
 	runStageSession = func(projectID, runID, docID string, opts stageSessionOpts, _, _ io.Writer) int {
+		calls++
 		if projectID != "tele" || runID != "single-agent" || docID != "design" {
 			t.Fatalf("session target = %s/%s %s, want tele/single-agent design", projectID, runID, docID)
 		}
@@ -235,6 +244,11 @@ func TestSDLCStagePersistsAgentWithoutCascadeFlag(t *testing.T) {
 	if md.Agent != "codex" {
 		t.Fatalf("run agent = %q, want codex", md.Agent)
 	}
+	if calls != 1 {
+		t.Fatalf("session calls=%d want 1", calls)
+	}
+	assertAgentSwitchCommit(t, root, "single-agent", before)
+	assertUnrelatedUnchanged()
 }
 
 func TestSDLCStageAgentNoOpWhenAlreadyPersisted(t *testing.T) {
@@ -250,10 +264,17 @@ func TestSDLCStageAgentNoOpWhenAlreadyPersisted(t *testing.T) {
 	if code := runNew("sdlc", []string{"--agent", "codex", "tele/agent-noop"}, &out, &errb); code != 0 {
 		t.Fatalf("runNew exit=%d stderr=%q", code, errb.String())
 	}
+	assertUnrelatedUnchanged := seedAgentSwitchStaging(t, root, "agent-noop")
+	installCreateFailureHook(t, root, `case "$(head -n 1 "$1")" in
+  "switch agent:"*) touch .git/agent-switch-hook-ran; echo reject-switch >&2; exit 1 ;;
+esac
+`)
 	headBefore := gitLogFormat(t, root, 1, "HEAD", "%H")
 
+	calls := 0
 	prev := runStageSession
 	runStageSession = func(_, _, _ string, _ stageSessionOpts, _, _ io.Writer) int {
+		calls++
 		return 0
 	}
 	t.Cleanup(func() { runStageSession = prev })
@@ -269,6 +290,13 @@ func TestSDLCStageAgentNoOpWhenAlreadyPersisted(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "switched run agent") {
 		t.Fatalf("unexpected switch announcement for no-op: stdout=%q", out.String())
+	}
+	assertUnrelatedUnchanged()
+	if calls != 1 {
+		t.Fatalf("session calls=%d want 1", calls)
+	}
+	if _, err := os.Stat(filepath.Join(root, ".git", "agent-switch-hook-ran")); !os.IsNotExist(err) {
+		t.Fatalf("no-op invoked switch hook: %v", err)
 	}
 }
 
@@ -593,5 +621,150 @@ func TestSDLCStageRejectsToWhenNothingFollows(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "no stage follows push") {
 		t.Fatalf("expected no-successor branch, got: %q", errb.String())
+	}
+}
+
+// seedAgentSwitchStaging captures index entries, working bytes, absence and
+// modes. The same-run path catches commits scoped to the whole run directory.
+func seedAgentSwitchStaging(t *testing.T, root, slug string) func() {
+	t.Helper()
+	tracked := filepath.Join(run.Dir("tele", slug), "notes.txt")
+	paths := []string{tracked, "unrelated-new.txt", "unrelated-deleted.txt", "unrelated-mode.txt"}
+	write := func(path, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, path), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, path := range []string{tracked, paths[2], paths[3]} {
+		write(path, "HEAD version\n")
+	}
+	gittest.Run(t, root, "add", "--", tracked, paths[2], paths[3])
+	gittest.Run(t, root, "commit", "-m", "seed unrelated work")
+	write(tracked, "index version\n")
+	write(paths[1], "new staged file\n")
+	if err := os.Remove(filepath.Join(root, paths[2])); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(root, paths[3]), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Run(t, root, "add", "--", paths[0], paths[1], paths[2], paths[3])
+	write(tracked, "working version\n")
+	write(paths[1], "new working version\n")
+	args := append([]string{"ls-files", "-s", "--"}, paths...)
+	index := gittest.Output(t, root, args...)
+	bodies := make(map[string][]byte)
+	modes := make(map[string]os.FileMode)
+	for _, path := range paths {
+		if path == paths[2] {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(root, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		info, err := os.Stat(filepath.Join(root, path))
+		if err != nil {
+			t.Fatal(err)
+		}
+		bodies[path], modes[path] = body, info.Mode()
+	}
+	return func() {
+		t.Helper()
+		if got := gittest.Output(t, root, args...); got != index {
+			t.Errorf("unrelated index changed: before=%q after=%q", index, got)
+		}
+		for path, body := range bodies {
+			got, err := os.ReadFile(filepath.Join(root, path))
+			if err != nil || !bytes.Equal(got, body) {
+				t.Errorf("working bytes changed for %s: got=%q err=%v want=%q", path, got, err, body)
+			}
+			info, err := os.Stat(filepath.Join(root, path))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if info.Mode() != modes[path] {
+				t.Errorf("working mode changed for %s: got=%v want=%v", path, info.Mode(), modes[path])
+			}
+		}
+		if _, err := os.Stat(filepath.Join(root, paths[2])); !os.IsNotExist(err) {
+			t.Errorf("deleted unrelated path reappeared: %v", err)
+		}
+	}
+}
+
+func assertAgentSwitchCommit(t *testing.T, root, slug, before string) {
+	t.Helper()
+	if parents := gittest.Output(t, root, "show", "-s", "--format=%P", "HEAD"); parents != before {
+		t.Errorf("switch should create exactly one commit: parent=%s want=%s", parents, before)
+	}
+	runJSON := filepath.Join(run.Dir("tele", slug), "run.json")
+	if paths := gittest.Output(t, root, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"); paths != runJSON {
+		t.Errorf("switch commit paths=%q want only %q", paths, runJSON)
+	}
+	var md run.Metadata
+	if err := json.Unmarshal([]byte(gittest.Output(t, root, "show", "HEAD:"+runJSON)), &md); err != nil {
+		t.Fatal(err)
+	}
+	if md.Agent != "codex" {
+		t.Errorf("committed agent=%q want codex", md.Agent)
+	}
+}
+
+func TestSDLCStageAgentCommitRejected(t *testing.T) {
+	for _, cascade := range []bool{false, true} {
+		name := "interactive"
+		if cascade {
+			name = "cascade"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := newTestBureaucracy(t)
+			markBureaucracy(t, root)
+			seedSdlcOneShotProject(t, root, "tele")
+			t.Setenv("MOE_HOME", root)
+			stubEditor(t)
+			suppressNextStagePrompt(t)
+			var out, errb bytes.Buffer
+			if code := runNew("sdlc", []string{"tele/rejected-agent"}, &out, &errb); code != 0 {
+				t.Fatalf("runNew exit=%d stderr=%q", code, errb.String())
+			}
+			assertUnrelatedUnchanged := seedAgentSwitchStaging(t, root, "rejected-agent")
+			installCreateFailureHook(t, root, `case "$(head -n 1 "$1")" in
+  "switch agent:"*) echo reject-switch >&2; exit 1 ;;
+esac
+`)
+			before := gittest.HeadSHA(t, root)
+			stages := stubOpenSdlcStage(t, nil)
+			pushes := stubPushFromCascade(t, 0, nil)
+			prev := runStageSession
+			runStageSession = func(_, _, _ string, _ stageSessionOpts, _, _ io.Writer) int {
+				t.Fatal("session started after rejected switch")
+				return 1
+			}
+			t.Cleanup(func() { runStageSession = prev })
+			args := []string{"--agent", "codex", "tele/rejected-agent"}
+			if cascade {
+				args = append([]string{"--once"}, args...)
+			}
+			out.Reset()
+			errb.Reset()
+			if code := runDesign(args, &out, &errb); code != 1 {
+				t.Fatalf("exit=%d want 1; stderr=%q", code, errb.String())
+			}
+			if !strings.Contains(errb.String(), "commit agent switch:") || !strings.Contains(errb.String(), "reject-switch") {
+				t.Errorf("missing rejection error: %q", errb.String())
+			}
+			if strings.Contains(out.String(), "switched run agent") {
+				t.Errorf("announced rejected switch: %q", out.String())
+			}
+			if len(*stages) != 0 || len(*pushes) != 0 {
+				t.Errorf("dispatch after rejection: stages=%v pushes=%v", *stages, *pushes)
+			}
+			if after := gittest.HeadSHA(t, root); after != before {
+				t.Errorf("HEAD changed: before=%s after=%s", before, after)
+			}
+			assertUnrelatedUnchanged()
+		})
 	}
 }

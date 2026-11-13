@@ -219,7 +219,10 @@ func persistSDLCStageAgent(verb, stage, projectID, runID, agentName string, stdo
 		Purpose: "switch-agent",
 		Run:     md.Project + "/" + md.ID,
 	}, func() error {
-		return run.StageAndCommit(root, msg, runJSON)
+		if err := run.Stage(root, runJSON); err != nil {
+			return err
+		}
+		return git.Run(root, "commit", "--only", "-m", msg, "--", runJSON)
 	})
 	if err != nil {
 		moePrintf(stderr, "commit agent switch: %v\n", err)
