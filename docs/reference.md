@@ -74,6 +74,11 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   waits for and prints that save's outcome. In a Rex terminal it reports the
   same OSC 7501 status as `dash --watch`.
 
+  The UI board omits routine project `sweeping` service rows to leave room for
+  runs and service exceptions. Cooling, failed or quota-deferred projects and
+  host/origin errors remain visible when applicable. For routine sweep status,
+  use `moe dash`, `moe dash --watch` or the web `/serve` page.
+
   `/` opens temporary board search from any pane. Type a case-insensitive
   literal substring of `project/run`; surrounding spaces are ignored. Search
   covers all selectable rows within the current filters, including off-screen

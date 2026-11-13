@@ -316,6 +316,11 @@ separators have a blank row on each side, and the console keeps six message
 rows even on short terminals. The minimum size is 40 columns by 20 rows.
 Moving to the first board item reveals the headings above it.
 
+The UI board omits routine project `sweeping` service rows. For routine sweep
+status, use `moe dash`, `moe dash --watch` or the web `/serve` page. Service
+exceptions remain visible when applicable; see
+[Re-Entry And Supervision](reference.md#re-entry-and-supervision).
+
 Press `/` from any pane to find a board item by a case-insensitive literal
 substring of `project/run`. Surrounding query spaces are ignored. Search
 includes off-screen rows, captures, completed items, chores and kept drafts
