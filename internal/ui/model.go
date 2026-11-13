@@ -307,7 +307,11 @@ func (m *model) move(delta int) {
 	if k := keyOf(m.board.Items[i]); k != m.sel {
 		m.sel, m.has, m.detailTop = k, true, 0
 	}
-	m.scrollToSelection()
+	if i == 0 {
+		m.boardTop = 0
+	} else {
+		m.scrollToSelection()
+	}
 }
 
 func (m *model) scrollToSelection() {
@@ -333,14 +337,17 @@ func (m *model) clampBoard() {
 // layout is shared by full paints, navigation, cursors and animation.
 // Geometry depends only on size and the complete overview, never input mode.
 type layout struct {
-	overview, board, detail, console int // body heights
-	boardRow, detailRow, consoleRow  int // body starts, after their headings
+	overview, board, detail, console   int // body heights
+	overviewRow                        int
+	boardRule, detailRule, consoleRule int
+	boardRow, detailRow, consoleRow    int // body starts, after heading padding
 }
 
 func (m *model) layout() layout {
-	l := layout{console: m.consoleHeight()}
-	body := m.high - 5 - l.console // banner, three headings, footer
-	if len(m.board.Overview) > 0 && body-len(m.board.Overview) >= 6 {
+	l := layout{console: m.consoleHeight(), overviewRow: 2}
+	// Banner, three rules, footer; a blank on each side of every rule.
+	body := m.high - 5 - 6 - l.console
+	if len(m.board.Overview) > 0 && body-len(m.board.Overview)-1 >= 6 {
 		fits := true
 		for _, line := range m.board.Overview {
 			if textWidth(line) > m.width-1 {
@@ -352,21 +359,22 @@ func (m *model) layout() layout {
 			l.overview = len(m.board.Overview)
 		}
 	}
-	body -= l.overview
-	l.board = max(body*2/3, 1)
-	l.detail = max(body-l.board, 2)
-	l.boardRow = 2 + l.overview
-	l.detailRow = l.boardRow + l.board + 1
-	l.consoleRow = l.detailRow + l.detail + 1
+	l.boardRule = 2
+	if l.overview > 0 {
+		body -= l.overview + 1 // the overview and its leading blank
+		l.boardRule += l.overview + 1
+	}
+	l.detail = max(body-body*2/3, 2)
+	l.board = max(body-l.detail, 1)
+	l.boardRow = l.boardRule + 2
+	l.detailRule = l.boardRow + l.board + 1
+	l.detailRow = l.detailRule + 2
+	l.consoleRule = l.detailRow + l.detail + 1
+	l.consoleRow = l.consoleRule + 2
 	return l
 }
 
-func (m *model) consoleHeight() int {
-	if m.high < 20 {
-		return 1
-	}
-	return 3
-}
+func (m *model) consoleHeight() int { return 6 }
 
 func (m *model) boardHeight() int {
 	return m.layout().board
@@ -377,7 +385,7 @@ func (m *model) detailHeight() int {
 }
 
 // tooSmall is the size below which neither pane is useful.
-func (m *model) tooSmall() bool { return m.width < 40 || m.high < 12 }
+func (m *model) tooSmall() bool { return m.width < 40 || m.high < 20 }
 
 func (m *model) resize(rows, cols int) {
 	m.width, m.high = cols, rows

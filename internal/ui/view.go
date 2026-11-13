@@ -38,7 +38,8 @@ Commands (:)
 Pane headings use a heavy rule for the input recipient (also without color).
 Board ranges count scrollable lines, including headings and blank rows.
 The complete chart and factory stay pinned when space permits; resize restores them.
-Console: arrows/page/Home scroll history; End follows newest messages.
+Console: six message rows; arrows/page/Home scroll history; End follows newest.
+Minimum terminal size: 40 columns by 20 rows.
 Confirmations: y accepts, Esc cancels; arrows/page/Home/End scroll the question.
 
 Notes reach the run's next prompt; they never pause, resume or start
@@ -58,7 +59,7 @@ func (m *model) view() frame {
 	f := frame{rows: make([]string, m.high)}
 	w := m.width - 1 // never write the last column: no autowrap
 	if m.tooSmall() {
-		for i, l := range []string{"too small", fmt.Sprintf("%dx%d, need 40x12", m.width, m.high), "nothing is lost"} {
+		for i, l := range []string{"too small", fmt.Sprintf("%dx%d, need 40x20", m.width, m.high), "nothing is lost"} {
 			if i < len(f.rows) {
 				f.rows[i] = plain(l, w)
 			}
@@ -89,9 +90,9 @@ func (m *model) view() frame {
 		if i >= art.Start && i < art.Start+art.Height && len(art.Frames) > 0 {
 			line = art.Frames[m.animation%len(art.Frames)][i-art.Start]
 		}
-		f.rows[1+i] = boardLine(line, false, w)
+		f.rows[l.overviewRow+i] = boardLine(line, false, w)
 	}
-	f.rows[l.boardRow-1] = m.boardHeading(w)
+	f.rows[l.boardRule] = m.boardHeading(w)
 	row := l.boardRow
 
 	sel, hasSel := m.selected()
@@ -103,8 +104,8 @@ func (m *model) view() frame {
 		row++
 	}
 
-	f.rows[row] = m.dividerRow(sel, hasSel, w)
-	row++
+	f.rows[l.detailRule] = m.dividerRow(sel, hasSel, w)
+	row = l.detailRow
 
 	lines, cur := m.detailLines(sel, hasSel, w, dh)
 	for i := range dh {
@@ -121,8 +122,8 @@ func (m *model) view() frame {
 	if m.console.unread > 0 {
 		label += fmt.Sprintf(" · %d new (End follows)", m.console.unread)
 	}
-	f.rows[row] = m.heading(label, m.paneFocused(paneConsole), w)
-	row++
+	f.rows[l.consoleRule] = m.heading(label, m.paneFocused(paneConsole), w)
+	row = l.consoleRow
 	for i, line := range m.consoleLines() {
 		f.rows[row+i] = line
 	}

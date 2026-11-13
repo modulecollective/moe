@@ -26,7 +26,7 @@ func TestAnimationPatchesOnlyVisibleArt(t *testing.T) {
 	old := m.view()
 	before := slices.Clone(old.rows)
 	out := string(m.animate(&old))
-	if !strings.Contains(out, "\x1b[2;1Hsmoke B") || strings.Contains(out, "fixed rail") || strings.Contains(out, "draft") || strings.Contains(out, "failure") {
+	if !strings.Contains(out, "\x1b[3;1Hsmoke B") || strings.Contains(out, "fixed rail") || strings.Contains(out, "draft") || strings.Contains(out, "failure") {
 		t.Fatalf("wrong patch: %q", out)
 	}
 	cursor := fmt.Sprintf("\x1b[%d;%dH\x1b[?25h", old.curRow+1, old.curCol+1)
@@ -34,7 +34,7 @@ func TestAnimationPatchesOnlyVisibleArt(t *testing.T) {
 		t.Fatal("cursor not restored")
 	}
 	for i := range before {
-		if i != 1 && before[i] != old.rows[i] {
+		if i != 2 && before[i] != old.rows[i] {
 			t.Fatalf("non-art row %d changed", i)
 		}
 	}
@@ -77,7 +77,7 @@ func TestLoopAnimationIsIndependentOfObservation(t *testing.T) {
 
 	go func() {
 		_, err := runLoop(ctx, Config{Boards: boards, Report: func(_ io.Writer, b Board) error { reports.Add(1); return nil }}, loopIO{
-			out: out, input: input, animation: ticks, size: func() (int, int, error) { return 24, 80, nil },
+			out: out, input: input, animation: ticks, size: func() (int, int, error) { return 30, 80, nil },
 		}, jobs, results)
 		done <- err
 	}()

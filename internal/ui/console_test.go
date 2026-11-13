@@ -21,7 +21,7 @@ func TestConsoleHistoryAndFocus(t *testing.T) {
 	m.setBoard(board(1, run("p", "a")))
 	keyboard(m, "nmy private words")
 	draft := m.active
-	m.say("p/a: failure\x1b[2J " + strings.Repeat("long reason ", 30))
+	m.say("p/a: failure\x1b[2J " + strings.Repeat("long reason ", 60))
 	if m.active != draft || m.mode != modeEdit {
 		t.Fatal("message stole the editor")
 	}
@@ -64,7 +64,7 @@ func TestConsoleHistoryAndFocus(t *testing.T) {
 }
 
 func TestConsoleGeometryAndObservationDedup(t *testing.T) {
-	for _, size := range [][2]int{{12, 40}, {24, 80}, {40, 120}} {
+	for _, size := range [][2]int{{20, 40}, {24, 80}, {40, 120}} {
 		m, _ := testModel(t)
 		m.resize(size[0], size[1])
 		b := board(1, run("p", "a"))
@@ -78,7 +78,7 @@ func TestConsoleGeometryAndObservationDedup(t *testing.T) {
 		before := m.boardHeight()
 		m.say("a message")
 		f := m.view()
-		if len(f.rows) != size[0] || m.boardHeight() != before || m.boardHeight() < 3 || m.detailHeight() < 2 {
+		if len(f.rows) != size[0] || m.boardHeight() != before || m.boardHeight() < 1 || m.detailHeight() < 2 {
 			t.Fatalf("bad geometry %v", size)
 		}
 		for _, r := range f.rows {
@@ -102,7 +102,7 @@ func TestCreationKeyboardAndSavePrompt(t *testing.T) {
 	for _, alias := range []string{"new idea", "new-idea", "new intent", "new-intent"} {
 		for _, existing := range []bool{false, true} {
 			m, q := testModel(t)
-			m.resize(12, 40)
+			m.resize(26, 40)
 			if existing {
 				m.setBoard(board(1, run("p", "old")))
 			}

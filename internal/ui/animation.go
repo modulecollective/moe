@@ -23,7 +23,7 @@ func (m *model) animate(last *frame) []byte {
 	}
 	var b bytes.Buffer
 	for i := 0; i < art.Height; i++ {
-		row := 1 + art.Start + i
+		row := l.overviewRow + art.Start + i
 		next := boardLine(art.Frames[m.animation][i], false, m.width-1)
 		if next == last.rows[row] {
 			continue

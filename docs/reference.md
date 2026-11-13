@@ -60,13 +60,16 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   reads or status reports. The shared dash banner stays visible; the complete
   histogram and factory are pinned above the scrolling board when they fit,
   and collapse together on short or narrow terminals. Resizing restores them.
-  A heavy, bright amber pane heading identifies where keys go; without color
-  the heavy rule remains. The selected target retains its `>` marker. A board
-  heading's `lines … of …` counts scrollable display lines (including headings
-  and blanks), not runs. The console retains 100 events in memory, with
-  bounded, labelled message truncation; it never logs note or capture bodies.
-  It needs a terminal on stdout (Linux or macOS) and restores it on every
-  exit; quitting mid-save waits for and prints that save's outcome. In a Rex
+  Pane separators have a blank row on either side, and the console shows six
+  message rows. The minimum terminal size is 40 columns by 20 rows. Moving to
+  the first board item reveals the section headings above it. A heavy, bright
+  amber pane heading identifies where keys go; without color the heavy rule
+  remains. The selected target retains its `>` marker. A board heading's
+  `lines … of …` counts scrollable display lines (including headings and
+  blanks), not runs. The console retains 100 events in memory, with bounded,
+  labelled message truncation; it never logs note or capture bodies. It needs
+  a terminal on stdout (Linux or macOS) and restores it on every exit;
+  quitting mid-save waits for and prints that save's outcome. In a Rex
   terminal it reports the same OSC 7501 status as `dash --watch`.
 
   Closed ideas and intents remain selectable with their full capture text

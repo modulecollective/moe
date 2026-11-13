@@ -27,7 +27,7 @@ func confirmationScreen(t *testing.T, m *model, want string) {
 }
 
 func TestConfirmationCloseVisible(t *testing.T) {
-	for _, size := range [][2]int{{30, 100}, {12, 40}} {
+	for _, size := range [][2]int{{30, 100}, {20, 40}} {
 		for _, following := range []bool{false, true} {
 			for _, accept := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%dx%d/follow=%t/accept=%t", size[1], size[0], following, accept), func(t *testing.T) {
@@ -94,7 +94,7 @@ func TestConfirmationDraftProtectionVisible(t *testing.T) {
 		for _, accept := range []bool{false, true} {
 			t.Run(fmt.Sprintf("quit=%t/accept=%t", quit, accept), func(t *testing.T) {
 				m, q := testModel(t)
-				m.resize(12, 40)
+				m.resize(20, 40)
 				m.setBoard(board(1, run("p", "target")))
 				keyboard(m, "nprivate unsaved text")
 				if quit {
@@ -148,9 +148,9 @@ func TestConfirmationNotOverwrittenByAnimation(t *testing.T) {
 
 func TestConfirmationLongTargetScrollAndResize(t *testing.T) {
 	m, q := testModel(t)
-	m.resize(12, 40)
+	m.resize(20, 40)
 	var parts []string
-	for i := range 90 {
+	for i := range 180 {
 		parts = append(parts, fmt.Sprintf("capture-%02d", i))
 	}
 	target := strings.Join(parts, "-") + "-tail"

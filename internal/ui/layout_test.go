@@ -52,8 +52,8 @@ func assertPinned(t *testing.T, m *model) {
 		t.Fatal("shared banner moved")
 	}
 	for i, line := range m.board.Overview {
-		if stripSGR(f.rows[i+1]) != stripSGR(line) {
-			t.Fatalf("overview row %d moved or clipped: %q", i, f.rows[i+1])
+		if stripSGR(f.rows[m.layout().overviewRow+i]) != stripSGR(line) {
+			t.Fatalf("overview row %d moved or clipped: %q", i, f.rows[m.layout().overviewRow+i])
 		}
 	}
 	if strings.Count(strings.Join(f.rows, "\n"), "MINISTRY OF EVERYTHING") != 1 {
@@ -76,7 +76,7 @@ func TestDashboardOverviewSurvivesBoardScroll(t *testing.T) {
 	if it.Line < m.boardTop || it.Line >= m.boardTop+m.boardHeight() {
 		t.Fatal("selection hidden")
 	}
-	header := m.view().rows[m.layout().boardRow-1]
+	header := m.view().rows[m.layout().boardRule]
 	want := fmt.Sprintf("lines %d–%d of %d", m.boardTop+1, m.boardTop+m.boardHeight(), len(m.board.Lines))
 	if !strings.Contains(header, want) {
 		t.Fatalf("range %q absent: %q", want, header)
@@ -108,8 +108,8 @@ func TestDashboardCollapseAndEditorGeometry(t *testing.T) {
 	for _, r := range b.Overview {
 		wide = max(wide, textWidth(r))
 	}
-	threshold := len(b.Overview) + 5 + 3 + 6
-	sizes := [][2]int{{120, 90}, {100, 40}, {80, 24}, {40, 12}, {wide, 40}, {wide + 1, 40}, {120, threshold - 1}, {120, threshold}}
+	threshold := len(b.Overview) + 5 + 6 + 6 + 1 + 6
+	sizes := [][2]int{{120, 90}, {100, 40}, {80, 24}, {40, 20}, {40, 21}, {40, 22}, {40, 23}, {wide, 40}, {wide + 1, 40}, {120, threshold - 1}, {120, threshold}}
 	for _, size := range sizes {
 		t.Run(fmt.Sprintf("%dx%d", size[0], size[1]), func(t *testing.T) {
 			m, _ := testModel(t)
@@ -117,8 +117,8 @@ func TestDashboardCollapseAndEditorGeometry(t *testing.T) {
 			m.setBoard(b)
 			keyboard(m, "nkept text")
 			l := m.layout()
-			want := size[0]-1 >= wide && size[1]-5-m.consoleHeight()-len(b.Overview) >= 6
-			if (l.overview > 0) != want || l.board < 4 || l.detail < 2 {
+			want := size[0]-1 >= wide && size[1]-5-6-m.consoleHeight()-len(b.Overview)-1 >= 6
+			if (l.overview > 0) != want || l.board < min(size[1]-19, 4) || l.detail < 2 {
 				t.Fatalf("invalid layout: %+v", l)
 			}
 			f := m.view()
@@ -202,20 +202,20 @@ func TestPaneEmphasisTracksInputRecipient(t *testing.T) {
 		m.color = false
 	}
 	l := m.layout()
-	check(l.boardRow - 1)
+	check(l.boardRule)
 	keyboard(m, "\t")
-	check(l.detailRow - 1)
+	check(l.detailRule)
 	keyboard(m, "\t")
-	check(l.consoleRow - 1)
+	check(l.consoleRule)
 	keyboard(m, "\x1b[Z")
-	check(l.detailRow - 1)
+	check(l.detailRule)
 	keyboard(m, "?")
-	check(l.detailRow - 1)
+	check(l.detailRule)
 	press(m, Key{Code: KeyEsc})
 	keyboard(m, "e")
-	check(l.detailRow - 1)
+	check(l.detailRule)
 	keyboard(m, "more\x13")
-	check(l.detailRow - 1) // idea save choice
+	check(l.detailRule) // idea save choice
 	press(m, Key{Code: KeyEsc})
 	press(m, Key{Code: KeyEsc})
 	keyboard(m, ":")
@@ -246,7 +246,7 @@ func TestPinnedAnimationAgreesAfterScrollAndResize(t *testing.T) {
 		t.Fatal("no smoke patch")
 	}
 	for i := range before {
-		if i < 1+m.board.Art.Start || i >= 1+m.board.Art.Start+m.board.Art.Height {
+		if i < m.layout().overviewRow+m.board.Art.Start || i >= m.layout().overviewRow+m.board.Art.Start+m.board.Art.Height {
 			if old.rows[i] != before[i] {
 				t.Fatalf("animation touched non-art row %d", i)
 			}
@@ -258,7 +258,7 @@ func TestPinnedAnimationAgreesAfterScrollAndResize(t *testing.T) {
 	if !slices.Equal(m.view().rows, old.rows) {
 		t.Fatal("full paint disagrees")
 	}
-	m.resize(12, 40)
+	m.resize(20, 40)
 	old = m.view()
 	if len(m.animate(&old)) > 0 {
 		t.Fatal("collapsed overview patched")
@@ -273,14 +273,14 @@ func TestPinnedAnimationAgreesAfterScrollAndResize(t *testing.T) {
 
 func TestNarrowHeadingPreservesStateAndSelection(t *testing.T) {
 	m, _ := testModel(t)
-	m.resize(12, 40)
+	m.resize(20, 40)
 	b := board(1, run("p", "r"))
 	b.Header = "project " + strings.Repeat("long filter ", 10)
 	m.setBoard(b)
 	keyboard(m, "nunsaved")
 	m.busy = &job{label: strings.Repeat("long operation ", 10)}
 	f := m.view()
-	heading := f.rows[m.layout().boardRow-1]
+	heading := f.rows[m.layout().boardRule]
 	for _, want := range []string{"Board", "unsaved draft", "working"} {
 		if !strings.Contains(heading, want) {
 			t.Fatalf("state %q lost: %q", want, heading)
@@ -296,5 +296,112 @@ func TestNarrowHeadingPreservesStateAndSelection(t *testing.T) {
 	heading = m.view().rows[1]
 	if !strings.Contains(heading, "unsaved draft") || !strings.Contains(heading, "working") {
 		t.Fatalf("confirmation hid state: %q", heading)
+	}
+}
+
+func TestPanePaddingAndSixConsoleRows(t *testing.T) {
+	for _, size := range [][2]int{{120, 90}, {100, 40}, {80, 24}, {40, 20}, {40, 21}, {40, 22}, {40, 23}} {
+		t.Run(fmt.Sprintf("%dx%d", size[0], size[1]), func(t *testing.T) {
+			m, _ := testModel(t)
+			m.resize(size[1], size[0])
+			m.setBoard(dashboardBoard())
+			for i := range 12 {
+				m.say(fmt.Sprintf("event %02d", i))
+			}
+			l, f := m.layout(), m.view()
+			for _, rule := range []int{l.boardRule, l.detailRule, l.consoleRule} {
+				if f.rows[rule-1] != "" || f.rows[rule+1] != "" || !strings.Contains(f.rows[rule], "──") && !strings.Contains(f.rows[rule], "━━") {
+					t.Fatalf("rule at %d lacks surrounding blank rows: %q", rule, f.rows[rule-1:rule+2])
+				}
+			}
+			if f.rows[1] != "" {
+				t.Fatal("no blank below banner")
+			}
+			if l.overview > 0 && (l.overviewRow != 2 || l.boardRule != l.overviewRow+l.overview+1) {
+				t.Fatal("overview padding must be exactly one row at each end")
+			}
+			if l.console != 6 || l.consoleRow+6 != m.high-1 {
+				t.Fatal("console padding consumed a message row or footer")
+			}
+			for i := range 6 {
+				if !strings.Contains(f.rows[l.consoleRow+i], fmt.Sprintf("event %02d", i+6)) {
+					t.Fatalf("console row %d: %q", i, f.rows[l.consoleRow+i])
+				}
+			}
+			if m.high <= 23 && (l.board != m.high-19 || l.detail != 2) {
+				t.Fatalf("short-terminal allocation: %+v", l)
+			}
+			m.focus = paneConsole
+			keyboard(m, "\x1b[5~")
+			if m.console.top != 0 || !strings.Contains(m.consoleLines()[0], "event 00") {
+				t.Fatal("Page Up did not page six message rows")
+			}
+			keyboard(m, "\x1b[F")
+			if !m.console.follow || !strings.Contains(m.consoleLines()[0], "event 06") {
+				t.Fatal("End did not follow the last six rows")
+			}
+		})
+	}
+}
+
+func TestFirstItemNavigationRevealsBoardStart(t *testing.T) {
+	for _, b := range []Board{
+		dashboardBoard(),
+		{Lines: []string{"service", "ACTIVE", "", "BACKLOG", "  first", "  second"}, Items: []Item{
+			{Project: "p", Run: "first", Line: 4}, {Project: "p", Run: "second", Line: 5},
+		}},
+	} {
+		m, _ := testModel(t)
+		m.resize(40, 120)
+		m.setBoard(b)
+		keyboard(m, "j\x1b[F\x1b[A") // select second, page to end, Up to first
+		if m.selectedIndex() != 0 || m.boardTop != 0 {
+			t.Fatal("Up to first item hid leading context")
+		}
+		f := m.view()
+		if !strings.Contains(strings.Join(f.rows[m.layout().boardRow:m.layout().boardRow+m.boardHeight()], "\n"), "ACTIVE") {
+			t.Fatal("first-item navigation did not paint ACTIVE")
+		}
+		m.boardTop = 3
+		keyboard(m, "k")
+		if m.boardTop != 0 {
+			t.Fatal("k at first item did not return to line zero")
+		}
+		keyboard(m, "\x1b[F")
+		top := m.boardTop
+		m.setBoard(b)
+		if m.boardTop != top {
+			t.Fatal("passive refresh reset paging")
+		}
+	}
+	m, _ := testModel(t)
+	m.resize(20, 40)
+	m.setBoard(Board{Lines: []string{"service", "ACTIVE", "prefix", "  first"}, Items: []Item{{Project: "p", Run: "first", Line: 3}}})
+	keyboard(m, "\x1b[A")
+	if m.boardTop != 0 {
+		t.Fatal("long prefix overrode the explicit top request")
+	}
+	m.setBoard(Board{})
+	keyboard(m, "k") // empty board remains safe
+	if m.has || m.boardTop != 0 {
+		t.Fatal("empty board acquired a selection")
+	}
+}
+
+func TestMinimumSizeRetainsDraft(t *testing.T) {
+	m, _ := testModel(t)
+	m.setBoard(board(1, run("p", "r")))
+	keyboard(m, "nkept draft")
+	for _, height := range []int{12, 19} {
+		m.resize(height, 40)
+		f := m.view()
+		if len(f.rows) != height || !strings.Contains(f.rows[1], "need 40x20") || f.cursor {
+			t.Fatalf("invalid resize notice: %+v", f)
+		}
+	}
+	m.resize(20, 40)
+	f := m.view()
+	if !f.cursor || m.active.ed.String() != "kept draft" || m.sel.run != "r" {
+		t.Fatal("resize lost draft, cursor or selection")
 	}
 }

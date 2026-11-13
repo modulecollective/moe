@@ -515,7 +515,7 @@ func TestDetailWrapsLongLines(t *testing.T) {
 	long := strings.Repeat("x", 150) + "END_OF_CAPTURE"
 	for _, cols := range []int{100, 40} {
 		m, _ := testModel(t)
-		m.resize(14, cols)
+		m.resize(23, cols)
 		closed := idea("p", "i", 1)
 		closed.Editable = false
 		closed.Body = "# i\n" + strings.Repeat("filler\n", 20) + long + "\n"
@@ -574,7 +574,7 @@ func TestOutcomeReachable(t *testing.T) {
 	const refusal = "the canvas changed since you opened it; nothing saved — Ctrl-X discards your draft, then e opens the current text"
 	for _, cols := range []int{40, 80, 100} {
 		m, q := testModel(t)
-		m.resize(14, cols)
+		m.resize(23, cols)
 		b := board(1, idea("p", "i", 1))
 		b.Header = "all projects · gathered 15:04:05 · 0 live"
 		m.setBoard(b)
@@ -747,7 +747,7 @@ func TestClosedIntentInspectable(t *testing.T) {
 		for _, width := range []int{40, 100} {
 			t.Run(fmt.Sprintf("startup=%v/width=%d", startup, width), func(t *testing.T) {
 				m, q := testModel(t)
-				m.resize(14, width)
+				m.resize(23, width)
 				closed := Item{Project: "p", Run: "intent", Kind: ItemIntent, Bucket: 4, Body: body}
 				other := idea("p", "neighbour", 3)
 				if !startup {

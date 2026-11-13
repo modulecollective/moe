@@ -266,15 +266,17 @@ moe control resume  moe/change-auth   # release a hold; starts nothing
 selected run's `control show` facts below it, updated as the owner publishes,
 and the same controls as `:pause`, `:finish` and so on, alongside notes,
 answers and the run's Rex terminal (`t`). A third pane keeps recent command
-outcomes and recovery messages. Tab and Shift-Tab cycle the three panes;
-the pane receiving input has a bright amber heading with a heavy rule
-(heavy even without color). The selection's `>` still marks the target
-when another pane has input. End in the console follows new messages after
-scrolling. The shared dash banner stays at the top; the complete histogram
-and factory stay below it while board lines scroll. When space is short,
-the whole overview collapses and returns on resize. The board heading's
-`lines … of …` counts scrollable display lines, including section headings
-and blanks, rather than runs.
+outcomes and recovery messages. Tab and Shift-Tab cycle the three panes; the
+pane receiving input has a bright amber heading with a heavy rule (heavy even
+without color). The selection's `>` still marks the target when another pane
+has input. End in the console follows new messages after scrolling. The shared
+dash banner stays at the top; the complete histogram and factory stay below it
+while board lines scroll. When space is short, the whole overview collapses
+and returns on resize. The board heading's `lines … of …` counts scrollable
+display lines, including section headings and blanks, rather than runs. Pane
+separators have a blank row on each side, and the console keeps six message
+rows even on short terminals. The minimum size is 40 columns by 20 rows.
+Moving to the first board item reveals the headings above it.
 
 Use `:new idea <project>/<slug>` or `:new-idea <project>/<slug>` to open an
 idea draft; intents use `new intent` or `new-intent`. Nothing is created
