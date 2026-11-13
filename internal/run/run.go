@@ -204,13 +204,6 @@ type Options struct {
 	// its agent still owes a work turn.
 	SeedDocs map[string]string
 
-	// RemovePaths, when non-empty, lists paths (relative to root)
-	// whose deletion should land in the same commit as the run's
-	// creation. Used by --from-idea to atomically drop the source
-	// idea file so the idea-to-run transition is a single commit in
-	// git history.
-	RemovePaths []string
-
 	// SubjectFrom, when non-empty, appends ` from <SubjectFrom>` to the
 	// open commit's subject so a promoted idea commits as
 	// `Open run p/r from idea slug` rather than the default `Open run p/r`.
@@ -271,16 +264,11 @@ type Options struct {
 	// at its first stage without needing it.
 	DesignOnly bool
 
-	// AllowDirty bypasses the working-tree-clean precondition (which
-	// counts staged changes and tracked-file modifications, never
-	// untracked files). The guardrail is there so a stray edit doesn't
-	// ride along on the open-run commit; callers that already vetted
-	// the tree (the followups harvester is the only current example —
-	// it allows a modified followups.md to ride along to the close
-	// commit, while each per-idea open-run commit only stages its own
-	// paths) opt out here. The opt-out is per-caller because run.New
-	// still stages only its addPaths, so dirt elsewhere is not
-	// silently committed.
+	// AllowDirty bypasses the working-tree-clean precondition (staged
+	// changes and tracked modifications, never untracked files). The
+	// harvester uses this for modified scratch files. New stages only
+	// its own additions, but a successful commit includes the existing
+	// index too; callers must vet any pre-staged work themselves.
 	AllowDirty bool
 }
 
@@ -326,7 +314,12 @@ func Dir(projectID, id string) string {
 // Refuses if the project is not registered, the explicit id collides, or
 // the working tree is dirty (a stray edit shouldn't ride along on the
 // "open run" commit).
-func New(root, projectID string, opts Options) (*Metadata, error) {
+//
+// The caller must hold the repository lock through New. Once New owns
+// a fresh directory with an empty index namespace, returned failures
+// remove its files and index entries. Cleanup failures report both causes;
+// successful cleanup reports "nothing recorded". Unrelated paths are preserved.
+func New(root, projectID string, opts Options) (md *Metadata, err error) {
 	if !idPattern.MatchString(projectID) {
 		return nil, fmt.Errorf("run: project id %q must match %s", projectID, idPattern)
 	}
@@ -391,7 +384,7 @@ func New(root, projectID string, opts Options) (*Metadata, error) {
 		}
 	}
 
-	md := &Metadata{
+	md = &Metadata{
 		ID:         id,
 		Project:    projectID,
 		Status:     StatusInProgress,
@@ -407,14 +400,54 @@ func New(root, projectID string, opts Options) (*Metadata, error) {
 	}
 
 	runJSONRel := filepath.Join(runDirRel, "run.json")
-	if err := writeJSON(filepath.Join(root, runJSONRel), md); err != nil {
-		return nil, err
-	}
 	addPaths := []string{runJSONRel}
-	for docID, body := range opts.SeedDocs {
+	for docID := range opts.SeedDocs {
 		if !idPattern.MatchString(docID) {
 			return nil, fmt.Errorf("run: seed document id %q must match %s", docID, idPattern)
 		}
+		addPaths = append(addPaths, ContentPath(projectID, id, docID))
+	}
+
+	// A missing directory can still have staged entries, even unmerged
+	// ones. Only an empty namespace is safe to acquire without snapshots.
+	entries, err := git.Output(root, "ls-files", "--stage", "--", runDirRel)
+	if err != nil {
+		return nil, fmt.Errorf("run: read index for %s: %w", runDirRel, err)
+	}
+	if entries != "" {
+		return nil, fmt.Errorf("run: index already contains entries for %s", runDirRel)
+	}
+	runDir := filepath.Join(root, runDirRel)
+	if err := os.MkdirAll(filepath.Dir(runDir), 0o755); err != nil {
+		return nil, fmt.Errorf("run: mkdir run parent: %w", err)
+	}
+	if err := os.Mkdir(runDir, 0o755); err != nil {
+		return nil, fmt.Errorf("run: acquire directory %s: %w", runDirRel, err)
+	}
+	defer func() {
+		if err == nil {
+			return
+		}
+		causes := []error{err}
+		args := append([]string{"update-index", "--force-remove", "--"}, addPaths...)
+		if cerr := git.Run(root, args...); cerr != nil {
+			causes = append(causes, fmt.Errorf("remove index entries for %s: %w", runDirRel, cerr))
+		}
+		if cerr := os.RemoveAll(runDir); cerr != nil {
+			causes = append(causes, fmt.Errorf("remove directory %s: %w", runDirRel, cerr))
+		}
+		md = nil
+		if len(causes) > 1 {
+			err = fmt.Errorf("run: create failed; cleanup incomplete for %s: %w", runDirRel, errors.Join(causes...))
+		} else {
+			err = fmt.Errorf("run: create failed, nothing recorded: %w", err)
+		}
+	}()
+
+	if err := writeJSON(filepath.Join(root, runJSONRel), md); err != nil {
+		return nil, err
+	}
+	for docID, body := range opts.SeedDocs {
 		seedRel := ContentPath(projectID, id, docID)
 		if err := os.MkdirAll(filepath.Join(root, DocDir(projectID, id, docID)), 0o755); err != nil {
 			return nil, fmt.Errorf("run: mkdir seed doc dir: %w", err)
@@ -422,16 +455,10 @@ func New(root, projectID string, opts Options) (*Metadata, error) {
 		if err := os.WriteFile(filepath.Join(root, seedRel), []byte(body), 0o644); err != nil {
 			return nil, fmt.Errorf("run: write seed doc: %w", err)
 		}
-		addPaths = append(addPaths, seedRel)
 	}
 	addArgs := append([]string{"add", "--"}, addPaths...)
 	if err := git.Run(root, addArgs...); err != nil {
 		return nil, fmt.Errorf("run: git add: %w", err)
-	}
-	for _, p := range opts.RemovePaths {
-		if err := git.Run(root, "rm", "--", p); err != nil {
-			return nil, fmt.Errorf("run: git rm %s: %w", p, err)
-		}
 	}
 
 	subject := fmt.Sprintf("Open run %s/%s", projectID, id)
