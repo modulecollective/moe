@@ -1,5 +1,5 @@
 // Package moe exposes the hand-authored guidance shipped inside the moe
-// binary: soul.md (workflow-agnostic philosophy) and the per-workflow
+// binary: SOUL.md (workflow-agnostic philosophy) and the per-workflow
 // stage fragments under workflows/<workflow>/<stage>.md. Keeping these as
 // embedded assets at the repo root means the Go code and the guidance
 // it injects always ship together — renaming a stage in code without
@@ -12,7 +12,7 @@ import (
 	"path"
 )
 
-//go:embed soul.md
+//go:embed SOUL.md
 var soulContent string
 
 //go:embed workflows
@@ -30,7 +30,7 @@ var moeHowtoSkill string
 //go:embed skills/moe-twin/SKILL.md
 var moeTwinSkill string
 
-// Soul returns the embedded soul.md content. Never empty in a correctly
+// Soul returns the embedded SOUL.md content. Never empty in a correctly
 // built binary; an empty return means the embed directive is broken.
 func Soul() string {
 	return soulContent

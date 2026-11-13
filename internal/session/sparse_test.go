@@ -27,7 +27,7 @@ func TestSparseSessionPreservesArchive(t *testing.T) {
 		"projects/alpha/runs/active/diagnostics/design/attempt/stderr-codex.log",
 		run.ContentPath("alpha", "active", "design"),
 		"projects/alpha/runs/active/run.json",
-		"lore/sparse-checkout.md", "soul.md", "AGENTS.md",
+		"lore/sparse-checkout.md", "SOUL.md", "AGENTS.md",
 	}
 	var omitted []string
 	for _, project := range []string{"alpha", "beta"} {

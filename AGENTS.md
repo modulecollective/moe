@@ -2,7 +2,7 @@
 
 This file applies when you are editing the moe CLI itself (this repo).
 It does not apply to agents dispatched by moe to work on target
-projects — those get their own guidance assembled from `soul.md` and
+projects — those get their own guidance assembled from `SOUL.md` and
 `stages/*`.
 
 ## Ground rules

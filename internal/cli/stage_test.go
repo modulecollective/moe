@@ -120,10 +120,10 @@ func TestEmbeddedFragmentsCoverRegisteredStages(t *testing.T) {
 }
 
 // TestEmbeddedSoulIsNonEmpty catches a busted //go:embed directive on
-// soul.md — trivial to check, would otherwise degrade silently.
+// SOUL.md — trivial to check, would otherwise degrade silently.
 func TestEmbeddedSoulIsNonEmpty(t *testing.T) {
 	if moe.Soul() == "" {
-		t.Fatal("moe.Soul() is empty; //go:embed soul.md likely broken")
+		t.Fatal("moe.Soul() is empty; //go:embed SOUL.md likely broken")
 	}
 }
 
@@ -284,7 +284,7 @@ func TestBuildSystemPromptOrdersSoulBeforeStageBeforeOperational(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Sentinels: soul.md heading, stage heading, first line of
+	// Sentinels: SOUL.md heading, stage heading, first line of
 	// operationalCore. All three must appear in order.
 	soulIdx := strings.Index(got, "# Soul")
 	stageIdx := strings.Index(got, "# Stage: design")

@@ -62,7 +62,7 @@ its own history if the history is legible, and a canvas is legible in a way a
 transcript is not.
 
 The second bet, made at the same time, was that agent behavior belongs in
-markdown rather than in Go. `soul.md` sets the operating philosophy; a stage
+markdown rather than in Go. `SOUL.md` sets the operating philosophy; a stage
 fragment sets the lens for the current stage; the twin records project intent.
 When an agent gets something wrong, the fix is an edit to the file it already
 reads. That rule is why the later steps were cheap: teaching the harness a new

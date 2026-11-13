@@ -113,7 +113,7 @@ MoE's memory improves through a few explicit channels:
 MoE assembles an instruction preamble fresh for every turn. The important
 inputs are plain markdown:
 
-- [`soul.md`](../soul.md) defines the general operating philosophy and
+- [`SOUL.md`](../SOUL.md) defines the general operating philosophy and
   quality bar.
 - `workflows/<workflow>/<stage>.md` defines the lens for the current stage.
 - The stage-location header says where the run is in the ladder and what the

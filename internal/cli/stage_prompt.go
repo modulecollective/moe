@@ -21,7 +21,7 @@ import (
 // buildSystemPrompt assembles the `--append-system-prompt` payload in the
 // order described in docs/concepts.md §"How Agents Are Steered":
 //
-//	soul.md                → global philosophy / quality bar
+//	SOUL.md                → global philosophy / quality bar
 //	stages/<stage>.md      → lifecycle-phase lens (for the doc being edited)
 //	operational core       → what specifically this invocation is doing
 //	project AGENTS.md      → project-specific guidance from the clone
