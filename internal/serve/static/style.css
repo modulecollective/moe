@@ -242,6 +242,7 @@ section h2 {
   letter-spacing: 0.02em;
   margin: 0 0 0.5rem;
 }
+.dash-section > h2 { flex-wrap: wrap; }
 section h2 .count {
   color: var(--muted);
   font-weight: 400;
