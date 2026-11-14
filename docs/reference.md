@@ -143,10 +143,11 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   usable server, serve opens a Rex session named `moe`, reached from the Rex
   client like any other session, whose managed `ui` block runs `moe ui`. A
   running editor survives serve restarts, keeping its drafts and current
-  binary; only a known exited editor is replaced. Unknown process state or
-  duplicate managed labels leave editors alone. Startup retires the old
-  managed `dash` block. Save or discard drafts, then quit and reopen the UI to
-  load an updated binary. Serve shutdown leaves the UI running. Session
+  binary. At startup, serve replaces a known exited editor or a restored shell
+  or other process positively identified as not running MoE. Unknown process
+  identity or duplicate managed labels leave blocks alone. Startup retires the
+  old managed `dash` block. Save or discard drafts, then quit and reopen the
+  UI to load an updated binary. Serve shutdown leaves the UI running. Session
   creation runs a harmless bootstrap; serve records its identity atomically
   before launching a labelled sweep. Each sweep runs in that session as a
   block labelled `heartbeat:<project>`. Such a sweep finishes even if serve
