@@ -106,6 +106,9 @@ func TestSDLCStageAgentAbsentOrUnmergedIndex(t *testing.T) {
 				if err := os.WriteFile(filepath.Join(root, rel), working, 0o644); err != nil {
 					t.Fatal(err)
 				}
+				if err := os.Chmod(filepath.Join(root, rel), 0o644); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if state == "unmerged" {
 				blob := gittest.Output(t, root, "rev-parse", "HEAD:"+rel)
@@ -297,6 +300,9 @@ func TestSDLCStageAgentReloadsUnderLock(t *testing.T) {
 				t.Fatal(err)
 			}
 			rel := filepath.Join(run.Dir("tele", md.ID), "run.json")
+			if err := os.Chmod(filepath.Join(root, rel), 0o644); err != nil {
+				t.Fatal(err)
+			}
 			gittest.Run(t, root, "add", "--", rel)
 			gittest.Run(t, root, "commit", "-m", "initial binding")
 			bin, err := os.Executable()
