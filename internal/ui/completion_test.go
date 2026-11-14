@@ -11,13 +11,12 @@ func TestCommandCompletionVocabularyAndCycles(t *testing.T) {
 		line  string
 		words []string
 	}{
-		{"", []string{"close", "edit", "finish", "handoff", "help", "new", "park", "pause", "quit", "resume", "tag", "terminal", "untag"}},
-		{"new ", []string{"idea", "intent"}},
-		{"tag ", []string{"design", "sdlc"}},
+		{"", []string{"close", "edit", "finish", "handoff", "help", "new-idea", "new-intent", "park", "pause", "quit", "resume", "tag-design", "tag-sdlc", "terminal", "untag"}},
 		{"p", []string{"park", "pause"}},
-		{"new i", []string{"idea", "intent"}},
-		{"tag s", []string{"sdlc"}},
-		{"ne", []string{"new"}},
+		{"new-i", []string{"new-idea", "new-intent"}},
+		{"tag-", []string{"tag-design", "tag-sdlc"}},
+		{"tag-s", []string{"tag-sdlc"}},
+		{"ne", []string{"new-idea", "new-intent"}},
 	} {
 		for _, existing := range []bool{false, true} {
 			for _, reverse := range []bool{false, true} {
@@ -55,18 +54,21 @@ func TestCommandCompletionAtCursor(t *testing.T) {
 		want   string
 		cursor int
 	}{
-		{"new ix  项目/é", 5, "new idea  项目/é", 8},
-		{"\u2003new\u2003ix  p/é", 6, "\u2003new\u2003idea  p/é", 9},
-		{"  new \t ixxx  p/é", 9, "  new \t idea  p/é", 12},
+		{"new-ix  项目/é", 5, "new-idea  项目/é", 8},
+		{"\u2003new-ix  p/é", 6, "\u2003new-idea  p/é", 9},
+		{"  new-ixxx  p/é", 7, "  new-idea  p/é", 10},
 		{"paZZ p/世界", 2, "park p/世界", 4},
-		{"new idea p/é", 3, "new idea p/é", 3},
-		{"new  p/é", 4, "new idea p/é", 8},
-		{"new i", 4, "new idea", 8},
-		{"New i", 5, "New i", 5},
+		{"new-intent p/é", 3, "new-idea p/é", 8},
+		{"new-  p/é", 4, "new-idea  p/é", 8},
+		{"tag-x p/é", 4, "tag-design p/é", 10},
+		{"New-i", 5, "New-i", 5},
 		{"bogus", 5, "bogus", 5},
-		{"new-", 4, "new-", 4},
-		{"new idea p/name", 15, "new idea p/name", 15},
+		{"new-idea p/name", 15, "new-idea p/name", 15},
 		{"pause ", 6, "pause ", 6},
+		{"tag-sdlc ", 9, "tag-sdlc ", 9},
+		{"new-idea ", 9, "new-idea ", 9},
+		{"new i", 5, "new i", 5},
+		{"tag d", 5, "tag d", 5},
 		{"tag sdlc ", 9, "tag sdlc ", 9},
 		{"new idea ", 9, "new idea ", 9},
 	} {
@@ -100,8 +102,8 @@ func TestCommandCompletionResetAndPaste(t *testing.T) {
 		}
 	}
 	m, q := testModel(t)
-	keyboard(m, ":new \x1b[200~i\t\x1b[201~")
-	if m.cmd.String() != "new i\t" || m.completion != nil || len(q) != 0 {
+	keyboard(m, ":new-\x1b[200~i\t\x1b[201~")
+	if m.cmd.String() != "new-i\t" || m.completion != nil || len(q) != 0 {
 		t.Fatal("paste dispatched completion")
 	}
 	for _, cancel := range []KeyCode{KeyEsc, KeyCtrlC, KeyEnter} {
@@ -161,20 +163,37 @@ func TestCommandCompletionTextLimit(t *testing.T) {
 	}
 }
 
-func TestRemovedCaptureAliases(t *testing.T) {
-	for _, alias := range []string{"new-idea", "new-intent"} {
+func TestRemovedSpacedCommands(t *testing.T) {
+	for _, command := range []string{"new idea p/new-one", "new intent p/new-one", "tag sdlc", "tag design"} {
 		for _, existing := range []bool{false, true} {
 			m, q := testModel(t)
 			if existing {
-				m.setBoard(board(1, run("p", "old")))
+				m.setBoard(board(1, idea("p", "old", 1)))
 			}
-			keyboard(m, ":"+alias+" p/new-one\r")
-			if len(q) != 0 || len(m.drafts) != 0 || m.active != nil || m.mode != modeNormal || !strings.Contains(strings.Join(m.consoleRows(), ""), "unknown command "+quote(alias)) {
-				t.Fatalf("%s accepted or wrong error", alias)
+			keyboard(m, ":"+command+"\r")
+			if len(q) != 0 || len(m.drafts) != 0 || m.active != nil || m.mode != modeNormal || !strings.Contains(strings.Join(m.consoleRows(), ""), "unknown command "+quote(strings.Fields(command)[0])) {
+				t.Fatalf("%s accepted or wrong error", command)
 			}
-			if commandHint(alias+" p/new-one", nil) == "creates on save" {
-				t.Fatal("removed alias has creation hint")
+			if commandHint(command, nil) == "creates on save" {
+				t.Fatal("removed command has creation hint")
 			}
+		}
+	}
+}
+
+func TestCommandCompletionKeepsArguments(t *testing.T) {
+	m, q := testModel(t)
+	keyboard(m, ":new-i p/é")
+	m.cmd.cur = 5
+	for _, tc := range []struct{ key, want string }{
+		{"\t", "new-idea p/é"},
+		{"\t", "new-intent p/é"},
+		{"\t", "new-idea p/é"},
+		{"\x1b[Z", "new-intent p/é"},
+	} {
+		keyboard(m, tc.key)
+		if m.cmd.String() != tc.want || len(q) != 0 || len(m.drafts) != 0 {
+			t.Fatalf("completion = %q, want %q without effects", m.cmd.String(), tc.want)
 		}
 	}
 }

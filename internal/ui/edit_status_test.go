@@ -17,8 +17,8 @@ func TestEditingStatusInDetailsRule(t *testing.T) {
 		{"answer", "a", "answer to question #42 on p/target", "kept text", 0},
 		{"idea", "e", "edit of p/target", "kept text", 0},
 		{"intent", "e", "edit of p/target", "kept text", 0},
-		{"new idea", ":new idea p/fresh\r", "new idea p/fresh", "# fresh", 1},
-		{"new intent", ":new intent p/fresh\r", "new intent p/fresh", "# fresh", 1},
+		{"new idea", ":new-idea p/fresh\r", "new idea p/fresh", "# fresh", 1},
+		{"new intent", ":new-intent p/fresh\r", "new intent p/fresh", "# fresh", 1},
 	} {
 		for _, size := range [][2]int{{100, 30}, {80, 24}, {40, 20}} {
 			t.Run(fmt.Sprintf("%s/%dx%d", tc.name, size[0], size[1]), func(t *testing.T) {

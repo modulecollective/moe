@@ -128,14 +128,14 @@ func TestUIKeyboardCreatesThroughWriters(t *testing.T) {
 		name, command, key, tag string
 		design, hidden, empty   bool
 	}{
-		{name: "save only", command: "new idea", key: "s"},
-		{name: "empty board", command: "new idea", key: "s", empty: true},
-		{name: "sdlc licence", command: "new idea", key: "g", tag: "sdlc"},
-		{name: "design licence", command: "new idea", key: "d", tag: "sdlc", design: true},
-		{name: "filtered intent", command: "new intent", hidden: true},
-		{name: "completed idea", command: "ne\t i\t", key: "s"},
-		{name: "completed intent", command: "ne\t i\t\t"},
-		{name: "reverse completed intent", command: "ne\t i\x1b[Z", empty: true},
+		{name: "save only", command: "new-idea", key: "s"},
+		{name: "empty board", command: "new-idea", key: "s", empty: true},
+		{name: "sdlc licence", command: "new-idea", key: "g", tag: "sdlc"},
+		{name: "design licence", command: "new-idea", key: "d", tag: "sdlc", design: true},
+		{name: "filtered intent", command: "new-intent", hidden: true},
+		{name: "completed idea", command: "new-i\t", key: "s"},
+		{name: "completed intent", command: "new-i\t\t"},
+		{name: "reverse completed intent", command: "new-i\x1b[Z", empty: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, _ := controlFixture(t)
@@ -273,7 +273,7 @@ func TestUIKeyboardCaptureEditLicenceAndClose(t *testing.T) {
 	c.wait(t, "moe/capture")
 	c.send(t, "eoperator text\x13s")
 	c.wait(t, "done: edit")
-	for _, command := range []struct{ line, out string }{{"tag sdlc", "done: tag sdlc"}, {"tag design", "done: tag sdlc (design only)"}, {"untag", "done: untag"}} {
+	for _, command := range []struct{ line, out string }{{"tag-sdlc", "done: tag sdlc"}, {"tag-design", "done: tag sdlc (design only)"}, {"untag", "done: untag"}} {
 		c.send(t, ":"+command.line+"\r")
 		c.wait(t, command.out)
 	}
@@ -360,6 +360,11 @@ func TestUIKeyboardIdeaTagKeys(t *testing.T) {
 		{"g", "sdlc", "tag sdlc", false, false},
 		{"u", "", "untag", false, false},
 		{"u", "", "untag", false, true},
+		{":tag-sdlc\r", "sdlc", "tag sdlc", false, false},
+		{":tag-\t\t\r", "sdlc", "tag sdlc", false, true},
+		{":tag-design\r", "sdlc", "tag sdlc (design only)", true, false},
+		{":tag-\x1b[Z\x1b[Z\r", "sdlc", "tag sdlc (design only)", true, true},
+		{":untag\r", "", "untag", false, false},
 	} {
 		before := gittest.HeadSHA(t, root)
 		sendTag(tc.key, "done: "+tc.label+" moe/"+first)
@@ -393,10 +398,13 @@ func TestUIKeyboardFailedCreateKeepsDraft(t *testing.T) {
 			root, _ := controlFixture(t)
 			c := startUIKeyboard(t, root)
 			c.wait(t, "moe/change-auth")
-			c.send(t, ":new idea "+target+"\rprecious text\x13g")
+			c.send(t, ":new-idea "+target+"\rprecious text\x13g")
 			c.wait(t, "failed: create")
 			c.wait(t, "not tagged: the save did not succeed")
-			c.send(t, ":new idea "+target+"\r")
+			c.mu.Lock()
+			c.output.Reset()
+			c.mu.Unlock()
+			c.send(t, ":new-idea "+target+"\r")
 			c.wait(t, "precious text")
 			c.send(t, "\x18y") // discard the retained draft
 			c.wait(t, "draft discarded")
@@ -411,11 +419,49 @@ func TestUIKeyboardFailedCreateKeepsDraft(t *testing.T) {
 	}
 }
 
+func TestUIKeyboardUppercaseRefusalAndLowercaseRetry(t *testing.T) {
+	root, _ := controlFixture(t)
+	c := startUIKeyboard(t, root)
+	c.wait(t, "moe/change-auth")
+	before := gittest.HeadSHA(t, root)
+	c.send(t, ":new-idea moe/Bad\r")
+	c.wait(t, "want <project>/<slug> with a lowercase-kebab slug")
+	for _, slug := range []string{"Bad", "bad"} {
+		if _, err := os.Stat(root + "/projects/moe/runs/" + slug); !os.IsNotExist(err) {
+			t.Fatalf("uppercase refusal left %s: %v", slug, err)
+		}
+	}
+	if after := gittest.HeadSHA(t, root); after != before {
+		t.Fatal("uppercase refusal wrote to the journal")
+	}
+	c.send(t, ":new-idea moe/bad\r")
+	c.wait(t, "editing new idea moe/bad")
+	if _, err := os.Stat(root + "/projects/moe/runs/bad"); !os.IsNotExist(err) {
+		t.Fatalf("Enter created before save: %v", err)
+	}
+	c.send(t, "operator body\x13")
+	c.wait(t, "g  save + tag sdlc")
+	c.send(t, "s")
+	c.wait(t, "done: create idea moe/bad")
+	c.quit(t)
+	md, err := run.Load(root, "moe", "bad")
+	if err != nil || md.Workflow != "idea" || md.Status != run.StatusInProgress || md.PromoteTo != "" || md.DesignOnly {
+		t.Fatalf("lowercase capture = %+v, %v", md, err)
+	}
+	body, err := os.ReadFile(root + "/" + run.ContentPath("moe", "bad", dash.IdeaDocID))
+	if err != nil || string(body) != "# bad\noperator body" {
+		t.Fatalf("lowercase body = %q, %v", body, err)
+	}
+	if _, err := os.Stat(root + "/projects/moe/runs/Bad"); !os.IsNotExist(err) {
+		t.Fatalf("retry created uppercase capture: %v", err)
+	}
+}
+
 func TestUIKeyboardCancelledCreationWritesNothing(t *testing.T) {
 	root, _ := controlFixture(t)
 	c := startUIKeyboard(t, root)
 	c.wait(t, "moe/change-auth")
-	c.send(t, ":new idea moe/cancel-me\rprivate text\x18y")
+	c.send(t, ":new-idea moe/cancel-me\rprivate text\x18y")
 	c.wait(t, "draft discarded")
 	c.quit(t)
 	if _, err := run.Load(root, "moe", "cancel-me"); err == nil {
@@ -423,17 +469,21 @@ func TestUIKeyboardCancelledCreationWritesNothing(t *testing.T) {
 	}
 }
 
-func TestUIKeyboardRemovedCaptureAliases(t *testing.T) {
-	for _, alias := range []string{"new-idea", "new-intent"} {
-		t.Run(alias, func(t *testing.T) {
+func TestUIKeyboardRemovedSpacedCommands(t *testing.T) {
+	for _, command := range []string{"new idea moe/no-capture", "new intent moe/no-capture", "tag sdlc", "tag design"} {
+		t.Run(command, func(t *testing.T) {
 			root, _ := controlFixture(t)
 			c := startUIKeyboard(t, root)
 			c.wait(t, "moe/change-auth")
-			c.send(t, ":"+alias+" moe/no-capture\r")
+			before := gittest.HeadSHA(t, root)
+			c.send(t, ":"+command+"\r")
 			c.wait(t, "unknown command")
 			c.quit(t) // an open draft would ask for confirmation instead
+			if after := gittest.HeadSHA(t, root); after != before {
+				t.Fatal("removed command wrote to the journal")
+			}
 			if _, err := run.Load(root, "moe", "no-capture"); err == nil {
-				t.Fatal("removed alias created a capture")
+				t.Fatal("removed command created a capture")
 			}
 		})
 	}

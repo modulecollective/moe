@@ -263,7 +263,7 @@ func TestSearchKeepsDraftsCommandsAndPendingSave(t *testing.T) {
 func TestSearchPendingCreation(t *testing.T) {
 	m, q := testModel(t)
 	m.setBoard(board(1, run("p", "match")))
-	typed(m, ":new idea p/created")
+	typed(m, ":new-idea p/created")
 	press(m, Key{Code: KeyEnter}, Key{Code: KeyCtrlS}, Key{Code: KeyEnter})
 	j := <-q
 	typed(m, "/match")

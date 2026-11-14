@@ -282,7 +282,7 @@ func TestCommands(t *testing.T) {
 	m.busy = nil
 
 	press(m, Key{Code: KeyRune, Rune: ':'})
-	typed(m, "tag design")
+	typed(m, "tag-design")
 	press(m, Key{Code: KeyEnter})
 	if a := (<-q).steps[0]; a.Kind != ActTag || a.Workflow != "sdlc" || !a.DesignOnly {
 		t.Fatalf("tag design = %+v", a)
@@ -310,7 +310,7 @@ func TestNewCapture(t *testing.T) {
 	m, q := testModel(t)
 	m.setBoard(board(1, run("p", "a")))
 	press(m, Key{Code: KeyRune, Rune: ':'})
-	typed(m, "new idea p/fresh-thing")
+	typed(m, "new-idea p/fresh-thing")
 	press(m, Key{Code: KeyEnter})
 	if m.mode != modeEdit || m.active.ed.String() != "# fresh-thing\n" {
 		t.Fatalf("new idea draft = %v %q", m.mode, m.active.ed.String())
@@ -333,7 +333,7 @@ func TestNewCapture(t *testing.T) {
 	}
 
 	press(m, Key{Code: KeyRune, Rune: ':'})
-	typed(m, "new intent p/Bad Slug")
+	typed(m, "new-intent p/Bad Slug")
 	press(m, Key{Code: KeyEnter})
 	if m.mode != modeNormal || !strings.Contains(consoleText(m), "usage") && !strings.Contains(consoleText(m), "kebab") {
 		t.Fatalf("bad slug = %v %q", m.mode, consoleText(m))
@@ -600,7 +600,7 @@ func TestOutcomeReachable(t *testing.T) {
 			t.Fatalf("console missing partial outcome: %q", got)
 		}
 		got := paintedDetail(t, m)
-		for _, want := range []string{"saved p/i", "tag: idea p/i is promoted, not in progress", "retry with :tag sdlc"} {
+		for _, want := range []string{"saved p/i", "tag: idea p/i is promoted, not in progress", "retry with :tag-sdlc"} {
 			if !strings.Contains(got, want) {
 				t.Fatalf("%d cols: %q not reachable in details:\n%s", cols, want, got)
 			}
@@ -768,7 +768,7 @@ func TestClosedIntentInspectable(t *testing.T) {
 					t.Fatalf("closed body not fully reachable: %s", got)
 				}
 				press(m, Key{Code: KeyRune, Rune: 'e'}, Key{Code: KeyRune, Rune: 'n'})
-				for _, command := range []string{"edit", "close", "pause", "tag sdlc"} {
+				for _, command := range []string{"edit", "close", "pause", "tag-sdlc"} {
 					press(m, Key{Code: KeyRune, Rune: ':'})
 					typed(m, command)
 					press(m, Key{Code: KeyEnter})

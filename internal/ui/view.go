@@ -47,13 +47,14 @@ Editor
   Alt-Left/Right or Alt-b/f move by a word
 
 Commands (:)
-  Tab / Shift-Tab complete fixed words, cycle forward / backward
-  Type spaces between words; Enter submits
+  Tab / Shift-Tab complete command names, cycle forward / backward
+  Type a space before arguments; Enter submits
   pause | handoff | park | finish | resume    the selected run
-  new idea <project>/<slug>                   opens a draft; creates on save
-  new intent <project>/<slug>
+  new-idea <project>/<slug>                   opens a draft; creates on save
+  new-intent <project>/<slug>
+  Slugs use lowercase letters, digits and hyphens, e.g. :new-idea p/my-idea
   edit | close                                the selected idea or intent
-  tag sdlc | tag design | untag               the selected idea's licence
+  tag-sdlc | tag-design | untag               the selected idea's licence
   terminal | help | quit
 
 Pane headings use a heavy rule for the input recipient (also without color).

@@ -290,7 +290,7 @@ func TestRunOnPTYSuspendContinue(t *testing.T) {
 func TestRunOnPTYSaveDialogue(t *testing.T) {
 	c := startPTYChild(t)
 	c.waitOut(t, "p/a")
-	c.master.Write([]byte(":new idea p/i\r"))
+	c.master.Write([]byte(":new-idea p/i\r"))
 	c.waitOut(t, "editing new idea p/i")
 	c.master.Write([]byte("\x13"))
 	c.waitOut(t, "save + tag sdlc")

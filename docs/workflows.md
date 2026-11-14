@@ -337,12 +337,14 @@ literal, with newlines becoming spaces. Printable shortcuts remain query
 text; Tab, page and save/discard keys do nothing in search. Ctrl-L redraws
 and Ctrl-Z suspends. In editors and the command line, `/` remains text.
 
-Use `:new idea <project>/<slug>` or `:new intent <project>/<slug>` to open a
-capture draft. In multiline editors, Enter or Shift+Enter inserts a newline.
-Nothing is created until Ctrl-S. Ideas offer save only, save and tag sdlc,
-or save and tag design only. The draft names its target even on an empty or
-filtered board. Alt-Backspace or Ctrl-W deletes a word; Alt-arrows or Alt-b/f
-moves by words. Words are whitespace-delimited, including newlines, so
+Use `:new-idea <project>/<slug>` or `:new-intent <project>/<slug>` to open a
+capture draft. Slugs use lowercase letters, digits and hyphens, e.g.
+`:new-idea p/my-idea`; uppercase is refused before a draft opens. In
+multiline editors, Enter or Shift+Enter inserts a newline. Nothing is
+created until Ctrl-S. Ideas offer save only, save and tag sdlc, or save and
+tag design only. The draft names its target even on an empty or filtered
+board. Alt-Backspace or Ctrl-W deletes a word; Alt-arrows or Alt-b/f moves
+by words. Words are whitespace-delimited, including newlines, so
 project/run tokens stay together. Esc keeps a draft, Ctrl-X discards it.
 
 On the selected open idea, press `g` to set the SDLC licence, `d` to set a
@@ -350,15 +352,16 @@ design-only licence, or `u` to clear either licence. These are explicit
 settings: repeating one creates no extra commit. They keep the selection,
 work from any pane in normal navigation, and launch nothing; a later sweep
 may pick up a tagged idea. Use `j`/`k` or arrows to continue to the next row.
-The command equivalents remain `:tag sdlc`, `:tag design`, and `:untag`.
+The command equivalents are `:tag-sdlc`, `:tag-design`, and `:untag`.
 In editors and the command line, the letters remain text.
 
-In the command prompt, Tab completes a fixed command word and cycles matches
-in lexical order; Shift-Tab cycles backward. Type spaces between words and
-press Enter to submit. `new` completes `idea` or `intent`; `tag` completes
-`design` or `sdlc`. Project IDs, slugs and other values are typed in full.
-Completion replaces the word at the cursor and preserves surrounding text.
-For example, `:ne<Tab> ide<Tab> p/example` becomes `:new idea p/example`.
+In the command prompt, Tab completes a command name and cycles matches in
+lexical order; Shift-Tab cycles backward. Type a space before arguments and
+press Enter to submit. `new-i` matches `new-idea` and `new-intent`; `tag-`
+matches `tag-design` and `tag-sdlc`. Project IDs, slugs and other values are
+typed in full. Completion replaces the word at the cursor and preserves
+surrounding text. For example, `:new-i<Tab> p/example` becomes
+`:new-idea p/example`.
 
 The board still gathers every three seconds and follows owner status
 subscriptions. A separate 500 ms timer cycles cached smoke without extra

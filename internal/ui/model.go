@@ -497,9 +497,9 @@ func (m *model) normalKey(k Key) effect {
 			}
 			switch k.Rune {
 			case 'g':
-				return m.runCommand("tag sdlc", target)
+				return m.runCommand("tag-sdlc", target)
 			case 'd':
-				return m.runCommand("tag design", target)
+				return m.runCommand("tag-design", target)
 			default:
 				return m.runCommand("untag", target)
 			}
@@ -932,9 +932,9 @@ func tagCommand(workflow string, designOnly bool) string {
 	case workflow == "":
 		return "untag"
 	case designOnly:
-		return "tag design"
+		return "tag-design"
 	}
-	return "tag sdlc"
+	return "tag-sdlc"
 }
 
 func (m *model) settleDraft(k draftKey, res Result) {
@@ -1026,11 +1026,11 @@ func commandHint(line string, target *Item) string {
 		if target != nil {
 			return "→ " + target.Label() + ": retires it (asks first)"
 		}
-	case "tag", "untag", "edit", "terminal":
+	case "tag-sdlc", "tag-design", "untag", "edit", "terminal":
 		if target != nil {
 			return "→ " + target.Label()
 		}
-	case "new":
+	case "new-idea", "new-intent":
 		return "creates on save"
 	}
 	if target == nil {
@@ -1087,18 +1087,15 @@ func (m *model) runCommand(line string, target *Item) effect {
 			label = "retrying " + label + " (" + a.RequestID + ")"
 		}
 		m.start(job{label: label, steps: []Action{a}, target: keyOf(*target)})
-	case "new":
-		if !need(len(f) >= 2 && (f[1] == "idea" || f[1] == "intent"), "usage: :new idea <project>/<slug> or :new intent <project>/<slug>") {
+	case "new-idea", "new-intent":
+		if !need(len(f) == 2, "usage: :"+verb+" <project>/<slug>") {
 			return effNone
 		}
-		if !need(len(f) == 3, "usage: :new "+f[1]+" <project>/<slug>") {
-			return effNone
-		}
-		p, slug, ok := strings.Cut(f[2], "/")
+		p, slug, ok := strings.Cut(f[1], "/")
 		if !need(ok && p != "" && validSlug(slug), "want <project>/<slug> with a lowercase-kebab slug") {
 			return effNone
 		}
-		m.openDraft(draftKey{project: p, run: slug, purpose: "new-" + f[1]}, "# "+slug+"\n")
+		m.openDraft(draftKey{project: p, run: slug, purpose: verb}, "# "+slug+"\n")
 	case "edit":
 		if need(len(f) == 1, "takes no arguments") {
 			m.startEditBodyOf(target)
@@ -1112,20 +1109,17 @@ func (m *model) runCommand(line string, target *Item) effect {
 		m.ask("Close "+what+" "+t.Label()+"? Its history stays", func(m *model) {
 			m.start(job{label: "close " + t.Label(), steps: []Action{{Kind: ActClose, Project: t.Project, Run: t.Run}}, target: keyOf(t)})
 		})
-	case "tag", "untag":
-		if !need(target != nil && target.Kind == ItemIdea && target.Editable, "select an open idea") {
+	case "tag-sdlc", "tag-design", "untag":
+		if !need(len(f) == 1, "takes no arguments") ||
+			!need(target != nil && target.Kind == ItemIdea && target.Editable, "select an open idea") {
 			return effNone
 		}
 		a := Action{Kind: ActTag, Project: target.Project, Run: target.Run}
-		switch {
-		case verb == "untag" && len(f) == 1:
-		case verb == "tag" && len(f) == 2 && f[1] == "sdlc":
+		switch verb {
+		case "tag-sdlc":
 			a.Workflow = "sdlc"
-		case verb == "tag" && len(f) == 2 && f[1] == "design":
+		case "tag-design":
 			a.Workflow, a.DesignOnly = "sdlc", true
-		default:
-			m.say("usage: tag sdlc | tag design | untag")
-			return effNone
 		}
 		m.start(job{label: tagLabel(a.Workflow, a.DesignOnly) + " " + target.Label(), steps: []Action{a}, target: keyOf(*target)})
 	case "terminal":

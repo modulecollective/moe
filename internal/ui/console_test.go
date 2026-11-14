@@ -23,8 +23,8 @@ func TestShiftEnterEditsDrafts(t *testing.T) {
 	}{
 		{"note", "n", "", ActNote},
 		{"answer", "a", "", ActAnswer},
-		{"new-idea", ":new idea p/a\r", "# a\n", ActCreate},
-		{"new-intent", ":new intent p/a\r", "# a\n", ActCreate},
+		{"new-idea", ":new-idea p/a\r", "# a\n", ActCreate},
+		{"new-intent", ":new-intent p/a\r", "# a\n", ActCreate},
 		{"body", "e", "# a\n", ActEdit},
 	} {
 		for _, seq := range []string{"\r", "\n", "\x1b[13;2u", "\x1b[27;2;13~"} {
@@ -105,7 +105,7 @@ func TestShiftEnterOutsideEditor(t *testing.T) {
 		}{
 			{"command", ":help", modeCommand},
 			{"search", "/p/a", modeSearch},
-			{"save choice", ":new idea p/a\r\x13", modeSave},
+			{"save choice", ":new-idea p/a\r\x13", modeSave},
 		} {
 			t.Run(fmt.Sprintf("%s/%q", tc.name, seq), func(t *testing.T) {
 				m, q := testModel(t)
@@ -213,22 +213,22 @@ func TestConsoleGeometryAndObservationDedup(t *testing.T) {
 }
 
 func TestCreationKeyboardAndSavePrompt(t *testing.T) {
-	for _, alias := range []string{"new idea", "new intent"} {
+	for _, command := range []string{"new-idea", "new-intent"} {
 		for _, existing := range []bool{false, true} {
 			m, q := testModel(t)
 			m.resize(26, 40)
 			if existing {
 				m.setBoard(board(1, run("p", "old")))
 			}
-			keyboard(m, ":"+alias+" p/new-one\r")
+			keyboard(m, ":"+command+" p/new-one\r")
 			if len(q) != 0 || m.mode != modeEdit || m.active.key.run != "new-one" {
-				t.Fatalf("%s did not open draft", alias)
+				t.Fatalf("%s did not open draft", command)
 			}
 			if f := strings.Join(m.view().rows, "\n"); !strings.Contains(f, "p/new-one") {
 				t.Fatal("target not visible")
 			}
 			keyboard(m, "body\x13")
-			if strings.Contains(alias, "idea") {
+			if strings.Contains(command, "idea") {
 				f := strings.Join(m.view().rows, "\n")
 				for _, text := range []string{"Enter/s  save only", "g  save + tag sdlc", "d  save + tag design only"} {
 					if !strings.Contains(f, text) {
@@ -238,7 +238,7 @@ func TestCreationKeyboardAndSavePrompt(t *testing.T) {
 				keyboard(m, "s")
 			}
 			j := <-q
-			if len(j.steps) != 1 || j.steps[0].Kind != ActCreate || j.steps[0].Workflow != strings.TrimPrefix(alias, "new ") || j.steps[0].Text != "# new-one\nbody" {
+			if len(j.steps) != 1 || j.steps[0].Kind != ActCreate || j.steps[0].Workflow != strings.TrimPrefix(command, "new-") || j.steps[0].Text != "# new-one\nbody" {
 				t.Fatalf("wrong create: %+v", j)
 			}
 			m.finished(jobResult{job: j, results: []Result{{Message: "project not found; draft retained"}}})
@@ -249,7 +249,7 @@ func TestCreationKeyboardAndSavePrompt(t *testing.T) {
 	}
 	m, q := testModel(t)
 	m.setBoard(Board{ProjectFilter: "other"})
-	keyboard(m, ":new intent p/hidden\rbody\x13")
+	keyboard(m, ":new-intent p/hidden\rbody\x13")
 	m.finished(jobResult{job: <-q, results: []Result{{OK: true, Message: "created p/hidden"}}})
 	if m.pendingSel != nil || !strings.Contains(strings.Join(m.consoleRows(), ""), "hidden by current filters") {
 		t.Fatal("hidden create not explained")
@@ -257,14 +257,14 @@ func TestCreationKeyboardAndSavePrompt(t *testing.T) {
 }
 
 func TestCommandKeyboardValidation(t *testing.T) {
-	for _, line := range []string{"pause extra", "handoff extra", "park extra", "finish extra", "resume extra", "edit extra", "close extra", "tag sdlc extra", "untag extra", "terminal extra", "help extra", "quit extra", "q extra", "new idea", "new intent", "new idea p/Bad", "new intent p/new extra", "bogus"} {
+	for _, line := range []string{"pause extra", "handoff extra", "park extra", "finish extra", "resume extra", "edit extra", "close extra", "tag-sdlc extra", "tag-design extra", "untag extra", "terminal extra", "help extra", "quit extra", "q extra", "new-idea", "new-intent", "new-idea p/Bad", "new-intent p/new extra", "new-idea p/new extra", "new-intent p/Bad", "new-idea p/", "new-intent p/-bad", "new-idea p/bad-", "new-intent p/a/b", "new-idea /bad", "bogus"} {
 		m, q := testModel(t)
 		m.setBoard(board(1, idea("p", "i", 1)))
-		if keyboard(m, ":"+line+"\r") != effNone || len(q) != 0 || m.mode != modeNormal || len(m.console.events) == 0 {
+		if keyboard(m, ":"+line+"\r") != effNone || len(q) != 0 || m.mode != modeNormal || len(m.console.events) == 0 || m.active != nil || len(m.drafts) != 0 {
 			t.Fatalf("%q silently accepted", line)
 		}
 	}
-	for _, line := range []string{"pause", "handoff", "park", "finish", "resume", "edit", "close", "tag sdlc", "tag design", "untag", "terminal"} {
+	for _, line := range []string{"pause", "handoff", "park", "finish", "resume", "edit", "close", "tag-sdlc", "tag-design", "untag", "terminal"} {
 		m, q := testModel(t)
 		keyboard(m, ":"+line+"\r")
 		if len(q) != 0 || len(m.console.events) == 0 {
@@ -278,6 +278,107 @@ func TestCommandKeyboardValidation(t *testing.T) {
 		f := m.view()
 		if !f.cursor || f.curCol >= m.width-1 || f.curCol < 1 {
 			t.Fatalf("cursor unreachable: %+v", f)
+		}
+	}
+}
+
+func TestCreationUppercaseRefusalAndLowercaseRetry(t *testing.T) {
+	for _, command := range []string{"new-idea", "new-intent"} {
+		for _, existing := range []bool{false, true} {
+			m, q := testModel(t)
+			if existing {
+				m.setBoard(board(1, run("p", "old")))
+			}
+			keyboard(m, ":"+command+" p/Bad\r")
+			if m.mode != modeNormal || m.active != nil || len(m.drafts) != 0 || len(q) != 0 || m.busy != nil || !strings.Contains(consoleText(m), "want <project>/<slug> with a lowercase-kebab slug") {
+				t.Fatalf("%s uppercase refusal: %s", command, consoleText(m))
+			}
+			keyboard(m, ":"+command+" p/bad\r")
+			if m.mode != modeEdit || m.active == nil || m.active.key != (draftKey{project: "p", run: "bad", purpose: command}) || m.active.ed.String() != "# bad\n" || len(m.drafts) != 1 || len(q) != 0 || m.busy != nil {
+				t.Fatalf("%s lowercase retry did not open the draft without writing", command)
+			}
+			keyboard(m, "body\x13")
+			if command == "new-idea" {
+				if m.mode != modeSave || len(q) != 0 {
+					t.Fatal("idea skipped save choices")
+				}
+				keyboard(m, "s")
+			}
+			if len(q) != 1 {
+				t.Fatal("retry save did not queue one write")
+			}
+			j := <-q
+			if len(j.steps) != 1 || j.steps[0].Kind != ActCreate || j.steps[0].Run != "bad" || j.steps[0].Workflow != strings.TrimPrefix(command, "new-") || j.steps[0].Text != "# bad\nbody" {
+				t.Fatalf("retry save = %+v", j)
+			}
+		}
+	}
+}
+
+func TestTagCommandsKeepPromptTarget(t *testing.T) {
+	for _, tc := range []struct {
+		command, workflow string
+		design            bool
+	}{{"tag-sdlc", "sdlc", false}, {"tag-design", "sdlc", true}, {"untag", "", false}} {
+		m, q := testModel(t)
+		m.setBoard(board(1, idea("p", "original", 1), idea("p", "other", 1)))
+		keyboard(m, ":"+tc.command)
+		if !strings.Contains(commandHint(m.cmd.String(), m.cmdTarget), "p/original") {
+			t.Fatal("hint lost captured target")
+		}
+		m.setBoard(board(2, idea("p", "other", 1)))
+		keyboard(m, "\r")
+		if len(q) != 1 {
+			t.Fatal("tag command did not queue one job")
+		}
+		j := <-q
+		if len(j.steps) != 1 || j.steps[0] != (Action{Kind: ActTag, Project: "p", Run: "original", Workflow: tc.workflow, DesignOnly: tc.design}) {
+			t.Fatalf("%s retargeted: %+v", tc.command, j)
+		}
+	}
+}
+
+func TestPartialSaveTagRetryCommand(t *testing.T) {
+	for _, tc := range []struct{ choice, command string }{{"g", "tag-sdlc"}, {"d", "tag-design"}} {
+		m, q := testModel(t)
+		keyboard(m, ":new-idea p/fresh\rbody\x13"+tc.choice)
+		j := <-q
+		if len(j.steps) != 2 {
+			t.Fatal("missing save and tag steps")
+		}
+		m.finished(jobResult{job: j, results: []Result{{OK: true, Message: "created p/fresh"}, {Message: "tag commit refused"}}})
+		text := consoleText(m)
+		_, tail, ok := strings.Cut(text, "retry with :")
+		command, _, end := strings.Cut(tail, " (tag only)")
+		if !ok || !end || command != tc.command || len(m.drafts) != 0 {
+			t.Fatalf("missing usable tag-only recovery: %s", text)
+		}
+		m.setBoard(board(1, idea("p", "fresh", 1)))
+		keyboard(m, ":"+command+"\r")
+		if len(q) != 1 {
+			t.Fatal("recovery did not queue one tag")
+		}
+		retry := <-q
+		if len(retry.steps) != 1 || retry.steps[0] != j.steps[1] {
+			t.Fatalf("recovery repeated creation or changed tag: %+v", retry)
+		}
+	}
+}
+
+func TestCommandHelpVocabulary(t *testing.T) {
+	m, _ := testModel(t)
+	keyboard(m, ":help\r")
+	if m.mode != modeHelp {
+		t.Fatal("help did not open")
+	}
+	for _, want := range []string{"new-idea <project>/<slug>", "new-intent <project>/<slug>", "tag-sdlc | tag-design | untag", "lowercase letters, digits and hyphens", ":new-idea p/my-idea"} {
+		if !strings.Contains(helpText, want) {
+			t.Fatalf("help missing %q", want)
+		}
+	}
+	for _, old := range []string{"new idea <", "new intent <", "tag sdlc |", "tag design |"} {
+		if strings.Contains(helpText, old) {
+			t.Fatalf("help teaches removed command %q", old)
 		}
 	}
 }
