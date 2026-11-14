@@ -397,28 +397,85 @@ func (h *rexHost) waitExit(block string) (int, error) {
 	}
 }
 
-// lastExit reads the block's process record.
-func (h *rexHost) lastExit(block string) (code int, exited bool, err error) {
+type rexProcess struct {
+	LastExit   json.RawMessage `json:"last_exit"`
+	Child      json.RawMessage `json:"child"`
+	Foreground json.RawMessage `json:"foreground"`
+	code       int
+	exited     bool
+}
+
+// readProcess validates exit state without interpreting optional identity:
+// the job waiter and known-exit UI recovery do not need that metadata.
+func (h *rexHost) readProcess(block string) (rexProcess, error) {
 	out, err := h.call(h.ctx, "block", "call", "-b", block, "process")
 	if err != nil {
-		return 0, false, err
+		return rexProcess{}, err
 	}
-	var proc struct {
-		LastExit json.RawMessage `json:"last_exit"`
-	}
+	var proc rexProcess
 	if err := json.Unmarshal(out, &proc); err != nil || len(proc.LastExit) == 0 {
-		return 0, false, fmt.Errorf("rex block call process: invalid reply %q", firstLine(string(out)))
+		return rexProcess{}, fmt.Errorf("rex block call process: invalid reply %q", firstLine(string(out)))
 	}
 	if bytes.Equal(bytes.TrimSpace(proc.LastExit), []byte("null")) {
-		return 0, false, nil
+		return proc, nil
 	}
 	var exit struct {
 		Code *int `json:"exit_code"`
 	}
 	if err := json.Unmarshal(proc.LastExit, &exit); err != nil || exit.Code == nil {
-		return 0, false, fmt.Errorf("rex block call process: invalid exit %q", firstLine(string(out)))
+		return rexProcess{}, fmt.Errorf("rex block call process: invalid exit %q", firstLine(string(out)))
 	}
-	return *exit.Code, true, nil
+	proc.code, proc.exited = *exit.Code, true
+	return proc, nil
+}
+
+// lastExit reads the block's process record for the job waiter.
+func (h *rexHost) lastExit(block string) (code int, exited bool, err error) {
+	proc, err := h.readProcess(block)
+	return proc.code, proc.exited, err
+}
+
+// otherExecutable returns the child path only when both child and foreground
+// prove this is not moe. A matching child suffices; a different child may be
+// a shell hosting moe. Missing or unresolvable identity is never permission
+// to discard a possibly live editor's drafts.
+func (p rexProcess) otherExecutable(moeBin string) (string, error) {
+	want, err := rexExecutable(moeBin)
+	if err != nil {
+		return "", err
+	}
+	var childPath string
+	for _, field := range []struct {
+		name string
+		raw  json.RawMessage
+	}{{"child", p.Child}, {"foreground", p.Foreground}} {
+		var identity struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal(field.raw, &identity); err != nil || !filepath.IsAbs(identity.Path) {
+			return "", fmt.Errorf("rex process: invalid %s path", field.name)
+		}
+		if field.name == "child" {
+			childPath = identity.Path
+		}
+		// Preserve same-path old binaries across atomic upgrades, even if
+		// the file's inode changed or symlink resolution is unavailable.
+		if identity.Path == want {
+			return "", nil
+		}
+		resolvedWant, err := filepath.EvalSymlinks(want)
+		if err != nil {
+			return "", fmt.Errorf("resolve moe executable: %w", err)
+		}
+		resolvedPath, err := filepath.EvalSymlinks(identity.Path)
+		if err != nil {
+			return "", fmt.Errorf("resolve %s executable: %w", field.name, err)
+		}
+		if resolvedPath == resolvedWant {
+			return "", nil
+		}
+	}
+	return childPath, nil
 }
 
 // lookupBlock returns the block's current metadata, or a zero value once
@@ -505,14 +562,19 @@ func firstJSONLine(out []byte) []byte {
 // is what serve itself runs in; the variables serve adds ride an env
 // prefix. TERM is Rex's own.
 func rexJobArgv(moeBin string, env, args []string) ([]string, error) {
-	bin, err := exec.LookPath(moeBin)
+	bin, err := rexExecutable(moeBin)
 	if err != nil {
-		return nil, err
-	}
-	if bin, err = filepath.Abs(bin); err != nil {
 		return nil, err
 	}
 	argv := append([]string{"/usr/bin/env"}, env...)
 	argv = append(argv, bin)
 	return append(argv, args...), nil
+}
+
+func rexExecutable(moeBin string) (string, error) {
+	bin, err := exec.LookPath(moeBin)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Abs(bin)
 }

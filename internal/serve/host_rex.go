@@ -248,7 +248,8 @@ const rexDashLabel = "dash"
 const rexUILabel = "ui"
 
 // openUI keeps a running editor across serve restarts: replacing it would
-// destroy drafts. Only a known exit or valid absence permits a new console.
+// destroy drafts. Only a known exit, valid absence or proven executable
+// mismatch permits a new console.
 // Failures here never hold the heartbeat, and shutdown leaves the UI in Rex.
 func (h *rexHost) openUI() {
 	argv, err := rexJobArgv(h.moeBin, []string{"MOE_HOME=" + h.root}, []string{"ui"})
@@ -287,17 +288,25 @@ func (h *rexHost) openUI() {
 		}
 	}
 	if current != "" {
-		_, exited, err := h.lastExit(current)
+		proc, err := h.readProcess(current)
 		if err != nil {
 			h.logf("host: rex ui not opened: process state unknown for %s: %v", current, err)
 			return
 		}
-		if !exited {
-			h.logf("host: rex ui retained in block %s", current)
-			return
+		if !proc.exited {
+			path, err := proc.otherExecutable(h.moeBin)
+			if err != nil {
+				h.logf("host: rex ui not opened: process state unknown for %s: %v", current, err)
+				return
+			}
+			if path == "" {
+				h.logf("host: rex ui retained in block %s", current)
+				return
+			}
+			h.logf("host: rex ui block %s runs %s, not moe; replacing", current, path)
 		}
 		if err := h.closeBlock(current); err != nil {
-			h.logf("host: rex ui not opened: close exited editor: %v", err)
+			h.logf("host: rex ui not opened: close ui block: %v", err)
 			return
 		}
 	}
