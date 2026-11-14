@@ -84,6 +84,8 @@ a:hover, a:focus { border-bottom-style: solid; }
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
+  flex-wrap: wrap;
+  row-gap: 0.2rem;
   margin-bottom: 1.5rem;
 }
 .banner {
@@ -93,8 +95,7 @@ a:hover, a:focus { border-bottom-style: solid; }
 .banner-bar {
   display: block;
   font-weight: 600;
-  white-space: nowrap;
-  overflow-x: auto;
+  overflow-wrap: anywhere;
   color: var(--fg);
   border-bottom: none;
 }
@@ -133,11 +134,14 @@ a.banner-bar:hover, a.banner-bar:focus { color: var(--accent); }
   margin-top: 0.2rem;
   color: var(--muted);
 }
-/* Serve's whole spend on a board: one muted line in the header's top row,
-   the same cluster the CLI banner carries, linking to /serve. */
+/* Give status its own row at every width so its content-sized basis
+   cannot starve the logo. DOM order is banner → serve → menu; order: 1
+   keeps the menu beside the banner before the full-width status row. */
 .banner-serve {
+  order: 1;
+  flex-basis: 100%;
   font-size: 0.92rem;
-  line-height: 2rem;
+  line-height: inherit;
   white-space: nowrap;
   min-width: 0;
   overflow: hidden;
@@ -277,20 +281,6 @@ section h2 .count {
    and fit the factory-art rail (small glyphs, scroll if still too wide). */
 @media (max-width: 640px) {
   html { font-size: 14px; }
-  /* The serve cluster is nowrap with a content-width basis, so in the
-     desktop no-wrap row it takes ~230px before .banner (flex-basis 0)
-     gets anything — on a phone that starves the title to ~76px and the
-     breadcrumb wraps one word per line. Give the cluster its own row.
-     order:1 is load-bearing: DOM order is banner → serve → menu, so
-     without it the full-width serve row lands between them and pushes
-     ☰ to a third row. The 2rem line-height only exists to centre the
-     cluster against the menu box in the desktop row. */
-  .page-header { flex-wrap: wrap; row-gap: 0.2rem; }
-  .banner-serve {
-    order: 1;
-    flex-basis: 100%;
-    line-height: inherit;
-  }
   .banner-art {
     /* The 61-col rail clips at 0.7rem once the flex theme-toggle eats into
        the banner column. Scale with viewport width (capped at 0.7rem) so it

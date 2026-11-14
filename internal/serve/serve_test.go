@@ -690,13 +690,10 @@ func TestStaticAssetServed(t *testing.T) {
 	}
 }
 
-// TestPhoneHeaderWrapRulesServed: the phone header fix is pure CSS, so no
-// test can prove the layout — but it can prove the rules reach the wire.
-// The stylesheet ships through //go:embed, and `order: 1` is the one
-// declaration whose absence is invisible in review (the header still wraps,
-// ☰ just falls to a third row). TestServeClusterRidesTheBoardHeaders guards
-// the other half — the banner → serve → menu DOM order that order:1 undoes.
-func TestPhoneHeaderWrapRulesServed(t *testing.T) {
+// TestHeaderWrapRulesServed pins the shared layout rules in the embedded
+// stylesheet. Browser probes cover geometry; this guards their delivery at
+// every width. TestServeClusterRidesTheBoardHeaders guards the DOM order.
+func TestHeaderWrapRulesServed(t *testing.T) {
 	s := newTestServer(t, Options{
 		Addr: "127.0.0.1:0",
 		Root: t.TempDir(),
@@ -707,32 +704,37 @@ func TestPhoneHeaderWrapRulesServed(t *testing.T) {
 		t.Fatalf("want 200, got %d", rr.Code)
 	}
 	css := rr.Body.String()
-	phone := strings.Index(css, "@media (max-width: 640px)")
-	if phone < 0 {
-		t.Fatal("style.css lost its phone media query")
-	}
-	// Scope each assertion to its own rule block. A slice that just runs to
-	// EOF passes on anything — `border: 1px` alone contains "order: 1", and
-	// three later blocks carry flex-wrap: wrap.
+	// Only base rules count: a phone-only fix leaves intermediate and
+	// desktop widths broken. Scope declarations to their selector block
+	// so unrelated rules (or border: 1px) cannot satisfy an assertion.
+	base, _, _ := strings.Cut(css, "@media")
 	block := func(selector string) string {
-		start := strings.Index(css[phone:], selector)
-		if start < 0 {
-			t.Fatalf("phone media query lost its %s rule", selector)
+		_, rest, found := strings.Cut(base, selector)
+		if !found {
+			t.Fatalf("base stylesheet lost its %s rule", selector)
 		}
-		start += phone + len(selector)
-		end := strings.Index(css[start:], "}")
-		if end < 0 {
+		rule, _, found := strings.Cut(rest, "}")
+		if !found {
 			t.Fatalf("%s rule is unterminated", selector)
 		}
-		return css[start : start+end]
+		return rule
 	}
-	if header := block(".page-header {"); !strings.Contains(header, "flex-wrap: wrap") {
-		t.Errorf("phone .page-header no longer wraps, so the serve cluster still starves the title: %q", header)
+	for selector, declarations := range map[string][]string{
+		".page-header {":  {"flex-wrap: wrap;", "row-gap: 0.2rem;"},
+		".banner-serve {": {"order: 1;", "flex-basis: 100%;", "line-height: inherit;"},
+		".banner-bar {":   {"overflow-wrap: anywhere;"},
+	} {
+		rule := block(selector)
+		for _, decl := range declarations {
+			if !strings.Contains(rule, decl) {
+				t.Errorf("base %s is missing %q: %q", selector, decl, rule)
+			}
+		}
 	}
-	serve := block(".banner-serve {")
-	for _, decl := range []string{"order: 1;", "flex-basis: 100%;"} {
-		if !strings.Contains(serve, decl) {
-			t.Errorf("phone .banner-serve is missing %q: %q", decl, serve)
+	logo := block(".banner-bar {")
+	for _, decl := range []string{"white-space: nowrap;", "overflow-x: auto;"} {
+		if strings.Contains(logo, decl) {
+			t.Errorf("logo still scrolls instead of wrapping: %q", decl)
 		}
 	}
 }
