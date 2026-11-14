@@ -9,49 +9,80 @@ import (
 	"testing"
 )
 
+// Fake Rex records launches without executing these files; only their paths
+// and executable modes participate in the real identity classifier.
+func rexUIExecutables(t *testing.T) (moe, shell string) {
+	t.Helper()
+	dir, err := filepath.Abs(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	moe, shell = filepath.Join(dir, "moe"), filepath.Join(dir, "shell")
+	for _, path := range []string{moe, shell} {
+		if err := os.WriteFile(path, nil, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return moe, shell
+}
+
 func TestRexUIRestartLifetime(t *testing.T) {
+	moeBin, shellBin := rexUIExecutables(t)
 	const retained = "host: rex ui retained in block block:EDITOR"
 	const unknown = "process state unknown for block:EDITOR"
+	const invalidChild = unknown + ": rex process: invalid child path"
+	const invalidForeground = unknown + ": rex process: invalid foreground path"
 	for _, tc := range []struct {
 		name, process string
 		status        int
 		replace       bool
 		log           string
+		capturedBash  bool
 	}{
-		{"restored shell", `{"last_exit":null,"child":{"pid":234,"name":"bash","path":"/usr/bin/bash","argv0":"-bash","cwd":"/home/dev/work/bureaucracy"},"foreground":{"pid":234,"name":"bash","path":"/usr/bin/bash","argv0":"-bash","cwd":"/home/dev/work/bureaucracy"}}`, 0, true, "host: rex ui block block:EDITOR runs /usr/bin/bash, not moe; replacing"},
-		{"running moe", `{"last_exit":null,"child":{"path":"/usr/bin/true"}}`, 0, false, retained},
-		{"running moe with malformed foreground", `{"last_exit":null,"child":{"path":"/usr/bin/true"},"foreground":42}`, 0, false, retained},
-		{"moe under shell", `{"last_exit":null,"child":{"path":"/usr/bin/bash"},"foreground":{"path":"/usr/bin/true"}}`, 0, false, retained},
-		{"extra fields", `{"last_exit":null,"child":{"path":"/usr/bin/true","future":[]},"future":42}`, 0, false, retained},
-		{"missing foreground", `{"last_exit":null,"child":{"path":"/usr/bin/bash"}}`, 0, false, unknown},
-		{"null foreground", `{"last_exit":null,"child":{"path":"/usr/bin/bash"},"foreground":null}`, 0, false, unknown},
-		{"malformed foreground", `{"last_exit":null,"child":{"path":"/usr/bin/bash"},"foreground":42}`, 0, false, unknown},
-		{"missing foreground path", `{"last_exit":null,"child":{"path":"/usr/bin/bash"},"foreground":{}}`, 0, false, unknown},
-		{"null foreground path", `{"last_exit":null,"child":{"path":"/usr/bin/bash"},"foreground":{"path":null}}`, 0, false, unknown},
-		{"empty foreground path", `{"last_exit":null,"child":{"path":"/usr/bin/bash"},"foreground":{"path":""}}`, 0, false, unknown},
-		{"non-string foreground path", `{"last_exit":null,"child":{"path":"/usr/bin/bash"},"foreground":{"path":42}}`, 0, false, unknown},
-		{"relative foreground path", `{"last_exit":null,"child":{"path":"/usr/bin/bash"},"foreground":{"path":"moe"}}`, 0, false, unknown},
-		{"missing child", `{"last_exit":null}`, 0, false, unknown},
-		{"missing child with moe foreground", `{"last_exit":null,"foreground":{"path":"/usr/bin/true"}}`, 0, false, unknown},
-		{"null child", `{"last_exit":null,"child":null}`, 0, false, unknown},
-		{"malformed child", `{"last_exit":null,"child":[]}`, 0, false, unknown},
-		{"missing child path", `{"last_exit":null,"child":{"name":"moe","argv0":"moe"}}`, 0, false, unknown},
-		{"null child path", `{"last_exit":null,"child":{"path":null}}`, 0, false, unknown},
-		{"empty child path", `{"last_exit":null,"child":{"path":""}}`, 0, false, unknown},
-		{"non-string child path", `{"last_exit":null,"child":{"path":42}}`, 0, false, unknown},
-		{"relative child path", `{"last_exit":null,"child":{"path":"moe"}}`, 0, false, unknown},
-		{"exited", `{"last_exit":{"exit_code":0}}`, 0, true, "host: rex ui open in block block:NEW"},
-		{"failed exit", `{"last_exit":{"exit_code":1}}`, 0, true, "host: rex ui open in block block:NEW"},
-		{"exited with malformed identity", `{"last_exit":{"exit_code":0,"future":true},"child":42,"foreground":[]}`, 0, true, "host: rex ui open in block block:NEW"},
-		{"malformed", `{`, 0, false, unknown},
-		{"absent field", `{}`, 0, false, unknown},
-		{"ambiguous exit", `{"last_exit":{}}`, 0, false, unknown},
-		{"null exit code", `{"last_exit":{"exit_code":null}}`, 0, false, unknown},
-		{"non-integer exit code", `{"last_exit":{"exit_code":1.5}}`, 0, false, unknown},
-		{"invalid exit", `{"last_exit":false}`, 0, false, unknown},
-		{"unavailable", "", 1, false, unknown},
+		{"captured restored shell", `{"last_exit":null,"child":{"pid":234,"name":"bash","path":"/usr/bin/bash","argv0":"-bash","cwd":"/home/dev/work/bureaucracy"},"foreground":{"pid":234,"name":"bash","path":"/usr/bin/bash","argv0":"-bash","cwd":"/home/dev/work/bureaucracy"}}`, 0, true, "host: rex ui block block:EDITOR runs /usr/bin/bash, not moe; replacing", true},
+		{"synthetic restored shell", fmt.Sprintf(`{"last_exit":null,"child":{"path":%q},"foreground":{"path":%q}}`, shellBin, shellBin), 0, true, "host: rex ui block block:EDITOR runs " + shellBin + ", not moe; replacing", false},
+		{"running moe", fmt.Sprintf(`{"last_exit":null,"child":{"path":%q}}`, moeBin), 0, false, retained, false},
+		{"running moe with malformed foreground", fmt.Sprintf(`{"last_exit":null,"child":{"path":%q},"foreground":42}`, moeBin), 0, false, retained, false},
+		{"moe under shell", fmt.Sprintf(`{"last_exit":null,"child":{"path":%q},"foreground":{"path":%q}}`, shellBin, moeBin), 0, false, retained, false},
+		{"extra fields", fmt.Sprintf(`{"last_exit":null,"child":{"path":%q,"future":[]},"future":42}`, moeBin), 0, false, retained, false},
+		{"missing foreground", fmt.Sprintf(`{"last_exit":null,"child":{"path":%q}}`, shellBin), 0, false, invalidForeground, false},
+		{"null foreground", fmt.Sprintf(`{"last_exit":null,"child":{"path":%q},"foreground":null}`, shellBin), 0, false, invalidForeground, false},
+		{"malformed foreground", fmt.Sprintf(`{"last_exit":null,"child":{"path":%q},"foreground":42}`, shellBin), 0, false, invalidForeground, false},
+		{"missing foreground path", fmt.Sprintf(`{"last_exit":null,"child":{"path":%q},"foreground":{}}`, shellBin), 0, false, invalidForeground, false},
+		{"null foreground path", fmt.Sprintf(`{"last_exit":null,"child":{"path":%q},"foreground":{"path":null}}`, shellBin), 0, false, invalidForeground, false},
+		{"empty foreground path", fmt.Sprintf(`{"last_exit":null,"child":{"path":%q},"foreground":{"path":""}}`, shellBin), 0, false, invalidForeground, false},
+		{"non-string foreground path", fmt.Sprintf(`{"last_exit":null,"child":{"path":%q},"foreground":{"path":42}}`, shellBin), 0, false, invalidForeground, false},
+		{"relative foreground path", fmt.Sprintf(`{"last_exit":null,"child":{"path":%q},"foreground":{"path":"moe"}}`, shellBin), 0, false, invalidForeground, false},
+		{"missing child", `{"last_exit":null}`, 0, false, invalidChild, false},
+		{"missing child with moe foreground", fmt.Sprintf(`{"last_exit":null,"foreground":{"path":%q}}`, moeBin), 0, false, invalidChild, false},
+		{"null child", `{"last_exit":null,"child":null}`, 0, false, invalidChild, false},
+		{"malformed child", `{"last_exit":null,"child":[]}`, 0, false, invalidChild, false},
+		{"missing child path", `{"last_exit":null,"child":{"name":"moe","argv0":"moe"}}`, 0, false, invalidChild, false},
+		{"null child path", `{"last_exit":null,"child":{"path":null}}`, 0, false, invalidChild, false},
+		{"empty child path", `{"last_exit":null,"child":{"path":""}}`, 0, false, invalidChild, false},
+		{"non-string child path", `{"last_exit":null,"child":{"path":42}}`, 0, false, invalidChild, false},
+		{"relative child path", `{"last_exit":null,"child":{"path":"moe"}}`, 0, false, invalidChild, false},
+		{"exited", `{"last_exit":{"exit_code":0}}`, 0, true, "host: rex ui open in block block:NEW", false},
+		{"failed exit", `{"last_exit":{"exit_code":1}}`, 0, true, "host: rex ui open in block block:NEW", false},
+		{"exited with malformed identity", `{"last_exit":{"exit_code":0,"future":true},"child":42,"foreground":[]}`, 0, true, "host: rex ui open in block block:NEW", false},
+		{"malformed", `{`, 0, false, unknown, false},
+		{"absent field", `{}`, 0, false, unknown, false},
+		{"ambiguous exit", `{"last_exit":{}}`, 0, false, unknown, false},
+		{"null exit code", `{"last_exit":{"exit_code":null}}`, 0, false, unknown, false},
+		{"non-integer exit code", `{"last_exit":{"exit_code":1.5}}`, 0, false, unknown, false},
+		{"invalid exit", `{"last_exit":false}`, 0, false, unknown, false},
+		{"unavailable", "", 1, false, unknown, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.capturedBash {
+				path, err := rexExecutable("/usr/bin/bash")
+				if err != nil {
+					t.Skipf("captured shell executable unavailable: %v", err)
+				}
+				if _, err := filepath.EvalSymlinks(path); err != nil {
+					t.Skipf("captured shell executable cannot resolve symlinks: %v", err)
+				}
+			}
 			fake := newFakeRex(t)
 			fake.reply("block-ls", `{"blocks":[{"block_id":"block:EDITOR","label":"ui"},{"block_id":"block:LEGACY","label":"dash"},{"block_id":"block:JOB","label":"heartbeat:p"},{"block_id":"block:MANUAL","label":"my terminal"}]}`, 0)
 			fake.reply("block-call", tc.process, tc.status)
@@ -60,7 +91,7 @@ func TestRexUIRestartLifetime(t *testing.T) {
 			h := newRexHost(fake.bin, t.TempDir(), &log)
 			defer h.cancel()
 			h.session = "session:S"
-			h.moeBin = "/usr/bin/true"
+			h.moeBin = moeBin
 			h.openUI()
 			if !fake.called("block close block:LEGACY") {
 				t.Fatal("legacy dash not retired")
@@ -76,7 +107,7 @@ func TestRexUIRestartLifetime(t *testing.T) {
 				t.Fatalf("want exactly one process read: %q", calls)
 			}
 			if tc.replace {
-				wantRun := "run --json --focus=false --keep-open -s session:S --label ui --cwd " + h.root + " -- /usr/bin/env MOE_HOME=" + h.root + " /usr/bin/true ui"
+				wantRun := "run --json --focus=false --keep-open -s session:S --label ui --cwd " + h.root + " -- /usr/bin/env MOE_HOME=" + h.root + " " + moeBin + " ui"
 				closeAt, runAt := slices.Index(calls, "block close block:EDITOR"), slices.Index(calls, wantRun)
 				if closeAt < 0 || runAt <= closeAt || slices.Contains(calls[closeAt+1:], calls[closeAt]) || slices.Contains(calls[runAt+1:], wantRun) {
 					t.Fatalf("want one close then one exact launch: %q", calls)
@@ -92,11 +123,8 @@ func TestRexUIRestartLifetime(t *testing.T) {
 func TestRexUIExecutablePaths(t *testing.T) {
 	for _, mode := range []string{"PATH", "symlink child", "symlink foreground", "atomic replacement", "unresolvable child", "unresolvable foreground"} {
 		t.Run(mode, func(t *testing.T) {
-			dir := t.TempDir()
-			bin := filepath.Join(dir, "moe")
-			if err := os.WriteFile(bin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-				t.Fatal(err)
-			}
+			bin, shellBin := rexUIExecutables(t)
+			dir := filepath.Dir(bin)
 			launched, childPath, foregroundPath := bin, bin, ""
 			switch mode {
 			case "PATH":
@@ -108,16 +136,16 @@ func TestRexUIExecutablePaths(t *testing.T) {
 					t.Fatal(err)
 				}
 				if mode == "symlink foreground" {
-					childPath, foregroundPath = "/usr/bin/bash", bin
+					childPath, foregroundPath = shellBin, bin
 				}
 			case "unresolvable child", "unresolvable foreground":
 				broken := filepath.Join(dir, "broken-link")
 				if err := os.Symlink(filepath.Join(dir, "missing"), broken); err != nil {
 					t.Fatal(err)
 				}
-				childPath, foregroundPath = broken, "/usr/bin/bash"
+				childPath, foregroundPath = broken, shellBin
 				if mode == "unresolvable foreground" {
-					childPath, foregroundPath = "/usr/bin/bash", broken
+					childPath, foregroundPath = shellBin, broken
 				}
 			}
 			fake := newFakeRex(t)
@@ -153,8 +181,11 @@ func TestRexUIExecutablePaths(t *testing.T) {
 				t.Fatalf("editor replaced: %q", fake.calls())
 			}
 			wantLog := "host: rex ui retained in block block:EDITOR"
-			if strings.HasPrefix(mode, "unresolvable") {
-				wantLog = "process state unknown for block:EDITOR"
+			switch mode {
+			case "unresolvable child":
+				wantLog = "process state unknown for block:EDITOR: resolve child executable"
+			case "unresolvable foreground":
+				wantLog = "process state unknown for block:EDITOR: resolve foreground executable"
 			}
 			if !strings.Contains(log.String(), wantLog) {
 				t.Fatalf("log = %q, want %q", log.String(), wantLog)
@@ -164,7 +195,8 @@ func TestRexUIExecutablePaths(t *testing.T) {
 }
 
 func TestRexUIDuplicateAndCloseFailure(t *testing.T) {
-	for _, process := range []string{`{"last_exit":{"exit_code":0}}`, `{"last_exit":null,"child":{"path":"/usr/bin/bash"},"foreground":{"path":"/usr/bin/bash"}}`} {
+	moeBin, shellBin := rexUIExecutables(t)
+	for _, process := range []string{`{"last_exit":{"exit_code":0}}`, fmt.Sprintf(`{"last_exit":null,"child":{"path":%q},"foreground":{"path":%q}}`, shellBin, shellBin)} {
 		for _, duplicate := range []bool{false, true} {
 			fake := newFakeRex(t)
 			blocks := `{"blocks":[{"block_id":"block:A","label":"ui"}`
@@ -176,7 +208,7 @@ func TestRexUIDuplicateAndCloseFailure(t *testing.T) {
 			fake.reply("block-close", "cannot close", 1)
 			h := newRexHost(fake.bin, t.TempDir(), nil)
 			h.session = "session:S"
-			h.moeBin = "/usr/bin/true"
+			h.moeBin = moeBin
 			h.openUI()
 			h.cancel()
 			if fake.called("run ") {
@@ -193,6 +225,7 @@ func TestRexUIDuplicateAndCloseFailure(t *testing.T) {
 }
 
 func TestRexUILostLaunchAcknowledgement(t *testing.T) {
+	moeBin, shellBin := rexUIExecutables(t)
 	fake := newFakeRex(t)
 	if err := os.Mkdir(filepath.Join(fake.dir, "blocks"), 0o755); err != nil {
 		t.Fatal(err)
@@ -205,13 +238,13 @@ func TestRexUILostLaunchAcknowledgement(t *testing.T) {
 	}
 	fake.reply("run", `{"block_ids":["block:EDITOR"]}`, 1)
 	fake.reply("ls", `{"sessions":[{"session_id":"session:S","label":"moe"}]}`, 0)
-	fake.reply("block-call@block:STALE", `{"last_exit":null,"child":{"path":"/usr/bin/bash"},"foreground":{"path":"/usr/bin/bash"}}`, 0)
-	fake.reply("block-call", `{"last_exit":null,"child":{"path":"/usr/bin/true"}}`, 0)
+	fake.reply("block-call@block:STALE", fmt.Sprintf(`{"last_exit":null,"child":{"path":%q},"foreground":{"path":%q}}`, shellBin, shellBin), 0)
+	fake.reply("block-call", fmt.Sprintf(`{"last_exit":null,"child":{"path":%q}}`, moeBin), 0)
 	var log syncBuf
 	h := newRexHost(fake.bin, t.TempDir(), &log)
 	defer h.cancel()
 	h.session = "session:S"
-	h.moeBin = "/usr/bin/true"
+	h.moeBin = moeBin
 	h.openUI()
 	h.openUI()
 	count := 0
