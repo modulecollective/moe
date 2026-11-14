@@ -277,9 +277,9 @@ hint.
 ### Seeing and steering a running run
 
 Every invocation that runs workflow work — a stage, the next-stage prompt, a
-kick, a CI repair, a push — serves a small live endpoint for its run while it
-owns it. `moe dash` (and `--watch`) appends what that owner reports to the run's
-row, in brackets: `[agent running build 4m]`, `[waiting for operator]`,
+kick, a CI repair, a push — serves a small live endpoint for its run while
+it owns it. `moe dash` appends what that owner reports to the run's row, in
+brackets: `[agent running build 4m]`, `[waiting for operator]`,
 `[pause pending]`, `[handed off]`, `[owned · no live status]`.
 `moe control show <project>/<run>` prints the long form: owner and generation,
 phase and since when, why it is waiting, its continuation (`prompt`, `!`, `!!`,
@@ -316,9 +316,9 @@ separators have a blank row on each side, and the console keeps six message
 rows even on short terminals. The minimum size is 40 columns by 20 rows.
 Moving to the first board item reveals the headings above it.
 
-The UI board omits routine project `sweeping` service rows. For routine sweep
-status, use `moe dash`, `moe dash --watch` or the web `/serve` page. Service
-exceptions remain visible when applicable; see
+The UI board omits routine project `sweeping` service rows. For routine
+sweep status, use `moe dash` or the web `/serve` page. Service exceptions
+remain visible when applicable; see
 [Re-Entry And Supervision](reference.md#re-entry-and-supervision).
 
 Press `/` from any pane to find a board item by a case-insensitive literal

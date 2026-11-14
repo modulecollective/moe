@@ -6,11 +6,10 @@ import (
 	"unicode/utf8"
 )
 
-// The terminal width policy shared by every full-screen surface (dash
-// --watch, moe ui): how many cells a rune takes, and how to clip a line
-// that may carry CSI sequences to a column budget without emitting a
-// partial sequence. Approximate by design: grapheme clusters beyond the
-// cases below are not modelled.
+// The terminal width policy for moe ui: how many cells a rune takes, and
+// how to clip a line that may carry CSI sequences to a column budget
+// without emitting a partial sequence. Approximate by design: grapheme
+// clusters beyond the cases below are not modelled.
 
 // ClipLine writes line clipped to columns cells. Complete CSI sequences
 // pass through at zero width; a partial one ends the line.

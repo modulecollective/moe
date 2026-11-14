@@ -13,28 +13,17 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
 
 ### Re-Entry And Supervision
 
-- `moe dash [--all] [--project <id>] [--workflow <name>] [--watch]` prints the
-  terminal dashboard, with due project chores at the head of BACKLOG and a
-  daily-activity histogram of recent run activity (`--project` scopes the chart
-  to one project). `--watch` redraws it in place every 3 seconds until Ctrl-C —
-  a live pane rather than a snapshot; it needs a terminal on stdout and exits 2
-  without one. When a `moe serve` is running against this bureaucracy, its
-  status rides the banner's tail — armed or not, uptime, next sweep — and a
-  project earns a line of its own only when it is sweeping, cooling off, or its
-  last sweep died. The tail also carries the drain to origin: `N unpushed` when
-  commits are waiting (read from git, so it shows with or without a serve), or
-  `pushed 2m ago` once serve's pusher has landed one. A push origin is refusing
-  earns a row of its own with git's reason.
-
-  In a Rex terminal, `--watch` also reports live sweeps, outstanding operator
-  questions and known serve failures through OSC 7501. Activity and questions
-  follow the board filters; health explicitly includes serve-wide failures.
-  An open session does not prove an agent is thinking, and a question does not
-  stop its run. Reports update only when their content changes and clear on
-  orderly exit. They require the watch pane to keep running; restarting it
-  reseeds current state. Nested tmux/screen terminals and serve children do
-  not emit reports. These are current observations, not an event feed or a
-  complete account of stage failures.
+- `moe dash [--all] [--project <id>] [--workflow <name>]` prints a snapshot
+  of the terminal dashboard, with due project chores at the head of BACKLOG
+  and a daily-activity histogram of recent run activity (`--project` scopes
+  the chart to one project). When a `moe serve` is running against this
+  bureaucracy, its status rides the banner's tail — armed or not, uptime,
+  next sweep — and a project earns a line of its own only when it is
+  sweeping, cooling off, or its last sweep died. The tail also carries the
+  drain to origin: `N unpushed` when commits are waiting (read from git, so
+  it shows with or without a serve), or `pushed 2m ago` once serve's pusher
+  has landed one. A push origin is refusing earns a row of its own with
+  git's reason.
 - `moe ui [--project <id>] [--workflow <name>]` is the dashboard as a console:
   the whole board, every completed run included, above the selected item's
   details and a console of recent outcomes. Arrows or `j`/`k` select; `Tab` /
@@ -74,12 +63,22 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   memory, with bounded, labelled message truncation; it never logs note or
   capture bodies. It needs a terminal on stdout (Linux or macOS) and restores
   it on every exit; quitting mid-save waits for and prints that save's outcome.
-  In a Rex terminal it reports the same OSC 7501 status as `dash --watch`.
 
-  The UI board omits routine project `sweeping` service rows to leave room for
-  runs and service exceptions. Cooling, failed or quota-deferred projects and
-  host/origin errors remain visible when applicable. For routine sweep status,
-  use `moe dash`, `moe dash --watch` or the web `/serve` page.
+  In a Rex terminal, UI reports live sweeps, outstanding operator questions,
+  control state and observation health through OSC 7501. Activity and
+  questions follow the board filters; health explicitly includes serve-wide
+  failures. An open session does not prove an agent is thinking, and a
+  question does not stop its run. Reports update only when their content
+  changes and clear on orderly exit. They require UI to keep running;
+  restarting it clears its report subtree and reseeds current state. Nested
+  tmux/screen terminals and serve children do not emit reports. These are
+  current observations, not an event feed or a complete account of stage
+  failures.
+
+  The UI board omits routine project `sweeping` service rows to leave room
+  for runs and service exceptions. Cooling, failed or quota-deferred
+  projects and host/origin errors remain visible when applicable. For
+  routine sweep status, use `moe dash` or the web `/serve` page.
 
   `/` opens temporary board search from any pane. Type a case-insensitive
   literal substring of `project/run`; surrounding spaces are ignored. Search

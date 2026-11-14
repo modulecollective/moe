@@ -15,7 +15,7 @@ import (
 // order. A slot missing here is built and silently never shown.
 var dashStatusSlots = []string{"moe/dash/activity", "moe/dash/questions", "moe/dash/control", "moe/dash/health"}
 
-// dashStatus owns only this watch's subtree. A successful write is the
+// dashStatus owns only this UI's report subtree. A successful write is the
 // comparison checkpoint; a failed write is retried on the next refresh.
 type dashStatus struct {
 	w       io.Writer

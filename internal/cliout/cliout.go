@@ -56,10 +56,10 @@ func Enabled(w io.Writer) bool {
 // ignored: callers using this for layout decisions (banner.IndentStderr)
 // want the operator's terminal indented even when colour is suppressed.
 //
-// A writer that wraps the terminal (dash's watch-mode frame buffer) is
-// followed through `Unwrap() io.Writer` — the errors.Unwrap idiom —
-// before the assertion, so decorating stdout doesn't silently strip
-// every style down-stack.
+// A writer that wraps the terminal (the UI's frame buffer) is followed
+// through `Unwrap() io.Writer` — the errors.Unwrap idiom — before the
+// assertion, so decorating stdout doesn't silently strip every style
+// down-stack.
 //
 // The /dev/null guard mirrors stdinIsTerminal in internal/cli/init.go,
 // where it was load-bearing: an exec.Command-spawned `moe init` gets

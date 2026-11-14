@@ -27,8 +27,7 @@ import (
 // operator who doesn't run serve sees the banner they always saw. A
 // project only earns a line of its own when it is sweeping, cooling, or
 // its last sweep died, and the drain to origin only when it is being
-// refused. --watch gets freshness for free — the 3s repaint re-reads one
-// small file and one rev-list.
+// refused. Each snapshot reads one small file and one rev-list.
 
 // serveLiveness is what this reader can honestly say about the process
 // behind a state file. Three-valued because the pid probe is not always

@@ -1201,156 +1201,46 @@ func TestDashRendersFactoryArt(t *testing.T) {
 	}
 }
 
-// TestDashWatchRejectsNonTTY: `--watch` against a non-terminal stdout
-// exits 2 without drawing anything. The gate is what keeps the redraw
-// loop off pipes and scripts — and, not incidentally, out of the test
-// binary, which is why this is the only unit test watch mode gets.
-func TestDashWatchRejectsNonTTY(t *testing.T) {
+func TestDashRejectsRemovedWatchFlag(t *testing.T) {
 	newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
-
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash", "--watch"}, &out, &errb)
-	if code != 2 {
-		t.Fatalf("exit=%d want 2 (stdout=%q stderr=%q)", code, out.String(), errb.String())
-	}
-	if !strings.Contains(errb.String(), "needs a terminal") {
-		t.Fatalf("expected a terminal-required error on stderr, got:\n%s", errb.String())
-	}
-	if out.Len() != 0 {
-		t.Fatalf("expected no frame on a rejected --watch, got:\n%q", out.String())
-	}
-}
-
-func TestWriteWatchViewportErasesEveryVisibleLine(t *testing.T) {
-	var buf bytes.Buffer
-	in := "alpha\nbeta\n\ntrailing-no-newline"
-	if err := writeWatchViewport(&buf, []byte(in), 20, 80); err != nil {
-		t.Fatalf("write viewport: %v", err)
-	}
-	want := "alpha\x1b[K\nbeta\x1b[K\n\x1b[K\ntrailing-no-newline\x1b[K"
-	if buf.String() != want {
-		t.Fatalf("got %q\nwant %q", buf.String(), want)
-	}
-}
-
-func TestWriteWatchViewportReservesBottomRowWithoutFinalNewline(t *testing.T) {
-	in := "one\ntwo\nthree\nfour"
-	want := "one\x1b[K\ntwo\x1b[K"
-
-	var buf bytes.Buffer
-	if err := writeWatchViewport(&buf, []byte(in), 3, 80); err != nil {
-		t.Fatalf("write viewport: %v", err)
-	}
-	if buf.String() != want {
-		t.Fatalf("got %q want %q", buf.String(), want)
-	}
-	if got := strings.Count(buf.String(), "\n"); got != 1 {
-		t.Fatalf("newlines=%d want rows-2=1 in %q", got, buf.String())
-	}
-	if got := strings.Count(buf.String(), dashEraseLine); got != 2 {
-		t.Fatalf("EL count=%d want one per content row", got)
-	}
-}
-
-func TestWriteWatchViewportClipsByDisplayCells(t *testing.T) {
-	tests := []struct {
-		name    string
-		in      string
-		columns int
-		want    string
-	}{
-		{name: "ascii", in: "abcdef", columns: 5, want: "abcd"},
-		{name: "combining", in: "e\u0301x", columns: 2, want: "e\u0301"},
-		{name: "dashboard glyphs", in: "▶▂·x", columns: 4, want: "▶▂·"},
-		{name: "cjk exact", in: "a界b", columns: 4, want: "a界"},
-		{name: "cjk does not split", in: "a界b", columns: 3, want: "a"},
-		{name: "emoji", in: "a😀b", columns: 4, want: "a😀"},
-		{name: "supplemental emoji", in: "a🀄b", columns: 4, want: "a🀄"},
-		{name: "emoji presentation", in: "x❤️y", columns: 4, want: "x❤️"},
-		{name: "emoji presentation does not split", in: "❤️x", columns: 2, want: ""},
-		{name: "text presentation stays narrow", in: "x❤︎y", columns: 4, want: "x❤︎y"},
-		{name: "keycap with variation selector", in: "x1️⃣y", columns: 4, want: "x1️⃣"},
-		{name: "keycap without variation selector", in: "x1⃣y", columns: 4, want: "x1⃣"},
-		{
-			name:    "ansi is zero width and reset survives",
-			in:      cliout.Bright + "abcde" + cliout.Reset,
-			columns: 4,
-			want:    cliout.Bright + "abc" + cliout.Reset,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var buf bytes.Buffer
-			if err := writeWatchViewport(&buf, []byte(tt.in), 2, tt.columns); err != nil {
-				t.Fatalf("write viewport: %v", err)
+	for _, arg := range []string{"--watch", "--watch=false"} {
+		t.Run(arg, func(t *testing.T) {
+			var out, errb bytes.Buffer
+			code := Run([]string{"dash", arg}, &out, &errb)
+			if code != 2 {
+				t.Fatalf("exit=%d want 2 (stdout=%q stderr=%q)", code, out.String(), errb.String())
 			}
-			want := tt.want + dashEraseLine
-			if buf.String() != want {
-				t.Fatalf("got %q want %q", buf.String(), want)
+			if !strings.Contains(errb.String(), "flag provided but not defined: -watch") {
+				t.Fatalf("expected unknown watch flag error, got:\n%s", errb.String())
 			}
-			if !utf8.Valid(buf.Bytes()) {
-				t.Fatalf("viewport emitted partial UTF-8: %q", buf.Bytes())
+			if out.Len() != 0 {
+				t.Fatalf("expected no frame on a rejected watch flag, got:\n%q", out.String())
 			}
 		})
 	}
 }
 
-func TestWriteWatchViewportNarrowPaneRegression(t *testing.T) {
-	line := strings.Repeat("x", 136)
-	for _, columns := range []int{80, 100} {
-		var buf bytes.Buffer
-		if err := writeWatchViewport(&buf, []byte(line+"\nnext\n"), 3, columns); err != nil {
-			t.Fatalf("columns %d: write viewport: %v", columns, err)
-		}
-		want := strings.Repeat("x", columns-1) + dashEraseLine + "\nnext" + dashEraseLine
-		if buf.String() != want {
-			t.Fatalf("columns %d: got %q want %q", columns, buf.String(), want)
-		}
+func TestDashHelpListsSnapshotFlags(t *testing.T) {
+	var out, errb bytes.Buffer
+	if code := Run([]string{"dash", "--help"}, &out, &errb); code != 2 {
+		t.Fatalf("exit=%d want 2 (stderr=%q)", code, errb.String())
 	}
-}
-
-func TestWriteWatchViewportReservesRightmostColumn(t *testing.T) {
-	const columns = 80
-	var buf bytes.Buffer
-	if err := writeWatchViewport(&buf, []byte(strings.Repeat("x", columns)), 2, columns); err != nil {
-		t.Fatalf("write viewport: %v", err)
+	if out.Len() != 0 {
+		t.Fatalf("help printed a dashboard: %q", out.String())
 	}
-	want := strings.Repeat("x", columns-1) + dashEraseLine
-	if buf.String() != want {
-		t.Fatalf("got %q want %q", buf.String(), want)
+	if strings.Contains(errb.String(), "watch") {
+		t.Fatalf("help advertises removed watch flag: %s", errb.String())
 	}
-}
-
-func TestWriteWatchViewportNoSafeContentDimension(t *testing.T) {
-	in := cliout.Bright + "x" + cliout.Reset + "\nsecond\n"
-	for _, size := range []struct {
-		rows, columns int
-	}{
-		{rows: 1, columns: 80},
-		{rows: 24, columns: 1},
-		{rows: 1, columns: 1},
-	} {
-		var buf bytes.Buffer
-		if err := writeWatchViewport(&buf, []byte(in), size.rows, size.columns); err != nil {
-			t.Fatalf("%dx%d: write viewport: %v", size.columns, size.rows, err)
-		}
-		if buf.Len() != 0 {
-			t.Fatalf("%dx%d: got %q want no content stream", size.columns, size.rows, buf.String())
+	for _, flag := range []string{"--all", "--project", "--workflow"} {
+		if !strings.Contains(errb.String(), flag) {
+			t.Errorf("help lacks %s: %s", flag, errb.String())
 		}
 	}
 }
 
-func TestDashFramePostResetsStyleBeforeErase(t *testing.T) {
-	want := cliout.Reset + "\x1b[J\x1b[?2026l"
-	if dashFramePost != want {
-		t.Fatalf("dashFramePost=%q want reset + ED-0 + sync-off %q", dashFramePost, want)
-	}
-}
-
-// TestTTYFrameBufferKeepsColourGate: every dash styler (banner gradient,
-// activity histogram, factory art) gates on cliout.Enabled. Buffering a
-// watch frame must not make its eventual terminal destination disappear.
+// TestTTYFrameBufferKeepsColourGate: buffering a UI frame must not make
+// its eventual terminal destination disappear from cliout.Enabled.
 func TestTTYFrameBufferKeepsColourGate(t *testing.T) {
 	t.Setenv("NO_COLOR", "")
 	f, err := os.Open("/dev/ptmx")
@@ -1364,7 +1254,7 @@ func TestTTYFrameBufferKeepsColourGate(t *testing.T) {
 
 	frame := ttyFrameBuffer{terminal: f}
 	if !cliout.Enabled(&frame) {
-		t.Fatal("cliout.Enabled(ttyFrameBuffer{tty}) = false; buffered watch frames would render unstyled")
+		t.Fatal("cliout.Enabled(ttyFrameBuffer{tty}) = false; buffered UI frames would render unstyled")
 	}
 }
 
