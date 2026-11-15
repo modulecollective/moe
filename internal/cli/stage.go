@@ -202,7 +202,7 @@ type stageSessionOpts struct {
 	CanvasOnOpen func(workRoot string, md *run.Metadata, agentName string) error
 	// HarvestOnExit runs the followups + lore harvest against the
 	// canonical root once the turn is committed and merged. Set by the
-	// three conversational openers (openIntentChat, openIdeaChat,
+	// three conversational openers (captureKind.openChat for idea and intent,
 	// openChat) and nothing else: their runs never reach a harvesting
 	// terminal — the capture workflows' close deliberately skips harvest,
 	// and chat is perpetual, so its close may be weeks away or never — so

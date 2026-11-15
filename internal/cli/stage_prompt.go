@@ -352,11 +352,10 @@ func intentsReferenceSection(root, projectID string) string {
 	if root == "" || projectID == "" {
 		return ""
 	}
-	entries, err := scanOpenIntents(root, projectID)
-	if err != nil || len(entries) == 0 {
+	slugs, err := intentKind.scanOpen(root, projectID)
+	if err != nil || len(slugs) == 0 {
 		return ""
 	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].slug < entries[j].slug })
 
 	var b strings.Builder
 	b.WriteString("## Project intents\n\n")
@@ -365,10 +364,10 @@ of where it's going: a theme, a bet, a direction it's heading. They are
 inlined below. They aim the discretionary calls (what to propose, what
 to prioritise); they don't fence what's allowed.
 `)
-	for _, e := range entries {
-		title := intentTitle(root, e.project, e.slug)
-		fmt.Fprintf(&b, "\n### `%s` — %s\n", e.slug, title)
-		content, err := os.ReadFile(filepath.Join(root, run.ContentPath(e.project, e.slug, dash.IntentDocID)))
+	for _, slug := range slugs {
+		title := intentTitle(root, projectID, slug)
+		fmt.Fprintf(&b, "\n### `%s` — %s\n", slug, title)
+		content, err := os.ReadFile(filepath.Join(root, run.ContentPath(projectID, slug, dash.IntentDocID)))
 		if err != nil {
 			continue
 		}

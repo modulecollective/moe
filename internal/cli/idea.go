@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 
 	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/dash"
@@ -26,7 +25,7 @@ import (
 // same as sdlc. Capture stays cheap: `moe idea new` never launches an
 // agent. Refinement is the one door an agent may hold — `moe idea edit
 // --chat` opens an ordinary stage session on the idea's own document
-// (see openIdeaChat).
+// (see captureKind.openChat).
 //
 // idea is reached one way — `moe idea <verb>` — same as every other
 // workflow's top-level form. The Workflow registration is a separate
@@ -39,12 +38,12 @@ func init() {
 	g.Register(&Command{
 		Name:    "new",
 		Summary: "capture a new idea in $EDITOR",
-		Run:     runIdeaNew,
+		Run:     ideaKind.runNew,
 	})
 	g.Register(&Command{
 		Name:    "edit",
 		Summary: "refine a captured idea ($EDITOR, or --chat for an agent session)",
-		Run:     runIdeaEdit,
+		Run:     ideaKind.runEdit,
 		argKind: argIdea,
 	})
 	g.Register(&Command{
@@ -56,7 +55,7 @@ func init() {
 	g.Register(&Command{
 		Name:    "list",
 		Summary: "list this project's open ideas",
-		Run:     runIdeaList,
+		Run:     ideaKind.runList,
 	})
 	g.Register(&Command{
 		Name:    "cat",
@@ -113,123 +112,6 @@ func init() {
 	RegisterWorkflow(w)
 }
 
-func runIdeaNew(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("idea new", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe idea new <project>/<slug>\n")
-		fs.PrintDefaults()
-	}
-	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
-		return 2
-	}
-	if fs.NArg() != 1 {
-		fs.Usage()
-		return 2
-	}
-	projectID, slug, err := splitProjectRun(fs.Arg(0))
-	if err != nil {
-		moePrintf(stderr, "idea new: %v\n", err)
-		return 2
-	}
-	if canonical := run.Slugify(slug); canonical != slug {
-		moePrintf(stderr, "idea new: slug must match [a-z0-9-]+ (lowercase kebab), got %q\n", slug)
-		return 2
-	}
-
-	root, err := findRoot(stderr)
-	if err != nil {
-		return 1
-	}
-	if err := requireProject(root, projectID); err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-	if err := requireCleanTree(root); err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-	if os.Getenv("VISUAL") == "" && os.Getenv("EDITOR") == "" {
-		moePrintln(stderr, "idea: set $EDITOR or $VISUAL — idea new needs an editor")
-		return 1
-	}
-
-	// Pre-flight the slug before the editor pop. run.New checks again
-	// inside the lock and is the authority on collisions; this gate
-	// just refuses the obvious case before the operator types into a
-	// tempfile we'd otherwise have to throw away (the original
-	// late-bail bug). Match run.New's wording so the operator sees the
-	// same error regardless of which gate caught it.
-	if taken, err := run.SlugTaken(root, projectID, slug); err != nil {
-		moePrintf(stderr, "idea new: %v\n", err)
-		return 1
-	} else if taken {
-		suggestion, serr := run.NextFreeID(root, projectID, slug)
-		if serr != nil {
-			moePrintf(stderr, "idea new: %v\n", serr)
-			return 1
-		}
-		moePrintf(stderr,
-			"idea new: slug %q in project %s is already used (existing run or prior history); try %q or pick a different name\n",
-			slug, projectID, suggestion)
-		return 1
-	}
-
-	// Pop $EDITOR on a stub written outside the bureaucracy tree, then
-	// pass the edited body into run.New as seed content — run.New writes
-	// the canvas at its canonical location and commits run.json + canvas
-	// atomically. captureEditorBody returns tmpPath when there is edited
-	// text worth preserving (the editor ran); the deferred cleanup below
-	// removes it on success and keepTmp guards the post-editor failure
-	// window.
-	body, tmpPath, code := captureEditorBody("moe-idea-new-", fmt.Sprintf("# %s\n", slug), stderr)
-	if code != 0 {
-		if tmpPath != "" {
-			moePrintf(stderr, "idea: your edited canvas is preserved at %s\n", tmpPath)
-		}
-		return code
-	}
-	// Default-clean: cleanup happens unless a post-editor failure flips
-	// keepTmp. The editor session is a multi-minute window, so anything
-	// that fails after the operator may have written content keeps the
-	// tempfile and names its absolute path on stderr — the pre-flight
-	// above closes the common collision case, this is the safety net for
-	// whatever races slip through (concurrent harvest, late-arriving
-	// error from run.New).
-	keepTmp := false
-	defer func() {
-		if !keepTmp {
-			os.RemoveAll(filepath.Dir(tmpPath))
-		}
-	}()
-
-	opts := run.Options{
-		ID:       slug,
-		Workflow: dash.IdeaWorkflow,
-		SeedDocs: map[string]string{dash.IdeaDocID: body},
-	}
-	var md *run.Metadata
-	err = repolock.With(root, repolock.Options{
-		Purpose: "idea-new",
-		Run:     projectID + "/" + slug,
-	}, func() error {
-		m, err := run.New(root, projectID, opts)
-		if err != nil {
-			return err
-		}
-		md = m
-		return nil
-	})
-	if err != nil {
-		keepTmp = true
-		moePrintf(stderr, "idea: %v\n", err)
-		moePrintf(stderr, "idea: your edited canvas is preserved at %s\n", tmpPath)
-		return 1
-	}
-	moePrintf(stdout, "captured idea %s/%s\n", md.Project, md.ID)
-	return 0
-}
-
 // createIdea opens a new idea run with slug auto-disambiguated from
 // slugBase: if slugBase is taken, tries slugBase-2, slugBase-3, … until
 // one is free. Used by the close-time followups harvester (idea new
@@ -277,138 +159,6 @@ func createIdea(root, projectID, slugBase, body, promoteTo string, extra trailer
 	}
 }
 
-func runIdeaEdit(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("idea edit", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	chat := fs.Bool("chat", false, "refine in an interactive agent session instead of $EDITOR")
-	agentOverride := fs.String("agent", "", "with --chat, override the agent for this turn (claude/codex); does not persist")
-	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe idea edit [--chat [--agent <name>]] <project>/<slug>\n")
-		fs.PrintDefaults()
-	}
-	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
-		return 2
-	}
-	if fs.NArg() != 1 {
-		fs.Usage()
-		return 2
-	}
-	if code := checkChatAgentFlags("idea edit", *chat, *agentOverride, stderr); code != 0 {
-		return code
-	}
-	projectID, slug, err := splitProjectRun(fs.Arg(0))
-	if err != nil {
-		moePrintf(stderr, "idea edit: %v\n", err)
-		return 2
-	}
-
-	root, err := findRoot(stderr)
-	if err != nil {
-		return 1
-	}
-	if err := requireProject(root, projectID); err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-	if err := requireCleanTree(root); err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-
-	if _, err := loadIdeaRun(root, projectID, slug); err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-	if *chat {
-		return openIdeaChat(projectID, slug, *agentOverride, stdout, stderr)
-	}
-	if os.Getenv("VISUAL") == "" && os.Getenv("EDITOR") == "" {
-		moePrintln(stderr, "idea: set $EDITOR or $VISUAL (or pass --chat) — idea edit needs an editor")
-		return 1
-	}
-
-	abs := filepath.Join(root, run.ContentPath(projectID, slug, dash.IdeaDocID))
-	if _, err := os.Stat(abs); err != nil {
-		moePrintf(stderr, "idea: canvas missing: %v\n", err)
-		return 1
-	}
-
-	if code := launchEditor(abs, stderr); code != 0 {
-		return code
-	}
-
-	docDir := run.DocDir(projectID, slug, dash.IdeaDocID)
-	msg := fmt.Sprintf("work: update %s\n\n", dash.IdeaDocID) +
-		trailers.Block{
-			Run:      slug,
-			Project:  projectID,
-			Workflow: dash.IdeaWorkflow,
-			Document: dash.IdeaDocID,
-		}.String()
-	err = repolock.With(root, repolock.Options{
-		Purpose: "idea-edit",
-		Run:     projectID + "/" + slug,
-	}, func() error {
-		return run.StageAndCommit(root, msg, docDir)
-	})
-	switch {
-	case errors.Is(err, run.ErrNothingToCommit):
-		moePrintf(stdout, "idea %s/%s unchanged\n", projectID, slug)
-	case err != nil:
-		moePrintf(stderr, "idea: commit: %v\n", err)
-		return 1
-	default:
-		moePrintf(stdout, "refined idea %s/%s\n", projectID, slug)
-	}
-	return 0
-}
-
-// ideaChatKickoff is the first user message of a refinement session.
-// It has to do two jobs the fragment can't: say that *this* turn was
-// opened by an operator who wants to talk (so the agent asks before
-// editing rather than rewriting on sight), and re-assert the shelf
-// boundary at the point of action.
-const ideaChatKickoff = "The operator just opened this idea to refine it. Read the " +
-	"canvas first, then ask what they want to sharpen — one question, and wait for " +
-	"their answer before you edit. Keep it a shelf note: sharper framing, a concrete " +
-	"example, a smaller scope. Not a design."
-
-// openIdeaChat is the Go-level seam behind `moe idea edit --chat`: an
-// ordinary interactive stage session on the idea's own document. Riding
-// runStageSession (rather than the run-less bespoke path this feature
-// had before `ditch-idea-chat` removed it) is the whole point — the
-// session id lands in run.json's `documents.idea.session` and resumes on
-// the next `--chat`, which is what gives `moe idea log` a transcript to
-// render.
-//
-// Three knobs beyond the defaults:
-//
-//   - NeedsSandbox stays false. An idea is a shelf note; refining it
-//     sharpens the operator's framing of a problem, it doesn't verify
-//     claims about code. That's the line against `moe chat`, which
-//     attaches a clone to think *with* the project.
-//   - SkipNextStage is always on. idea is a single-stage workflow with
-//     no successor, so the only post-turn prompt available is the close
-//     nudge — wrong for a shelf entry the operator is still deciding
-//     about. Session exit drops them back to the shell.
-//   - HarvestOnExit is always on. The session's prompt invites the agent
-//     to file followups and lore like any other stage, but idea close is
-//     a capture close and skips harvest, so without this the captures
-//     would be committed to the journal and stranded there.
-//
-// Interactive-only: there is no headless parameter and no oneshot.md
-// fragment, because nothing cascades into an idea.
-func openIdeaChat(projectID, slug, agentOverride string, stdout, stderr io.Writer) int {
-	return runStageSession(projectID, slug, dash.IdeaDocID,
-		stageSessionOpts{
-			ValidateEntry: inProgressSessionEntry(dash.IdeaWorkflow),
-			InitialPrompt: ideaChatKickoff,
-			SkipNextStage: true,
-			HarvestOnExit: true,
-			Agent:         agentOverride,
-		}, stdout, stderr)
-}
-
 // checkChatAgentFlags validates the `--chat` / `--agent` pair the two
 // edit verbs share. `--agent` without `--chat` is a usage error rather
 // than a silent no-op: the editor path spawns no agent, so accepting the
@@ -435,42 +185,6 @@ func checkChatAgentFlags(verb string, chat bool, agentOverride string, stderr io
 // use `Close <wf> run <p>/<r>` — see design).
 func runIdeaClose(args []string, stdout, stderr io.Writer) int {
 	return runClose(dash.IdeaWorkflow, "Close idea %s/%s", nil, args, stdout, stderr)
-}
-
-func runIdeaList(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("idea list", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe idea list <project>")
-	}
-	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
-		return 2
-	}
-	if fs.NArg() != 1 {
-		fs.Usage()
-		return 2
-	}
-	projectID := fs.Arg(0)
-
-	root, err := findRoot(stderr)
-	if err != nil {
-		return 1
-	}
-	if err := requireProject(root, projectID); err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-
-	entries, err := scanOpenIdeas(root, projectID)
-	if err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].slug < entries[j].slug })
-	for _, e := range entries {
-		fmt.Fprintln(stdout, e.slug)
-	}
-	return 0
 }
 
 // defaultPromoteTag is the workflow `moe idea tag` stamps when the
@@ -572,7 +286,7 @@ func setIdeaTag(ref, workflow string, designOnly bool, verb string, stdout, stde
 		return 1
 	}
 
-	md, err := loadIdeaRun(root, projectID, slug)
+	md, err := ideaKind.loadRun(root, projectID, slug)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -652,7 +366,7 @@ func runIdeaMove(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	md, err := loadIdeaRun(root, fromProject, slug)
+	md, err := ideaKind.loadRun(root, fromProject, slug)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -757,56 +471,6 @@ func runIdeaReopen(args []string, stdout, stderr io.Writer) int {
 	}
 	moePrintf(stdout, "reopened idea %s/%s\n", projectID, slug)
 	return 0
-}
-
-// ideaEntry is the minimal projection of an idea run used by `moe idea
-// list` and `moe dash`'s backlog bucket.
-type ideaEntry struct {
-	project string
-	slug    string
-}
-
-// scanOpenIdeas returns all in-progress idea runs for projectID. If
-// projectID is "", all projects are scanned — used by dash.
-func scanOpenIdeas(root, projectID string) ([]ideaEntry, error) {
-	mds, err := run.Scan(root)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]ideaEntry, 0, len(mds))
-	for _, md := range mds {
-		if md.Workflow != dash.IdeaWorkflow {
-			continue
-		}
-		if md.Status != run.StatusInProgress {
-			continue
-		}
-		if projectID != "" && md.Project != projectID {
-			continue
-		}
-		out = append(out, ideaEntry{
-			project: md.Project,
-			slug:    md.ID,
-		})
-	}
-	return out, nil
-}
-
-// loadIdeaRun loads an idea run and verifies it is in fact an idea run
-// (workflow=idea), producing a recognisable error when the slug names
-// a different workflow's run.
-func loadIdeaRun(root, projectID, slug string) (*run.Metadata, error) {
-	md, err := run.Load(root, projectID, slug)
-	if err != nil {
-		if errors.Is(err, run.ErrRunNotFound) {
-			return nil, fmt.Errorf("idea %s/%s does not exist; run `moe idea list %s` to see open ideas", projectID, slug, projectID)
-		}
-		return nil, err
-	}
-	if md.Workflow != dash.IdeaWorkflow {
-		return nil, fmt.Errorf("run %s/%s is a %s run, not an idea", projectID, slug, md.Workflow)
-	}
-	return md, nil
 }
 
 // requireProject errors if projectID has no project.json on disk.
