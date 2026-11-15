@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	liveSheet     = "* { model: live-model; }\n"
-	proposedSheet = "* { model: next-model; }\n"
+	liveSheet     = "* { model-claude: live-model; }\n"
+	proposedSheet = "* { model-claude: next-model; }\n"
 )
 
 // proposeStylesheet commits a live root stylesheet and the run's

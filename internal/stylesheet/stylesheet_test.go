@@ -13,10 +13,10 @@ import (
 // independently.
 func TestResolve(t *testing.T) {
 	const src = `
-* { model: opus; }
+* { model-claude: opus; }
 sdlc { agent: claude; }
-.review { model: gpt-5-codex; agent: codex; }
-sdlc.design { model: claude-fable-5; }
+.review { model-claude: gpt-5-codex; agent: codex; }
+sdlc.design { model-claude: claude-fable-5; }
 `
 	s, err := Parse([]byte(src))
 	if err != nil {
@@ -39,7 +39,7 @@ sdlc.design { model: claude-fable-5; }
 		{"kb", "review", "codex", "gpt-5-codex"},
 	}
 	for _, c := range cases {
-		gotAgent, gotMod := s.Resolve(c.workflow, c.stage)
+		gotAgent, gotMod := resolve(s, c.workflow, c.stage)
 		if gotAgent != c.wantAgent || gotMod != c.wantMod {
 			t.Errorf("Resolve(%q,%q) = (%q,%q), want (%q,%q)",
 				c.workflow, c.stage, gotAgent, gotMod, c.wantAgent, c.wantMod)
@@ -54,11 +54,11 @@ func TestResolveEmptyAndNil(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse empty: %v", err)
 	}
-	if a, m := empty.Resolve("sdlc", "design"); a != "" || m != "" {
+	if a, m := resolve(empty, "sdlc", "design"); a != "" || m != "" {
 		t.Errorf("empty sheet: got (%q,%q), want empty", a, m)
 	}
 	var nilSheet *Sheet
-	if a, m := nilSheet.Resolve("sdlc", "design"); a != "" || m != "" {
+	if a, m := resolve(nilSheet, "sdlc", "design"); a != "" || m != "" {
 		t.Errorf("nil sheet: got (%q,%q), want empty", a, m)
 	}
 }
@@ -66,11 +66,11 @@ func TestResolveEmptyAndNil(t *testing.T) {
 // TestResolveLastWinsSameSelector pins that a property repeated across
 // two rules of identical specificity takes the later rule's value.
 func TestResolveLastWinsSameSelector(t *testing.T) {
-	s, err := Parse([]byte("sdlc.design { model: a; }\nsdlc.design { model: b; }\n"))
+	s, err := Parse([]byte("sdlc.design { model-claude: a; }\nsdlc.design { model-claude: b; }\n"))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if _, m := s.Resolve("sdlc", "design"); m != "b" {
+	if _, m := resolve(s, "sdlc", "design"); m != "b" {
 		t.Errorf("last-wins: got %q, want b", m)
 	}
 }
@@ -83,17 +83,17 @@ func TestParseOperatorFile(t *testing.T) {
    Stages not matched here keep the vendor CLI's own default model.
    ` + "`fable`" + ` is claude's floating latest-in-family alias. */
 
-sdlc.design { model: fable; }
-sdlc.review { model: fable; }
+sdlc.design { model-claude: fable; }
+sdlc.review { model-claude: fable; }
 `
 	s, err := Parse([]byte(src))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if a, m := s.Resolve("sdlc", "design"); a != "" || m != "fable" {
+	if a, m := resolve(s, "sdlc", "design"); a != "" || m != "fable" {
 		t.Errorf("design: got (%q,%q), want ('','fable')", a, m)
 	}
-	if a, m := s.Resolve("sdlc", "code"); a != "" || m != "" {
+	if a, m := resolve(s, "sdlc", "code"); a != "" || m != "" {
 		t.Errorf("unmatched code stage should keep vendor default: got (%q,%q)", a, m)
 	}
 }
@@ -101,11 +101,11 @@ sdlc.review { model: fable; }
 // TestParseUnknownPropertyIgnored pins that a property Resolve never
 // reads is legal (valid CSS a browser ignores), not a parse error.
 func TestParseUnknownPropertyIgnored(t *testing.T) {
-	s, err := Parse([]byte("* { color: red; model: opus; }"))
+	s, err := Parse([]byte("* { color: red; model-claude: opus; }"))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if _, m := s.Resolve("sdlc", "design"); m != "opus" {
+	if _, m := resolve(s, "sdlc", "design"); m != "opus" {
 		t.Errorf("got model %q, want opus", m)
 	}
 }
@@ -117,13 +117,13 @@ func TestParseErrors(t *testing.T) {
 		name, src, wantSub string
 	}{
 		{"no brace", "sdlc.design model: opus;", "no '{'"},
-		{"no close", "sdlc.design { model: opus;", "no '}'"},
+		{"no close", "sdlc.design { model-claude: opus;", "no '}'"},
 		{"no colon", "sdlc.design { model opus; }", "missing ':'"},
-		{"empty value", "sdlc.design { model: ; }", "empty value"},
-		{"empty selector", "{ model: opus; }", "empty selector"},
-		{"bad selector", "sd lc { model: opus; }", "invalid"},
+		{"empty value", "sdlc.design { model-claude: ; }", "empty value"},
+		{"empty selector", "{ model-claude: opus; }", "empty selector"},
+		{"bad selector", "sd lc { model-claude: opus; }", "invalid"},
 		{"unterminated comment", "/* nope", "unterminated comment"},
-		{"stray brace", "sdlc { model: opus; ", "no '}'"},
+		{"stray brace", "sdlc { model-claude: opus; ", "no '}'"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -159,7 +159,7 @@ func TestLoadMissingFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load missing: %v", err)
 	}
-	if a, m := s.Resolve("sdlc", "design"); a != "" || m != "" {
+	if a, m := resolve(s, "sdlc", "design"); a != "" || m != "" {
 		t.Errorf("missing file should resolve empty: got (%q,%q)", a, m)
 	}
 }
@@ -179,14 +179,14 @@ func TestLoadParseFailure(t *testing.T) {
 // TestLoadValidFile round-trips a real file through Load.
 func TestLoadValidFile(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, FileName), []byte("sdlc.review { model: fable; agent: codex; }"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, FileName), []byte("sdlc.review { model-claude: fable; agent: codex; }"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	s, err := Load(dir)
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	if a, m := s.Resolve("sdlc", "review"); a != "codex" || m != "fable" {
+	if a, m := resolve(s, "sdlc", "review"); a != "codex" || m != "fable" {
 		t.Errorf("got (%q,%q), want (codex,fable)", a, m)
 	}
 }
@@ -213,11 +213,11 @@ func TestValidateErrors(t *testing.T) {
 		src  string
 		subs []string
 	}{
-		{"unknown workflow (wf.stage)", "sldc.design { model: opus; }", []string{"line 1", "unknown workflow", `"sldc"`, "sdlc", "pulse"}},
-		{"unknown workflow (bare)", "sldc { model: opus; }", []string{"unknown workflow", `"sldc"`}},
-		{"cross-workflow stage", "sdlc.pulse { model: opus; }", []string{"unknown stage", `"pulse"`, "in workflow", `"sdlc"`, "design"}},
-		{"unknown stage (bare)", ".reveiw { model: opus; }", []string{"unknown stage", `"reveiw"`, "review"}},
-		{"unknown property", "sdlc.design { modle: opus; }", []string{"unknown property", `"modle"`, "agent, model"}},
+		{"unknown workflow (wf.stage)", "sldc.design { model-claude: opus; }", []string{"line 1", "unknown workflow", `"sldc"`, "sdlc", "pulse"}},
+		{"unknown workflow (bare)", "sldc { model-claude: opus; }", []string{"unknown workflow", `"sldc"`}},
+		{"cross-workflow stage", "sdlc.pulse { model-claude: opus; }", []string{"unknown stage", `"pulse"`, "in workflow", `"sdlc"`, "design"}},
+		{"unknown stage (bare)", ".reveiw { model-claude: opus; }", []string{"unknown stage", `"reveiw"`, "review"}},
+		{"unknown property", "sdlc.design { modle: opus; }", []string{"unknown property", `"modle"`, "agent, model-claude, model-codex"}},
 		{"unknown agent", "sdlc.design { agent: codxe; }", []string{"unknown agent", `"codxe"`, "claude, codex"}},
 	}
 	for _, c := range cases {
@@ -242,7 +242,7 @@ func TestValidateErrors(t *testing.T) {
 // TestValidateErrorLine pins that the reported line tracks the rule's
 // position, not always line 1.
 func TestValidateErrorLine(t *testing.T) {
-	s, err := Parse([]byte("sdlc.design { model: fable; }\n\nsldc.review { model: fable; }\n"))
+	s, err := Parse([]byte("sdlc.design { model-claude: fable; }\n\nsldc.review { model-claude: fable; }\n"))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -262,11 +262,11 @@ func TestValidatePasses(t *testing.T) {
 		t.Errorf("empty sheet: %v", err)
 	}
 	good := []string{
-		"* { model: fable; agent: claude; }",
+		"* { model-claude: fable; agent: claude; }",
 		"sdlc { agent: codex; }",
-		".review { model: fable; }",
-		"sdlc.code { agent: claude; model: opus; }",
-		"pulse.pulse { agent: claude; model: sonnet; }",
+		".review { model-claude: fable; }",
+		"sdlc.code { agent: claude; model-claude: opus; }",
+		"pulse.pulse { agent: claude; model-claude: sonnet; }",
 	}
 	for _, src := range good {
 		s, err := Parse([]byte(src))
@@ -287,9 +287,9 @@ func TestValidateOperatorFile(t *testing.T) {
    Stages not matched here keep the vendor CLI's own default model.
    ` + "`fable`" + ` is claude's floating latest-in-family alias. */
 
-pulse.pulse { agent: claude; model: sonnet; }
-sdlc.design { agent: claude; model: fable; }
-sdlc.review { agent: claude; model: fable; }
+pulse.pulse { agent: claude; model-claude: sonnet; }
+sdlc.design { agent: claude; model-claude: fable; }
+sdlc.review { agent: claude; model-claude: fable; }
 `
 	s, err := Parse([]byte(src))
 	if err != nil {
@@ -303,7 +303,7 @@ sdlc.review { agent: claude; model: fable; }
 // TestValidateModelUnchecked pins the one deliberate hole: a model value
 // with no catalog behind it floats through Validate untouched.
 func TestValidateModelUnchecked(t *testing.T) {
-	s, err := Parse([]byte("sdlc.design { model: no-such-model-9000; }"))
+	s, err := Parse([]byte("sdlc.design { model-claude: no-such-model-9000; }"))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -337,8 +337,8 @@ sdlc.design { model-codex: last; }
 				t.Errorf("ModelForAgent(%q, %q, %q) = %q, want %q", tc.workflow, tc.stage, backend, got, want)
 			}
 		}
-		if a, m := s.Resolve(tc.workflow, tc.stage); a != "" || m != "" {
-			t.Errorf("model choices selected agent/legacy model: (%q, %q)", a, m)
+		if a := s.Agent(tc.workflow, tc.stage); a != "" {
+			t.Errorf("model choices selected agent %q", a)
 		}
 	}
 	if got := s.ModelForAgent("sdlc", "design", "other"); got != "" {
@@ -365,7 +365,7 @@ func TestValidateBackendModelProperties(t *testing.T) {
 			t.Fatal(err)
 		}
 		err = s.Validate(testVocab())
-		for _, want := range []string{"line 3", prop, "known: agent, model, model-claude, model-codex"} {
+		for _, want := range []string{"line 3", prop, "known: agent, model-claude, model-codex"} {
 			if err == nil || !strings.Contains(err.Error(), want) {
 				t.Errorf("Validate error = %v, want %q", err, want)
 			}
@@ -384,5 +384,30 @@ func TestValidateBackendModelProperties(t *testing.T) {
 	v.Agents = append(v.Agents, "future")
 	if err := s.Validate(v); err != nil {
 		t.Errorf("registered backend model property rejected: %v", err)
+	}
+}
+
+// resolve reads the agent and the claude model a turn gets — the pair the
+// cascade tests pin.
+func resolve(s *Sheet, workflow, stage string) (string, string) {
+	return s.Agent(workflow, stage), s.ModelForAgent(workflow, stage, "claude")
+}
+
+// TestValidateRefusesBareModel pins the removal of the backend-agnostic
+// `model` property: a sheet that still carries one refuses with its line,
+// rather than handing one backend's model id to whichever runs.
+func TestValidateRefusesBareModel(t *testing.T) {
+	s, err := Parse([]byte("sdlc.design { agent: claude; }\n\nsdlc.review { model: x; }\n"))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	err = s.Validate(testVocab())
+	if err == nil {
+		t.Fatal("bare model property validated")
+	}
+	for _, want := range []string{"line 3", "unknown property", `"model"`} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q missing %q", err, want)
+		}
 	}
 }

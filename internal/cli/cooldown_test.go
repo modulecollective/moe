@@ -341,7 +341,7 @@ func TestCooldownRefreshesSelectionAndPromptFromMain(t *testing.T) {
 	t.Cleanup(func() { agent.Unregister("quota-after") })
 	fake.canvasRel = run.ContentPath("tele", "fix-it", "code")
 	t.Chdir(root)
-	oldSheet := "* { agent: quota-before; model: old-model; }\n"
+	oldSheet := "* { agent: quota-before; model-quota-before: old-model; }\n"
 	gittest.WriteAndCommit(t, root, "model-stylesheet.css", oldSheet, "initial selection")
 	originalFactory := newCooldownGate
 	originalRead := readStageQuota
@@ -364,7 +364,7 @@ func TestCooldownRefreshesSelectionAndPromptFromMain(t *testing.T) {
 			slept = true
 			now = now.Add(d)
 			// Move canonical main while the reserved session waits.
-			gittest.WriteAndCommit(t, root, "model-stylesheet.css", "* { agent: quota-after; model: new-model; }\n", "operator changes backend")
+			gittest.WriteAndCommit(t, root, "model-stylesheet.css", "* { agent: quota-after; model-quota-after: new-model; }\n", "operator changes backend")
 			gittest.WriteAndCommit(t, root, run.ContentPath("tele", "fix-it", "design"), "# Design\n\nFresh contract after quota wait.\n", "operator updates design")
 			if _, err := input.Add(root, "tele", "fix-it", "Fresh contract after quota wait."); err != nil {
 				t.Fatal(err)

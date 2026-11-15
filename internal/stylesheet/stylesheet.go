@@ -22,8 +22,9 @@
 //     `.review` tie. Properties cascade independently — the winning
 //     model choices and the winning `agent` need not share a rule.
 //
-// Values are bare tokens: a `model` is handed verbatim to the vendor
-// CLI's `--model`, an `agent` is resolved through the agent registry.
+// Values are bare tokens: a `model-<agent>` value is handed verbatim to
+// that vendor CLI's `--model`, an `agent` is resolved through the agent
+// registry.
 // Validate (run at the load site) checks the sheet's own vocabulary
 // against the live registries — selectors name real workflows and
 // stages, property names are ones moe reads, and `agent` values name
@@ -49,8 +50,8 @@ import (
 const FileName = "model-stylesheet.css"
 
 // Sheet is a parsed stylesheet: an ordered list of rules. The zero value
-// (and a nil *Sheet) is a valid empty sheet whose Resolve returns
-// ("", "") for everything — the no-rules default.
+// (and a nil *Sheet) is a valid empty sheet whose lookups return
+// "" for everything — the no-rules default.
 type Sheet struct {
 	rules []rule
 }
@@ -108,17 +109,15 @@ func Load(root string) (*Sheet, error) {
 	return s, nil
 }
 
-// Resolve returns the agent and model that apply to a (workflow, stage)
-// turn. An empty return for either means no rule set it — the caller
-// keeps its own default (the agent ladder's next rung, or the vendor
-// CLI's default model). The two properties are resolved independently.
-func (s *Sheet) Resolve(workflow, stage string) (agent, model string) {
-	return s.property(workflow, stage, "agent"), s.property(workflow, stage, "model")
+// Agent returns the backend that applies to a (workflow, stage) turn.
+// Empty means no rule set it — the caller keeps the agent ladder's next
+// rung.
+func (s *Sheet) Agent(workflow, stage string) string {
+	return s.property(workflow, stage, "agent")
 }
 
 // ModelForAgent returns the backend-specific model for a turn. This
-// property cascades independently of agent and the legacy model property;
-// it never selects a backend. Empty means no model was set for this agent.
+// property cascades independently of agent; it never selects a backend. Empty means no model was set for this agent.
 func (s *Sheet) ModelForAgent(workflow, stage, agent string) string {
 	return s.property(workflow, stage, "model-"+agent)
 }
@@ -182,7 +181,7 @@ func (s *Sheet) Validate(v Vocab) error {
 	if s == nil {
 		return nil
 	}
-	properties := []string{"agent", "model"}
+	properties := []string{"agent"}
 	for _, name := range v.Agents {
 		properties = append(properties, "model-"+name)
 	}

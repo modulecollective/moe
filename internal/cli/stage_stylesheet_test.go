@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"strings"
 	"testing"
 
 	"github.com/modulecollective/moe/internal/agent"
@@ -34,17 +33,14 @@ func TestBackendModelSelectionLadder(t *testing.T) {
 				case "stylesheet":
 					sheetAgent = backend
 				}
-				// A broad backend choice beats the more specific legacy value.
-				s, err := stylesheet.Parse([]byte("* { model-codex: codex-choice; model-claude: claude-choice; }\nsdlc.design { agent: " + sheetAgent + "; model: legacy; }"))
+				// A broad backend model follows whichever backend the ladder picks.
+				s, err := stylesheet.Parse([]byte("* { model-codex: codex-choice; model-claude: claude-choice; }\nsdlc.design { agent: " + sheetAgent + "; }"))
 				if err != nil {
 					t.Fatal(err)
 				}
-				a, m := s.Resolve("sdlc", "design")
-				resolved := stageAgentName(opts, md, a)
-				var stderr bytes.Buffer
-				got := stageModel("", s.ModelForAgent("sdlc", "design", resolved), a, m, resolved, &stderr)
-				if resolved != backend || got != backend+"-choice" || stderr.Len() != 0 {
-					t.Fatalf("agent=%q model=%q stderr=%q", resolved, got, stderr.String())
+				resolved := stageAgentName(opts, md, s.Agent("sdlc", "design"))
+				if got := s.ModelForAgent("sdlc", "design", resolved); resolved != backend || got != backend+"-choice" {
+					t.Fatalf("agent=%q model=%q", resolved, got)
 				}
 			})
 		}
@@ -59,12 +55,9 @@ func TestBackendModelSelectionLadder(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		a, m := s.Resolve("sdlc", "design")
-		resolved := stageAgentName(stageSessionOpts{}, nil, a)
-		var stderr bytes.Buffer
-		got := stageModel("", s.ModelForAgent("sdlc", "design", resolved), a, m, resolved, &stderr)
-		if resolved != "claude" || got != tc.model || stderr.Len() != 0 {
-			t.Errorf("model-only sheet selected agent=%q model=%q stderr=%q", resolved, got, stderr.String())
+		resolved := stageAgentName(stageSessionOpts{}, nil, s.Agent("sdlc", "design"))
+		if got := s.ModelForAgent("sdlc", "design", resolved); resolved != "claude" || got != tc.model {
+			t.Errorf("model-only sheet selected agent=%q model=%q", resolved, got)
 		}
 	}
 }
@@ -113,9 +106,6 @@ func TestBackendModelsReachStageDispatch(t *testing.T) {
 				call := fake.execCalls[i]
 				if call.method != method || call.model != tc.model {
 					t.Errorf("turn %d: method=%s model=%q, want %s / %q", i, call.method, call.model, method, tc.model)
-				}
-				if strings.Contains(stderr.String(), "dropping model") {
-					t.Errorf("backend choice emitted legacy drop notice: %s", stderr.String())
 				}
 			}
 		})

@@ -13,6 +13,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -152,10 +153,10 @@ type stageSessionOpts struct {
 	NextStageOverride string
 	// Model, if non-empty, is the `--model` value for this turn's agent
 	// invocation — both the interactive and headless paths. Empty defers
-	// to the vendor CLI's configured default. runStageSession populates it
-	// via stageModel when a caller leaves it empty — the backend-specific
-	// choice, then the legacy model with its pairing rule. A bounded
-	// curation caller (push synthesis) that sets it explicitly keeps it.
+	// to the vendor CLI's configured default. runStageSession fills it
+	// from the stylesheet's model-<agent> for the resolved backend when a
+	// caller leaves it empty. A bounded curation caller (push synthesis)
+	// that sets it explicitly keeps it.
 	Model string
 	// CanvasSkeleton, when non-empty, is written to the canvas file the
 	// first time the document is opened (the EnsureDocument-mutated
@@ -248,28 +249,6 @@ func stylesheetVocab() stylesheet.Vocab {
 		}
 	}
 	return stylesheet.Vocab{Workflows: wf, Agents: agent.Names(), Retired: retired}
-}
-
-// stageModel chooses an explicit model, then the resolved backend's model,
-// then the legacy model. Legacy pairing uses the sheet's winning agent
-// property: forcing a different backend drops that fallback with a notice.
-// An unpaired legacy model is handed verbatim to whichever backend runs.
-func stageModel(explicit, backendModel, sheetAgent, sheetModel, agentName string, stderr io.Writer) string {
-	if explicit != "" {
-		return explicit
-	}
-	if backendModel != "" {
-		return backendModel
-	}
-	if sheetModel == "" {
-		return ""
-	}
-	if sheetAgent != "" && sheetAgent != agentName {
-		moePrintf(stderr, "model-stylesheet: dropping model %q (rule pairs agent %s; turn runs %s)\n",
-			sheetModel, sheetAgent, agentName)
-		return ""
-	}
-	return sheetModel
 }
 
 // resolveAgentName picks the backend for this turn. Precedence:
@@ -430,9 +409,8 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		return 1
 	}
 	explicitModel := opts.Model
-	sheetAgent, sheetModel := sheet.Resolve(md.Workflow, docID)
-	agentName := stageAgentName(opts, md, sheetAgent)
-	opts.Model = stageModel(opts.Model, sheet.ModelForAgent(md.Workflow, docID, agentName), sheetAgent, sheetModel, agentName, stderr)
+	agentName := stageAgentName(opts, md, sheet.Agent(md.Workflow, docID))
+	opts.Model = cmp.Or(opts.Model, sheet.ModelForAgent(md.Workflow, docID, agentName))
 	// A project-doc fix turn runs *inside* an outer stage's banner pair, so
 	// framing it as a stage of its own reads as two stages having run.
 	// The gate already announces it on one line; that line is the whole
@@ -537,9 +515,8 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		if err := currentSheet.Validate(stylesheetVocab()); err != nil {
 			return "", "", err
 		}
-		sa, sm := currentSheet.Resolve(fresh.Workflow, docID)
-		name := stageAgentName(opts, fresh, sa)
-		model := stageModel(explicitModel, currentSheet.ModelForAgent(fresh.Workflow, docID, name), sa, sm, name, stderr)
+		name := stageAgentName(opts, fresh, currentSheet.Agent(fresh.Workflow, docID))
+		model := cmp.Or(explicitModel, currentSheet.ModelForAgent(fresh.Workflow, docID, name))
 		*md = *fresh
 		return name, model, nil
 	}

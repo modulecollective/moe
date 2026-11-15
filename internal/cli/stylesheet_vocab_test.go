@@ -34,7 +34,7 @@ func TestStylesheetVocab(t *testing.T) {
 			t.Errorf("Retired[sdlc][%s] = %q, want build", retired, got)
 		}
 	}
-	for _, rule := range []string{"sdlc.code { model: x; }\n", ".test { model: x; }\n"} {
+	for _, rule := range []string{"sdlc.code { model-claude: x; }\n", ".test { model-claude: x; }\n"} {
 		s, err := stylesheet.Parse([]byte(rule))
 		if err != nil {
 			t.Fatal(err)
@@ -61,11 +61,11 @@ func TestStylesheetVocab(t *testing.T) {
 func TestStylesheetVocabRejectsTypos(t *testing.T) {
 	v := stylesheetVocab()
 	bad := []string{
-		"sldc.design { model: fable; }", // unknown workflow
-		"sdlc.pulse { model: fable; }",  // stage not in that workflow
-		".reveiw { model: fable; }",     // unknown stage
-		"sdlc.design { modle: fable; }", // unknown property
-		"sdlc.design { agent: codxe; }", // unknown agent
+		"sldc.design { model-claude: fable; }", // unknown workflow
+		"sdlc.pulse { model-claude: fable; }",  // stage not in that workflow
+		".reveiw { model-claude: fable; }",     // unknown stage
+		"sdlc.design { modle: fable; }",        // unknown property
+		"sdlc.design { agent: codxe; }",        // unknown agent
 	}
 	for _, src := range bad {
 		s, err := stylesheet.Parse([]byte(src))
@@ -78,7 +78,7 @@ func TestStylesheetVocabRejectsTypos(t *testing.T) {
 	}
 
 	// The operator's live bindings still pass against the real vocab.
-	good, err := stylesheet.Parse([]byte("pulse.pulse { agent: claude; model: sonnet; }\nsdlc.design { agent: claude; model: fable; }\n"))
+	good, err := stylesheet.Parse([]byte("pulse.pulse { agent: claude; model-claude: sonnet; }\nsdlc.design { agent: claude; model-claude: fable; }\n"))
 	if err != nil {
 		t.Fatalf("parse operator bindings: %v", err)
 	}
