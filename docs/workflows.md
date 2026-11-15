@@ -370,8 +370,8 @@ keeps a running editor across restarts to preserve drafts. This also keeps
 its old binary: save or discard drafts and quit/reopen to update it. On a
 later serve startup, an exited editor or a restored shell or other process
 positively identified as not running MoE is replaced; uncertain process
-identity or duplicate labels leave blocks alone. The old managed `dash`
-block is retired, and serve shutdown leaves the UI running.
+identity or duplicate labels leave blocks alone. Serve shutdown leaves the
+UI running.
 
 None of them interrupts an agent. The owner finishes the turn it is on —
 commit, transcript, input stamps, any recovery that turn needs — and acts at
