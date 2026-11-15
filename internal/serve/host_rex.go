@@ -243,8 +243,6 @@ func (h *rexHost) reconcile() error {
 }
 func (h *rexHost) shutdown(context.Context, io.Writer) { h.cancel() }
 
-// The old read-only console is retired when the editor takes its place.
-const rexDashLabel = "dash"
 const rexUILabel = "ui"
 
 // openUI keeps a running editor across serve restarts: replacing it would
@@ -258,7 +256,6 @@ func (h *rexHost) openUI() {
 		return
 	}
 	var current string
-	var legacy []string
 	if session := h.sessionID(); session != "" {
 		bs, err := h.blocks(session)
 		if err != nil {
@@ -269,22 +266,14 @@ func (h *rexHost) openUI() {
 			}
 		}
 		for _, b := range bs {
-			switch b.Label {
-			case rexUILabel:
-				if current != "" {
-					h.logf("host: rex ui not opened: duplicate managed ui blocks; leaving editors alone")
-					return
-				}
-				current = b.ID
-			case rexDashLabel:
-				legacy = append(legacy, b.ID)
+			if b.Label != rexUILabel {
+				continue
 			}
-		}
-	}
-	for _, block := range legacy {
-		if err := h.closeBlock(block); err != nil {
-			h.logf("host: rex ui not opened: close legacy dash: %v", err)
-			return
+			if current != "" {
+				h.logf("host: rex ui not opened: duplicate managed ui blocks; leaving editors alone")
+				return
+			}
+			current = b.ID
 		}
 	}
 	if current != "" {

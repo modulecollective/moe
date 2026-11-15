@@ -171,7 +171,6 @@ func TestRexStartupWaitsForReconciliation(t *testing.T) {
 				t.Fatalf("later tick repeated adoption or dash: %q", fake.calls()[before:])
 			}
 			calls := fake.calls()
-			closeAt := slices.Index(calls, "block close block:D")
 			dashAt, betaAt, dashCount := -1, -1, 0
 			for i, call := range calls {
 				if strings.Contains(call, "--label ui ") {
@@ -181,8 +180,8 @@ func TestRexStartupWaitsForReconciliation(t *testing.T) {
 					betaAt = i
 				}
 			}
-			if closeAt < 0 || dashAt <= closeAt || betaAt <= dashAt || dashCount != 1 {
-				t.Fatalf("want one dash refresh after adoption and before beta: %q", calls)
+			if fake.called("block close block:D") || dashAt < 0 || betaAt <= dashAt || dashCount != 1 {
+				t.Fatalf("want one ui launch before beta, the dash block left alone: %q", calls)
 			}
 			fake.release("wait")
 			waitRexWorkers(t, testRex(s.children))

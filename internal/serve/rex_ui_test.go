@@ -84,7 +84,7 @@ func TestRexUIRestartLifetime(t *testing.T) {
 				}
 			}
 			fake := newFakeRex(t)
-			fake.reply("block-ls", `{"blocks":[{"block_id":"block:EDITOR","label":"ui"},{"block_id":"block:LEGACY","label":"dash"},{"block_id":"block:JOB","label":"heartbeat:p"},{"block_id":"block:MANUAL","label":"my terminal"}]}`, 0)
+			fake.reply("block-ls", `{"blocks":[{"block_id":"block:EDITOR","label":"ui"},{"block_id":"block:DASH","label":"dash"},{"block_id":"block:JOB","label":"heartbeat:p"},{"block_id":"block:MANUAL","label":"my terminal"}]}`, 0)
 			fake.reply("block-call", tc.process, tc.status)
 			fake.reply("run", `{"block_ids":["block:NEW"]}`, 0)
 			var log syncBuf
@@ -93,13 +93,10 @@ func TestRexUIRestartLifetime(t *testing.T) {
 			h.session = "session:S"
 			h.moeBin = moeBin
 			h.openUI()
-			if !fake.called("block close block:LEGACY") {
-				t.Fatal("legacy dash not retired")
-			}
 			if fake.called("block close block:EDITOR") != tc.replace || fake.called("run ") != tc.replace {
 				t.Fatalf("wrong replacement: %q", fake.calls())
 			}
-			if fake.called("block close block:JOB") || fake.called("block close block:MANUAL") {
+			if fake.called("block close block:JOB") || fake.called("block close block:MANUAL") || fake.called("block close block:DASH") {
 				t.Fatal("unrelated block closed")
 			}
 			calls := fake.calls()

@@ -602,10 +602,10 @@ func TestRexStartupOpensTheDash(t *testing.T) {
 	}
 }
 
-// TestRexStartupReplacesTheDash: a dash block a previous serve left runs
-// the binary that serve was, so it is closed and a fresh one launched —
-// after adoption, which leaves the heartbeat blocks as they are.
-func TestRexStartupReplacesTheDash(t *testing.T) {
+// TestRexStartupOpensUIBesideOtherBlocks: with no ui block in the session,
+// startup launches one after adoption, and leaves every other block — the
+// adopted heartbeat, a pane labelled "dash" — as it is.
+func TestRexStartupOpensUIBesideOtherBlocks(t *testing.T) {
 	fake := rexStartupFake(t)
 	fake.reply("block-ls", `{"blocks":[`+
 		`{"block_id":"block:A","label":"heartbeat:alpha"},`+
@@ -624,20 +624,18 @@ func TestRexStartupReplacesTheDash(t *testing.T) {
 		t.Error("the heartbeat block was not adopted")
 	}
 	calls := fake.calls()
-	closeAt := slices.Index(calls, "block close block:OLD")
-	runAt := slices.Index(calls, "run --json --focus=false --keep-open -s session:S --label ui --cwd "+root+
-		" -- /usr/bin/env MOE_HOME="+root+" "+moe+" ui")
-	if closeAt < 0 || runAt < closeAt {
-		t.Errorf("rex calls = %q, want the old dash closed, then a new one run", calls)
+	if !slices.Contains(calls, "run --json --focus=false --keep-open -s session:S --label ui --cwd "+root+
+		" -- /usr/bin/env MOE_HOME="+root+" "+moe+" ui") {
+		t.Errorf("rex calls = %q, want a ui launched", calls)
 	}
-	if fake.called("block close block:A") {
-		t.Errorf("rex calls = %q, want the adopted heartbeat block left alone", calls)
+	if fake.called("block close") {
+		t.Errorf("rex calls = %q, want the heartbeat and dash blocks left alone", calls)
 	}
 }
 
 // TestRexDashFailureHoldsNothing: a dash that won't open is a log line.
 // The heartbeat dispatches on the next tick, creating the session the
-// dash couldn't — and its close failing launches no second dash.
+// dash couldn't — and an exited ui that won't close launches no second one.
 func TestRexDashFailureHoldsNothing(t *testing.T) {
 	t.Run("launch fails", func(t *testing.T) {
 		fake := rexStartupFake(t)
@@ -662,7 +660,8 @@ func TestRexDashFailureHoldsNothing(t *testing.T) {
 	})
 	t.Run("close fails", func(t *testing.T) {
 		fake := rexStartupFake(t)
-		fake.reply("block-ls", `{"blocks":[{"block_id":"block:OLD","label":"dash"}]}`, 0)
+		fake.reply("block-ls", `{"blocks":[{"block_id":"block:OLD","label":"ui"}]}`, 0)
+		fake.reply("block-call", `{"last_exit":{"exit_code":0}}`, 0)
 		fake.reply("block-close", "", 1)
 		var log syncBuf
 		root := t.TempDir()
