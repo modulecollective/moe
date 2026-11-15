@@ -7,12 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/modulecollective/moe/internal/atomicfile"
 )
 
 // Rex as the host for serve's background jobs.
@@ -326,24 +327,7 @@ func (h *rexHost) establish() error {
 		h.candidate = created.SessionID
 		h.bootstrap = created.Windows[0].BlockIDs[0]
 	}
-	path := rexSessionPath(h.root)
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return fmt.Errorf("rex record session: %w", err)
-	}
-	f, err := os.CreateTemp(filepath.Dir(path), "rex-session-*")
-	if err != nil {
-		return fmt.Errorf("rex record session: %w", err)
-	}
-	defer os.Remove(f.Name())
-	_, writeErr := f.WriteString(h.candidate + "\n")
-	closeErr := f.Close()
-	if writeErr != nil {
-		return fmt.Errorf("rex record session: %w", writeErr)
-	}
-	if closeErr != nil {
-		return fmt.Errorf("rex record session: %w", closeErr)
-	}
-	if err := os.Rename(f.Name(), path); err != nil {
+	if err := atomicfile.Write(rexSessionPath(h.root), []byte(h.candidate+"\n"), 0o600); err != nil {
 		return fmt.Errorf("rex record session: %w", err)
 	}
 	h.mu.Lock()

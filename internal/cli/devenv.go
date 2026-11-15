@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/modulecollective/moe/internal/atomicfile"
 	"github.com/modulecollective/moe/internal/banner"
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/project"
@@ -315,9 +316,6 @@ func validDevEnvRevision(revision string) bool {
 }
 
 func writeDevEnvCacheRevision(cachePath string, env map[string]string, owner, revision string) error {
-	if err := os.MkdirAll(filepath.Dir(cachePath), 0o755); err != nil {
-		return fmt.Errorf("dev-env: mkdir cache dir: %w", err)
-	}
 	keys := make([]string, 0, len(env))
 	for k := range env {
 		keys = append(keys, k)
@@ -337,24 +335,7 @@ func writeDevEnvCacheRevision(cachePath string, env map[string]string, owner, re
 		b.WriteString(env[k])
 		b.WriteByte('\n')
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(cachePath), ".dev-env.env-*")
-	if err != nil {
-		return fmt.Errorf("dev-env: create cache temp: %w", err)
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if err := tmp.Chmod(0o644); err != nil {
-		tmp.Close()
-		return fmt.Errorf("dev-env: chmod cache temp: %w", err)
-	}
-	if _, err := io.WriteString(tmp, b.String()); err != nil {
-		tmp.Close()
-		return fmt.Errorf("dev-env: write cache temp: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("dev-env: close cache temp: %w", err)
-	}
-	if err := os.Rename(tmpPath, cachePath); err != nil {
+	if err := atomicfile.Write(cachePath, []byte(b.String()), 0o644); err != nil {
 		return fmt.Errorf("dev-env: publish cache: %w", err)
 	}
 	return nil

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/modulecollective/moe/internal/atomicfile"
 	"github.com/modulecollective/moe/internal/repolock"
 )
 
@@ -475,29 +476,14 @@ func ReadActivitySnapshot(root string) (snap ActivitySnapshot, ok bool, err erro
 // pushes burst to a handful a minute, each already behind a 1-5s network
 // push, so the write is still free.
 func writeSnapshot(root string, snap ActivitySnapshot) error {
-	dir, err := repolock.EnsureDir(root)
-	if err != nil {
+	if _, err := repolock.EnsureDir(root); err != nil {
 		return err
 	}
 	body, err := json.MarshalIndent(snap, "", "  ")
 	if err != nil {
 		return err
 	}
-	body = append(body, '\n')
-	tmp, err := os.CreateTemp(dir, "serve.json.tmp.*")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if _, err := tmp.Write(body); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, ActivityPath(root))
+	return atomicfile.Write(ActivityPath(root), append(body, '\n'), 0o600)
 }
 
 // removeSnapshot drops the state file. Called on clean shutdown, which

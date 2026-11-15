@@ -12,17 +12,15 @@ import (
 	"github.com/modulecollective/moe/internal/git/gittest"
 )
 
-func preserveReplaceOps(t *testing.T) {
+func preserveReplaceFile(t *testing.T) {
 	t.Helper()
-	create, write, close, chmod, rename := replaceCreateTemp, replaceWrite, replaceClose, replaceChmod, replaceRename
-	t.Cleanup(func() {
-		replaceCreateTemp, replaceWrite, replaceClose, replaceChmod, replaceRename = create, write, close, chmod, rename
-	})
+	orig := replaceFile
+	t.Cleanup(func() { replaceFile = orig })
 }
 
 func requireNoInputTemps(t *testing.T, path string) {
 	t.Helper()
-	matches, err := filepath.Glob(filepath.Join(filepath.Dir(path), ".inputs-*.json"))
+	matches, err := filepath.Glob(filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*"))
 	if err != nil || len(matches) != 0 {
 		t.Fatalf("temporary residue = %v, error = %v", matches, err)
 	}
@@ -123,7 +121,7 @@ func TestRestorePublishesGeneration(t *testing.T) {
 	requireNoInputTemps(t, path)
 }
 
-func TestAddPartialWritePreservesDestination(t *testing.T) {
+func TestAddPublishFailurePreservesDestination(t *testing.T) {
 	for _, existed := range []bool{false, true} {
 		t.Run(fmt.Sprintf("existed=%t", existed), func(t *testing.T) {
 			root := seedRoot(t)
@@ -135,25 +133,13 @@ func TestAddPartialWritePreservesDestination(t *testing.T) {
 			}
 			before := readInputPath(t, root, rel)
 			head := gittest.HeadSHA(t, root)
-			preserveReplaceOps(t)
-			failure := errors.New("partial temporary write")
-			wrote := false
-			replaceWrite = func(f *os.File, body []byte) (int, error) {
-				n, err := f.Write(body[:len(body)/2])
-				if err != nil {
-					t.Fatal(err)
-				}
-				wrote = true
-				// A reader during the partial write still opens the old record.
-				requireInputPath(t, root, rel, before)
-				if _, err := Load(root, "moe", "destination"); err != nil {
-					t.Fatalf("reader during partial write: %v", err)
-				}
-				return n, failure
-			}
+			preserveReplaceFile(t)
+			failure := errors.New("publish failed")
+			called := false
+			replaceFile = func(string, []byte) error { called = true; return failure }
 			_, err := Add(root, "moe", "destination", "rejected note")
-			if !wrote || !errors.Is(err, failure) {
-				t.Fatalf("partial write = %v, wrote = %t", err, wrote)
+			if !called || !errors.Is(err, failure) {
+				t.Fatalf("failed publish = %v, called = %t", err, called)
 			}
 			requireInputPath(t, root, rel, before)
 			if gittest.HeadSHA(t, root) != head {
@@ -161,100 +147,6 @@ func TestAddPartialWritePreservesDestination(t *testing.T) {
 			}
 			requireNoInputTemps(t, path)
 		})
-	}
-}
-
-func TestReplacePreparationFailure(t *testing.T) {
-	for _, operation := range []string{"create", "write and close", "close", "chmod"} {
-		t.Run(operation, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), FileName)
-			const original = "original bytes\n"
-			if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			preserveReplaceOps(t)
-			failure := errors.New(operation + " failed")
-			closeFailure := errors.New("close after failed write")
-			switch operation {
-			case "create":
-				replaceCreateTemp = func(string, string) (*os.File, error) { return nil, failure }
-			case "write and close":
-				replaceWrite = func(*os.File, []byte) (int, error) { return 0, failure }
-				replaceClose = func(f *os.File) error { return errors.Join(f.Close(), closeFailure) }
-			case "close":
-				replaceClose = func(f *os.File) error { return errors.Join(f.Close(), failure) }
-			case "chmod":
-				replaceChmod = func(string, os.FileMode) error { return failure }
-			}
-			published := false
-			replaceRename = func(string, string) error { published = true; return nil }
-			err := replaceFile(path, []byte("replacement\n"))
-			if !errors.Is(err, failure) || published {
-				t.Fatalf("preparation failure = %v, published = %t", err, published)
-			}
-			if operation == "write and close" && !errors.Is(err, closeFailure) {
-				t.Fatalf("lost close error: %v", err)
-			}
-			requireInputBytes(t, path, original)
-			requireNoInputTemps(t, path)
-		})
-	}
-}
-
-func TestReplaceRenameFailureCleansTemp(t *testing.T) {
-	for _, directory := range []bool{false, true} {
-		t.Run(fmt.Sprintf("directory=%t", directory), func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), FileName)
-			failure := errors.New("rename failed")
-			if directory {
-				if err := os.Mkdir(path, 0o755); err != nil {
-					t.Fatal(err)
-				}
-			} else {
-				if err := os.WriteFile(path, []byte("original\n"), 0o644); err != nil {
-					t.Fatal(err)
-				}
-				preserveReplaceOps(t)
-				replaceRename = func(string, string) error { return failure }
-			}
-			err := replaceFile(path, []byte("replacement\n"))
-			if err == nil || (!directory && !errors.Is(err, failure)) {
-				t.Fatalf("rename failure = %v", err)
-			}
-			if directory {
-				entries, err := os.ReadDir(path)
-				if err != nil || len(entries) != 0 {
-					t.Fatalf("destination directory changed: %v, %v", entries, err)
-				}
-			} else {
-				requireInputBytes(t, path, "original\n")
-			}
-			requireNoInputTemps(t, path)
-		})
-	}
-}
-
-func TestReplaceReportsCleanupFailure(t *testing.T) {
-	path := filepath.Join(t.TempDir(), FileName)
-	preserveReplaceOps(t)
-	failure := errors.New("rename failed")
-	var tmp string
-	replaceRename = func(from, to string) error {
-		tmp = from
-		// A nonempty directory at the temporary path makes cleanup fail
-		// under root as well, without introducing another operation seam.
-		if err := os.Remove(from); err != nil {
-			t.Fatal(err)
-		}
-		write(t, from, "blocker", "cleanup blocked")
-		return failure
-	}
-	err := replaceFile(path, []byte("replacement\n"))
-	if !errors.Is(err, failure) || !strings.Contains(err.Error(), "remove temporary file "+tmp) {
-		t.Fatalf("cleanup failure = %v", err)
-	}
-	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("failed replacement created destination: %v", err)
 	}
 }
 
@@ -272,21 +164,22 @@ func TestInputCommitFailureKeepsGenerationWhenRestoreFails(t *testing.T) {
 	before := readInputPath(t, root, rel)
 	head := gittest.HeadSHA(t, root)
 	rejectInputCommits(t, root, "")
-	preserveReplaceOps(t)
-	failure := errors.New("rollback rename failed")
+	preserveReplaceFile(t)
+	failure := errors.New("rollback publish failed")
 	calls := 0
 	var attempted string
-	replaceRename = func(from, to string) error {
+	publish := replaceFile
+	replaceFile = func(path string, body []byte) error {
 		calls++
 		if calls == 2 {
 			attempted = string(readInputPath(t, root, rel).body)
 			return failure
 		}
-		return os.Rename(from, to)
+		return publish(path, body)
 	}
 	_, err := Add(root, "moe", "destination", "rejected note")
 	if calls != 2 || !errors.Is(err, failure) || !strings.Contains(err.Error(), commitFailureMarker) || !strings.Contains(err.Error(), "restore file") || !strings.Contains(err.Error(), rel) || strings.Contains(err.Error(), "nothing recorded") {
-		t.Fatalf("failed rollback = %v, rename calls = %d", err, calls)
+		t.Fatalf("failed rollback = %v, publish calls = %d", err, calls)
 	}
 	requireInputBytes(t, path, attempted)
 	f, err := Load(root, "moe", "destination")

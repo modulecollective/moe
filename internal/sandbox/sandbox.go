@@ -41,6 +41,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/modulecollective/moe/internal/atomicfile"
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/project"
 )
@@ -314,20 +315,7 @@ func ensureGitignore(root string) error {
 	// first-touch of a fresh `.moe/` would race it into momentarily
 	// un-ignoring the tree. Racers write identical content, so
 	// last-writer-wins rename is idempotent. (Mirrors repolock's copy.)
-	tmp, err := os.CreateTemp(dir, ".gitignore.tmp.*")
-	if err != nil {
-		return fmt.Errorf("sandbox: write %s: %w", p, err)
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if _, err := tmp.Write([]byte("*\n")); err != nil {
-		tmp.Close()
-		return fmt.Errorf("sandbox: write %s: %w", p, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("sandbox: write %s: %w", p, err)
-	}
-	if err := os.Rename(tmpPath, p); err != nil {
+	if err := atomicfile.Write(p, []byte("*\n"), 0o600); err != nil {
 		return fmt.Errorf("sandbox: write %s: %w", p, err)
 	}
 	return nil

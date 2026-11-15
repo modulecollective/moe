@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/modulecollective/moe/internal/atomicfile"
 )
 
 // An owner that knows how a request ended but cannot commit the receipt
@@ -80,38 +82,11 @@ func dropUnrecorded(root, projectID, runID, id string) error {
 	return writeUnrecorded(root, projectID, runID, m)
 }
 
-// Private operation seams allow deterministic preparation/publication failures
-// in tests while keeping real temporary files and their private permissions.
-var (
-	unrecordedWrite  = (*os.File).Write
-	unrecordedClose  = (*os.File).Close
-	unrecordedRename = os.Rename
-)
-
-func writeUnrecorded(root, projectID, runID string, m map[string]Settlement) (err error) {
-	path := unrecordedPath(root, projectID, runID)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
+// Receipts are private local state: 0600, never the 0644 of tracked records.
+func writeUnrecorded(root, projectID, runID string, m map[string]Settlement) error {
 	b, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".unrecorded-*.json")
-	if err != nil {
-		return err
-	}
-	name := tmp.Name()
-	defer func() {
-		if err != nil {
-			if cleanupErr := os.Remove(name); cleanupErr != nil && !errors.Is(cleanupErr, os.ErrNotExist) {
-				err = errors.Join(err, fmt.Errorf("runcontrol: remove temporary file %s: %w", name, cleanupErr))
-			}
-		}
-	}()
-	_, werr := unrecordedWrite(tmp, append(b, '\n'))
-	if err := errors.Join(werr, unrecordedClose(tmp)); err != nil {
-		return err
-	}
-	return unrecordedRename(name, path)
+	return atomicfile.Write(unrecordedPath(root, projectID, runID), append(b, '\n'), 0o600)
 }

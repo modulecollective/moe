@@ -39,6 +39,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/modulecollective/moe/internal/atomicfile"
 )
 
 // Default timing knobs. Short numbers on purpose: anything longer than
@@ -849,20 +851,7 @@ func ensureGitignore(dir string) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("repolock: stat %s: %w", p, err)
 	}
-	tmp, err := os.CreateTemp(dir, ".gitignore.tmp.*")
-	if err != nil {
-		return fmt.Errorf("repolock: write %s: %w", p, err)
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	if _, err := tmp.Write([]byte("*\n")); err != nil {
-		tmp.Close()
-		return fmt.Errorf("repolock: write %s: %w", p, err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("repolock: write %s: %w", p, err)
-	}
-	if err := os.Rename(tmpPath, p); err != nil {
+	if err := atomicfile.Write(p, []byte("*\n"), 0o600); err != nil {
 		return fmt.Errorf("repolock: write %s: %w", p, err)
 	}
 	return nil

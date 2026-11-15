@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/modulecollective/moe/internal/atomicfile"
 	"github.com/modulecollective/moe/internal/git"
 )
 
@@ -57,25 +58,11 @@ func readClose(s *Session) (*pendingClose, error) {
 
 func writeClose(s *Session, tip, main string) error {
 	p := pendingClose{Branch: s.Branch, Worktree: s.WorktreePath, Tip: tip, Main: main}
-	path := closePath(s)
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
 	body, err := json.Marshal(p)
 	if err != nil {
 		return err
 	}
-	f, err := os.CreateTemp(filepath.Dir(path), ".close-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(f.Name())
-	_, writeErr := f.Write(append(body, '\n'))
-	closeErr := f.Close()
-	if err := errors.Join(writeErr, closeErr); err != nil {
-		return err
-	}
-	return os.Rename(f.Name(), path)
+	return atomicfile.Write(closePath(s), append(body, '\n'), 0o600)
 }
 
 func removeIfPresent(path string) error {
