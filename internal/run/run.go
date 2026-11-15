@@ -674,34 +674,7 @@ var ErrSlugTaken = errors.New("run: slug already used")
 // work turn yet — the caller treats that as "first turn, nothing to
 // diff against."
 func LatestWorkTurnSHA(root, projectID, runID, docID string) (sha string, when time.Time, err error) {
-	// Doc IDs are [a-z0-9-]+ today, so QuoteMeta is belt-and-suspenders:
-	// nothing in that class is a BRE metacharacter, but escape anyway so
-	// a future looser validator can't turn a doc ID into a regex foot-gun.
-	out, err := git.Output(root,
-		"log", "-1",
-		"--all-match",
-		"--grep", fmt.Sprintf("^work: update %s$", regexp.QuoteMeta(docID)),
-		"--grep", trailers.GrepPattern("MoE-Project", projectID),
-		"--grep", trailers.GrepPattern("MoE-Run", runID),
-		"--grep", trailers.GrepPattern("MoE-Document", docID),
-		"--format=%H %ct",
-	)
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf("run: git log: %w", err)
-	}
-	line := strings.TrimSpace(out)
-	if line == "" {
-		return "", time.Time{}, nil
-	}
-	parts := strings.SplitN(line, " ", 2)
-	if len(parts) != 2 {
-		return "", time.Time{}, fmt.Errorf("run: unexpected git log output %q", line)
-	}
-	epoch, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf("run: parse %%ct %q: %w", parts[1], err)
-	}
-	return parts[0], time.Unix(epoch, 0).UTC(), nil
+	return latestSubjectSHA(root, "work: update", projectID, runID, docID)
 }
 
 // LatestAdvanceSHA returns the SHA and committer time of the most recent
@@ -713,10 +686,20 @@ func LatestWorkTurnSHA(root, projectID, runID, docID string) (sha string, when t
 // instead of the work-turn subject. Returns ("", time.Time{}, nil) when no
 // advance marker exists yet — the stage was never click-advanced.
 func LatestAdvanceSHA(root, projectID, runID, docID string) (sha string, when time.Time, err error) {
+	return latestSubjectSHA(root, "advance:", projectID, runID, docID)
+}
+
+// latestSubjectSHA is the newest commit whose subject is exactly
+// "<prefix> <docID>" and whose trailers name the run's project, run and
+// document. ("", time.Time{}, nil) when there is none.
+func latestSubjectSHA(root, prefix, projectID, runID, docID string) (sha string, when time.Time, err error) {
+	// Doc IDs are [a-z0-9-]+ today, so QuoteMeta is belt-and-suspenders:
+	// nothing in that class is a BRE metacharacter, but escape anyway so
+	// a future looser validator can't turn a doc ID into a regex foot-gun.
 	out, err := git.Output(root,
 		"log", "-1",
 		"--all-match",
-		"--grep", fmt.Sprintf("^advance: %s$", regexp.QuoteMeta(docID)),
+		"--grep", fmt.Sprintf("^%s %s$", prefix, regexp.QuoteMeta(docID)),
 		"--grep", trailers.GrepPattern("MoE-Project", projectID),
 		"--grep", trailers.GrepPattern("MoE-Run", runID),
 		"--grep", trailers.GrepPattern("MoE-Document", docID),
