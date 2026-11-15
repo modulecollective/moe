@@ -377,7 +377,7 @@ func TestDashBacklogShowsCapturedIdeas(t *testing.T) {
 	if !ok {
 		t.Fatalf("backlog missing `idea:capture` stage note in:\n%s", got)
 	}
-	if strings.Index(after, "idea:capture") < 0 {
+	if !strings.Contains(after, "idea:capture") {
 		t.Fatalf("expected two `idea:capture` rows in backlog, got:\n%s", got)
 	}
 	// Sections render top-to-bottom: ACTIVE → BACKLOG → COMPLETED.

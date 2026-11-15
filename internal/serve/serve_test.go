@@ -176,7 +176,7 @@ func assertSharedHead(t *testing.T, body string) {
 		t.Fatalf("theme toggle must render inside page header\n%s", body)
 	}
 	footerIdx := strings.Index(body, `<footer class="page-footer">`)
-	if footerIdx >= 0 && strings.Index(body[footerIdx:], `id="theme-toggle"`) >= 0 {
+	if footerIdx >= 0 && strings.Contains(body[footerIdx:], `id="theme-toggle"`) {
 		t.Fatalf("theme toggle must not render in footer\n%s", body)
 	}
 }

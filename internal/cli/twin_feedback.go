@@ -75,13 +75,7 @@ func parseTwinFeedback(body []byte) (lines []string, todo []parsedTwinNote, err 
 				return nil, nil, fmt.Errorf("line %d: twin observation %w", e.lineIdx+1, err)
 			}
 		}
-		todo = append(todo, parsedTwinNote{
-			lineIdx:   e.lineIdx,
-			slug:      e.slug,
-			promoteTo: e.promoteTo,
-			title:     e.title,
-			body:      e.body,
-		})
+		todo = append(todo, parsedTwinNote(e))
 	}
 	return lines, todo, nil
 }
