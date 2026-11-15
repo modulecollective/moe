@@ -151,7 +151,6 @@ func (m *model) view() frame {
 	if cur != nil {
 		f.cursor, f.curRow, f.curCol = true, row+cur.row, cur.col
 	}
-	row += dh
 
 	label := "Console"
 	if m.console.unread > 0 {

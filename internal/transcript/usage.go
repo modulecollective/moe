@@ -43,20 +43,6 @@ func (u Usage) Add(model string, m ModelUsage) {
 	u[model] = cur
 }
 
-// Total collapses every model into one bucket. Steps sums too, so a
-// mixed-model stage still reports its real step count.
-func (u Usage) Total() ModelUsage {
-	var t ModelUsage
-	for _, m := range u {
-		t.Input += m.Input
-		t.CacheWrite += m.CacheWrite
-		t.CacheRead += m.CacheRead
-		t.Output += m.Output
-		t.Steps += m.Steps
-	}
-	return t
-}
-
 // UsageParser is an adapter that extracts token accounting from one
 // backend's JSONL stream. Stateless per call, like Parser.
 type UsageParser func(r io.Reader) (Usage, error)

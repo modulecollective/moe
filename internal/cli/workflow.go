@@ -549,12 +549,6 @@ func (w *Workflow) RetireStage(name, replacement string) {
 	w.retired[name] = replacement
 }
 
-// RetiredStage returns the replacement for a retired stage name.
-func (w *Workflow) RetiredStage(name string) (string, bool) {
-	repl, ok := w.retired[name]
-	return repl, ok
-}
-
 // successorEvidence widens a stage's successors with every retired
 // stage they replaced. A run started under the old ladder recorded its
 // progress past design as code/test turns; those still prove design was

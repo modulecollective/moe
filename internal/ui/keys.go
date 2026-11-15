@@ -52,10 +52,7 @@ const (
 // paste past this is reported, never silently cut.
 const maxPaste = 256 << 10
 
-var (
-	pasteStart = []byte("\x1b[200~")
-	pasteEnd   = []byte("\x1b[201~")
-)
+var pasteEnd = []byte("\x1b[201~")
 
 // decoder turns terminal input bytes into Keys. Input arrives in
 // arbitrary fragments: an escape sequence or a UTF-8 rune split across

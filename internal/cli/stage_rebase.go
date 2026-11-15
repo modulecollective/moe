@@ -9,17 +9,14 @@ import (
 	"github.com/modulecollective/moe/internal/session"
 )
 
-// closeWithAutoResolve wraps a close closure: on *RebaseFailureError,
+// closeWithAutoResolveUnlessInterrupted wraps a close closure: on *RebaseFailureError,
 // release the lock (already done — closeSess holds it inside its
 // closure), launch a one-shot agent in the session worktree to
 // resolve, then retry close once. Single-shot: if the second attempt
 // still fails the caller sees the typed error and the operator falls
 // back to today's `moe session resolve` / `moe session abandon` path.
-// Other error types pass through unchanged.
-func closeWithAutoResolve(closeSess func() error, stdout, stderr io.Writer) error {
-	return closeWithAutoResolveUnlessInterrupted(closeSess, stdout, stderr, func() bool { return false })
-}
-
+// Other error types pass through unchanged, and so does a rebase failure
+// once interrupted reports true.
 func closeWithAutoResolveUnlessInterrupted(closeSess func() error, stdout, stderr io.Writer, interrupted func() bool) error {
 	err := closeSess()
 	var rebaseFail *session.RebaseFailureError

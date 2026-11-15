@@ -1131,7 +1131,7 @@ type stageTurnSpec struct {
 // leaves intact.
 func closeBootstrapFailedSession(closeSess func() error, stderr io.Writer) {
 	if err := closeSess(); err != nil {
-		// Bare %v — close errors self-describe. See closeWithAutoResolve.
+		// Bare %v — close errors self-describe. See closeWithAutoResolveUnlessInterrupted.
 		moePrintf(stderr, "%v\n", err)
 	}
 }
@@ -1371,7 +1371,7 @@ func runStageTurn(root string, in stageTurnInputs, stdout, stderr io.Writer) (co
 	// worktree down. The lock window and its budget are
 	// openStageSession's; see the budget comment there.
 	//
-	// closeWithAutoResolve wraps the close: on a *RebaseFailureError
+	// closeWithAutoResolveUnlessInterrupted wraps the close: on a *RebaseFailureError
 	// it launches a one-shot agent in the session worktree to
 	// resolve, then retries close once. Falls through to today's
 	// "resolve by hand / moe session abandon" message if the agent
@@ -1535,7 +1535,7 @@ func reportStageTurnExit(in stageTurnInputs, runErr, commitErr, closeErr error, 
 		moePrintf(stdout, "committed %s turn for %s/%s\n", in.DocID, in.Project, in.RunSlug)
 	}
 	if closeErr != nil {
-		// Bare %v — close errors self-describe. See closeWithAutoResolve.
+		// Bare %v — close errors self-describe. See closeWithAutoResolveUnlessInterrupted.
 		moePrintf(stderr, "%v\n", closeErr)
 	}
 	if runErr != nil || commitFailed || closeErr != nil {

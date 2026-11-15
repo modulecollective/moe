@@ -546,11 +546,10 @@ func requireBuildCanvases(projectID, runID, currentStage string) error {
 	if err != nil {
 		return err
 	}
-	md := &run.Metadata{Project: projectID, ID: runID, Workflow: sdlcWorkflow}
 	if _, err := run.Canvases(root, projectID, runID, "build"); err != nil {
 		return fmt.Errorf("build canvases: %w", err)
 	}
-	for _, f := range stageCanvasFiles(md.Workflow, "build") {
+	for _, f := range stageCanvasFiles(sdlcWorkflow, "build") {
 		info, err := os.Stat(filepath.Join(root, run.ContentFilePath(projectID, runID, "build", f.Name)))
 		if err != nil || info.Size() == 0 {
 			return fmt.Errorf("build canvas %s missing — run `moe sdlc build %s/%s` before `moe sdlc %s`",

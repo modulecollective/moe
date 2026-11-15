@@ -92,8 +92,8 @@ func TestSdlcBuildIsDirectoryForm(t *testing.T) {
 		t.Fatal("a directory-form stage must report a gate so the cascade checks it")
 	}
 	for _, retired := range []string{"code", "test"} {
-		if repl, ok := wf.RetiredStage(retired); !ok || repl != "build" {
-			t.Fatalf("RetiredStage(%q) = %q, %v", retired, repl, ok)
+		if repl, ok := wf.retired[retired]; !ok || repl != "build" {
+			t.Fatalf("retired[%q] = %q, %v", retired, repl, ok)
 		}
 		if !slices.Contains(wf.Docs(), retired) {
 			t.Fatalf("retired %s must stay a readable document: %v", retired, wf.Docs())

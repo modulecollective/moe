@@ -3,14 +3,17 @@ package run
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/git/gittest"
+	"github.com/modulecollective/moe/internal/trailers"
 )
 
 // fixedNow returns an Options.Now that always yields t — so tests that
@@ -1522,4 +1525,32 @@ func TestJournalIndexOpenCommitMarks(t *testing.T) {
 	if got, ok := idx.PromoteConsent["a/idea-2"]; ok {
 		t.Errorf("PromoteConsent[a/idea-2] = %q, want absent — an operator promote stamps nothing", got)
 	}
+}
+
+// LastActivity is the per-run oracle TestJournalIndexLastActivityMatchesLastActivity
+// checks JournalIndex.LastActivity against: the committer time of the most
+// recent commit carrying both MoE-Project: <projectID> and MoE-Run: <runID>,
+// or the zero time. Slugs are only per-project unique, so the project leg
+// keeps two same-slug runs apart; the anchored greps keep `auth` from
+// matching `auth-2`.
+func LastActivity(root, projectID, runID string) (time.Time, error) {
+	out, err := git.Output(root,
+		"log", "-1",
+		"--all-match",
+		"--grep", trailers.GrepPattern("MoE-Project", projectID),
+		"--grep", trailers.GrepPattern("MoE-Run", runID),
+		"--format=%ct",
+	)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("run: git log: %w", err)
+	}
+	line := strings.TrimSpace(out)
+	if line == "" {
+		return time.Time{}, nil
+	}
+	epoch, err := strconv.ParseInt(line, 10, 64)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("run: parse %%ct %q: %w", line, err)
+	}
+	return time.Unix(epoch, 0).UTC(), nil
 }

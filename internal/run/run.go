@@ -772,41 +772,6 @@ func Scan(root string) ([]*Metadata, error) {
 	return out, nil
 }
 
-// LastActivity returns the committer time of the most recent commit
-// carrying both MoE-Project: <projectID> and MoE-Run: <runID>, or the
-// zero time if no such commit exists (a run dir can exist without its
-// opening commit being reachable from HEAD, though that's unusual).
-// Slugs are only per-project unique, so the project leg is required to
-// keep two same-slug runs in different projects from reading each
-// other's age; the greps are anchored so a prefix-extending sibling
-// (`auth` vs `auth-2`) can't match either.
-//
-// No production caller today — the JournalIndex.LastActivity map serves
-// dash's sort/age path. This survives as the oracle
-// TestJournalIndexLastActivityMatchesLastActivity checks the index
-// against, so it has to key runs the same way the index now does.
-func LastActivity(root, projectID, runID string) (time.Time, error) {
-	out, err := git.Output(root,
-		"log", "-1",
-		"--all-match",
-		"--grep", trailers.GrepPattern("MoE-Project", projectID),
-		"--grep", trailers.GrepPattern("MoE-Run", runID),
-		"--format=%ct",
-	)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("run: git log: %w", err)
-	}
-	line := strings.TrimSpace(out)
-	if line == "" {
-		return time.Time{}, nil
-	}
-	epoch, err := strconv.ParseInt(line, 10, 64)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("run: parse %%ct %q: %w", line, err)
-	}
-	return time.Unix(epoch, 0).UTC(), nil
-}
-
 // JournalIndex is the precomputed in-memory view of MoE-trailer
 // signals dash reads from the bureaucracy journal. One batched
 // `git log` builds it (BuildJournalIndex); downstream callers do map

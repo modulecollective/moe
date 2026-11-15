@@ -224,9 +224,6 @@ func Listen(dir string, id Identity, initial Status) (*Server, error) {
 	return s, nil
 }
 
-// Addr is the socket path.
-func (s *Server) Addr() string { return s.path }
-
 // Update applies change to the published status and bumps its revision.
 // A phase change restamps PhaseSince.
 func (s *Server) Update(change func(*Status)) {

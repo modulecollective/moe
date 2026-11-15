@@ -157,26 +157,3 @@ func RenderDocCanvases(docDir string) (string, error) {
 func ReadCanvas(root, projectID, id, docID string) (string, error) {
 	return RenderDocCanvases(filepath.Join(root, DocDir(projectID, id, docID)))
 }
-
-// CanvasRelPaths returns the root-relative paths of (project, run,
-// doc)'s canvases — what a prompt names and what a diff command
-// scopes to. Missing returns the file-form path so callers that name
-// "where the canvas will be" keep working.
-func CanvasRelPaths(root, projectID, id, docID string) ([]string, error) {
-	canvases, err := Canvases(root, projectID, id, docID)
-	if err != nil {
-		return nil, err
-	}
-	if len(canvases) == 0 {
-		return []string{ContentPath(projectID, id, docID)}, nil
-	}
-	out := make([]string, 0, len(canvases))
-	for _, c := range canvases {
-		rel, err := filepath.Rel(root, c.Path)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, rel)
-	}
-	return out, nil
-}

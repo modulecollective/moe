@@ -43,9 +43,6 @@ func TestParseClaudeUsageDedupesByMessageID(t *testing.T) {
 	if opus.Output != 120 || opus.Steps != 1 {
 		t.Errorf("opus usage = %+v, want the second turn alone", opus)
 	}
-	if got := u.Total(); got.Steps != 2 || got.Output != 420 {
-		t.Errorf("total = %+v, want 2 steps and 420 output", got)
-	}
 }
 
 // TestParseClaudeUsageCountsUnkeyedTurns: a usage block with no message
@@ -137,14 +134,15 @@ func TestParseUsageReal(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ParseUsage %s: %v", c.path, err)
 			}
-			total := u.Total()
-			if total.Steps == 0 || total.Output == 0 {
-				t.Fatalf("usage %+v from %s: a real stage transcript is never free", total, c.path)
-			}
-			for model := range u {
+			paid := false
+			for model, m := range u {
 				if model == "" {
 					t.Errorf("usage from %s has an unattributed model bucket", c.path)
 				}
+				paid = paid || (m.Steps > 0 && m.Output > 0)
+			}
+			if !paid {
+				t.Fatalf("usage %+v from %s: a real stage transcript is never free", u, c.path)
 			}
 		})
 	}

@@ -42,8 +42,8 @@ func TestCloseWithAutoResolveLaunchesAgentOnRebaseFailure(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	if err := closeWithAutoResolve(closeSess, &stdout, &stderr); err != nil {
-		t.Fatalf("closeWithAutoResolve: %v", err)
+	if err := closeWithAutoResolveUnlessInterrupted(closeSess, &stdout, &stderr, func() bool { return false }); err != nil {
+		t.Fatalf("closeWithAutoResolveUnlessInterrupted: %v", err)
 	}
 	if calls != 2 {
 		t.Errorf("closeSess called %d times, want 2 (first triggers chain-back, second is the retry)", calls)
@@ -69,7 +69,7 @@ func TestCloseWithAutoResolveLaunchesAgentOnRebaseFailure(t *testing.T) {
 
 // TestCloseWithAutoResolveRetriesOnceThenSurfacesTypedError: the
 // chain-back is single-shot. If the second close also returns a
-// typed *RebaseFailureError, closeWithAutoResolve returns that error
+// typed *RebaseFailureError, closeWithAutoResolveUnlessInterrupted returns that error
 // untouched so the caller's reportStageTurnExit prints today's
 // "resolve by hand" message.
 func TestCloseWithAutoResolveRetriesOnceThenSurfacesTypedError(t *testing.T) {
@@ -91,7 +91,7 @@ func TestCloseWithAutoResolveRetriesOnceThenSurfacesTypedError(t *testing.T) {
 		return rfe
 	}
 
-	err := closeWithAutoResolve(closeSess, &bytes.Buffer{}, &bytes.Buffer{})
+	err := closeWithAutoResolveUnlessInterrupted(closeSess, &bytes.Buffer{}, &bytes.Buffer{}, func() bool { return false })
 	if err == nil {
 		t.Fatal("expected typed error to surface after retry, got nil")
 	}
@@ -122,7 +122,7 @@ func TestCloseWithAutoResolvePassesNonRebaseErrorsUnchanged(t *testing.T) {
 		return wantErr
 	}
 
-	got := closeWithAutoResolve(closeSess, &bytes.Buffer{}, &bytes.Buffer{})
+	got := closeWithAutoResolveUnlessInterrupted(closeSess, &bytes.Buffer{}, &bytes.Buffer{}, func() bool { return false })
 	if !errors.Is(got, wantErr) {
 		t.Errorf("non-rebase error must pass through unchanged: got %v, want %v", got, wantErr)
 	}
