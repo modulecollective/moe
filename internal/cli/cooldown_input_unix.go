@@ -4,6 +4,8 @@ package cli
 
 import (
 	"bufio"
+	"errors"
+	"io"
 	"os"
 	"syscall"
 )
@@ -28,18 +30,29 @@ func openCooldownControls() (<-chan cooldownControl, func()) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		lines := bufio.NewScanner(f)
-		for lines.Scan() {
-			if ctl, ok := parseCooldownControl(lines.Text()); ok {
-				select {
-				case ch <- ctl:
-				default:
-				}
-			}
-		}
+		readCooldownControls(f, ch, os.Stderr)
 	}()
 	return ch, func() {
 		_ = f.Close()
 		<-done
+	}
+}
+
+// readCooldownControls feeds parsed control lines from r into ch until r
+// ends. Closing the tty is how stop ends it, so ErrClosed is quiet; any
+// other read failure means the controls are dead for the rest of the
+// wait, and the operator is told rather than left typing into nothing.
+func readCooldownControls(r io.Reader, ch chan<- cooldownControl, stderr io.Writer) {
+	lines := bufio.NewScanner(r)
+	for lines.Scan() {
+		if ctl, ok := parseCooldownControl(lines.Text()); ok {
+			select {
+			case ch <- ctl:
+			default:
+			}
+		}
+	}
+	if err := lines.Err(); err != nil && !errors.Is(err, os.ErrClosed) {
+		moePrintf(stderr, "cooldown: terminal controls stopped (%v); Ctrl-C still cancels\n", err)
 	}
 }

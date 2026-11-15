@@ -810,9 +810,13 @@ func pipeExecProgress(r io.Reader, w io.Writer, trimRoot string, sidCh chan<- st
 			fmt.Fprintf(w, "> %s\n", renderCommandExecution(ev.Item, trimRoot))
 		}
 	}
-	// Scanner stops at its bounded token limit. Keep draining even when an
-	// oversized event cannot be rendered, so capture remains complete and the
-	// child cannot block on a full pipe before Wait.
+	// Scanner stops at its bounded token limit. Say so, or progress just goes
+	// quiet; then keep draining so capture remains complete and the child
+	// cannot block on a full pipe before Wait. ErrClosed is DrainThenWait's
+	// deadline force-close, not news.
+	if err := scanner.Err(); err != nil && !errors.Is(err, os.ErrClosed) {
+		fmt.Fprintf(w, "> progress stopped: %v\n", err)
+	}
 	_, _ = io.Copy(io.Discard, r)
 }
 

@@ -291,7 +291,12 @@ func promoteLoreEntry(root, projectID, runID string, p parsedLore) (string, erro
 		// append this run to updated-in. The append is deduped so a
 		// retry over an already-patched file reproduces an identical
 		// body — the idempotency the partial-progress recovery relies on.
-		fm := lore.Frontmatter(abs)
+		fm, err := lore.Frontmatter(abs)
+		if err != nil {
+			// A partial read would rewrite the entry without the
+			// provenance the unread lines carried.
+			return "", fmt.Errorf("amend %s: %w", abs, err)
+		}
 		discoveredIn := fm["discovered-in"]
 		updatedIn := appendUpdatedIn(fm["updated-in"], discoveredIn, thisRun)
 		body = renderLoreFile(p.title, p.appliesWhen, discoveredIn, updatedIn, p.body)

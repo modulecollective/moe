@@ -3,8 +3,10 @@ package claude
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -52,8 +54,7 @@ func pipeOneShotProgress(r io.Reader, w io.Writer, trimRoot string, sidCh chan<-
 	// Stream-json messages can carry tool inputs much larger than
 	// bufio.Scanner's 64KiB default (a Bash command + diff output, an
 	// Edit's old/new strings, etc.). Allow up to 8 MiB per line — past
-	// that the line is dropped, which is fine: we'd render nothing
-	// useful for it anyway.
+	// that the scanner stops; see the tail below.
 	scanner.Buffer(make([]byte, 64*1024), 8*1024*1024)
 	for scanner.Scan() {
 		line := scanner.Bytes()
@@ -84,6 +85,14 @@ func pipeOneShotProgress(r io.Reader, w io.Writer, trimRoot string, sidCh chan<-
 			fmt.Fprintf(w, "> %s\n", renderToolCall(b.Name, b.Input, trimRoot))
 		}
 	}
+	// Same tail as codex's pipeExecProgress: an over-long line stops the
+	// scanner, so say so and keep draining — otherwise the child blocks on a
+	// full pipe and Wait never returns. ErrClosed is DrainThenWait's
+	// deadline force-close, not news.
+	if err := scanner.Err(); err != nil && !errors.Is(err, os.ErrClosed) {
+		fmt.Fprintf(w, "> progress stopped: %v\n", err)
+	}
+	_, _ = io.Copy(io.Discard, r)
 }
 
 // renderToolCall returns the one-line summary for a tool_use block.

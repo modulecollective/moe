@@ -164,3 +164,21 @@ func TestLoreReferenceSectionStripsQuotes(t *testing.T) {
 		t.Errorf("expected unquoted applies-when in output, got:\n%s", got)
 	}
 }
+
+// TestFrontmatterReportsOverlongLine: a line past the 64 KiB cap ends the
+// read early. The keys before it come back, but with an error, so a caller
+// about to rewrite the entry doesn't take the partial map for the whole.
+func TestFrontmatterReportsOverlongLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "entry.md")
+	writeFile(t, path, "---\ntitle: \"t\"\nnote: \""+strings.Repeat("x", 70<<10)+"\"\ndiscovered-in: \"p/runs/r\"\n---\nbody\n")
+	fm, err := Frontmatter(path)
+	if err == nil || !strings.Contains(err.Error(), "token too long") {
+		t.Fatalf("err = %v, want the overlong line reported", err)
+	}
+	if fm["title"] != "t" || fm["discovered-in"] != "" {
+		t.Fatalf("partial map = %v", fm)
+	}
+	if title, _ := readLoreFrontmatter(path); title != "t" {
+		t.Fatalf("catalog title = %q, want the best-effort read", title)
+	}
+}

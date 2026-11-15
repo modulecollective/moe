@@ -119,46 +119,52 @@ notes or grep across other projects for a similar fact, use
 }
 
 // Frontmatter reads a lore entry's YAML frontmatter into a
-// key→value map. Fail-soft: any I/O error, a missing opening fence, or
-// a malformed file yields an empty (but non-nil) map, so callers can
-// index without a nil check and fall back to their own placeholders — a
-// half-written entry shouldn't break every stage prompt or a harvest.
+// key→value map. The map is always non-nil and holds whatever was read
+// before any failure, so a caller that only wants placeholders can
+// ignore the error — a half-written entry shouldn't break every stage
+// prompt. A missing opening fence is not an error (a hand-authored entry
+// has none); a failed open or read, including a line past the 64 KiB cap,
+// is, and a caller about to rewrite the entry must not treat that partial
+// map as the whole frontmatter.
 //
 // Stdlib only: we read just enough lines to clear the second `---`
 // fence, collect every `key: value` pair, and stop. No YAML parser
 // needed for the flat, quoted-scalar schema lore entries carry.
-func Frontmatter(path string) map[string]string {
+func Frontmatter(path string) (map[string]string, error) {
 	out := map[string]string{}
 	f, err := os.Open(path)
 	if err != nil {
-		return out
+		return out, err
 	}
 	defer f.Close()
 	sc := bufio.NewScanner(f)
 	// Cap line length so a misshapen file doesn't blow the buffer.
 	sc.Buffer(make([]byte, 0, 64*1024), 64*1024)
 
-	if !sc.Scan() || strings.TrimSpace(sc.Text()) != "---" {
-		return out
-	}
-	for sc.Scan() {
-		line := sc.Text()
-		if strings.TrimSpace(line) == "---" {
-			break
+	if sc.Scan() && strings.TrimSpace(sc.Text()) == "---" {
+		for sc.Scan() {
+			line := sc.Text()
+			if strings.TrimSpace(line) == "---" {
+				break
+			}
+			if key, val, ok := splitFrontmatterLine(line); ok {
+				out[key] = val
+			}
 		}
-		if key, val, ok := splitFrontmatterLine(line); ok {
-			out[key] = val
-		}
 	}
-	return out
+	if err := sc.Err(); err != nil {
+		return out, fmt.Errorf("lore: read %s: %w", path, err)
+	}
+	return out, nil
 }
 
 // readLoreFrontmatter pulls `title:` and `applies-when:` out of a lore
 // entry's frontmatter, falling back to ("", "") for either missing key
 // so the catalog can substitute the filename + "(missing)" placeholders.
-// Thin wrapper over Frontmatter.
+// Thin wrapper over Frontmatter; the catalog is best effort, so a read
+// error just means placeholders.
 func readLoreFrontmatter(path string) (title, appliesWhen string) {
-	fm := Frontmatter(path)
+	fm, _ := Frontmatter(path)
 	return fm["title"], fm["applies-when"]
 }
 
