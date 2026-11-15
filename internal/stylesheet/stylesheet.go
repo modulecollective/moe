@@ -117,7 +117,8 @@ func (s *Sheet) Agent(workflow, stage string) string {
 }
 
 // ModelForAgent returns the backend-specific model for a turn. This
-// property cascades independently of agent; it never selects a backend. Empty means no model was set for this agent.
+// property cascades independently of agent; it never selects a backend.
+// Empty means no model was set for this agent.
 func (s *Sheet) ModelForAgent(workflow, stage, agent string) string {
 	return s.property(workflow, stage, "model-"+agent)
 }
