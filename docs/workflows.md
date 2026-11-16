@@ -19,9 +19,9 @@ back to `build` or `design`, not to decorate the ladder.
 
 ```sh
 moe sdlc new [--workspace <project>/<name>] [--agent <name>] [--seed] [--park|--ship|--chain] <project>/<slug>
-moe sdlc design [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
-moe sdlc build  [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
-moe sdlc review [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
+moe sdlc design [--workspace <project>/<name>] [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
+moe sdlc build  [--workspace <project>/<name>] [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
+moe sdlc review [--workspace <project>/<name>] [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
 moe sdlc push [--pr|--merge] <project>/<run>
 moe sdlc shell  <project>/<run>
 ```

@@ -135,14 +135,15 @@ func init() {
 // lives), and the one that persists --agent to run.json.
 func sdlcStageVerbCfg(stage string, usage []string, open func(projectID, runID string, headless bool, agentOverride string, stdout, stderr io.Writer) int) stageVerbCfg {
 	return stageVerbCfg{
-		workflow:     "sdlc",
-		verb:         "sdlc " + stage,
-		stage:        stage,
-		usage:        usage,
-		open:         open,
-		resolveSlug:  resolveSDLCRunSlug,
-		reentryGuard: resolveSDLCReentry,
-		persistAgent: true,
+		workflow:      "sdlc",
+		verb:          "sdlc " + stage,
+		stage:         stage,
+		usage:         usage,
+		open:          open,
+		resolveSlug:   resolveSDLCRunSlug,
+		reentryGuard:  resolveSDLCReentry,
+		persistAgent:  true,
+		bindWorkspace: true,
 	}
 }
 
@@ -204,6 +205,52 @@ func persistSDLCStageAgent(verb, stage, projectID, runID, agentName string, stdo
 		moePrintf(stdout, "switched run agent to %s\n", agentName)
 	}
 	return resolvedRunID, code
+}
+
+// persistSDLCStageWorkspace binds the run to the named workspace a
+// stage verb's --workspace names (already checked: bare name, claim
+// free or this run's). Rebinding is refused while the run's current
+// tree holds its work — commits on the run branch or modified tracked
+// files live only there until push — and otherwise the old tree's hold
+// is dropped once the binding commit lands. The claim on the new
+// workspace is taken at attach, as for a run opened with the flag.
+func persistSDLCStageWorkspace(verb, stage, projectID, runID, name string, stdout, stderr io.Writer) (string, int) {
+	root, err := findRoot(stderr)
+	if err != nil {
+		return "", 1
+	}
+	var old *run.Metadata
+	resolvedRunID, changed, code := persistSDLCRunField(verb, stage, projectID, runID, "bind-workspace", "bind workspace", func(md *run.Metadata) (string, error) {
+		if md.Workspace == name {
+			return "", nil
+		}
+		path, commits, modified, held, err := runTreeWork(root, md)
+		if err != nil {
+			return "", fmt.Errorf("check %s/%s's working tree: %w", md.Project, md.ID, err)
+		}
+		if commits > 0 || modified > 0 {
+			return "", fmt.Errorf("%s/%s has work in %s (%d commit(s) on %s%s, %d modified tracked file(s)); it lives only there until push, so the run can't move trees",
+				md.Project, md.ID, path, commits, branchPrefix, md.ID, modified)
+		}
+		if held {
+			prev := *md
+			old = &prev
+		}
+		md.Workspace = name
+		return fmt.Sprintf("bind workspace: %s/%s to %s", md.Project, md.ID, name), nil
+	}, stdout, stderr)
+	if code != 0 || !changed {
+		return resolvedRunID, code
+	}
+	moePrintf(stdout, "bound run to workspace %s/%s\n", projectID, name)
+	// The binding is durable; a failed release leaves a stale hold that
+	// `moe workspace release` (or removing the clone) clears.
+	if old != nil {
+		if err := releaseRunWorkspace(root, old); err != nil {
+			moePrintf(stderr, "warning: release previous working tree: %v\n", err)
+		}
+	}
+	return resolvedRunID, 0
 }
 
 // persistSDLCRunField is the one writer behind the stage verbs' run.json

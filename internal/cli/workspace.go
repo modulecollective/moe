@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
@@ -206,4 +207,49 @@ func checkWorkspaceBinding(root, runProject, value, self string, stderr io.Write
 		return "", 1
 	}
 	return name, 0
+}
+
+// runTreeWork reports what the run has in its current working tree that
+// a rebind would strand: commits on the run branch ahead of
+// origin/<default>, and modified tracked files. held is false when
+// there is no tree to drop — a per-run clone that was never made, or a
+// named workspace this run doesn't hold — and then there is no work
+// either. Untracked files don't count: in a per-run clone they're
+// scratch that goes with it, and a named workspace keeps its directory.
+func runTreeWork(root string, md *run.Metadata) (path string, commits, modified int, held bool, err error) {
+	if md.Workspace == "" {
+		if !sandbox.Exists(root, md.Project, md.ID) {
+			return "", 0, 0, false, nil
+		}
+		path = sandbox.Path(root, md.Project, md.ID)
+	} else {
+		claim, err := workspace.ReadClaim(root, md.Project, md.Workspace)
+		if err != nil {
+			return "", 0, 0, false, err
+		}
+		if claim == nil || claim.Run != md.Project+"/"+md.ID {
+			return "", 0, 0, false, nil
+		}
+		path = workspace.Path(root, md.Project, md.Workspace)
+	}
+	branch := "refs/heads/" + branchPrefix + md.ID
+	if git.HasRef(path, branch) {
+		defaultBranch, err := defaultBranchForProject(root, md.Project)
+		if err != nil {
+			return path, 0, 0, true, err
+		}
+		if commits, err = git.AheadOf(path, "origin/"+defaultBranch, branch); err != nil {
+			return path, 0, 0, true, err
+		}
+	}
+	entries, err := git.Status(path)
+	if err != nil {
+		return path, commits, 0, true, err
+	}
+	for _, e := range entries {
+		if !e.Untracked() {
+			modified++
+		}
+	}
+	return path, commits, modified, true, nil
 }

@@ -173,10 +173,14 @@ type stageVerbCfg struct {
 	resolveSlug  slugResolver
 	reentryGuard slugResolver
 	persistAgent bool
+	// bindWorkspace registers --workspace, which binds the run to a named
+	// workspace in run.json before the stage opens (sdlc). A workflow that
+	// leaves it false refuses the flag by never declaring it.
+	bindWorkspace bool
 }
 
 // runStageVerb is the shared body behind every workflow's stage verbs
-// (sdlc design/code/review/test): parse the per-stage
+// (sdlc design/build/review): parse the per-stage
 // flags, branch to interactive
 // (no cascade flag) or cascade (one of --once / --to / --ship /
 // --chain), and surface cascade-mode mutual exclusion at parse time.
@@ -195,13 +199,25 @@ func runStageVerb(cfg stageVerbCfg, args []string, stdout, stderr io.Writer) int
 	to := fs.String("to", "", "walk headless from "+cfg.stage+" up to (but not including) the named gate (= !<stage>)")
 	ship := fs.Bool("ship", false, "headless cascade through push, ship this run (= !!)")
 	chain := fs.Bool("chain", false, "headless cascade through push, then ride the whole chain (= !!!)")
+	var workspaceFlag *string
+	if cfg.bindWorkspace {
+		workspaceFlag = addWorkspaceFlag(fs, "refused while the current tree holds commits or modified tracked files")
+	}
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe %s [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>\n", cfg.verb)
+		wsUsage := ""
+		if cfg.bindWorkspace {
+			wsUsage = "[--workspace <project>/<name>] "
+		}
+		moePrintf(stderr, "usage: moe %s %s[--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>\n", cfg.verb, wsUsage)
 		moePrintln(stderr, "")
 		for _, line := range cfg.usage {
 			moePrintln(stderr, line)
 		}
 		moePrintln(stderr, "")
+		if cfg.bindWorkspace {
+			moePrintln(stderr, "  --workspace <project>/<name> bind the run's working tree to that named workspace;")
+			moePrintln(stderr, "                 refused while the current tree holds commits or modified tracked files")
+		}
 		moePrintf(stderr, "  --agent <name> %s; $MOE_FORCE_AGENT overrides backend selection\n", agentFlagUsage(cfg.persistAgent))
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Cascade mode flags (mutually exclusive):")
@@ -237,6 +253,20 @@ func runStageVerb(cfg stageVerbCfg, args []string, stdout, stderr io.Writer) int
 		moePrintf(stderr, "%s: %s\n", cfg.verb, cascadeUnavailableReason(cfg.workflow))
 		return 2
 	}
+	// Check --workspace before the guard can prompt or anything writes: a
+	// malformed value or a workspace another run holds is refused here.
+	wsName := ""
+	if workspaceFlag != nil && *workspaceFlag != "" {
+		root, err := findRoot(stderr)
+		if err != nil {
+			return 1
+		}
+		name, code := checkWorkspaceBinding(root, projectID, *workspaceFlag, projectID+"/"+runID, stderr)
+		if code != 0 {
+			return code
+		}
+		wsName = name
+	}
 	// Interactive (no cascade flag) leg: guard the door before anything
 	// writes. The cascade legs have their own refusal inside
 	// resolveAndGuardForCascade — a cascade must not prompt-and-mint, so
@@ -246,6 +276,13 @@ func runStageVerb(cfg stageVerbCfg, args []string, stdout, stderr io.Writer) int
 	// typed.
 	if answer == "" && cfg.reentryGuard != nil {
 		resolvedRunID, code := cfg.reentryGuard(cfg.verb, projectID, runID, stdout, stderr)
+		if code != 0 {
+			return code
+		}
+		runID = resolvedRunID
+	}
+	if wsName != "" {
+		resolvedRunID, code := persistSDLCStageWorkspace(cfg.verb, cfg.stage, projectID, runID, wsName, stdout, stderr)
 		if code != 0 {
 			return code
 		}

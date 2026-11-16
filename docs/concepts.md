@@ -78,6 +78,12 @@ A named workspace can be claimed by one run at a time, but the directory
 survives run close. `refresh` rebuilds cached `dev-env.d/*` output in place;
 `release` clears a stuck claim.
 
+A run binds to a named workspace with `--workspace <project>/<name>` on `moe
+sdlc new`, `reopen`, `design`, `build` or `review`. A stage verb moves a run
+that is already under way only while its current tree holds no commits and no
+modified tracked files, since the run branch lives only there until push; the
+old tree is released once the binding lands.
+
 `moe sdlc shell <project>/<run>` drops you into the run's working tree (its
 sandbox clone or named workspace, whichever it was opened with); `moe workspace
 shell` does the same for a named workspace directly.

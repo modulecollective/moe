@@ -71,7 +71,7 @@ type Metadata struct {
 	// Workspace, when non-empty, names the persistent named workspace
 	// this run is attached to (under .moe/named/<project>/<name>/).
 	// Empty means the run uses a per-run sandbox (.moe/clones/...).
-	// Set at run-open time via `--workspace <name>` on the new verb;
+	// Set via `--workspace <project>/<name>` on new, reopen or a stage verb;
 	// every later verb (stage session, push, close, sync, shell)
 	// routes off it. omitempty keeps run.json bodies of pre-workspace
 	// runs unchanged so diffs and tests stay clean.
