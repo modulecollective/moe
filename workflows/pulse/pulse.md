@@ -75,9 +75,7 @@ Start from the delta, not the whole project:
 
 This turn recurs on every pulse. It is a sweep, not an investigation.
 Anything that needs deep digging becomes a followup *naming the
-question* — not the answer, and not the dig. Routine fact collection
-already named by a tagged task is different: decide whether the task is
-ready to begin, then let its destination workflow collect the facts.
+question* — not the answer, and not the dig.
 
 ## Noise resistance is the whole game
 
@@ -222,10 +220,9 @@ still where the overwhelming majority of findings belong.
 
 A **run spec** is different. It opens a real run. For a new slug, the
 harness mints a parked sdlc run and seeds its design canvas with your
-`design` markdown. When the same slug names a harvested idea carrying a
-workflow tag, the harness promotes that idea into the tagged workflow
-instead; the idea canvas is the seed, so omit `design`. Untagged ideas
-remain flag-only and require the operator.
+`design` markdown. Ideas are not yours to start, tagged or not — the
+harness starts tagged ones on a dynamic sweep, and the rest are the
+operator's.
 
 A spec in `loose` parks standalone and unchained. The same spec written
 inline in a thread's `runs` opens the same run and puts it exactly
@@ -241,12 +238,9 @@ separate bar.
 
 **The bar: mechanical, bounded, and verifiable.** All three, not two:
 
-- **Mechanical** — the path to the answer is established. For a fresh
-  fix spec, the fix is obvious from the evidence: you are not proposing
-  a judgment call, an approach, or a design. For an existing tagged
-  task, routine collection of facts through a known method does not make
-  the task non-mechanical merely because the facts are absent from its
-  seed.
+- **Mechanical** — the path to the answer is established. The fix is
+  obvious from the evidence: you are not proposing a judgment call, an
+  approach, or a design.
 - **Bounded** — you can say what "done" looks like in one line, and it
   is small.
 - **Verifiable** — there is a signal that flips when it's fixed: a red
@@ -295,10 +289,9 @@ three:
 **The `design` body is the brief, not the design.** State the problem,
 the evidence, and what you want decided. Do not argue the approach —
 the design stage does that, with the code in front of it and a sandbox
-you don't have. On a fresh slug, a spec with `design_only` and no
-`design` body is skipped: without the brief this is the one-line idea
-it exists to replace. On a tagged idea the body is never the seed —
-its canvas is the brief — so omit it there and nothing is lost.
+you don't have. A spec with `design_only` and no `design` body is
+skipped: without the brief this is the one-line idea it exists to
+replace.
 
 **Mark the `why` speculative when it is.** The field says the ride is
 short; the `why` says why the finding earns a turn at all. The two are
@@ -310,14 +303,11 @@ hold. A pile of design canvases the operator never opens is the failure
 mode, and it is a slow one, so it is worth avoiding before it starts.
 
 **Fresh slugs only.** `design_only` on a slug that already names a live
-run is skipped: a tag is the licence to *ship* and an untagged idea is
-the operator's, so consuming either to buy a design turn goes past a
-brake that is there on purpose. The design-only rung on an idea is the
-operator's to stamp, not yours to reach for — and on an idea they have
-already stamped, the flag is redundant and simply ignored. It is also
-skipped at a thread position — a design-only root is held by definition
-and would strand everything behind it — and on a `chore` or `twin`
-entry, where there is no design stage for the bound to mean anything.
+run or idea is skipped: ideas and their licences are the operator's to
+stamp, not yours to reach for. It is also skipped at a thread position
+— a design-only root is held by definition and would strand everything
+behind it — and on a `chore` or `twin` entry, where there is no design
+stage for the bound to mean anything.
 
 **A design-only run the operator closed is a no.** It is in the
 recently-settled block. Do not re-propose the same finding under a
@@ -337,34 +327,6 @@ you are hoping about. Zero is the normal number.
 The `slug` is a lowercase-kebab base (the harness dates it); `why` is
 the one line that names the evidence — the failing test, the URL, the
 contradicted line.
-
-A tagged idea that clears the same mechanical/bounded/verifiable bar is
-proposed under its existing slug. Judge whether it has a clear objective,
-a bounded method, and a credible verification source — whether it is ready
-to begin, not whether its work is already done. Routine fact collection
-belongs in the destination workflow's design stage. For example, a tagged
-request to refresh an existing price table from authoritative vendor
-sources need not already list current models or rates: identifying them is
-the task. Use the existing slug, omit `design`, and let design resolve the
-lookup or close if nothing changed.
-
-Withhold when the objective or acceptance criterion depends on an operator
-choice, or when the evidence says the task needs a pricing-system redesign.
-Name that concrete blocker rather than treating facts the agent can collect
-as one. Do not invent a fresh slug or repeat the idea's design: the harness
-promotes rather than duplicates it. The tag is necessary, not sufficient —
-you still make the scheduling judgment. An untagged idea stays advisory-only.
-Promotion is not closing an idea; the normal promotion transition records
-where the work went, so the backlog-hygiene rule to never close ideas still
-stands.
-
-An idea whose tag reads **design only** on the board is proposed the
-same way — loose, under its own slug — but it clears the design-only
-bar rather than the spawn bar: a finding worth a designer's hour, not a
-fix worth a ride. Write no `design_only` on the spec; the tag carries
-it, and the harness rides the promoted run exactly one design turn. A
-design-only tag is loose-only for the same reason a `design_only` spec
-is: name one at a thread position and it strands the runs behind it.
 
 ## Judged chores — the one thing here that isn't the spawn bar
 

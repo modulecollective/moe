@@ -483,16 +483,22 @@ func TestBuildSystemPromptInjectsPulseFragment(t *testing.T) {
 		t.Fatalf("pulse.md missing the spawn bar it owns:\n%s", got)
 	}
 
+	// Tagged ideas are the harness's to start, so the survey is told so
+	// once and asked to judge nothing about them — no readiness bar for
+	// a choice it no longer makes.
+	flat := strings.Join(strings.Fields(got), " ")
+	if !strings.Contains(flat, "Ideas are not yours to start, tagged or not — the harness starts tagged ones on a dynamic sweep") {
+		t.Errorf("pulse.md missing the line that hands tagged ideas to the harness")
+	}
 	for name, text := range map[string]string{
 		"assembled system prompt": got,
 		"first-turn kickoff":      pulseKickoff,
 	} {
 		text = strings.Join(strings.Fields(text), " ")
-		if !strings.Contains(text, "Routine fact collection belongs in the destination workflow's design stage") {
-			t.Errorf("%s missing the fact-collection rule", name)
-		}
-		if !strings.Contains(text, "Withhold when the objective or acceptance criterion depends on an operator choice") {
-			t.Errorf("%s missing the operator-choice boundary", name)
+		for _, stale := range []string{"existing tagged idea", "tagged task", "The tag is necessary, not sufficient"} {
+			if strings.Contains(text, stale) {
+				t.Errorf("%s still asks the survey to judge tagged ideas (%q)", name, stale)
+			}
 		}
 	}
 }

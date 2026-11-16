@@ -510,13 +510,16 @@ lineage in the journal. `idea reopen` is for a promoted idea whose destination
 run was abandoned and should become backlog again.
 
 `idea tag` is the other way in, and the cheaper one: it stamps a workflow tag
-(`sdlc` by default) that licenses a pulse to promote the idea itself, under its
-own slug, when the survey judges it ready. The tag is the whole fence — **the
-machine starts only tagged ideas**, whoever filed them — so `idea untag` is the
-per-idea pause, and an untagged idea stays operator-only forever. Agents can
-tag at capture time with the followups grammar (`` - [ ] `slug` (sdlc) — Title ``);
-`idea tag` is how the operator stamps one that was filed without it. Tagged
-ideas say so on the dash, and both verbs have a chip on the idea's page.
+(`sdlc` by default), and the next dynamic sweep promotes the idea under its own
+slug and rides it. The survey can order a tagged idea or `park` it by naming it
+in a thread, but it does not decide whether the idea starts; if the work turns
+out not to be ready, the destination's design gate holds or closes it. The tag
+is the whole fence — **the machine starts only tagged ideas**, whoever filed
+them — so `idea untag` is the per-idea pause, and an untagged idea stays
+operator-only forever. Agents can tag at capture time with the followups grammar
+(`` - [ ] `slug` (sdlc) — Title ``); `idea tag` is how the operator stamps one
+that was filed without it. Tagged ideas say so on the dash, and both verbs have
+a chip on the idea's page.
 
 `--design-only` narrows that licence to one headless design turn: the promoted
 run rides design and then holds until you read the canvas and advance it, which
@@ -753,15 +756,8 @@ heartbeat never starts build directly.
 Most of what a survey finds becomes a followup. When it finds work that is
 mechanical, bounded, and verifiable — a red check with a named failing test,
 documentation the code plainly contradicts — it may open or nominate an
-ordinary `sdlc` or chore run. For an existing tagged idea, the survey judges
-whether the task has a clear objective, a bounded method, and a credible
-verification source, not whether its work is already done. Routine fact
-collection belongs in the destination's design stage: a tagged request to
-refresh an existing price table from authoritative vendor sources need not
-already list current models or rates. The survey withholds when the objective
-or acceptance criterion depends on an operator choice, or evidence points to a
-redesign, and names that concrete blocker rather than treating collectable
-facts as one.
+ordinary `sdlc` or chore run. Tagged ideas are not the survey's call: a dynamic
+sweep promotes every one the gate left alone.
 
 The survey can place new and existing queued runs into ordinary chain threads,
 leave them loose when it has no ordering opinion, or add a chain head when a

@@ -780,24 +780,24 @@ func commitExists(t *testing.T, root, trailer string) bool {
 	return strings.Contains(gittest.Output(t, root, "log", "--format=%B"), trailer)
 }
 
-// A note on a tagged idea has no turn of its own to reach — the promote
-// is what delivers it — so the block tells the survey to read it as
-// promote signal rather than a pending pickup.
-func TestPendingInputBlockNamesTaggedIdeasAsPromoteSignal(t *testing.T) {
+// A note on a tagged idea is not the survey's to weigh: the harness
+// promotes the idea on the next dynamic sweep and the promotion carries
+// the note onto the run. So the entry drops out of the waiting list —
+// and with nothing else live, the whole block does. A note on an
+// untagged idea stays, as the operator's inbox it always was.
+func TestPendingInputBlockLeavesOutTaggedIdeas(t *testing.T) {
 	root := spawnFixture(t)
 	if _, err := run.New(root, "moe", run.Options{ID: "an-idea", Workflow: "idea"}); err != nil {
 		t.Fatal(err)
 	}
 	addOn(t, root, "moe", "an-idea", "Do the design pass and park for me to look.")
 
-	// Untagged: operator-fenced, so the survey can't promote it and the
-	// sentence would be advice it can't take.
 	sc, ok := newPulseScan(root)
 	if !ok {
 		t.Fatalf("newPulseScan(%q) failed", root)
 	}
-	if got := pendingInputBlock(sc, "moe"); strings.Contains(got, "signal to promote") {
-		t.Fatalf("block reads an untagged idea as promote signal:\n%s", got)
+	if got := pendingInputBlock(sc, "moe"); !strings.Contains(got, "`moe/an-idea`") {
+		t.Fatalf("block dropped a note on an untagged idea:\n%s", got)
 	}
 
 	if err := runopen.TagIdea(root, "moe", "an-idea", "sdlc", false); err != nil {
@@ -807,8 +807,7 @@ func TestPendingInputBlockNamesTaggedIdeasAsPromoteSignal(t *testing.T) {
 	if !ok {
 		t.Fatalf("newPulseScan(%q) failed", root)
 	}
-	got := pendingInputBlock(sc, "moe")
-	if !strings.Contains(got, "signal to promote") {
-		t.Fatalf("block missing the tagged-idea sentence:\n%s", got)
+	if got := pendingInputBlock(sc, "moe"); got != "" {
+		t.Fatalf("block = %q, want empty — the tagged idea's note rides its promotion", got)
 	}
 }

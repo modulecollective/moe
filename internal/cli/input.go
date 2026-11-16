@@ -310,7 +310,7 @@ func indentContinuation(text string) string {
 // nothing is live, which is the normal sweep.
 func pendingInputBlock(sc *pulseScan, projectID string) string {
 	waiting, _ := input.Scan(sc.root, projectID)
-	open, pending := partitionWaiting(waiting)
+	open, pending := partitionWaiting(dropTaggedIdeas(sc, waiting))
 	if len(open) == 0 && len(pending) == 0 {
 		return ""
 	}
@@ -323,10 +323,6 @@ func pendingInputBlock(sc *pulseScan, projectID string) string {
 			"the run's own turn receives it in full.\n")
 		for _, w := range pending {
 			fmt.Fprintf(&b, "- `%s/%s` — %s\n", w.Project, w.Run, w.Entry.FirstLine())
-		}
-		if anyTaggedIdea(sc, pending) {
-			b.WriteString("\nA tagged idea in that list has no turn of its own: promoting it is " +
-				"what delivers the note, so read the note as signal to promote.\n")
 		}
 	}
 	if len(open) > 0 {
@@ -346,17 +342,18 @@ func pendingInputBlock(sc *pulseScan, projectID string) string {
 	return b.String()
 }
 
-// anyTaggedIdea reports whether any of these entries sits on an idea the
-// operator has tagged for promotion. Such a note is undeliverable where
-// it is — an idea has no machine turn — and the promote is what moves it
-// onto a run that does, which makes the note promote signal rather than
-// a pending pickup.
-func anyTaggedIdea(sc *pulseScan, waiting []input.Waiting) bool {
+// dropTaggedIdeas drops the entries sitting on a tagged idea. A dynamic
+// sweep promotes every tagged idea itself, and the promotion carries the
+// note onto the destination run, so the note is not the survey's to
+// weigh.
+func dropTaggedIdeas(sc *pulseScan, waiting []input.Waiting) []input.Waiting {
+	var out []input.Waiting
 	for _, w := range waiting {
 		md := sc.byKey[w.Project+"/"+w.Run]
 		if md != nil && md.Workflow == dash.IdeaWorkflow && md.PromoteTo != "" {
-			return true
+			continue
 		}
+		out = append(out, w)
 	}
-	return false
+	return out
 }

@@ -210,13 +210,14 @@ propose an untagged idea, whoever filed it. What isn't valid is
 skipping the decision. An untagged entry should mean "a human should
 look at this", not "I didn't think about it".
 
-The tag licenses; it does not schedule. A tagged idea is proposed by a
-future pulse under its own slug, and the survey still decides whether
-and when it rides. Tags are validated at close against staged,
-chainable workflows; unknown or non-chainable tags are rejected rather
-than silently ignored. A missed tag is recoverable — the operator can
-stamp or clear one later with `moe idea tag` / `moe idea untag` — but
-it strands the work until someone notices.
+A tagged idea starts on the next dynamic sweep: the harness promotes
+it into a run and the kick rides it, without waiting for the survey to
+name it. That is why the bar above is yours to hold. Tags are validated
+at close against staged, chainable workflows; unknown or non-chainable
+tags are rejected rather than silently ignored. A missed tag is
+recoverable — the operator can stamp or clear one later with `moe idea
+tag` / `moe idea untag` — but it strands the work until someone
+notices.
 
 Content written in any other shape — plain bullets, prose, or a
 hyphen where the em-dash belongs — is **rejected at close**, not

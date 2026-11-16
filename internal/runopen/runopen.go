@@ -267,7 +267,7 @@ func bumpIdeaPromoted(root string, md *run.Metadata, destProjectID, destSlug, co
 }
 
 // TagIdea stamps workflow onto an in-progress idea's PromoteTo — the
-// license a pulse survey needs before it will propose the idea for a
+// license a dynamic pulse sweep needs before it will promote the idea into a
 // run of its own. An empty workflow clears the tag (`moe idea untag`),
 // which is the per-idea pause: an untagged idea is operator-fenced,
 // always, whoever filed it.
@@ -280,8 +280,8 @@ func bumpIdeaPromoted(root string, md *run.Metadata, destProjectID, destSlug, co
 // already design-only idea clears the bit. designOnly with an empty
 // workflow is a caller bug: there is no licence for it to narrow.
 //
-// The tag is a license, not a schedule: the survey still decides whether
-// and where a tagged idea rides. Nothing here starts anything.
+// The tag is the licence and, under dynamic consent, the schedule: the
+// next dynamic sweep promotes the idea. Nothing here starts anything.
 //
 // The workflow name is deliberately NOT validated here — runopen has no
 // workflow registry. Callers vet it against theirs first (cli's
