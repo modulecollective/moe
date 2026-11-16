@@ -123,7 +123,9 @@ func applyPulseGate(root, projectID, pulseSlug string, gate pulseGate, stdout, s
 // grammars share, so the destination is the ordinary machine spawn the
 // kick floor admits. Id order keeps a multi-idea sweep deterministic.
 // Warn-only like the rest of the sweep: a failed scan or a refused
-// promotion costs a stderr line, and the next dynamic sweep tries again.
+// promotion costs a stderr line — including an idea whose slug a second
+// live run already holds, which the seam leaves its caller to name — and
+// the next dynamic sweep tries again.
 //
 // Only under dynamic consent, the one door to machine-rooted motion: a
 // hand-typed `moe pulse new` keeps promoting only what its gate names.
@@ -145,8 +147,35 @@ func promoteTaggedIdeas(root, projectID, pulseSlug string, stdout, stderr io.Wri
 	sort.Strings(ids)
 	m := &pulseMinter{root: root, projectID: projectID, pulseSlug: pulseSlug}
 	for _, id := range ids {
-		m.promoteIfTaggedIdea(id, pulseRunSpec{}, false /*atThread*/, stdout, stderr)
+		if _, dup := m.promoteIfTaggedIdea(id, pulseRunSpec{}, false /*atThread*/, stdout, stderr); dup {
+			sayWhyTaggedIdeaStayed(root, projectID, id, stderr)
+		}
 	}
+}
+
+// sayWhyTaggedIdeaStayed names the live run that kept a tagged idea from
+// promoting. promoteIfTaggedIdea leaves dup for its caller to speak to,
+// and here a silent skip strands the operator's licence sweep after
+// sweep. The sibling is usually the idea's own work (a hand-opened
+// `moe sdlc new`, or a promotion whose idea mark failed), so the hint
+// leads with closing the idea. It re-scans rather than widening the
+// shared seam's signature for this one caller; a scan that errors or
+// no longer finds a sibling only drops the name, and the next sweep
+// asks again.
+func sayWhyTaggedIdeaStayed(root, projectID, id string, stderr io.Writer) {
+	var siblings []string
+	matches, _ := matchingLiveRuns(root, projectID, id)
+	for _, md := range matches {
+		if md.ID != id {
+			siblings = append(siblings, projectID+"/"+md.ID)
+		}
+	}
+	if len(siblings) == 0 {
+		moePrintf(stderr, "pulse: promote: tagged idea %s/%s not promoted — its slug is no longer a lone idea\n", projectID, id)
+		return
+	}
+	moePrintf(stderr, "pulse: promote: tagged idea %s/%s not promoted — live run %s already holds its slug; `moe idea close %s/%s` if that run is its work, or close the run to let the idea promote\n",
+		projectID, id, strings.Join(siblings, ", "), projectID, id)
 }
 
 // askThreadEntry opens the survey's ping on the run sitting at this
