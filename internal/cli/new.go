@@ -12,7 +12,6 @@ import (
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
-	"github.com/modulecollective/moe/internal/workspace"
 )
 
 // newRunCommand returns a Command suitable for registering under a
@@ -63,7 +62,7 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	// tree (claim taken at first stage attach — sdlc design). The flag
 	// parses on every workflow's shared `new` facade and we reject it for
 	// the other workflows below before doing any work.
-	workspaceName := fs.String("workspace", "", "(sdlc) bind the run to the named workspace at .moe/named/<project>/<name>/ and use it as the run's working tree; the claim is taken at first stage attach")
+	workspaceName := addWorkspaceFlag(fs, "sdlc only")
 	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). Explicit values persist to run.json; omitted values resolve at stage time via the model stylesheet, then claude. $MOE_FORCE_AGENT overrides backend selection")
 	// --park, --seed, and the cascade ladder are workflow-generic (they
 	// live on the shared new facade, so every workflow gets them).
@@ -88,8 +87,8 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	chain := fs.Bool("chain", false, "open the run, ship it, and ride the chain it heads (the flag twin of !!!; mutually exclusive with --park/--ship)")
 	fs.Usage = func() {
 		if workflowName == sdlcWorkflow {
-			moePrintf(stderr, "usage: moe %s new [--workspace <name>] [--agent <name>] [--seed] [--park|--ship|--chain] <project>/<slug>\n", workflowName)
-			moePrintf(stderr, "       moe %s new [--workspace <name>] [--agent <name>] [--park|--ship|--chain] --from-idea <project>/<slug>\n", workflowName)
+			moePrintf(stderr, "usage: moe %s new [--workspace <project>/<name>] [--agent <name>] [--seed] [--park|--ship|--chain] <project>/<slug>\n", workflowName)
+			moePrintf(stderr, "       moe %s new [--workspace <project>/<name>] [--agent <name>] [--park|--ship|--chain] --from-idea <project>/<slug>\n", workflowName)
 			fs.PrintDefaults()
 		} else {
 			moePrintf(stderr, "usage: moe %s new [--agent <name>] [--seed] [--park] <project>/<slug>\n", workflowName)
@@ -138,15 +137,9 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
-	if *workspaceName != "" {
-		if workflowName != sdlcWorkflow {
-			moePrintf(stderr, "--workspace: only sdlc accepts --workspace today\n")
-			return 2
-		}
-		if err := workspace.ValidateName(*workspaceName); err != nil {
-			moePrintf(stderr, "%v\n", err)
-			return 2
-		}
+	if *workspaceName != "" && workflowName != sdlcWorkflow {
+		moePrintf(stderr, "--workspace: only sdlc accepts --workspace today\n")
+		return 2
 	}
 	// Validate --agent against the registry up-front so a typo surfaces
 	// at run open rather than at first stage turn. Empty (the steady
@@ -209,10 +202,12 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	if *workspaceName != "" && workflowName == "sdlc" {
-		if code := preflightWorkspaceClaim(root, project, *workspaceName, stderr); code != 0 {
+	if *workspaceName != "" {
+		name, code := checkWorkspaceBinding(root, project, *workspaceName, "", stderr)
+		if code != 0 {
 			return code
 		}
+		*workspaceName = name
 	}
 
 	var md *run.Metadata
@@ -283,34 +278,6 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	// stage), neither offers the standard chain prompt where the operator
 	// picks `!<stage>` / `!!` / `!!!` after seeing the seeded canvas.
 	return mintTail(root, md, *park, cascade, stdout, stderr)
-}
-
-// preflightWorkspaceClaim refuses to bind a run to a workspace that is
-// already claimed by another run. The actual claim is taken at first
-// stage attach (sdlc design under the sdlc workflow); checking at the
-// verb gives the operator a fail-fast signal at the command they typed
-// instead of a confusing error one stage later. Stale claims (a run
-// that crashed or was force-closed) clear with `moe workspace release`;
-// we don't paper over them automatically.
-//
-// Hooks runs don't take a claim — the workspace is a label, not a
-// working tree — so callers gate this on workflow themselves.
-//
-// Returns 0 to proceed; non-zero exit code (already printed to stderr)
-// otherwise.
-func preflightWorkspaceClaim(root, projectID, name string, stderr io.Writer) int {
-	holder, err := workspace.ReadClaim(root, projectID, name)
-	if err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
-	}
-	if holder != nil {
-		moePrintf(stderr,
-			"workspace %q for project %q is claimed by run %s; close that run first or pick a different workspace\n",
-			name, projectID, holder.Run)
-		return 1
-	}
-	return 0
 }
 
 // seedFirstStage runs --seed's editor capture and, on success, wires the

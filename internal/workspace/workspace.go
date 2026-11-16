@@ -8,7 +8,7 @@
 // Lifecycle:
 //
 //   - Lazily created on first use, by either `moe sdlc new
-//     --workspace <name>` or `moe workspace shell <project> <name>`.
+//     --workspace <project>/<name>` or `moe workspace shell <project>/<name>`.
 //     The working tree reuses sandbox.EnsureAt — an object-shared
 //     `git clone --local --shared` of the canonical submodule, with
 //     the auto-init pre-flight for fresh checkouts.

@@ -176,7 +176,7 @@ func TestRunNewWithWorkspaceFlagPersistsToRunJSON(t *testing.T) {
 	suppressNextStagePrompt(t)
 
 	var out, errb bytes.Buffer
-	if code := runNew("sdlc", []string{"--workspace=dev", "tele/fix-it"}, &out, &errb); code != 0 {
+	if code := runNew("sdlc", []string{"--workspace=tele/dev", "tele/fix-it"}, &out, &errb); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	body, err := os.ReadFile(filepath.Join(root, "projects", "tele", "runs", "fix-it", "run.json"))
@@ -213,7 +213,7 @@ func TestRunNewWithWorkspaceFlagRefusesIfClaimed(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	code := runNew("sdlc", []string{"--workspace=dev", "tele/fix-it"}, &out, &errb)
+	code := runNew("sdlc", []string{"--workspace=tele/dev", "tele/fix-it"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on conflicting claim, got 0; stdout=%q", out.String())
 	}
@@ -234,7 +234,7 @@ func TestRunNewWithWorkspaceFlagRejectedOnNonSdlc(t *testing.T) {
 	stubEditor(t)
 
 	var out, errb bytes.Buffer
-	code := runNew(chatWorkflow, []string{"--workspace=dev", "tele/dns-basics"}, &out, &errb)
+	code := runNew(chatWorkflow, []string{"--workspace=tele/dev", "tele/dns-basics"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on --workspace with a non-sdlc workflow, got 0; stdout=%q", out.String())
 	}
@@ -371,7 +371,7 @@ func TestClaimedShellsRefuseStaleDevEnvHookRevision(t *testing.T) {
 
 			args := []string{"tele/fix-it"}
 			if tc.workspace != "" {
-				args = []string{"--workspace=" + tc.workspace, "tele/fix-it"}
+				args = []string{"--workspace=tele/" + tc.workspace, "tele/fix-it"}
 			}
 			if code := runNew("sdlc", args, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 				t.Fatal("seed run failed")
@@ -501,7 +501,7 @@ func TestSdlcShellRejectsWorkspaceFlag(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := runShell([]string{"--workspace=dev", "tele"}, &out, &errb)
+	code := runShell([]string{"--workspace=tele/dev", "tele"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on --workspace under sdlc shell; stdout=%q stderr=%q", out.String(), errb.String())
 	}

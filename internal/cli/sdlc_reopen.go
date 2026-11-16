@@ -13,7 +13,6 @@ import (
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/trailers"
-	"github.com/modulecollective/moe/internal/workspace"
 )
 
 // runSDLCReopen opens a fresh sdlc run seeded by a prior run's design
@@ -49,7 +48,7 @@ import (
 func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("sdlc reopen", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	workspaceName := fs.String("workspace", "", "bind the new run to the named workspace at .moe/named/<project>/<name>/ (claim taken at first stage attach — sdlc design). When omitted, the prior run's workspace is inherited.")
+	workspaceName := addWorkspaceFlag(fs, "When omitted, the prior run's workspace is inherited")
 	noWorkspace := fs.Bool("no-workspace", false, "give the new run a fresh per-run sandbox instead of inheriting the prior's named workspace. Mutually exclusive with --workspace.")
 	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). When omitted, the prior run's agent is inherited.")
 	noAgent := fs.Bool("no-agent", false, "clear the inherited agent so stage-time selection uses $MOE_FORCE_AGENT, then the stylesheet, then claude. Mutually exclusive with --agent.")
@@ -61,7 +60,7 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 	ship := fs.Bool("ship", false, "open the run and cascade every stage headless to the ship (the flag twin of !! at the chain prompt; mutually exclusive with --park/--chain)")
 	chain := fs.Bool("chain", false, "open the run, ship it, and ride the chain it heads (the flag twin of !!!; mutually exclusive with --park/--ship)")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe sdlc reopen [--workspace <name> | --no-workspace] [--agent <name> | --no-agent] [--park|--ship|--chain] <project>/<slug>")
+		moePrintln(stderr, "usage: moe sdlc reopen [--workspace <project>/<name> | --no-workspace] [--agent <name> | --no-agent] [--park|--ship|--chain] <project>/<slug>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens a fresh sdlc run seeded with the prior run's design canvas.")
 		moePrintln(stderr, "The prior run must be in a terminal status (closed, merged, or promoted);")
@@ -96,12 +95,6 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "sdlc reopen: --agent and --no-agent are mutually exclusive")
 		return 2
 	}
-	if *workspaceName != "" {
-		if err := workspace.ValidateName(*workspaceName); err != nil {
-			moePrintf(stderr, "%v\n", err)
-			return 2
-		}
-	}
 	if *agentOverride != "" {
 		if _, err := agent.Get(*agentOverride); err != nil {
 			moePrintf(stderr, "%v\n", err)
@@ -117,6 +110,13 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 	root, err := findRoot(stderr)
 	if err != nil {
 		return 1
+	}
+	if *workspaceName != "" {
+		name, code := checkWorkspaceBinding(root, projectID, *workspaceName, "", stderr)
+		if code != 0 {
+			return code
+		}
+		*workspaceName = name
 	}
 
 	prior, err := run.Load(root, projectID, priorSlug)
@@ -210,8 +210,11 @@ func mintSDLCReopen(verb, root string, prior *run.Metadata, wsName, agentName st
 		designSeed = renderEmptyReopenSeed(priorSlug)
 	}
 
+	// The name may be inherited from the prior rather than typed, so the
+	// claim check runs here for every caller; the bare name gets its
+	// project back to pass the shared check.
 	if wsName != "" {
-		if code := preflightWorkspaceClaim(root, projectID, wsName, stderr); code != 0 {
+		if _, code := checkWorkspaceBinding(root, projectID, projectID+"/"+wsName, "", stderr); code != 0 {
 			return nil, code
 		}
 	}

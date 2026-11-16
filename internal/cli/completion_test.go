@@ -178,6 +178,40 @@ func TestCompleteWorkspaceValues(t *testing.T) {
 	}
 }
 
+// TestCompleteWorkspaceFlagValue: --workspace's value completes as
+// `project/name` in all three token shapes, and the token after the
+// value is still the first positional (a run).
+func TestCompleteWorkspaceFlagValue(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProjectWithSubmodule(t, root, "tele")
+	seedRunJSON(t, root, "tele", "fix-bug", "sdlc", run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	if _, err := workspace.Ensure(root, "tele", "dev"); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, verb := range []string{"new", "reopen", "build"} {
+		space := completeWords(root, []string{"sdlc", verb, "--workspace", ""})
+		if !slices.Equal(space, []string{"tele/dev"}) {
+			t.Errorf("%s space form: %v", verb, space)
+		}
+	}
+	single := completeWords(root, []string{"sdlc", "build", "--workspace=te"})
+	if !slices.Equal(single, []string{"--workspace=tele/dev"}) {
+		t.Errorf("single-token form: %v", single)
+	}
+	bash := completeWords(root, []string{"sdlc", "build", "--workspace", "=", "tele/"})
+	if !slices.Equal(bash, []string{"tele/dev"}) {
+		t.Errorf("bash split form: %v", bash)
+	}
+	after := completeWords(root, []string{"sdlc", "build", "--workspace", "tele/dev", ""})
+	if !slices.Contains(after, "tele/fix-bug") || slices.Contains(after, "tele/dev") {
+		t.Errorf("first positional after --workspace value should offer runs: %v", after)
+	}
+}
+
 // TestCompleteFromIdeaFlagValue covers all three token shapes the
 // --from-idea value arrives in across shells: space form, single-token
 // `=` form, and bash's wordbreak-split `=` form.

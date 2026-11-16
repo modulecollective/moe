@@ -389,7 +389,7 @@ func TestSDLCReopenWorkspaceFlagOverridesPrior(t *testing.T) {
 	suppressNextStagePrompt(t)
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "reopen", "--workspace=dev", "tele/fix-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "reopen", "--workspace=tele/dev", "tele/fix-it"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -446,7 +446,7 @@ func TestSDLCReopenWorkspaceAndNoWorkspaceConflict(t *testing.T) {
 	suppressNextStagePrompt(t)
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "reopen", "--workspace=dev", "--no-workspace", "tele/fix-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "reopen", "--workspace=tele/dev", "--no-workspace", "tele/fix-it"}, &out, &errb)
 	if code != 2 {
 		t.Fatalf("exit=%d, want 2; stderr=%q", code, errb.String())
 	}
@@ -467,7 +467,7 @@ func TestSDLCReopenWorkspaceFlagRefusesClaimed(t *testing.T) {
 	plantClaim(t, root, "tele", "dev", "tele/other")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "reopen", "--workspace=dev", "tele/fix-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "reopen", "--workspace=tele/dev", "tele/fix-it"}, &out, &errb)
 	if code != 1 {
 		t.Fatalf("exit=%d, want 1; stderr=%q", code, errb.String())
 	}
@@ -503,7 +503,7 @@ func TestSDLCReopenWorkspaceFlagRejectsInvalidName(t *testing.T) {
 	suppressNextStagePrompt(t)
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "reopen", "--workspace=NOT VALID", "tele/fix-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "reopen", "--workspace=tele/NOT VALID", "tele/fix-it"}, &out, &errb)
 	if code != 2 {
 		t.Fatalf("exit=%d, want 2; stderr=%q", code, errb.String())
 	}

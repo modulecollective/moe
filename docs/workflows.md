@@ -18,7 +18,7 @@ back to `build` or `design`, not to decorate the ladder.
 `moe sdlc` is the main software-development workflow:
 
 ```sh
-moe sdlc new [--workspace <name>] [--agent <name>] [--seed] [--park|--ship|--chain] <project>/<slug>
+moe sdlc new [--workspace <project>/<name>] [--agent <name>] [--seed] [--park|--ship|--chain] <project>/<slug>
 moe sdlc design [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
 moe sdlc build  [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
 moe sdlc review [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>

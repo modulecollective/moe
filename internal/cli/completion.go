@@ -50,10 +50,11 @@ const (
 // value. Kept tiny and name-keyed on purpose: it lets the single
 // highest-traffic flag (`--from-idea`) complete its idea slug without
 // exposing every command's FlagSet — the framework-shaped refactor the
-// design ruled out. `--workspace` → argWorkspace is the obvious next
-// entry; it's a one-line add when wanted.
+// design ruled out. `--workspace` takes `<project>/<name>`, the shape
+// workspaceCandidates yields.
 var flagArgKind = map[string]argKind{
 	"--from-idea": argIdea,
+	"--workspace": argWorkspace,
 }
 
 // valueFlags lists the flags whose *next token* is a value, not a

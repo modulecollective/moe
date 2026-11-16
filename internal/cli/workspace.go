@@ -1,8 +1,11 @@
 package cli
 
 import (
+	"flag"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
@@ -78,13 +81,13 @@ func freshenRunBranch(workTree, branch, defaultBranch string) {
 func resolveRunWorkspacePath(root string, md *run.Metadata) (string, error) {
 	if md.Workspace == "" {
 		if !sandbox.Exists(root, md.Project, md.ID) {
-			return "", fmt.Errorf("no sandbox clone for %s/%s; run `moe %s code %s/%s` first",
+			return "", fmt.Errorf("no sandbox clone for %s/%s; run `moe %s build %s/%s` first",
 				md.Project, md.ID, md.Workflow, md.Project, md.ID)
 		}
 		return sandbox.Ensure(root, md.Project, md.ID)
 	}
 	if !workspace.Exists(root, md.Project, md.Workspace) {
-		return "", fmt.Errorf("workspace %q for project %q does not exist on disk; run `moe %s code %s/%s` first",
+		return "", fmt.Errorf("workspace %q for project %q does not exist on disk; run `moe %s build %s/%s` first",
 			md.Workspace, md.Project, md.Workflow, md.Project, md.ID)
 	}
 	return workspace.Path(root, md.Project, md.Workspace), nil
@@ -152,4 +155,55 @@ func defaultBranchForProject(root, projectID string) (string, error) {
 		return "", fmt.Errorf("workspace: project %s has no default_branch set in project.json", projectID)
 	}
 	return pj.DefaultBranch, nil
+}
+
+// addWorkspaceFlag declares --workspace on a verb that binds an sdlc
+// run to a named workspace (new, reopen, the stage verbs). The value
+// shape and the claim note are shared; extra is the clause that differs
+// per verb ("" for none).
+func addWorkspaceFlag(fs *flag.FlagSet, extra string) *string {
+	usage := "bind the run to the named workspace `<project>/<name>` at .moe/named/<project>/<name>/ and use it as the run's working tree; the project must be the run's, and the claim is taken at stage attach"
+	if extra != "" {
+		usage += ". " + extra
+	}
+	return fs.String("workspace", "", usage)
+}
+
+// checkWorkspaceBinding validates a --workspace value against the run's
+// project and refuses a workspace another run holds. value is the
+// `<project>/<name>` the operator typed; the returned name is bare —
+// run.json stores the name alone, since the project is the run's own.
+// self is the "<project>/<run>" allowed to already hold the claim (a
+// stage verb passes the run it binds; new and reopen pass "").
+//
+// Returns the bare name and 0, or "" and an exit code with stderr
+// already written: 2 for a malformed or mismatched value, 1 for a claim
+// held elsewhere. A stale claim (a crashed or force-closed holder)
+// clears with `moe workspace release`; it isn't papered over here.
+func checkWorkspaceBinding(root, runProject, value, self string, stderr io.Writer) (string, int) {
+	project, name, ok := strings.Cut(value, "/")
+	if !ok {
+		moePrintf(stderr, "--workspace: want <project>/<name> — try %s/%s\n", runProject, value)
+		return "", 2
+	}
+	if project != runProject {
+		moePrintf(stderr, "--workspace: %s names project %q, but the run is in %q\n", value, project, runProject)
+		return "", 2
+	}
+	if err := workspace.ValidateName(name); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return "", 2
+	}
+	holder, err := workspace.ReadClaim(root, runProject, name)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return "", 1
+	}
+	if holder != nil && holder.Run != self {
+		moePrintf(stderr,
+			"workspace %q for project %q is claimed by run %s; close that run first or pick a different workspace\n",
+			name, runProject, holder.Run)
+		return "", 1
+	}
+	return name, 0
 }

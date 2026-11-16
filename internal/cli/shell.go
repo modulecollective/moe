@@ -99,7 +99,7 @@ func shellRunWorkspace(root, projectID, runID string, stdout, stderr io.Writer) 
 // workspace is created lazily on first use; subsequent calls are a
 // stat. Doesn't switch branches and doesn't take a claim — the
 // workspace is just a directory at this point, and a run that later
-// attaches with `--workspace <name>` is what flips it to "owned."
+// attaches with `--workspace <project>/<name>` is what flips it to "owned."
 //
 // Sources the workspace's cached dev-env when it is valid. A stale
 // cache is refused with workspace-refresh guidance. The unclaimed
