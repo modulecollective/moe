@@ -204,10 +204,10 @@ func promoteTagLabel(workflow string, designOnly bool) string {
 }
 
 // runIdeaTag stamps a workflow tag onto a parked idea. The tag is the
-// machine's license: the pulse survey proposes only tagged ideas, so
-// tagging is how the operator says "you may start this" without the
-// promote ritual. It is a license, not a schedule — the survey still
-// decides whether and where the idea rides.
+// machine's license: the machine starts only tagged ideas, so tagging
+// is how the operator says "start this" without the promote ritual.
+// Under dynamic consent it is also the schedule — the next dynamic
+// sweep promotes the idea. Tagging itself starts nothing.
 //
 // The workflow argument is optional and defaults to sdlc; it is
 // validated against the same bar the followups grammar applies to a

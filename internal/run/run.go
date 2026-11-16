@@ -95,8 +95,8 @@ type Metadata struct {
 	ReopenOf string `json:"reopen_of,omitempty"`
 	// PromoteTo, when non-empty, names the workflow an idea is licensed
 	// to become. Stamped by a filer's followup tag at harvest or by
-	// `moe idea tag` (cleared by `moe idea untag`); the pulse still
-	// decides whether and when to promote it. Untagged ideas remain
+	// `moe idea tag` (cleared by `moe idea untag`); the next dynamic
+	// sweep promotes a tagged idea. Untagged ideas remain
 	// operator-triaged and cannot be machine-promoted. On an idea,
 	// DesignOnly below may ride alongside it to narrow the licence.
 	PromoteTo string `json:"promote_to,omitempty"`

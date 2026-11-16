@@ -478,10 +478,9 @@ happens.
 
 Capture has to be cheaper than the thought is fleeting, or you lose the thought.
 `moe idea new` captures an untagged note without launching an agent. Untagged
-ideas await operator triage; a workflow tag permits a pulse to promote an idea
-when the survey judges it ready, preserving lineage in the journal. Under
-dynamic consent, the pulse can start the resulting work. Tagging itself
-launches no agent and does not promise immediate execution.
+ideas await operator triage; a workflow tag has the next dynamic sweep promote
+the idea and start the resulting work, preserving lineage in the journal.
+Tagging itself launches no agent; without dynamic consent a tagged idea waits.
 
 `moe idea` is the cheap backlog surface:
 
