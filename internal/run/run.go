@@ -1064,422 +1064,471 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 	if err != nil {
 		return nil, fmt.Errorf("run: git log: %w", err)
 	}
-	idx := &JournalIndex{
-		LastActivity:         make(map[string]time.Time),
-		LastOperatorActivity: make(map[string]time.Time),
-		PromotedTo:           make(map[string]string),
-		PRURL:                make(map[string]string),
-		CIRepairAttempts:     make(map[string][]CIRepairAttempt),
-		QuotaRetries:         make(map[string]QuotaRetry),
-		WorkTurnTime:         make(map[WorkTurnKey]time.Time),
-		AdvanceTime:          make(map[WorkTurnKey]time.Time),
-		ReopenedFrom:         make(map[string]string),
-		SpawnedBy:            make(map[string]string),
-		SpawnConsent:         make(map[string]string),
-		FromRun:              make(map[string]string),
-		OpenConsent:          make(map[string]string),
-		PromoteConsent:       make(map[string]string),
-		PushConsent:          make(map[string]string),
-		ChainedChild:         make(map[string]string),
-		EdgeConsent:          make(map[string]string),
-		ChoreByRun:           make(map[string]string),
-		ChoreTouched:         make(map[string]time.Time),
-		ChoreSkipped:         make(map[string]time.Time),
-	}
-	// dailyProjSlugs accumulates, per project, the distinct slug set active
-	// on each UTC day (project → day → set<slug>). Nesting by project
-	// encodes the qualified (project, slug) identity a run is counted by —
-	// within one project a bare slug is unique. Kept as sets during the
-	// walk (so repeat commits from one run on one day collapse to a single
-	// tally) and folded to the two DailyRunCount maps at the end — storing
-	// the counts, not the sets, keeps the index small.
-	dailyProjSlugs := make(map[string]map[string]map[string]struct{})
-	quotaSeen := make(map[string]bool)
-	quotaResolved := make(map[string]map[string]bool)
+	w := newJournalWalk()
 	for record := range strings.SplitSeq(out, "\x1e") {
-		record = strings.TrimLeft(record, "\n")
-		if record == "" {
-			continue
+		c, ok, err := parseJournalCommit(record)
+		if err != nil {
+			return nil, err
 		}
-		before, after, ok := strings.Cut(record, "\x00")
+		if ok {
+			w.fold(&c)
+		}
+	}
+	return w.finish(), nil
+}
+
+// journalCommit is one journal commit's trailers, parsed once and read
+// by every fold step. No step writes to it.
+type journalCommit struct {
+	when    time.Time
+	subject string
+
+	// First-wins string trailers: the first line carrying the key sets
+	// the field, later duplicates are ignored.
+	slug, project, doc                      string
+	promotedTo, prURL, reopenOf, fromRun    string
+	spawnedBy, consent, chore, choreSkipped string
+
+	choreTouched []string
+	ciRepair     *CIRepairAttempt
+	quotaRetry   *QuotaRetry
+	// Per-commit chain verdicts. chainAdd wins over chainRemove for the
+	// same parent within one commit (an edit save pairs a remove of the
+	// prior edge with an add of the new one; the new edge is the live
+	// state). First add wins on duplicate Chained-To lines for the same
+	// parent — linear-chain invariant says there should only be one,
+	// but pick a deterministic survivor regardless.
+	chainAdd, chainRemove map[string]string
+	// Both endpoints of every chain line on this commit, in the
+	// qualified "<project>/<slug>" form the run-scoped maps key by.
+	// Duplicates are harmless — every fold below is first-wins.
+	chainEndpoints []string
+}
+
+// runKey is the qualified key the run-scoped maps use. Slugs are only
+// per-project unique, so these maps key by "<project>/<slug>" — the
+// same qualified key dash looks runs up by. A commit missing its
+// MoE-Project trailer (a since-fixed late-May writer bug left a
+// handful) keys under "/<slug>" and is invisible to consumers, which
+// always query with a real project; worst case is a slightly stale age
+// on those runs. No bare-slug fallback — that would reintroduce the
+// cross-project ambiguity.
+func (c *journalCommit) runKey() string {
+	return c.project + "/" + c.slug
+}
+
+// operatorAuthored reports whether a person, not a machine walk, made
+// the commit: what decides it is whether a consent or spawn trailer was
+// on the commit at all, not what it pointed at.
+func (c *journalCommit) operatorAuthored() bool {
+	return c.consent == "" && c.spawnedBy == ""
+}
+
+// parseJournalCommit parses one `git log` record (`%ct NUL %B`). ok is
+// false for a record the walk skips (empty, no NUL, unparseable epoch);
+// a malformed quota-retry or CI-repair trailer fails the whole build.
+func parseJournalCommit(record string) (c journalCommit, ok bool, err error) {
+	record = strings.TrimLeft(record, "\n")
+	if record == "" {
+		return c, false, nil
+	}
+	before, body, ok := strings.Cut(record, "\x00")
+	if !ok {
+		return c, false, nil
+	}
+	epoch, err := strconv.ParseInt(before, 10, 64)
+	if err != nil {
+		return c, false, nil
+	}
+	c.when = time.Unix(epoch, 0).UTC()
+	c.subject = body
+	if before, _, ok := strings.Cut(body, "\n"); ok {
+		c.subject = before
+	}
+	for line := range strings.SplitSeq(body, "\n") {
+		// No trailer key contains a colon, so the text before a line's
+		// first colon is exactly its key.
+		key, v, ok := strings.Cut(strings.TrimSpace(line), ":")
 		if !ok {
 			continue
 		}
-		epoch, err := strconv.ParseInt(before, 10, 64)
-		if err != nil {
-			continue
-		}
-		body := after
-		subject := body
-		if before, _, ok := strings.Cut(body, "\n"); ok {
-			subject = before
-		}
-		slug := ""
-		var promotedTo, prURL, projectID, docID, reopenOf, spawnedBy, chore, choreSkipped, consent, fromRun string
-		var choreTouched []string
-		var ciRepair *CIRepairAttempt
-		var quotaRetry *QuotaRetry
-		// Per-commit chain verdicts. addByParent wins over
-		// removeByParent for the same parent within one commit (an edit
-		// save pairs a remove of the prior edge with an add of the new
-		// one; the new edge is the live state). First add wins on
-		// duplicate Chained-To lines for the same parent — linear-chain
-		// invariant says there should only be one, but pick a
-		// deterministic survivor regardless.
-		var addByParent, removeByParent map[string]string
-		// Both endpoints of every chain line on this commit, in the
-		// qualified "<project>/<slug>" form the run-scoped maps key by.
-		// Duplicates are harmless — every fold below is first-wins.
-		var chainEndpoints []string
-		for line := range strings.SplitSeq(body, "\n") {
-			line = strings.TrimSpace(line)
-			if v, ok := strings.CutPrefix(line, "MoE-Quota-Retry:"); ok {
-				var r QuotaRetry
-				if err := json.Unmarshal([]byte(strings.TrimSpace(v)), &r); err != nil || r.Project == "" ||
-					(r.Token == "" && len(r.Resolves) == 0) || (r.Token != "" && (r.NotBefore.IsZero() || len(r.Targets) == 0 || !strings.HasPrefix(r.Token, r.Project+"/"))) {
-					return nil, fmt.Errorf("run: malformed MoE-Quota-Retry trailer: %s", v)
+		switch key {
+		case "MoE-Quota-Retry":
+			var r QuotaRetry
+			if err := json.Unmarshal([]byte(strings.TrimSpace(v)), &r); err != nil || r.Project == "" ||
+				(r.Token == "" && len(r.Resolves) == 0) || (r.Token != "" && (r.NotBefore.IsZero() || len(r.Targets) == 0 || !strings.HasPrefix(r.Token, r.Project+"/"))) {
+				return c, false, fmt.Errorf("run: malformed MoE-Quota-Retry trailer: %s", v)
+			}
+			for token, fingerprint := range r.Resolves {
+				if !strings.HasPrefix(token, r.Project+"/") || token == r.Token || fingerprint == "" {
+					return c, false, fmt.Errorf("run: invalid quota retry resolution: %s", token)
 				}
-				for token, fingerprint := range r.Resolves {
-					if !strings.HasPrefix(token, r.Project+"/") || token == r.Token || fingerprint == "" {
-						return nil, fmt.Errorf("run: invalid quota retry resolution: %s", token)
-					}
-				}
-				quotaRetry = &r
+			}
+			c.quotaRetry = &r
+		case "MoE-CI-Repair":
+			var a CIRepairAttempt
+			if err := json.Unmarshal([]byte(strings.TrimSpace(v)), &a); err != nil || a.PR == "" || a.Head == "" {
+				return c, false, fmt.Errorf("run: malformed MoE-CI-Repair trailer: %s", v)
+			}
+			c.ciRepair = &a
+		case "MoE-Run":
+			setFirst(&c.slug, v)
+		case "MoE-Project":
+			setFirst(&c.project, v)
+		case "MoE-Document":
+			setFirst(&c.doc, v)
+		case "MoE-Promoted-To":
+			setFirst(&c.promotedTo, v)
+		case "MoE-From-Run":
+			setFirst(&c.fromRun, v)
+		case "MoE-PR":
+			setFirst(&c.prURL, v)
+		case "MoE-Reopen-Of":
+			setFirst(&c.reopenOf, v)
+		case "MoE-Spawned-By":
+			setFirst(&c.spawnedBy, v)
+		case "MoE-Consent":
+			setFirst(&c.consent, v)
+		case "MoE-Chore-Skipped":
+			setFirst(&c.choreSkipped, v)
+		case "MoE-Chore":
+			setFirst(&c.chore, v)
+		case "MoE-Chore-Touched":
+			if touched := strings.TrimSpace(v); touched != "" {
+				c.choreTouched = append(c.choreTouched, touched)
+			}
+		case "MoE-Chained-To-Removed":
+			parent, child, ok := splitChainPair(v)
+			if !ok {
 				continue
 			}
-			if v, ok := strings.CutPrefix(line, "MoE-Run:"); ok {
-				if slug == "" {
-					slug = strings.TrimSpace(v)
-				}
+			c.chainEndpoints = append(c.chainEndpoints, parent, child)
+			if c.chainRemove == nil {
+				c.chainRemove = make(map[string]string)
+			}
+			if _, dup := c.chainRemove[parent]; !dup {
+				c.chainRemove[parent] = ""
+			}
+		case "MoE-Chained-To":
+			parent, child, ok := splitChainPair(v)
+			if !ok {
 				continue
 			}
-			if v, ok := strings.CutPrefix(line, "MoE-Project:"); ok {
-				if projectID == "" {
-					projectID = strings.TrimSpace(v)
-				}
-				continue
+			c.chainEndpoints = append(c.chainEndpoints, parent, child)
+			if c.chainAdd == nil {
+				c.chainAdd = make(map[string]string)
 			}
-			if v, ok := strings.CutPrefix(line, "MoE-Document:"); ok {
-				if docID == "" {
-					docID = strings.TrimSpace(v)
-				}
-				continue
-			}
-			if v, ok := strings.CutPrefix(line, "MoE-Promoted-To:"); ok {
-				if promotedTo == "" {
-					promotedTo = strings.TrimSpace(v)
-				}
-				continue
-			}
-			if v, ok := strings.CutPrefix(line, "MoE-From-Run:"); ok {
-				if fromRun == "" {
-					fromRun = strings.TrimSpace(v)
-				}
-				continue
-			}
-			if v, ok := strings.CutPrefix(line, "MoE-CI-Repair:"); ok {
-				var a CIRepairAttempt
-				if err := json.Unmarshal([]byte(strings.TrimSpace(v)), &a); err != nil || a.PR == "" || a.Head == "" {
-					return nil, fmt.Errorf("run: malformed MoE-CI-Repair trailer: %s", v)
-				}
-				ciRepair = &a
-				continue
-			}
-			if v, ok := strings.CutPrefix(line, "MoE-PR:"); ok {
-				if prURL == "" {
-					prURL = strings.TrimSpace(v)
-				}
-				continue
-			}
-			if v, ok := strings.CutPrefix(line, "MoE-Reopen-Of:"); ok {
-				if reopenOf == "" {
-					reopenOf = strings.TrimSpace(v)
-				}
-				continue
-			}
-			if v, ok := strings.CutPrefix(line, "MoE-Spawned-By:"); ok {
-				if spawnedBy == "" {
-					spawnedBy = strings.TrimSpace(v)
-				}
-				continue
-			}
-			if v, ok := strings.CutPrefix(line, "MoE-Consent:"); ok {
-				if consent == "" {
-					consent = strings.TrimSpace(v)
-				}
-				continue
-			}
-			if v, ok := strings.CutPrefix(line, "MoE-Chore-Touched:"); ok {
-				if touched := strings.TrimSpace(v); touched != "" {
-					choreTouched = append(choreTouched, touched)
-				}
-				continue
-			}
-			// MoE-Chore-Skipped must be matched before MoE-Chore — the
-			// latter is a prefix of the former. (CutPrefix("MoE-Chore:")
-			// can't match "MoE-Chore-Skipped:" since the next char is '-',
-			// not ':', but match it first to mirror the Touched arm.)
-			if v, ok := strings.CutPrefix(line, "MoE-Chore-Skipped:"); ok {
-				if choreSkipped == "" {
-					choreSkipped = strings.TrimSpace(v)
-				}
-				continue
-			}
-			if v, ok := strings.CutPrefix(line, "MoE-Chore:"); ok {
-				if chore == "" {
-					chore = strings.TrimSpace(v)
-				}
-				continue
-			}
-			// MoE-Chained-To-Removed must be matched before
-			// MoE-Chained-To — the latter is a prefix of the former.
-			if v, ok := strings.CutPrefix(line, "MoE-Chained-To-Removed:"); ok {
-				parent, child, ok := splitChainPair(v)
-				if !ok {
-					continue
-				}
-				chainEndpoints = append(chainEndpoints, parent, child)
-				if removeByParent == nil {
-					removeByParent = make(map[string]string)
-				}
-				if _, dup := removeByParent[parent]; !dup {
-					removeByParent[parent] = ""
-				}
-				continue
-			}
-			if v, ok := strings.CutPrefix(line, "MoE-Chained-To:"); ok {
-				parent, child, ok := splitChainPair(v)
-				if !ok {
-					continue
-				}
-				chainEndpoints = append(chainEndpoints, parent, child)
-				if addByParent == nil {
-					addByParent = make(map[string]string)
-				}
-				if _, dup := addByParent[parent]; !dup {
-					addByParent[parent] = child
-				}
-				continue
-			}
-		}
-		// Apply per-commit chain verdicts before the slug gate — chain
-		// commits carry no MoE-Run trailer (one edit touches several
-		// parents) and would otherwise be discarded.
-		for parent, child := range addByParent {
-			if _, decided := idx.ChainedChild[parent]; decided {
-				continue
-			}
-			idx.ChainedChild[parent] = child
-			// Attribution rides the same decision: only the commit that
-			// wins the parent gets to say who placed the edge. An
-			// unstamped (operator) commit therefore leaves no entry, and
-			// an older groom underneath it can't re-assert one.
-			if consent != "" {
-				idx.EdgeConsent[parent+" "+child] = consent
-			}
-		}
-		for parent := range removeByParent {
-			if _, decided := idx.ChainedChild[parent]; decided {
-				continue
-			}
-			idx.ChainedChild[parent] = ""
-		}
-		// A chain commit the machine did not stamp is `moe chain edit`
-		// or `moe chain clear` — the operator rearranging the board by
-		// hand — so it counts as a touch on every run it names. Chain
-		// commits carry no MoE-Run trailer, so without this the one
-		// operator act that plainly moves a thread would leave
-		// LastOperatorActivity untouched, and the reap hold would keep
-		// holding a thread the operator had just reordered. Same
-		// exclusion and same first-wins rule as the run-scoped arm below.
-		if consent == "" && spawnedBy == "" {
-			for _, key := range chainEndpoints {
-				if _, ok := idx.LastOperatorActivity[key]; !ok {
-					idx.LastOperatorActivity[key] = time.Unix(epoch, 0).UTC()
-				}
-			}
-		}
-		for _, touched := range choreTouched {
-			if _, ok := idx.ChoreTouched[touched]; !ok {
-				idx.ChoreTouched[touched] = time.Unix(epoch, 0).UTC()
-			}
-		}
-		if choreSkipped != "" {
-			if _, ok := idx.ChoreSkipped[choreSkipped]; !ok {
-				idx.ChoreSkipped[choreSkipped] = time.Unix(epoch, 0).UTC()
-			}
-		}
-		if quotaRetry != nil {
-			// History is newest first. A resolution consumes only the
-			// observed version; an aggregate updated concurrently survives.
-			// Keep all later resolutions so a stale completion cannot hide
-			// a valid resolution of the newest update.
-			// Pin the newest event even when resolved, preventing resurrection.
-			for token, fingerprint := range quotaRetry.Resolves {
-				if quotaResolved[token] == nil {
-					quotaResolved[token] = make(map[string]bool)
-				}
-				quotaResolved[token][fingerprint] = true
-			}
-			if token := quotaRetry.Token; token != "" && !quotaSeen[token] {
-				if !quotaResolved[token][quotaRetry.Fingerprint()] {
-					idx.QuotaRetries[token] = *quotaRetry
-				}
-				quotaSeen[token] = true
-			}
-		}
-		if slug == "" {
-			continue
-		}
-		// Tally the slug under its commit's project and UTC day for the
-		// activity histogram. Unlike LastActivity (first-commit-wins),
-		// every commit contributes — the set membership dedups within a
-		// day. A commit with no MoE-Project trailer buckets under "".
-		day := time.Unix(epoch, 0).UTC().Format("2006-01-02")
-		byDay := dailyProjSlugs[projectID]
-		if byDay == nil {
-			byDay = make(map[string]map[string]struct{})
-			dailyProjSlugs[projectID] = byDay
-		}
-		set := byDay[day]
-		if set == nil {
-			set = make(map[string]struct{})
-			byDay[day] = set
-		}
-		set[slug] = struct{}{}
-		// Slugs are only per-project unique, so these run-scoped maps key
-		// by "<project>/<slug>" — the same qualified key dash looks runs up
-		// by. A commit missing its MoE-Project trailer (a since-fixed
-		// late-May writer bug left a handful) keys under "/<slug>" and is
-		// invisible to consumers, which always query with a real project;
-		// worst case is a slightly stale age on those runs. No bare-slug
-		// fallback — that would reintroduce the cross-project ambiguity.
-		runKey := projectID + "/" + slug
-		if ciRepair != nil {
-			idx.CIRepairAttempts[runKey] = append(idx.CIRepairAttempts[runKey], *ciRepair)
-		}
-		if _, ok := idx.LastActivity[runKey]; !ok {
-			idx.LastActivity[runKey] = time.Unix(epoch, 0).UTC()
-		}
-		// The operator-only narrowing, read before the spawnedBy arm
-		// below re-qualifies its value: what decides it is whether the
-		// trailer was on the commit at all, not what it pointed at.
-		if consent == "" && spawnedBy == "" {
-			if _, ok := idx.LastOperatorActivity[runKey]; !ok {
-				idx.LastOperatorActivity[runKey] = time.Unix(epoch, 0).UTC()
-			}
-		}
-		if promotedTo != "" {
-			if _, ok := idx.PromotedTo[runKey]; !ok {
-				idx.PromotedTo[runKey] = promotedTo
-				// Paired with the promotion the way SpawnConsent pairs with
-				// the spawn: the level belongs to the commit that recorded
-				// the edge, so a later commit re-stating it can't swap the
-				// level underneath.
-				if consent != "" {
-					idx.PromoteConsent[runKey] = consent
-				}
-			}
-		}
-		if fromRun != "" {
-			if _, ok := idx.FromRun[runKey]; !ok {
-				idx.FromRun[runKey] = fromRun
-			}
-		}
-		// The open commit is the one that says who caused the run to
-		// exist, so the consent that counts here is the one it carries
-		// and no other. Pinned by subject for the same reason the push
-		// arm below pins its own: every commit a machine walk lands is
-		// consent-stamped, so without the pin the first such commit after
-		// an operator's open would stand in for an opening nobody
-		// stamped.
-		if consent != "" && strings.HasPrefix(subject, "Open run ") {
-			if _, ok := idx.OpenConsent[runKey]; !ok {
-				idx.OpenConsent[runKey] = consent
-			}
-		}
-		if prURL != "" {
-			if _, ok := idx.PRURL[runKey]; !ok {
-				idx.PRURL[runKey] = prURL
-			}
-		}
-		if reopenOf != "" {
-			// Key qualified like the rest; the value stays a bare slug —
-			// reopens are same-project by construction, and every consumer
-			// walk carries the project to re-qualify it.
-			if _, ok := idx.ReopenedFrom[runKey]; !ok {
-				idx.ReopenedFrom[runKey] = reopenOf
-			}
-		}
-		if spawnedBy != "" {
-			// Keyed by the spawned run like ReopenedFrom; the value is always
-			// qualified "<project>/<slug>". New writers qualify at the source;
-			// a legacy bare value gets qualified here with the spawned run's
-			// own project — every historical spawn was same-project, so this
-			// interpretation is exact, not a guess. First (newest) commit wins.
-			if !strings.Contains(spawnedBy, "/") {
-				spawnedBy = projectID + "/" + spawnedBy
-			}
-			if _, ok := idx.SpawnedBy[runKey]; !ok {
-				idx.SpawnedBy[runKey] = spawnedBy
-				// Paired with the edge, not indexed independently: the
-				// consent decorates the spawn the winning commit recorded,
-				// so a later commit re-stating the spawn can't swap the
-				// level under it. Absent trailer leaves the key unset.
-				if consent != "" {
-					idx.SpawnConsent[runKey] = consent
-				}
-			}
-		}
-		// Push records are the run's own commits (MoE-Run + Document:
-		// push), so they key by runKey like the rest. Only machine-driven
-		// pushes carry consent, so a hit is the ship-under-a-ride fact.
-		//
-		// The subject pin is what keeps that fact about the *ship*: a
-		// push stage's own session-start and work-turn commits carry
-		// Document: push too, and every commit a machine walk lands is
-		// consent-stamped, so a ride whose push stage opened and then
-		// died would otherwise mint a "shipped under a machine walk"
-		// provenance hop for a run that never shipped. Same
-		// subject-pinning idiom the work-turn and advance-marker arms
-		// below use.
-		if consent != "" && docID == "push" && isPushRecordSubject(subject) {
-			if _, ok := idx.PushConsent[runKey]; !ok {
-				idx.PushConsent[runKey] = consent
-			}
-		}
-		if chore != "" && projectID != "" {
-			k := projectID + "/" + slug
-			if _, ok := idx.ChoreByRun[k]; !ok {
-				idx.ChoreByRun[k] = chore
-			}
-		}
-		// Work-turn keying is project-scoped, and the subject pin
-		// keeps session-start / merge / push commits out — same
-		// filter LatestWorkTurnSHA uses.
-		if projectID != "" && docID != "" && subject == "work: update "+docID {
-			k := WorkTurnKey{Project: projectID, Run: slug, Doc: docID}
-			if _, ok := idx.WorkTurnTime[k]; !ok {
-				idx.WorkTurnTime[k] = time.Unix(epoch, 0).UTC()
-			}
-		}
-		// Advance markers share the work-turn keying; the distinct
-		// subject pin keeps them in their own map, mirroring
-		// LatestAdvanceSHA's grep.
-		if projectID != "" && docID != "" && subject == "advance: "+docID {
-			k := WorkTurnKey{Project: projectID, Run: slug, Doc: docID}
-			if _, ok := idx.AdvanceTime[k]; !ok {
-				idx.AdvanceTime[k] = time.Unix(epoch, 0).UTC()
+			if _, dup := c.chainAdd[parent]; !dup {
+				c.chainAdd[parent] = child
 			}
 		}
 	}
-	// Collapse the per-(project,day) slug sets to distinct-run counts:
-	// the per-project map keeps each project's own window, and the global
-	// map sums them — so two projects sharing a slug on one day count as
-	// two distinct runs globally, one in each project.
+	return c, true, nil
+}
+
+// setFirst sets *dst to the trimmed v unless an earlier line already set it.
+func setFirst(dst *string, v string) {
+	if *dst == "" {
+		*dst = strings.TrimSpace(v)
+	}
+}
+
+// journalWalk folds parsed commits, newest first, into a JournalIndex.
+// Every map is first-wins, so the HEAD-first order of `git log` is
+// what makes the newest commit's fact the one that sticks.
+type journalWalk struct {
+	idx *JournalIndex
+	// dailyProjSlugs accumulates, per project, the distinct slug set
+	// active on each UTC day (project → day → set<slug>). Nesting by
+	// project encodes the qualified (project, slug) identity a run is
+	// counted by — within one project a bare slug is unique. Kept as
+	// sets during the walk (so repeat commits from one run on one day
+	// collapse to a single tally) and folded to the two DailyRunCount
+	// maps by finish — storing the counts, not the sets, keeps the index
+	// small.
+	dailyProjSlugs map[string]map[string]map[string]struct{}
+	quotaSeen      map[string]bool
+	quotaResolved  map[string]map[string]bool
+}
+
+func newJournalWalk() *journalWalk {
+	return &journalWalk{
+		idx: &JournalIndex{
+			LastActivity:         make(map[string]time.Time),
+			LastOperatorActivity: make(map[string]time.Time),
+			PromotedTo:           make(map[string]string),
+			PRURL:                make(map[string]string),
+			CIRepairAttempts:     make(map[string][]CIRepairAttempt),
+			QuotaRetries:         make(map[string]QuotaRetry),
+			WorkTurnTime:         make(map[WorkTurnKey]time.Time),
+			AdvanceTime:          make(map[WorkTurnKey]time.Time),
+			ReopenedFrom:         make(map[string]string),
+			SpawnedBy:            make(map[string]string),
+			SpawnConsent:         make(map[string]string),
+			FromRun:              make(map[string]string),
+			OpenConsent:          make(map[string]string),
+			PromoteConsent:       make(map[string]string),
+			PushConsent:          make(map[string]string),
+			ChainedChild:         make(map[string]string),
+			EdgeConsent:          make(map[string]string),
+			ChoreByRun:           make(map[string]string),
+			ChoreTouched:         make(map[string]time.Time),
+			ChoreSkipped:         make(map[string]time.Time),
+		},
+		dailyProjSlugs: make(map[string]map[string]map[string]struct{}),
+		quotaSeen:      make(map[string]bool),
+		quotaResolved:  make(map[string]map[string]bool),
+	}
+}
+
+// fold applies one commit. Chain, chore and quota commits carry no
+// MoE-Run trailer, so their steps run before the slug gate; everything
+// after it is run-scoped.
+func (w *journalWalk) fold(c *journalCommit) {
+	w.foldChain(c)
+	w.foldChores(c)
+	w.foldQuota(c)
+	if c.slug == "" {
+		return
+	}
+	w.foldDaily(c)
+	w.foldActivity(c)
+	w.foldProvenance(c)
+	w.foldTurns(c)
+}
+
+func (w *journalWalk) foldChain(c *journalCommit) {
+	idx := w.idx
+	for parent, child := range c.chainAdd {
+		if _, decided := idx.ChainedChild[parent]; decided {
+			continue
+		}
+		idx.ChainedChild[parent] = child
+		// Attribution rides the same decision: only the commit that
+		// wins the parent gets to say who placed the edge. An
+		// unstamped (operator) commit therefore leaves no entry, and
+		// an older groom underneath it can't re-assert one.
+		if c.consent != "" {
+			idx.EdgeConsent[parent+" "+child] = c.consent
+		}
+	}
+	for parent := range c.chainRemove {
+		if _, decided := idx.ChainedChild[parent]; decided {
+			continue
+		}
+		idx.ChainedChild[parent] = ""
+	}
+	// A chain commit the machine did not stamp is `moe chain edit`
+	// or `moe chain clear` — the operator rearranging the board by
+	// hand — so it counts as a touch on every run it names. Chain
+	// commits carry no MoE-Run trailer, so without this the one
+	// operator act that plainly moves a thread would leave
+	// LastOperatorActivity untouched, and the reap hold would keep
+	// holding a thread the operator had just reordered. Same
+	// exclusion and same first-wins rule as foldActivity's run-scoped
+	// arm.
+	if c.operatorAuthored() {
+		for _, key := range c.chainEndpoints {
+			if _, ok := idx.LastOperatorActivity[key]; !ok {
+				idx.LastOperatorActivity[key] = c.when
+			}
+		}
+	}
+}
+
+func (w *journalWalk) foldChores(c *journalCommit) {
+	for _, touched := range c.choreTouched {
+		if _, ok := w.idx.ChoreTouched[touched]; !ok {
+			w.idx.ChoreTouched[touched] = c.when
+		}
+	}
+	if c.choreSkipped != "" {
+		if _, ok := w.idx.ChoreSkipped[c.choreSkipped]; !ok {
+			w.idx.ChoreSkipped[c.choreSkipped] = c.when
+		}
+	}
+}
+
+func (w *journalWalk) foldQuota(c *journalCommit) {
+	r := c.quotaRetry
+	if r == nil {
+		return
+	}
+	// History is newest first. A resolution consumes only the
+	// observed version; an aggregate updated concurrently survives.
+	// Keep all later resolutions so a stale completion cannot hide
+	// a valid resolution of the newest update.
+	// Pin the newest event even when resolved, preventing resurrection.
+	for token, fingerprint := range r.Resolves {
+		if w.quotaResolved[token] == nil {
+			w.quotaResolved[token] = make(map[string]bool)
+		}
+		w.quotaResolved[token][fingerprint] = true
+	}
+	if token := r.Token; token != "" && !w.quotaSeen[token] {
+		if !w.quotaResolved[token][r.Fingerprint()] {
+			w.idx.QuotaRetries[token] = *r
+		}
+		w.quotaSeen[token] = true
+	}
+}
+
+// foldDaily tallies the slug under its commit's project and UTC day for
+// the activity histogram. Unlike LastActivity (first-commit-wins),
+// every commit contributes — the set membership dedups within a day. A
+// commit with no MoE-Project trailer buckets under "".
+func (w *journalWalk) foldDaily(c *journalCommit) {
+	day := c.when.Format("2006-01-02")
+	byDay := w.dailyProjSlugs[c.project]
+	if byDay == nil {
+		byDay = make(map[string]map[string]struct{})
+		w.dailyProjSlugs[c.project] = byDay
+	}
+	set := byDay[day]
+	if set == nil {
+		set = make(map[string]struct{})
+		byDay[day] = set
+	}
+	set[c.slug] = struct{}{}
+}
+
+func (w *journalWalk) foldActivity(c *journalCommit) {
+	runKey := c.runKey()
+	if _, ok := w.idx.LastActivity[runKey]; !ok {
+		w.idx.LastActivity[runKey] = c.when
+	}
+	if c.operatorAuthored() {
+		if _, ok := w.idx.LastOperatorActivity[runKey]; !ok {
+			w.idx.LastOperatorActivity[runKey] = c.when
+		}
+	}
+}
+
+// foldProvenance records the run's edges to other runs, ideas and PRs,
+// and the consent levels pinned to them.
+func (w *journalWalk) foldProvenance(c *journalCommit) {
+	idx := w.idx
+	runKey := c.runKey()
+	if c.ciRepair != nil {
+		idx.CIRepairAttempts[runKey] = append(idx.CIRepairAttempts[runKey], *c.ciRepair)
+	}
+	if c.promotedTo != "" {
+		if _, ok := idx.PromotedTo[runKey]; !ok {
+			idx.PromotedTo[runKey] = c.promotedTo
+			// Paired with the promotion the way SpawnConsent pairs with
+			// the spawn: the level belongs to the commit that recorded
+			// the edge, so a later commit re-stating it can't swap the
+			// level underneath.
+			if c.consent != "" {
+				idx.PromoteConsent[runKey] = c.consent
+			}
+		}
+	}
+	if c.fromRun != "" {
+		if _, ok := idx.FromRun[runKey]; !ok {
+			idx.FromRun[runKey] = c.fromRun
+		}
+	}
+	// The open commit is the one that says who caused the run to
+	// exist, so the consent that counts here is the one it carries
+	// and no other. Pinned by subject for the same reason the push
+	// arm below pins its own: every commit a machine walk lands is
+	// consent-stamped, so without the pin the first such commit after
+	// an operator's open would stand in for an opening nobody
+	// stamped.
+	if c.consent != "" && strings.HasPrefix(c.subject, "Open run ") {
+		if _, ok := idx.OpenConsent[runKey]; !ok {
+			idx.OpenConsent[runKey] = c.consent
+		}
+	}
+	if c.prURL != "" {
+		if _, ok := idx.PRURL[runKey]; !ok {
+			idx.PRURL[runKey] = c.prURL
+		}
+	}
+	if c.reopenOf != "" {
+		// Key qualified like the rest; the value stays a bare slug —
+		// reopens are same-project by construction, and every consumer
+		// walk carries the project to re-qualify it.
+		if _, ok := idx.ReopenedFrom[runKey]; !ok {
+			idx.ReopenedFrom[runKey] = c.reopenOf
+		}
+	}
+	if spawnedBy := c.spawnedBy; spawnedBy != "" {
+		// Keyed by the spawned run like ReopenedFrom; the value is always
+		// qualified "<project>/<slug>". New writers qualify at the source;
+		// a legacy bare value gets qualified here with the spawned run's
+		// own project — every historical spawn was same-project, so this
+		// interpretation is exact, not a guess. First (newest) commit wins.
+		if !strings.Contains(spawnedBy, "/") {
+			spawnedBy = c.project + "/" + spawnedBy
+		}
+		if _, ok := idx.SpawnedBy[runKey]; !ok {
+			idx.SpawnedBy[runKey] = spawnedBy
+			// Paired with the edge, not indexed independently: the
+			// consent decorates the spawn the winning commit recorded,
+			// so a later commit re-stating the spawn can't swap the
+			// level under it. Absent trailer leaves the key unset.
+			if c.consent != "" {
+				idx.SpawnConsent[runKey] = c.consent
+			}
+		}
+	}
+	// Push records are the run's own commits (MoE-Run + Document:
+	// push), so they key by runKey like the rest. Only machine-driven
+	// pushes carry consent, so a hit is the ship-under-a-ride fact.
+	//
+	// The subject pin is what keeps that fact about the *ship*: a
+	// push stage's own session-start and work-turn commits carry
+	// Document: push too, and every commit a machine walk lands is
+	// consent-stamped, so a ride whose push stage opened and then
+	// died would otherwise mint a "shipped under a machine walk"
+	// provenance hop for a run that never shipped. Same
+	// subject-pinning idiom foldTurns uses.
+	if c.consent != "" && c.doc == "push" && isPushRecordSubject(c.subject) {
+		if _, ok := idx.PushConsent[runKey]; !ok {
+			idx.PushConsent[runKey] = c.consent
+		}
+	}
+	if c.chore != "" && c.project != "" {
+		if _, ok := idx.ChoreByRun[runKey]; !ok {
+			idx.ChoreByRun[runKey] = c.chore
+		}
+	}
+}
+
+func (w *journalWalk) foldTurns(c *journalCommit) {
+	if c.project == "" || c.doc == "" {
+		return
+	}
+	k := WorkTurnKey{Project: c.project, Run: c.slug, Doc: c.doc}
+	// Work-turn keying is project-scoped, and the subject pin
+	// keeps session-start / merge / push commits out — same
+	// filter LatestWorkTurnSHA uses.
+	if c.subject == "work: update "+c.doc {
+		if _, ok := w.idx.WorkTurnTime[k]; !ok {
+			w.idx.WorkTurnTime[k] = c.when
+		}
+	}
+	// Advance markers share the work-turn keying; the distinct
+	// subject pin keeps them in their own map, mirroring
+	// LatestAdvanceSHA's grep.
+	if c.subject == "advance: "+c.doc {
+		if _, ok := w.idx.AdvanceTime[k]; !ok {
+			w.idx.AdvanceTime[k] = c.when
+		}
+	}
+}
+
+// finish collapses the per-(project,day) slug sets to distinct-run
+// counts: the per-project map keeps each project's own window, and the
+// global map sums them — so two projects sharing a slug on one day
+// count as two distinct runs globally, one in each project.
+func (w *journalWalk) finish() *JournalIndex {
+	idx := w.idx
 	idx.DailyRunCount = make(map[string]int)
-	idx.DailyRunCountByProject = make(map[string]map[string]int, len(dailyProjSlugs))
-	for proj, byDay := range dailyProjSlugs {
+	idx.DailyRunCountByProject = make(map[string]map[string]int, len(w.dailyProjSlugs))
+	for proj, byDay := range w.dailyProjSlugs {
 		perProject := make(map[string]int, len(byDay))
 		for day, set := range byDay {
 			perProject[day] = len(set)
@@ -1487,7 +1536,7 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 		}
 		idx.DailyRunCountByProject[proj] = perProject
 	}
-	return idx, nil
+	return idx
 }
 
 // isPushRecordSubject reports whether subject is one of the terminal
