@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/modulecollective/moe/internal/dash"
@@ -103,6 +104,49 @@ func applyPulseGate(root, projectID, pulseSlug string, gate pulseGate, stdout, s
 		groups = append(groups, grp)
 	}
 	return groups
+}
+
+// promoteTaggedIdeas promotes every live tagged idea the gate left
+// unpromoted. It is the harness's half of what a workflow tag means
+// under dynamic consent: the tag is the operator saying "start this",
+// so whether it starts is not the survey's call. The survey can still
+// order one (name it at a thread position) or hold it (a `park` on that
+// thread) — both through applyPulseGate, which runs first, so an idea
+// the gate already promoted has left the scan by the time this looks.
+//
+// Promotion used to wait on the survey naming the idea, and two sweeps
+// on 2026-11-15 read the tag commits and named nothing. A default that
+// needs the survey to spend confidence drifts toward stillness — the
+// lesson pulseSelfKick learned one layer down.
+//
+// Every promotion goes through promoteIfTaggedIdea, the seam both gate
+// grammars share, so the destination is the ordinary machine spawn the
+// kick floor admits. Id order keeps a multi-idea sweep deterministic.
+// Warn-only like the rest of the sweep: a failed scan or a refused
+// promotion costs a stderr line, and the next dynamic sweep tries again.
+//
+// Only under dynamic consent, the one door to machine-rooted motion: a
+// hand-typed `moe pulse new` keeps promoting only what its gate names.
+func promoteTaggedIdeas(root, projectID, pulseSlug string, stdout, stderr io.Writer) {
+	if currentRideMode != rideDynamic {
+		return
+	}
+	mds, err := run.Scan(root)
+	if err != nil {
+		moePrintf(stderr, "pulse: promote: scan runs for %s: %v\n", projectID, err)
+		return
+	}
+	var ids []string
+	for _, md := range mds {
+		if md.Project == projectID && md.Workflow == dash.IdeaWorkflow && md.Status == run.StatusInProgress && md.PromoteTo != "" {
+			ids = append(ids, md.ID)
+		}
+	}
+	sort.Strings(ids)
+	m := &pulseMinter{root: root, projectID: projectID, pulseSlug: pulseSlug}
+	for _, id := range ids {
+		m.promoteIfTaggedIdea(id, pulseRunSpec{}, false /*atThread*/, stdout, stderr)
+	}
 }
 
 // askThreadEntry opens the survey's ping on the run sitting at this

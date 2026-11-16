@@ -396,6 +396,7 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 	// can only be stamped once every run in it exists, and a kick must
 	// not start until the thread it names has stopped moving.
 	groups := applyPulseGate(root, projectID, md.ID, gate, stdout, stderr)
+	promoteTaggedIdeas(root, projectID, md.ID, stdout, stderr)
 	groomed := groomChains(root, projectID, md.ID, groups, survey.chainEdges, stderr)
 	groomed.prChecks = survey.prChecks
 
