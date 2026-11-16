@@ -1004,9 +1004,7 @@ func loadMergeRecordPending(root string, md *run.Metadata, stderr io.Writer) (*p
 // move here — the ff-push landed, so the run really is merged.
 //
 // Two things it deliberately does not repeat from mergePath's closure.
-// releaseRunWorkspace already ran on the first attempt, and
-// workspace.Release drops the claim with no ownership check — by now
-// another run may hold it. And ErrNothingToCommit is success, not
+// releaseRunWorkspace already ran on the first attempt. And ErrNothingToCommit is success, not
 // failure: it means the operator committed the staged record by hand.
 func resumeMergeRecord(root string, md *run.Metadata, pending *pendingMergeRecord, stdout, stderr io.Writer) int {
 	err := repolock.With(root, repolock.Options{

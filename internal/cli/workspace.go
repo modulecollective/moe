@@ -107,7 +107,12 @@ func resolveRunWorkspacePath(root string, md *run.Metadata) (string, error) {
 // the workspace's env is expected to outlive the run.
 //
 // Idempotent: a run that never reached `sdlc build` (no clone, no
-// claim) is a no-op either way. Teardown is invoked best-effort —
+// claim) is a no-op either way. A named workspace is touched only when
+// the claim on disk names this run: a run can be bound to a workspace
+// another run has since claimed (the binding is written at open, the
+// claim at attach), and its close must not move the holder's tree or
+// drop the holder's claim. An unclaimed workspace is left alone too —
+// only the holder moves the tree. Teardown is invoked best-effort —
 // a non-zero exit is logged but doesn't block sandbox removal,
 // because a half-removed sandbox is worse than a half-cleaned dev
 // resource (the operator can re-run cleanup; they can't undo
@@ -126,6 +131,10 @@ func releaseRunWorkspace(root string, md *run.Metadata) error {
 		}
 		return sandbox.Remove(root, md.Project, md.ID)
 	}
+	held, err := runHoldsWorkspace(root, md)
+	if err != nil || !held {
+		return err
+	}
 	if workspace.Exists(root, md.Project, md.Workspace) {
 		if defaultBranch, err := defaultBranchForProject(root, md.Project); err != nil {
 			fmt.Fprintf(os.Stderr, "warning: reposition workspace: %v\n", err)
@@ -138,6 +147,18 @@ func releaseRunWorkspace(root string, md *run.Metadata) error {
 		}
 	}
 	return workspace.Release(root, md.Project, md.Workspace)
+}
+
+// runHoldsWorkspace reports whether the claim on the run's named
+// workspace names this run. Binding and holding are separate facts —
+// md.Workspace is written at open or a stage verb, the claim at attach
+// — so anything that acts on the tree as the run's own asks here.
+func runHoldsWorkspace(root string, md *run.Metadata) (bool, error) {
+	claim, err := workspace.ReadClaim(root, md.Project, md.Workspace)
+	if err != nil {
+		return false, err
+	}
+	return claim != nil && claim.Run == md.Project+"/"+md.ID, nil
 }
 
 // defaultBranchForProject reads the project's default branch from its
@@ -223,12 +244,9 @@ func runTreeWork(root string, md *run.Metadata) (path string, commits, modified 
 		}
 		path = sandbox.Path(root, md.Project, md.ID)
 	} else {
-		claim, err := workspace.ReadClaim(root, md.Project, md.Workspace)
-		if err != nil {
+		held, err := runHoldsWorkspace(root, md)
+		if err != nil || !held {
 			return "", 0, 0, false, err
-		}
-		if claim == nil || claim.Run != md.Project+"/"+md.ID {
-			return "", 0, 0, false, nil
 		}
 		path = workspace.Path(root, md.Project, md.Workspace)
 	}
