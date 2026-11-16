@@ -175,14 +175,14 @@ func TestSDLCStageAgentEarlyFailures(t *testing.T) {
 				})
 				marker = "nested Acquire"
 			case "partial-save":
-				prev := saveSDLCStageAgent
-				saveSDLCStageAgent = func(root string, md *run.Metadata) error {
+				prev := saveSDLCRunField
+				saveSDLCRunField = func(root string, md *run.Metadata) error {
 					if err := os.WriteFile(filepath.Join(root, rel), []byte("{partial"), 0o644); err != nil {
 						return err
 					}
 					return errors.New(marker)
 				}
-				t.Cleanup(func() { saveSDLCStageAgent = prev })
+				t.Cleanup(func() { saveSDLCRunField = prev })
 			case "stage":
 				marker = "ignored"
 				gittest.Run(t, root, "update-index", "--force-remove", "--", rel)
@@ -331,11 +331,11 @@ func TestSDLCStageAgentReloadsUnderLock(t *testing.T) {
 			if outcome == "reject" {
 				rejectAgentSwitch(t, root)
 			}
-			prev := withSDLCStageAgentLock
+			prev := withSDLCRunFieldLock
 			waited := false
 			var published []byte
 			var publishedIndex, publishedHead string
-			withSDLCStageAgentLock = func(root string, opts repolock.Options, fn func() error) error {
+			withSDLCRunFieldLock = func(root string, opts repolock.Options, fn func() error) error {
 				opts.Sleep = func(time.Duration) {
 					if waited {
 						t.Fatal("still waiting after cooperating writer released")
@@ -357,7 +357,7 @@ func TestSDLCStageAgentReloadsUnderLock(t *testing.T) {
 				}
 				return repolock.With(root, opts, fn)
 			}
-			t.Cleanup(func() { withSDLCStageAgentLock = prev })
+			t.Cleanup(func() { withSDLCRunFieldLock = prev })
 			var out, errb bytes.Buffer
 			_, code := persistSDLCStageAgent("sdlc design", "design", "tele", "switch-agent", "codex", &out, &errb)
 			if !waited {

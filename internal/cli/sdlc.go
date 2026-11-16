@@ -188,30 +188,53 @@ func runRetiredSDLCStage(stage string) func(args []string, stdout, stderr io.Wri
 }
 
 // Private seams for failures after a partial save and cooperating lock writers.
-var saveSDLCStageAgent = run.Save
-var withSDLCStageAgentLock = repolock.With
+var saveSDLCRunField = run.Save
+var withSDLCRunFieldLock = repolock.With
 
+// persistSDLCStageAgent writes a stage verb's --agent to run.json.
 func persistSDLCStageAgent(verb, stage, projectID, runID, agentName string, stdout, stderr io.Writer) (string, int) {
+	resolvedRunID, changed, code := persistSDLCRunField(verb, stage, projectID, runID, "switch-agent", "commit agent switch", func(md *run.Metadata) (string, error) {
+		if md.Agent == agentName {
+			return "", nil
+		}
+		md.Agent = agentName
+		return fmt.Sprintf("switch agent: %s/%s to %s", md.Project, md.ID, agentName), nil
+	}, stdout, stderr)
+	if changed {
+		moePrintf(stdout, "switched run agent to %s\n", agentName)
+	}
+	return resolvedRunID, code
+}
+
+// persistSDLCRunField is the one writer behind the stage verbs' run.json
+// flags: under the repo lock it loads the run, lets mutate change it,
+// and commits run.json alone with the run's trailers, restoring the file
+// and its index entry if any step after the save fails. mutate returns
+// the commit subject, or "" when the value already matches (no write);
+// an error from mutate refuses before anything is written. errLabel
+// prefixes a failure on stderr.
+func persistSDLCRunField(verb, stage, projectID, runID, purpose, errLabel string, mutate func(*run.Metadata) (string, error), stdout, stderr io.Writer) (string, bool, int) {
 	resolvedRunID, code := resolveSDLCRunSlug(verb, projectID, runID, stdout, stderr)
 	if code != 0 {
-		return "", code
+		return "", false, code
 	}
 	root, err := findRoot(stderr)
 	if err != nil {
-		return "", 1
+		return "", false, 1
 	}
 	runJSON := filepath.Join(run.Dir(projectID, resolvedRunID), "run.json")
 	changed := false
-	err = withSDLCStageAgentLock(root, repolock.Options{
-		Purpose: "switch-agent",
+	err = withSDLCRunFieldLock(root, repolock.Options{
+		Purpose: purpose,
 		Run:     projectID + "/" + resolvedRunID,
 	}, func() error {
 		md, err := run.Load(root, projectID, resolvedRunID)
 		if err != nil {
 			return err
 		}
-		if md.Agent == agentName {
-			return nil
+		subject, err := mutate(md)
+		if err != nil || subject == "" {
+			return err
 		}
 		abs := filepath.Join(root, runJSON)
 		prev, err := os.ReadFile(abs)
@@ -228,16 +251,15 @@ func persistSDLCStageAgent(verb, stage, projectID, runID, agentName string, stdo
 			return fmt.Errorf("unmerged index entry for %s", runJSON)
 		}
 		rollback := func(cause error) error {
-			return restoreSDLCStageAgent(root, runJSON, prev, index, cause)
+			return restoreSDLCRunField(root, runJSON, prev, index, cause)
 		}
-		md.Agent = agentName
-		if err := saveSDLCStageAgent(root, md); err != nil {
+		if err := saveSDLCRunField(root, md); err != nil {
 			return rollback(err)
 		}
 		if err := run.Stage(root, runJSON); err != nil {
 			return rollback(err)
 		}
-		msg := fmt.Sprintf("switch agent: %s/%s to %s\n\n", md.Project, md.ID, agentName) +
+		msg := subject + "\n\n" +
 			trailers.Block{
 				Run:      md.ID,
 				Project:  md.Project,
@@ -251,17 +273,14 @@ func persistSDLCStageAgent(verb, stage, projectID, runID, agentName string, stdo
 		return nil
 	})
 	if err != nil {
-		moePrintf(stderr, "commit agent switch: %v\n", err)
-		return "", 1
+		moePrintf(stderr, "%s: %v\n", errLabel, err)
+		return "", false, 1
 	}
-	if changed {
-		moePrintf(stdout, "switched run agent to %s\n", agentName)
-	}
-	return resolvedRunID, 0
+	return resolvedRunID, changed, 0
 }
 
 // Restore only this writer's path, attempting both recoveries independently.
-func restoreSDLCStageAgent(root, rel string, prev []byte, index string, cause error) error {
+func restoreSDLCRunField(root, rel string, prev []byte, index string, cause error) error {
 	var indexErr error
 	if fields := strings.Fields(index); len(fields) >= 2 {
 		indexErr = git.Run(root, "update-index", "--add", "--cacheinfo", fields[0]+","+fields[1]+","+rel)
@@ -276,7 +295,7 @@ func restoreSDLCStageAgent(root, rel string, prev []byte, index string, cause er
 		fileErr = fmt.Errorf("restore file %s: %w", rel, fileErr)
 	}
 	if err := errors.Join(indexErr, fileErr); err != nil {
-		return fmt.Errorf("agent switch failed (%w); rollback incomplete: %w; inspect and repair %s before retrying", cause, err, rel)
+		return fmt.Errorf("run.json write failed (%w); rollback incomplete: %w; inspect and repair %s before retrying", cause, err, rel)
 	}
 	return cause
 }
