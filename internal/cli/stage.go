@@ -347,14 +347,15 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		return 1
 	}
 
-	// Run-scoped state captured by closure. md is pre-loaded from the
-	// canonical root only to feed the pre-session, pre-pull surface:
+	// Run-scoped state, shared by every phase through stageSession. md is
+	// pre-loaded from the canonical root only to feed the pre-session,
+	// pre-pull surface:
 	// the entry banner (md.Workflow), stylesheet resolution, and the
 	// agent ladder, all of which run before openStageSession takes the
 	// repolock and pulls. This entry copy is deliberately not trusted
 	// past that point — BuildSpec reloads run.json from the session
 	// worktree (post-pull) into this same pointer, so every downstream
-	// closure carries the fresh state. Loading from `root` here rather
+	// phase carries the fresh state. Loading from `root` here rather
 	// than the worktree is safe for the banner's purposes — run.json
 	// doesn't drift on `git worktree add`, and md.Workflow is immutable
 	// per run.
@@ -372,17 +373,102 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 			finishWalkStopped(root, md, cascadeResult{ran: []cascadeStepResult{{stage: docID}}}, exit, stderr)
 		}()
 	}
+
+	s := &stageSession{
+		root: root, projectID: projectID, runID: runID, docID: docID,
+		stdout: stdout, stderr: stderr, opts: opts, md: md,
+	}
+	if code := s.enter(freshOwner, acquired); code != 0 {
+		return code
+	}
+	return s.settle(runStageTurn(root, s.turnInputs(), stdout, stderr))
+}
+
+// stageSession is one runStageSession invocation's state, shared across
+// its phases: enter (before the session worktree opens), admit and
+// buildSpec (inside runStageTurn, in that order), and settle (after it
+// returns). Each field says which phase writes it. Phases read fields
+// late on purpose — buildSpec sees the agent, model, dev-env and clone
+// path as admission left them — so nothing here is copied into a phase
+// argument ahead of time.
+type stageSession struct {
+	root, projectID, runID, docID string
+	stdout, stderr                io.Writer
+
+	// opts is the caller's options. enter and admit rewrite opts.Model
+	// in place with the resolved model; settle hands opts to the
+	// project-doc hygiene gate, whose fix turn copies it.
+	opts stageSessionOpts
+	// explicitModel is the caller's own opts.Model, written by enter, so
+	// re-resolution keeps the explicit model separate from a stylesheet
+	// pick.
+	explicitModel string
+	// md is shared with runStageSession's deferred finishWalkStopped.
+	// resolveSelection and buildSpec reload it by overwriting through the
+	// pointer (*md = *fresh); it is never reassigned.
+	md *run.Metadata
+	// agentName is resolved by enter and re-resolved by admit.
+	agentName string
+
+	// Written by enter, read by admit.
+	entry       *stageEntry
+	interactive bool
+
+	// Directory-form stages declare their canvas files on the workflow;
+	// nil for every file-form stage. Design also resets its single gate.
+	// canvasBaseline is the content after seeding and the entry gate reset,
+	// taken immediately before
+	// dispatch — the turn-output check compares against it so harness
+	// preparation never passes for agent work.
+	//
+	// canvasFiles and resetCanvases are written by enter, canvasBaseline
+	// by buildSpec.
+	canvasFiles    []CanvasFile
+	resetCanvases  bool
+	canvasBaseline map[string]string
+
+	// Written by prepareWorkspace; buildSpec also points chat's devEnv
+	// at the canonical bureaucracy (chatGroomingHome).
+	clonePath string
+	devEnv    map[string]string
+
+	// Sandbox-boundary snapshot, populated by prepareWorkspace when
+	// opts.EnforceSandboxBoundary is set. checkSandboxBoundary
+	// reads these after the executor returns to refuse the cascade
+	// if the agent left a half-implementation behind. Empty when
+	// the stage opts out (most stages).
+	sandboxBoundaryClone, sandboxBoundaryEntryHEAD string
+
+	// The operator-input entries this turn's prompt actually rendered,
+	// captured by buildPrompt and stamped delivered by settle once the turn
+	// succeeds. Nil for nearly every turn.
+	deliveredInputIDs []int
+
+	// Set by commitStager when this turn's commit actually touched
+	// projects/<p>/knowledge/. The knowledge-hygiene gate in settle reads it
+	// so turns that didn't write knowledge pay nothing.
+	projectDocsTouched []string
+
+	// Set by admit when the quota gate deferred the turn; settle records it.
+	deferred *quotaDeferral
+}
+
+// enter admits the entry, resolves the stylesheet's agent and model for
+// it, and prints the entry banner — everything that runs before
+// openStageSession takes the repolock and pulls.
+func (s *stageSession) enter(freshOwner bool, acquired time.Time) int {
 	// Operator controls: a hold refuses every entry but an explicit
 	// interactive one, which resumes the run once quota admits it.
-	interactive := !opts.Headless && !serveAgentSuppress() && !rideWalkActive && stdinIsTerminal()
-	entry, entryCode := admitStageEntry(root, md, "stage "+docID, freshOwner, interactive, acquired, stderr)
+	s.interactive = !s.opts.Headless && !serveAgentSuppress() && !rideWalkActive && stdinIsTerminal()
+	entry, entryCode := admitStageEntry(s.root, s.md, "stage "+s.docID, freshOwner, s.interactive, acquired, s.stderr)
 	if entryCode != 0 {
 		return entryCode
 	}
-	publishRun(root, projectID, runID, func(s *runsock.Status) {
-		s.Phase, s.Stage, s.Waiting, s.Interactive = runsock.PhaseAdmission, docID, "", interactive
-		if interactive && !rideWalkActive {
-			s.Continuation = "prompt"
+	s.entry = entry
+	publishRun(s.root, s.projectID, s.runID, func(st *runsock.Status) {
+		st.Phase, st.Stage, st.Waiting, st.Interactive = runsock.PhaseAdmission, s.docID, "", s.interactive
+		if s.interactive && !rideWalkActive {
+			st.Continuation = "prompt"
 		}
 	})
 	// Model stylesheet: resolve the (workflow, stage) → (agent, model)
@@ -395,9 +481,9 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	// Living here means every caller of runStageSession — interactive
 	// verbs, cascade headless, serve children — gets stylesheet steering
 	// by construction.
-	sheet, err := stylesheet.Load(root)
+	sheet, err := stylesheet.Load(s.root)
 	if err != nil {
-		moePrintf(stderr, "%v\n", err)
+		moePrintf(s.stderr, "%v\n", err)
 		return 1
 	}
 	// Validate the sheet's own vocabulary against the live registries
@@ -405,463 +491,486 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	// refuses the turn here — same fail-loud path as a parse error —
 	// rather than silently matching nothing on some future turn.
 	if err := sheet.Validate(stylesheetVocab()); err != nil {
-		moePrintf(stderr, "stylesheet %s: %v\n", filepath.Join(root, stylesheet.FileName), err)
+		moePrintf(s.stderr, "stylesheet %s: %v\n", filepath.Join(s.root, stylesheet.FileName), err)
 		return 1
 	}
-	explicitModel := opts.Model
-	agentName := stageAgentName(opts, md, sheet.Agent(md.Workflow, docID))
-	opts.Model = cmp.Or(opts.Model, sheet.ModelForAgent(md.Workflow, docID, agentName))
+	s.explicitModel = s.opts.Model
+	s.agentName = stageAgentName(s.opts, s.md, sheet.Agent(s.md.Workflow, s.docID))
+	s.opts.Model = cmp.Or(s.opts.Model, sheet.ModelForAgent(s.md.Workflow, s.docID, s.agentName))
 	// A project-doc fix turn runs *inside* an outer stage's banner pair, so
 	// framing it as a stage of its own reads as two stages having run.
 	// The gate already announces it on one line; that line is the whole
 	// header the inner turn needs. Same guard on StageExit below.
-	if !opts.projectDocFixTurn {
-		banner.StageEntry(stdout, agentName, md.Workflow, docID, md.Project, md.ID)
+	if !s.opts.projectDocFixTurn {
+		banner.StageEntry(s.stdout, s.agentName, s.md.Workflow, s.docID, s.md.Project, s.md.ID)
 	}
 
-	// Sandbox-boundary snapshot, populated by BuildSpec when
-	// opts.EnforceSandboxBoundary is set. checkSandboxBoundary
-	// reads these after the executor returns to refuse the cascade
-	// if the agent left a half-implementation behind. Empty when
-	// the stage opts out (most stages).
-	var sandboxBoundaryClone, sandboxBoundaryEntryHEAD string
+	s.canvasFiles = stageCanvasFiles(s.md.Workflow, s.docID)
+	s.resetCanvases = s.canvasFiles != nil || (s.md.Workflow == sdlcWorkflow && s.docID == "design")
+	return 0
+}
 
-	// Set by the CommitStager when this turn's commit actually touched
-	// projects/<p>/knowledge/. The knowledge-hygiene gate below reads it
-	// so turns that didn't write knowledge pay nothing.
-	var projectDocsTouched []string
-
-	// The operator-input entries this turn's prompt actually rendered,
-	// captured by BuildPrompt and stamped delivered below once the turn
-	// succeeds. Nil for nearly every turn.
-	var deliveredInputIDs []int
-
-	// Directory-form stages declare their canvas files on the workflow;
-	// nil for every file-form stage. Design also resets its single gate.
-	// canvasBaseline is the content after seeding and the entry gate reset,
-	// taken immediately before
-	// dispatch — the turn-output check compares against it so harness
-	// preparation never passes for agent work.
-	canvasFiles := stageCanvasFiles(md.Workflow, docID)
-	resetCanvases := canvasFiles != nil || (md.Workflow == sdlcWorkflow && docID == "design")
-	var canvasBaseline map[string]string
-
-	var clonePath string
-	var devEnv map[string]string
-	prepareWorkspace := func() error {
-		// Code workspace — still keyed off the canonical bureaucracy
-		// root so per-run sandbox persistence works across turns.
-		// Document-only stages see no clone; code stages insist on one
-		// and pre-position it on the moe/<run-id> branch so the
-		// agent's commits (and any later `moe sdlc push`) land on a
-		// branch we own; design opts in read-only. attachRunWorkspace
-		// routes per-run sandbox vs named workspace based on
-		// md.Workspace; the callers here don't need to know which.
-		clonePath = ""
-		devEnv = nil
-		if opts.NeedsSandbox {
-			if _, err := os.Stat(filepath.Join(root, project.SubmoduleDir(md.Project))); err != nil {
-				return fmt.Errorf("project %q has no submodule on disk; cannot run %q without code to edit", md.Project, docID)
-			}
-			clonePath, err = attachRunWorkspace(root, md, branchPrefix+md.ID)
-			if err != nil {
-				return err
-			}
-			// Dev-env hooks fire on every code/review/test stage open
-			// against this working tree. First touch runs the
-			// project's dev-env.d/* setup scripts and caches the
-			// parsed KEY=VALUE output to <tree>/.moe/dev-env.env;
-			// later turns re-source the cache while its allowlisted
-			// directories remain valid, or tear it down and rebuild it
-			// when one has vanished. Projects with no dev-env.d/
-			// directory get an empty env (the single-driver default) —
-			// no warning, no refusal.
-			env, _, err := devEnvSetupEnv(root, clonePath, md, stdout, stderr)
-			if err != nil {
-				return fmt.Errorf("dev-env: %w", err)
-			}
-			devEnv = env
-			if opts.EnforceSandboxBoundary {
-				sandboxBoundaryClone = clonePath
-				// Snapshot post-dev-env so the boundary check
-				// tolerates dev-env hooks that may legitimately touch
-				// the worktree (e.g. cache writes outside tracked
-				// files). Hooks are contracted to leave tracked files
-				// alone — see checkSandboxBoundary's hooks-side contract.
-				//
-				// BoundaryAllowsCommits skips the snapshot: a stage
-				// that may commit (review) leaves entryHEAD empty, and
-				// checkSandboxBoundary reads that as "don't compare
-				// HEAD" — only the dirty-tracked leg runs.
-				if !opts.BoundaryAllowsCommits {
-					head, err := git.HEAD(clonePath)
-					if err != nil {
-						return fmt.Errorf("sandbox boundary: snapshot HEAD: %w", err)
-					}
-					sandboxBoundaryEntryHEAD = head
-				}
-			}
+func (s *stageSession) prepareWorkspace() error {
+	// Code workspace — still keyed off the canonical bureaucracy
+	// root so per-run sandbox persistence works across turns.
+	// Document-only stages see no clone; code stages insist on one
+	// and pre-position it on the moe/<run-id> branch so the
+	// agent's commits (and any later `moe sdlc push`) land on a
+	// branch we own; design opts in read-only. attachRunWorkspace
+	// routes per-run sandbox vs named workspace based on
+	// md.Workspace; the callers here don't need to know which.
+	s.clonePath = ""
+	s.devEnv = nil
+	if s.opts.NeedsSandbox {
+		if _, err := os.Stat(filepath.Join(s.root, project.SubmoduleDir(s.md.Project))); err != nil {
+			return fmt.Errorf("project %q has no submodule on disk; cannot run %q without code to edit", s.md.Project, s.docID)
 		}
-
-		return nil
-	}
-	// Re-resolve against the reserved worktree: it carries post-pull main,
-	// or the recovered session state. Keep the explicit model separate.
-	resolveSelection := func(workRoot string, fresh *run.Metadata) (string, string, error) {
-		currentSheet, err := stylesheet.Load(workRoot)
+		clonePath, err := attachRunWorkspace(s.root, s.md, branchPrefix+s.md.ID)
 		if err != nil {
-			return "", "", err
+			return err
 		}
-		if err := currentSheet.Validate(stylesheetVocab()); err != nil {
-			return "", "", err
+		s.clonePath = clonePath
+		// Dev-env hooks fire on every code/review/test stage open
+		// against this working tree. First touch runs the
+		// project's dev-env.d/* setup scripts and caches the
+		// parsed KEY=VALUE output to <tree>/.moe/dev-env.env;
+		// later turns re-source the cache while its allowlisted
+		// directories remain valid, or tear it down and rebuild it
+		// when one has vanished. Projects with no dev-env.d/
+		// directory get an empty env (the single-driver default) —
+		// no warning, no refusal.
+		env, _, err := devEnvSetupEnv(s.root, s.clonePath, s.md, s.stdout, s.stderr)
+		if err != nil {
+			return fmt.Errorf("dev-env: %w", err)
 		}
-		name := stageAgentName(opts, fresh, currentSheet.Agent(fresh.Workflow, docID))
-		model := cmp.Or(explicitModel, currentSheet.ModelForAgent(fresh.Workflow, docID, name))
-		*md = *fresh
-		return name, model, nil
-	}
-
-	in := stageTurnInputs{
-		ValidateEntry: opts.ValidateEntry,
-		Project:       projectID,
-		RunSlug:       runID,
-		DocID:         docID,
-		Agent:         agentName,
-		LockPurpose:   "stage",
-		Headless:      opts.Headless,
-		// md is pre-loaded at runStageSession entry from the canonical
-		// root, *before* openStageSession pulled origin/main under the
-		// repolock. Reload it here from the session worktree — which
-		// session.Open created from post-pull main — so this turn's
-		// write-backs ride the pulled run state, not the stale entry
-		// copy. Overwrite in place (*md = *fresh): every downstream
-		// closure captured this pointer, so the reload routes all of
-		// them through fresh state with no signature changes. workRoot,
-		// not root: on a resumed crashed-turn branch the worktree's
-		// run.json can be ahead of main, and it's what this turn commits
-		// against. If the pull deleted the run on the other machine the
-		// load fails and the turn refuses, rather than resurrecting it.
-		BuildSpec: func(workRoot string) (stageTurnSpec, error) {
-			fresh, err := run.Load(workRoot, md.Project, md.ID)
-			if err != nil {
-				return stageTurnSpec{}, err
-			}
-			*md = *fresh
-			doc, mutated, err := run.EnsureDocument(workRoot, md, docID)
-			if err != nil {
-				return stageTurnSpec{}, err
-			}
-			// The eraser half of the reap's tombstone: a session opening
-			// on this run is the answer to "the last machine turn died",
-			// so the note is spent. Its own reason to commit — a resume
-			// that mints no fresh session id still owes the erasure —
-			// which is why it sets mutated rather than riding one.
-			if md.Reaped != nil {
-				md.Reaped = nil
-				mutated = true
-			}
-			// Resolve sessionCwd early so the skill materialisers can
-			// write under it: claude's cwd-walkup skill discovery starts
-			// at sessionCwd post-fix, so a workRoot-only materialisation
-			// wouldn't be found. See sessionDocCwd's doc for the
-			// stable-cwd rationale.
-			sessionCwd := sessionDocCwd(root, md.Project, md.ID, docID)
-			if err := os.MkdirAll(sessionCwd, 0o755); err != nil {
-				return stageTurnSpec{}, fmt.Errorf("session: mkdir %s: %w", sessionCwd, err)
-			}
-			// Materialise the moe-bureaucracy skill into the sessionCwd
-			// .claude/skills/ (claude runs cwd=sessionCwd and finds it
-			// there) and workRoot/.codex/skills/ (codex anchors there).
-			// See skill_materialize.go. Refresh on every BuildSpec is
-			// cheap; the paths are session-stable but rewriting is
-			// faster than reasoning about staleness across resumes.
-			if err := materializeMoeBureaucracySkill(workRoot, sessionCwd, md); err != nil {
-				return stageTurnSpec{}, err
-			}
-
-			// Chat grooms the operator's real backlog in-session — point
-			// the agent's MOE_HOME at the canonical bureaucracy so
-			// `moe idea new` / `edit` commit to live main (visible across
-			// windows at once) and the real bureaucracy lands in the
-			// agent's writable --add-dir set. One assignment, both
-			// effects; see chatGroomingHome. No-op for non-chat stages.
-			devEnv = chatGroomingHome(md.Workflow, devEnv, root)
-
-			// Materialise the moe-context skill once clonePath is final
-			// — sibling to the bureaucracy materialiser above, but this
-			// one needs the clone path threaded so the rendered body can
-			// name both roots concretely (or render the document-only
-			// branch when there's no clone). Same lifecycle: worktree-
-			// only, refreshed every BuildSpec, never staged.
-			if err := materializeMoeContextSkill(workRoot, sessionCwd, md, clonePath); err != nil {
-				return stageTurnSpec{}, err
-			}
-
-			// Two workflow-scoped skills, one gate each, per "tool
-			// scoping by document":
+		s.devEnv = env
+		if s.opts.EnforceSandboxBoundary {
+			s.sandboxBoundaryClone = s.clonePath
+			// Snapshot post-dev-env so the boundary check
+			// tolerates dev-env hooks that may legitimately touch
+			// the worktree (e.g. cache writes outside tracked
+			// files). Hooks are contracted to leave tracked files
+			// alone — see checkSandboxBoundary's hooks-side contract.
 			//
-			//   - moe-howto is chat's idea-capture / backlog-grooming
-			//     guidance; an sdlc agent isn't here to groom the backlog.
-			//   - moe-twin is the digital-twin writing contract, and sdlc
-			//     is the only workflow whose turn commit picks the twin
-			//     dir up (see projectCommitDirs).
-			//
-			// Two gates is not a registry. A third workflow-specific skill
-			// is the point to reconsider.
-			if md.Workflow == chatWorkflow {
-				if err := materializeMoeHowtoSkill(workRoot, sessionCwd); err != nil {
-					return stageTurnSpec{}, err
-				}
-			}
-			if md.Workflow == sdlcWorkflow {
-				if err := materializeMoeTwinSkill(workRoot, sessionCwd); err != nil {
-					return stageTurnSpec{}, err
-				}
-			}
-
-			a, err := agent.Get(agentName)
-			if err != nil {
-				return stageTurnSpec{}, err
-			}
-			mirrorPath := filepath.Join(workRoot, run.ThreadPathFor(agentName, md.Project, md.ID, docID))
-			sessionID, newSession, sessionChanged, err := selectBackendSession(a, doc, agentName, sessionCwd, mirrorPath, workRoot, stderr)
-			if err != nil {
-				return stageTurnSpec{}, err
-			}
-			mutated = mutated || sessionChanged
-			// Seed only missing canvases; promoted and reopened prose stays.
-			if opts.CanvasSkeleton != "" && (mutated || resetCanvases) {
-				canvasRel := run.ContentPath(md.Project, md.ID, docID)
-				canvasAbs := filepath.Join(workRoot, canvasRel)
-				if _, statErr := os.Stat(canvasAbs); errors.Is(statErr, fs.ErrNotExist) {
-					if err := os.WriteFile(canvasAbs, []byte(opts.CanvasSkeleton), 0o644); err != nil {
-						return stageTurnSpec{}, fmt.Errorf("session: seed canvas skeleton: %w", err)
-					}
-				} else if statErr != nil {
-					return stageTurnSpec{}, fmt.Errorf("session: stat canvas: %w", statErr)
-				}
-			}
-			if mutated {
-				if err := run.Save(workRoot, md); err != nil {
-					return stageTurnSpec{}, err
-				}
-				// Commit on the session branch — no repo lock needed
-				// because the branch has a single writer (this session).
-				if err := commitSessionStart(workRoot, md, docID, sessionID); err != nil {
-					return stageTurnSpec{}, err
-				}
-				canvasShown := run.ContentPath(md.Project, md.ID, docID)
-				if canvasFiles != nil {
-					canvasShown = run.ContentDir(md.Project, md.ID, docID)
-				}
-				moePrintf(stderr, "opened %s canvas (session %s)\n  %s\n", docID, sessionID, filepath.Join(workRoot, canvasShown))
-			}
-
-			// Directory-form stages: seed any missing declared file
-			// (from the run's legacy canvas when one is named, else its
-			// skeleton). Design and directory-form gates reset to blocked
-			// on every admitted entry, not just the first: a
-			// resumed stage restamps against the current revision. The
-			// baseline is taken after both so neither counts as output.
-			if canvasFiles != nil {
-				if err := seedCanvasFiles(workRoot, md, docID, canvasFiles); err != nil {
-					return stageTurnSpec{}, err
-				}
-			}
-			if resetCanvases {
-				if err := resetCanvasGates(workRoot, md, docID); err != nil {
-					return stageTurnSpec{}, fmt.Errorf("session: reset canvas gates: %w", err)
-				}
-				baseline, err := snapshotCanvases(workRoot, md, docID)
+			// BoundaryAllowsCommits skips the snapshot: a stage
+			// that may commit (review) leaves entryHEAD empty, and
+			// checkSandboxBoundary reads that as "don't compare
+			// HEAD" — only the dirty-tracked leg runs.
+			if !s.opts.BoundaryAllowsCommits {
+				head, err := git.HEAD(s.clonePath)
 				if err != nil {
-					return stageTurnSpec{}, fmt.Errorf("session: snapshot canvases: %w", err)
+					return fmt.Errorf("sandbox boundary: snapshot HEAD: %w", err)
 				}
-				canvasBaseline = baseline
+				s.sandboxBoundaryEntryHEAD = head
 			}
-
-			// CanvasOnOpen runs last in BuildSpec — after every step that
-			// can fail — so a bootstrap error never leaves an uncommitted
-			// canvas write behind. chat uses it to append its per-session
-			// marker; see the field doc on stageSessionOpts.
-			if opts.CanvasOnOpen != nil {
-				if err := opts.CanvasOnOpen(workRoot, md, agentName); err != nil {
-					return stageTurnSpec{}, err
-				}
-			}
-
-			// Headless mode has no operator on stdin to type the seed
-			// prompt, so default it to the run slug — the same shape
-			// the cascade driver depends on.
-			// Callers that pass an explicit InitialPrompt keep theirs.
-			initialPrompt := opts.InitialPrompt
-			if opts.Headless && initialPrompt == "" {
-				initialPrompt = md.ID
-			}
-
-			return stageTurnSpec{
-				Metadata:             md,
-				DocID:                docID,
-				ClonePath:            clonePath,
-				SessionCwd:           sessionCwd,
-				SessionUUID:          sessionID,
-				NewSession:           newSession,
-				InitialPrompt:        initialPrompt,
-				InitialPromptBuilder: opts.InitialPromptBuilder,
-				OnAgentStart:         opts.OnAgentStart,
-				Headless:             opts.Headless,
-				Model:                opts.Model,
-				Agent:                agentName,
-				ExtraEnv:             mapToEnv(devEnv),
-				AddDirs:              devEnvWritableDirs(devEnv),
-				BuildPrompt: func(workRoot string) (string, error) {
-					// Read-only wording for the strict-boundary stages,
-					// but not for review: it enforces the boundary *and*
-					// commits its own fixes (BoundaryAllowsCommits), so
-					// the writable paragraph is the true one there.
-					readOnly := opts.EnforceSandboxBoundary && !opts.BoundaryAllowsCommits
-					p, inputIDs, err := buildSystemPrompt(workRoot, md, docID, clonePath, readOnly, agentName)
-					if err != nil {
-						return "", err
-					}
-					deliveredInputIDs = inputIDs
-					if opts.Headless {
-						if frag := moe.OneShot(md.Workflow); frag != "" {
-							p += oneShotPromptDelimiter + frag
-						}
-					}
-					// Persist the assembled prompt alongside the canvas
-					// and thread JSONL so the operator can see what the
-					// agent actually received. Overwrite each turn;
-					// commitTurn stages docDir wholesale and picks the
-					// file up automatically. Best-effort write — a
-					// failure here surfaces to stderr and lets the turn
-					// proceed (the prompt itself is the load-bearing
-					// payload; the on-disk copy is a debug surface).
-					if err := writePromptSnapshot(workRoot, agentName, md, docID, p); err != nil {
-						moePrintf(stderr, "prompt snapshot: %v\n", err)
-					}
-					return p, nil
-				},
-				CommitStager: func(workRoot string, runErr error) error {
-					// cwd-inversion shape: the agent writes the canvas,
-					// followups, and feedback files at their natural
-					// absolute bureaucracy paths under the session
-					// worktree. No clone-to-bureaucracy shuttle to run
-					// here — commitTurn reads the same paths the agent
-					// just wrote.
-					var extras []string
-					if opts.ExtraStagePaths != nil {
-						more, err := opts.ExtraStagePaths(workRoot, md)
-						if err != nil {
-							return err
-						}
-						extras = append(extras, more...)
-					}
-					// A headless deadline kill is the one turn ending
-					// with no other durable trace: stderr scrolls away
-					// and the interrupted transcript is overwritten by
-					// the next drive of the stage. Stamp the cap on
-					// this turn's own commit so sizing it later is a
-					// `git log --grep='^MoE-Timed-Out:'`.
-					var timedOut time.Duration
-					if toErr, ok := errors.AsType[*agent.TimeoutError](runErr); ok {
-						timedOut = toErr.Timeout
-					}
-					if resetCanvases {
-						if err := checkCanvasOutput(workRoot, md, docID, canvasBaseline); err != nil {
-							return err
-						}
-					}
-					if err := commitTurn(workRoot, md, docID, agentName, timedOut, extras...); err != nil {
-						return err
-					}
-					// HEAD is this turn's commit and the worktree is still
-					// open — the one moment the "which project doc trees did
-					// this turn write?" question is cheap to answer exactly.
-					projectDocsTouched = commitTouchedProjectDocs(workRoot, md.Project)
-					return nil
-				},
-			}, nil
-		},
+		}
 	}
 
-	var deferred *quotaDeferral
-	in.Admit = func(sess *session.Session) int {
-		fresh, err := run.Load(sess.WorktreePath, projectID, runID)
-		if err == nil {
-			agentName, opts.Model, err = resolveSelection(sess.WorktreePath, fresh)
+	return nil
+}
+
+// Re-resolve against the reserved worktree: it carries post-pull main,
+// or the recovered session state. Keep the explicit model separate.
+func (s *stageSession) resolveSelection(workRoot string, fresh *run.Metadata) (string, string, error) {
+	currentSheet, err := stylesheet.Load(workRoot)
+	if err != nil {
+		return "", "", err
+	}
+	if err := currentSheet.Validate(stylesheetVocab()); err != nil {
+		return "", "", err
+	}
+	name := stageAgentName(s.opts, fresh, currentSheet.Agent(fresh.Workflow, s.docID))
+	model := cmp.Or(s.explicitModel, currentSheet.ModelForAgent(fresh.Workflow, s.docID, name))
+	*s.md = *fresh
+	return name, model, nil
+}
+
+// turnInputs is what runStageTurn drives: this session's identity, plus
+// buildSpec and admit as its callbacks.
+func (s *stageSession) turnInputs() stageTurnInputs {
+	return stageTurnInputs{
+		ValidateEntry: s.opts.ValidateEntry,
+		Project:       s.projectID,
+		RunSlug:       s.runID,
+		DocID:         s.docID,
+		Agent:         s.agentName,
+		LockPurpose:   "stage",
+		Headless:      s.opts.Headless,
+		BuildSpec:     s.buildSpec,
+		Admit:         s.admit,
+	}
+}
+
+// buildSpec is the turn's BuildSpec.
+//
+// md is pre-loaded at runStageSession entry from the canonical
+// root, *before* openStageSession pulled origin/main under the
+// repolock. Reload it here from the session worktree — which
+// session.Open created from post-pull main — so this turn's
+// write-backs ride the pulled run state, not the stale entry
+// copy. Overwrite in place (*md = *fresh): every downstream
+// phase holds this pointer, so the reload routes all of
+// them through fresh state with no signature changes. workRoot,
+// not root: on a resumed crashed-turn branch the worktree's
+// run.json can be ahead of main, and it's what this turn commits
+// against. If the pull deleted the run on the other machine the
+// load fails and the turn refuses, rather than resurrecting it.
+func (s *stageSession) buildSpec(workRoot string) (stageTurnSpec, error) {
+	md := s.md
+	fresh, err := run.Load(workRoot, md.Project, md.ID)
+	if err != nil {
+		return stageTurnSpec{}, err
+	}
+	*md = *fresh
+	doc, mutated, err := run.EnsureDocument(workRoot, md, s.docID)
+	if err != nil {
+		return stageTurnSpec{}, err
+	}
+	// The eraser half of the reap's tombstone: a session opening
+	// on this run is the answer to "the last machine turn died",
+	// so the note is spent. Its own reason to commit — a resume
+	// that mints no fresh session id still owes the erasure —
+	// which is why it sets mutated rather than riding one.
+	if md.Reaped != nil {
+		md.Reaped = nil
+		mutated = true
+	}
+	// Resolve sessionCwd early so the skill materialisers can
+	// write under it: claude's cwd-walkup skill discovery starts
+	// at sessionCwd post-fix, so a workRoot-only materialisation
+	// wouldn't be found. See sessionDocCwd's doc for the
+	// stable-cwd rationale.
+	sessionCwd := sessionDocCwd(s.root, md.Project, md.ID, s.docID)
+	if err := os.MkdirAll(sessionCwd, 0o755); err != nil {
+		return stageTurnSpec{}, fmt.Errorf("session: mkdir %s: %w", sessionCwd, err)
+	}
+
+	// Chat grooms the operator's real backlog in-session — point
+	// the agent's MOE_HOME at the canonical bureaucracy so
+	// `moe idea new` / `edit` commit to live main (visible across
+	// windows at once) and the real bureaucracy lands in the
+	// agent's writable --add-dir set. One assignment, both
+	// effects; see chatGroomingHome. No-op for non-chat stages.
+	s.devEnv = chatGroomingHome(md.Workflow, s.devEnv, s.root)
+
+	if err := s.materializeSkills(workRoot, sessionCwd); err != nil {
+		return stageTurnSpec{}, err
+	}
+
+	a, err := agent.Get(s.agentName)
+	if err != nil {
+		return stageTurnSpec{}, err
+	}
+	mirrorPath := filepath.Join(workRoot, run.ThreadPathFor(s.agentName, md.Project, md.ID, s.docID))
+	sessionID, newSession, sessionChanged, err := selectBackendSession(a, doc, s.agentName, sessionCwd, mirrorPath, workRoot, s.stderr)
+	if err != nil {
+		return stageTurnSpec{}, err
+	}
+	if err := s.openCanvas(workRoot, sessionID, mutated || sessionChanged); err != nil {
+		return stageTurnSpec{}, err
+	}
+
+	// CanvasOnOpen runs last in BuildSpec — after every step that
+	// can fail — so a bootstrap error never leaves an uncommitted
+	// canvas write behind. chat uses it to append its per-session
+	// marker; see the field doc on stageSessionOpts.
+	if s.opts.CanvasOnOpen != nil {
+		if err := s.opts.CanvasOnOpen(workRoot, md, s.agentName); err != nil {
+			return stageTurnSpec{}, err
 		}
-		if err == nil {
-			err = prepareWorkspace()
+	}
+
+	// Headless mode has no operator on stdin to type the seed
+	// prompt, so default it to the run slug — the same shape
+	// the cascade driver depends on.
+	// Callers that pass an explicit InitialPrompt keep theirs.
+	initialPrompt := s.opts.InitialPrompt
+	if s.opts.Headless && initialPrompt == "" {
+		initialPrompt = md.ID
+	}
+
+	return stageTurnSpec{
+		Metadata:             md,
+		DocID:                s.docID,
+		ClonePath:            s.clonePath,
+		SessionCwd:           sessionCwd,
+		SessionUUID:          sessionID,
+		NewSession:           newSession,
+		InitialPrompt:        initialPrompt,
+		InitialPromptBuilder: s.opts.InitialPromptBuilder,
+		OnAgentStart:         s.opts.OnAgentStart,
+		Headless:             s.opts.Headless,
+		Model:                s.opts.Model,
+		Agent:                s.agentName,
+		ExtraEnv:             mapToEnv(s.devEnv),
+		AddDirs:              devEnvWritableDirs(s.devEnv),
+		BuildPrompt:          s.buildPrompt,
+		CommitStager:         s.commitStager,
+	}, nil
+}
+
+// materializeSkills writes the turn's skills under sessionCwd and
+// workRoot.
+func (s *stageSession) materializeSkills(workRoot, sessionCwd string) error {
+	md := s.md
+	// Materialise the moe-bureaucracy skill into the sessionCwd
+	// .claude/skills/ (claude runs cwd=sessionCwd and finds it
+	// there) and workRoot/.codex/skills/ (codex anchors there).
+	// See skill_materialize.go. Refresh on every BuildSpec is
+	// cheap; the paths are session-stable but rewriting is
+	// faster than reasoning about staleness across resumes.
+	if err := materializeMoeBureaucracySkill(workRoot, sessionCwd, md); err != nil {
+		return err
+	}
+
+	// Materialise the moe-context skill once clonePath is final
+	// — sibling to the bureaucracy materialiser above, but this
+	// one needs the clone path threaded so the rendered body can
+	// name both roots concretely (or render the document-only
+	// branch when there's no clone). Same lifecycle: worktree-
+	// only, refreshed every BuildSpec, never staged.
+	if err := materializeMoeContextSkill(workRoot, sessionCwd, md, s.clonePath); err != nil {
+		return err
+	}
+
+	// Two workflow-scoped skills, one gate each, per "tool
+	// scoping by document":
+	//
+	//   - moe-howto is chat's idea-capture / backlog-grooming
+	//     guidance; an sdlc agent isn't here to groom the backlog.
+	//   - moe-twin is the digital-twin writing contract, and sdlc
+	//     is the only workflow whose turn commit picks the twin
+	//     dir up (see projectCommitDirs).
+	//
+	// Two gates is not a registry. A third workflow-specific skill
+	// is the point to reconsider.
+	if md.Workflow == chatWorkflow {
+		if err := materializeMoeHowtoSkill(workRoot, sessionCwd); err != nil {
+			return err
 		}
+	}
+	if md.Workflow == sdlcWorkflow {
+		if err := materializeMoeTwinSkill(workRoot, sessionCwd); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// openCanvas prepares the stage's canvas for the turn: seeds what is
+// missing, commits the session start when run state changed (mutated),
+// resets entry gates, and takes the baseline the turn-output check
+// compares against.
+func (s *stageSession) openCanvas(workRoot, sessionID string, mutated bool) error {
+	md, docID := s.md, s.docID
+	// Seed only missing canvases; promoted and reopened prose stays.
+	if s.opts.CanvasSkeleton != "" && (mutated || s.resetCanvases) {
+		canvasRel := run.ContentPath(md.Project, md.ID, docID)
+		canvasAbs := filepath.Join(workRoot, canvasRel)
+		if _, statErr := os.Stat(canvasAbs); errors.Is(statErr, fs.ErrNotExist) {
+			if err := os.WriteFile(canvasAbs, []byte(s.opts.CanvasSkeleton), 0o644); err != nil {
+				return fmt.Errorf("session: seed canvas skeleton: %w", err)
+			}
+		} else if statErr != nil {
+			return fmt.Errorf("session: stat canvas: %w", statErr)
+		}
+	}
+	if mutated {
+		if err := run.Save(workRoot, md); err != nil {
+			return err
+		}
+		// Commit on the session branch — no repo lock needed
+		// because the branch has a single writer (this session).
+		if err := commitSessionStart(workRoot, md, docID, sessionID); err != nil {
+			return err
+		}
+		canvasShown := run.ContentPath(md.Project, md.ID, docID)
+		if s.canvasFiles != nil {
+			canvasShown = run.ContentDir(md.Project, md.ID, docID)
+		}
+		moePrintf(s.stderr, "opened %s canvas (session %s)\n  %s\n", docID, sessionID, filepath.Join(workRoot, canvasShown))
+	}
+
+	// Directory-form stages: seed any missing declared file
+	// (from the run's legacy canvas when one is named, else its
+	// skeleton). Design and directory-form gates reset to blocked
+	// on every admitted entry, not just the first: a
+	// resumed stage restamps against the current revision. The
+	// baseline is taken after both so neither counts as output.
+	if s.canvasFiles != nil {
+		if err := seedCanvasFiles(workRoot, md, docID, s.canvasFiles); err != nil {
+			return err
+		}
+	}
+	if s.resetCanvases {
+		if err := resetCanvasGates(workRoot, md, docID); err != nil {
+			return fmt.Errorf("session: reset canvas gates: %w", err)
+		}
+		baseline, err := snapshotCanvases(workRoot, md, docID)
 		if err != nil {
-			// A setup failure, not a quota refusal: keep exit 1 so a
-			// cascade doesn't summarise it as "not started: quota".
-			moePrintf(stderr, "%v\n", err)
+			return fmt.Errorf("session: snapshot canvases: %w", err)
+		}
+		s.canvasBaseline = baseline
+	}
+	return nil
+}
+
+// buildPrompt is the turn's BuildPrompt.
+func (s *stageSession) buildPrompt(workRoot string) (string, error) {
+	md := s.md
+	// Read-only wording for the strict-boundary stages,
+	// but not for review: it enforces the boundary *and*
+	// commits its own fixes (BoundaryAllowsCommits), so
+	// the writable paragraph is the true one there.
+	readOnly := s.opts.EnforceSandboxBoundary && !s.opts.BoundaryAllowsCommits
+	p, inputIDs, err := buildSystemPrompt(workRoot, md, s.docID, s.clonePath, readOnly, s.agentName)
+	if err != nil {
+		return "", err
+	}
+	s.deliveredInputIDs = inputIDs
+	if s.opts.Headless {
+		if frag := moe.OneShot(md.Workflow); frag != "" {
+			p += oneShotPromptDelimiter + frag
+		}
+	}
+	// Persist the assembled prompt alongside the canvas
+	// and thread JSONL so the operator can see what the
+	// agent actually received. Overwrite each turn;
+	// commitTurn stages docDir wholesale and picks the
+	// file up automatically. Best-effort write — a
+	// failure here surfaces to stderr and lets the turn
+	// proceed (the prompt itself is the load-bearing
+	// payload; the on-disk copy is a debug surface).
+	if err := writePromptSnapshot(workRoot, s.agentName, md, s.docID, p); err != nil {
+		moePrintf(s.stderr, "prompt snapshot: %v\n", err)
+	}
+	return p, nil
+}
+
+// commitStager is the turn's CommitStager.
+func (s *stageSession) commitStager(workRoot string, runErr error) error {
+	md := s.md
+	// cwd-inversion shape: the agent writes the canvas,
+	// followups, and feedback files at their natural
+	// absolute bureaucracy paths under the session
+	// worktree. No clone-to-bureaucracy shuttle to run
+	// here — commitTurn reads the same paths the agent
+	// just wrote.
+	var extras []string
+	if s.opts.ExtraStagePaths != nil {
+		more, err := s.opts.ExtraStagePaths(workRoot, md)
+		if err != nil {
+			return err
+		}
+		extras = append(extras, more...)
+	}
+	// A headless deadline kill is the one turn ending
+	// with no other durable trace: stderr scrolls away
+	// and the interrupted transcript is overwritten by
+	// the next drive of the stage. Stamp the cap on
+	// this turn's own commit so sizing it later is a
+	// `git log --grep='^MoE-Timed-Out:'`.
+	var timedOut time.Duration
+	if toErr, ok := errors.AsType[*agent.TimeoutError](runErr); ok {
+		timedOut = toErr.Timeout
+	}
+	if s.resetCanvases {
+		if err := checkCanvasOutput(workRoot, md, s.docID, s.canvasBaseline); err != nil {
+			return err
+		}
+	}
+	if err := commitTurn(workRoot, md, s.docID, s.agentName, timedOut, extras...); err != nil {
+		return err
+	}
+	// HEAD is this turn's commit and the worktree is still
+	// open — the one moment the "which project doc trees did
+	// this turn write?" question is cheap to answer exactly.
+	s.projectDocsTouched = commitTouchedProjectDocs(workRoot, md.Project)
+	return nil
+}
+
+// admit is the turn's Admit: with the session claimed, re-resolve the
+// agent and model against the reserved worktree, prepare the workspace,
+// and wait out quota.
+func (s *stageSession) admit(sess *session.Session) int {
+	root, md, docID, stderr := s.root, s.md, s.docID, s.stderr
+	fresh, err := run.Load(sess.WorktreePath, s.projectID, s.runID)
+	if err == nil {
+		s.agentName, s.opts.Model, err = s.resolveSelection(sess.WorktreePath, fresh)
+	}
+	if err == nil {
+		err = s.prepareWorkspace()
+	}
+	if err != nil {
+		// A setup failure, not a quota refusal: keep exit 1 so a
+		// cascade doesn't summarise it as "not started: quota".
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
+	if s.opts.projectDocFixTurn {
+		return 0
+	}
+	g := newCooldownGate(fmt.Sprintf("moe %s %s %s/%s", md.Workflow, docID, s.projectID, s.runID), stderr)
+	if s.opts.Headless || serveAgentSuppress() {
+		g.openControls = func() (<-chan cooldownControl, func()) { return nil, func() {} }
+	}
+	if !s.entry.release {
+		g.openHold = func() (<-chan struct{}, func()) { return watchControl(root, md, false) }
+	}
+	g.onWait = func(status string) { publishPhase(root, md, runsock.PhaseQuotaWait, docID, status) }
+	g.read = func(ctx context.Context, name, model string) (agent.Quota, error) {
+		return readStageQuota(ctx, name, model, mapToEnv(s.devEnv))
+	}
+	code := stageCooldown(g, &s.agentName, &s.opts.Model,
+		func(fresh *run.Metadata) (string, string, error) {
+			oldEnv := s.devEnv
+			name, model, err := s.resolveSelection(sess.WorktreePath, fresh)
+			if err == nil {
+				err = s.prepareWorkspace()
+			}
+			g.refreshChanged = !maps.Equal(oldEnv, s.devEnv)
+			return name, model, err
+		}, func() (*run.Metadata, error) {
+			err := repolock.With(root, stageLockOptions(s.turnInputs(), "refresh"), func() error { return session.Reconcile(sess) })
+			if err != nil {
+				return nil, err
+			}
+			return run.Load(sess.WorktreePath, s.projectID, s.runID)
+		}, stderr)
+	// A control that arrived while quota was checked or waited for
+	// is honoured before the agent launches; an explicit entry clears
+	// the hold it was admitted past only now, so a refused admission
+	// leaves the run held.
+	if code == 0 || code == exitYielded {
+		if c := s.entry.admitted("stage "+docID, stderr); c != 0 {
+			return c
+		}
+		if code == 0 {
+			publishRun(root, md.Project, md.ID, func(st *runsock.Status) {
+				st.Phase, st.Waiting, st.Stage, st.Agent = runsock.PhaseRunning, "", docID, s.agentName
+			})
+		}
+	}
+	if code == exitQuotaDeferred {
+		s.deferred = g.deferred
+		s.deferred.target.Project, s.deferred.target.Run, s.deferred.target.Stage = s.projectID, s.runID, docID
+	}
+	if code == 0 && s.opts.AfterAdmission != nil {
+		if err := s.opts.AfterAdmission(sess); err != nil {
+			moePrintf(stderr, "after quota admission: %v\n", err)
 			return 1
 		}
-		if opts.projectDocFixTurn {
-			return 0
-		}
-		g := newCooldownGate(fmt.Sprintf("moe %s %s %s/%s", md.Workflow, docID, projectID, runID), stderr)
-		if opts.Headless || serveAgentSuppress() {
-			g.openControls = func() (<-chan cooldownControl, func()) { return nil, func() {} }
-		}
-		if !entry.release {
-			g.openHold = func() (<-chan struct{}, func()) { return watchControl(root, md, false) }
-		}
-		g.onWait = func(status string) { publishPhase(root, md, runsock.PhaseQuotaWait, docID, status) }
-		g.read = func(ctx context.Context, name, model string) (agent.Quota, error) {
-			return readStageQuota(ctx, name, model, mapToEnv(devEnv))
-		}
-		code := stageCooldown(g, &agentName, &opts.Model,
-			func(fresh *run.Metadata) (string, string, error) {
-				oldEnv := devEnv
-				name, model, err := resolveSelection(sess.WorktreePath, fresh)
-				if err == nil {
-					err = prepareWorkspace()
-				}
-				g.refreshChanged = !maps.Equal(oldEnv, devEnv)
-				return name, model, err
-			}, func() (*run.Metadata, error) {
-				err := repolock.With(root, stageLockOptions(in, "refresh"), func() error { return session.Reconcile(sess) })
-				if err != nil {
-					return nil, err
-				}
-				return run.Load(sess.WorktreePath, projectID, runID)
-			}, stderr)
-		// A control that arrived while quota was checked or waited for
-		// is honoured before the agent launches; an explicit entry clears
-		// the hold it was admitted past only now, so a refused admission
-		// leaves the run held.
-		if code == 0 || code == exitYielded {
-			if c := entry.admitted("stage "+docID, stderr); c != 0 {
-				return c
-			}
-			if code == 0 {
-				publishRun(root, md.Project, md.ID, func(s *runsock.Status) {
-					s.Phase, s.Waiting, s.Stage, s.Agent = runsock.PhaseRunning, "", docID, agentName
-				})
-			}
-		}
-		in.Agent = agentName
-		if code == exitQuotaDeferred {
-			deferred = g.deferred
-			deferred.target.Project, deferred.target.Run, deferred.target.Stage = projectID, runID, docID
-		}
-		if code == 0 && opts.AfterAdmission != nil {
-			if err := opts.AfterAdmission(sess); err != nil {
-				moePrintf(stderr, "after quota admission: %v\n", err)
-				return 1
-			}
-		}
-		return code
 	}
+	return code
+}
 
-	code := runStageTurn(root, in, stdout, stderr)
+// settle runs once runStageTurn has returned code: the turn's commit is
+// on main (or the turn failed), and the session worktree is gone.
+func (s *stageSession) settle(code int) int {
+	root, md, docID, opts, stdout, stderr := s.root, s.md, s.docID, s.opts, s.stdout, s.stderr
 	publishPhase(root, md, runsock.PhaseSettling, docID, "")
-	if code == exitQuotaDeferred && deferred != nil && clockQuota != nil {
-		if err := clockQuota.record(*deferred, stderr); err != nil {
+	if code == exitQuotaDeferred && s.deferred != nil && clockQuota != nil {
+		if err := clockQuota.record(*s.deferred, stderr); err != nil {
 			moePrintf(stderr, "pulse: record quota retry: %v\n", err)
 			return 1
 		}
@@ -886,7 +995,7 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	//
 	// Best-effort: a failure here costs a re-delivery next turn, which is
 	// noise, not damage, and is not worth failing a good turn over.
-	if err := input.MarkDelivered(root, projectID, runID, docID, deliveredInputIDs, walkConsent()); err != nil {
+	if err := input.MarkDelivered(root, s.projectID, s.runID, docID, s.deliveredInputIDs, walkConsent()); err != nil {
 		moePrintf(stderr, "input: mark delivered: %v\n", err)
 	}
 	// Boundary check runs AFTER the bureaucracy commit (canvas + run
@@ -894,8 +1003,8 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	// barfing design stage doesn't drag downstream stages forward
 	// against a dirty sandbox. The check is best-effort wrt recovery:
 	// the operator resets the sandbox clone and re-runs design.
-	if opts.EnforceSandboxBoundary && sandboxBoundaryClone != "" {
-		if err := checkSandboxBoundary(sandboxBoundaryClone, sandboxBoundaryEntryHEAD, docID); err != nil {
+	if opts.EnforceSandboxBoundary && s.sandboxBoundaryClone != "" {
+		if err := checkSandboxBoundary(s.sandboxBoundaryClone, s.sandboxBoundaryEntryHEAD, docID); err != nil {
 			moePrintf(stderr, "%s: %v\n", docID, err)
 			return 1
 		}
@@ -906,8 +1015,8 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 	// that broke the index or invented a cross-reference can't drag the
 	// chain forward. Skipped on a fix turn — that's the gate's own
 	// recovery attempt, and it re-scans on return instead of recursing.
-	if len(projectDocsTouched) > 0 && !opts.projectDocFixTurn {
-		if code := enforceProjectDocHygiene(root, md, projectDocsTouched, docID, opts, stdout, stderr); code != 0 {
+	if len(s.projectDocsTouched) > 0 && !opts.projectDocFixTurn {
+		if code := enforceProjectDocHygiene(root, md, s.projectDocsTouched, docID, opts, stdout, stderr); code != 0 {
 			return code
 		}
 	}
