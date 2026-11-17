@@ -364,13 +364,7 @@ surrounding text. For example, `:new-i<Tab> p/example` becomes
 
 The board still gathers every three seconds and follows owner status
 subscriptions. A separate 500 ms timer cycles cached smoke without extra
-observation work. Serve opens this console in its managed Rex `ui` block and
-keeps a running editor across restarts to preserve drafts. This also keeps
-its old binary: save or discard drafts and quit/reopen to update it. On a
-later serve startup, an exited editor or a restored shell or other process
-positively identified as not running MoE is replaced; uncertain process
-identity or duplicate labels leave blocks alone. Serve shutdown leaves the
-UI running.
+observation work.
 
 None of them interrupts an agent. The owner finishes the turn it is on —
 commit, transcript, input stamps, any recovery that turn needs — and acts at

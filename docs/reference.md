@@ -141,22 +141,17 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   --dynamic` when the board warrants it. Unarmed, the ticker never fires and
   what the web wrote simply waits. Stopping the process retracts it: no new
   sweep starts. At armed startup, serve looks for a local Rex server. With a
-  usable server, serve opens a Rex session named `moe`, reached from the Rex
-  client like any other session, whose managed `ui` block runs `moe ui`. A
-  running editor survives serve restarts, keeping its drafts and current
-  binary. At startup, serve replaces a known exited editor or a restored shell
-  or other process positively identified as not running MoE. Unknown process
-  identity or duplicate managed labels leave blocks alone. Save or discard
-  drafts, then quit and reopen the UI to load an updated binary. Serve
-  shutdown leaves the UI running. Session creation runs a harmless bootstrap;
-  serve records its identity atomically before launching a labelled sweep.
-  Each sweep runs in that session as a block labelled `heartbeat:<project>`.
-  Such a sweep finishes even if serve stops or crashes; an armed restart with
-  a usable Rex host picks it up rather than starting another, and Ctrl-C in
-  its block is how to stop it. After reporting an exit, serve renames the
-  block to `done:heartbeat:<project>`; `done` acknowledges reporting,
-  including a failed notification attempt. Successful blocks and quota
-  deferrals close; failed screens stay readable until that project's next
+  usable server, serve runs its sweeps in a Rex session named `moe`, reached
+  from the Rex client like any other session; the first sweep creates it. Serve
+  places no UI there: run `moe ui` wherever you like. Session creation runs a
+  harmless bootstrap; serve records its identity atomically before launching a
+  labelled sweep. Each sweep runs in that session as a block labelled
+  `heartbeat:<project>`. Such a sweep finishes even if serve stops or crashes;
+  an armed restart with a usable Rex host picks it up rather than starting
+  another, and Ctrl-C in its block is how to stop it. After reporting an exit,
+  serve renames the block to `done:heartbeat:<project>`; `done` acknowledges
+  reporting, including a failed notification attempt. Successful blocks and
+  quota deferrals close; failed screens stay readable until that project's next
   sweep. Restart skips done blocks; the next sweep cleans them up before
   launching. Old unmarked exits are reported once on upgrade. A crash between
   reporting and renaming can still duplicate a report, and failure cooldown
@@ -166,19 +161,18 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   CLI is missing. Serve retries discovery and adoption on each heartbeat tick,
   including idle ticks, preserving known identity until replacement is
   recorded. Only a valid session listing proving absence permits replacement.
-  Session establishment and reconciliation must succeed before sweeps; opening
-  the optional UI is best effort, and its failure alone does not hold sweeps.
-  An incompatible Rex discovery reply instead requires fixing the host and
-  restarting serve. The startup log, `moe dash` and `/serve` name which host
-  is in use. A `/serve` page owns that ticker's status and trace — what each
-  recent tick decided, and the output tail of any sweep that failed —
-  reachable from the menu and from the one-line status cluster every board
-  header carries. `MOE_SERVE_NOTIFY_URL` is the other env var: set it and
-  serve POSTs a small JSON body to that URL when a heartbeat sweep succeeds or
-  fails, naming which project's sweep it was and whether it succeeded. Pure
-  quota deferrals send nothing. A sweep serve interrupted on its way down also
-  sends nothing: an `ok:false` there would report a failure the operator
-  caused. A failed POST is logged and blocks nothing.
+  Session establishment and reconciliation must succeed before sweeps. An
+  incompatible Rex discovery reply instead requires fixing the host and
+  restarting serve. The startup log, `moe dash` and `/serve` name which host is
+  in use. A `/serve` page owns that ticker's status and trace — what each
+  recent tick decided, and the output tail of any sweep that failed — reachable
+  from the menu and from the one-line status cluster every board header
+  carries. `MOE_SERVE_NOTIFY_URL` is the other env var: set it and serve POSTs
+  a small JSON body to that URL when a heartbeat sweep succeeds or fails,
+  naming which project's sweep it was and whether it succeeded. Pure quota
+  deferrals send nothing. A sweep serve interrupted on its way down also sends
+  nothing: an `ok:false` there would report a failure the operator caused. A
+  failed POST is logged and blocks nothing.
 - `moe project mode <id> [paused|safe|auto]` caps what the heartbeat may start
   in one project, without stopping the process. See below.
 - `moe chore list|check|open|skip` lists due project chores, dry-runs a chore
