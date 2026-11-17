@@ -226,3 +226,168 @@ func TestPushNoteFailureAfterFFPushLeavesPendingRecord(t *testing.T) {
 		t.Fatalf("root dirty after resume (err=%v):\n%s", err, gittest.Output(t, f.root, "status", "--porcelain"))
 	}
 }
+
+// holdGHPRList shadows the PR fixture's fake gh with one that blocks
+// its `pr list` reply until release exists, touching entered once it is
+// holding — the last network call before openPRPath writes its record.
+// It still logs to the fixture's gh log and gives up after a minute so
+// a broken test can't wedge the suite.
+func holdGHPRList(t *testing.T, f *prRecordFixture) (entered, release string) {
+	t.Helper()
+	dir := t.TempDir()
+	entered = filepath.Join(dir, "entered")
+	release = filepath.Join(dir, "release")
+	writeFile(t, filepath.Join(dir, "gh"), fmt.Sprintf(`#!/bin/sh
+printf '%%s\n' "$*" >> %q
+if [ "$1" = "pr" ] && [ "$2" = "list" ]; then
+  touch %q
+  i=0
+  while [ ! -f %q ]; do
+    i=$((i+1))
+    [ $i -gt 600 ] && exit 1
+    sleep 0.1
+  done
+  echo '[{"url":"%s"}]'
+  exit 0
+fi
+echo "fake gh: unsupported invocation: $*" >&2
+exit 2
+`, f.ghLog, entered, release, f.url))
+	if err := os.Chmod(filepath.Join(dir, "gh"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return entered, release
+}
+
+// TestPushPRContendedLockLeavesRootClean is the PR-route twin of the
+// held-merge reproduction: a sweep holding the repo lock when the PR
+// record wants it must find the root clean, and the push's later resume
+// must flip, apply and commit the exact record. The test holds the lock
+// in-process, so the push's push-pr acquire fails at once with a
+// NestedError instead of waiting out the 30s budget.
+func TestPushPRContendedLockLeavesRootClean(t *testing.T) {
+	f := newPRRecordFixture(t)
+	f.proposeStylesheet(proposedSheet)
+	entered, release := holdGHPRList(t, f)
+
+	t.Setenv("MOE_HOME", f.root)
+	t.Setenv("NO_COLOR", "1")
+	type result struct {
+		code           int
+		stdout, stderr string
+	}
+	done := make(chan result, 1)
+	restoreRide := withRideMode(rideDynamic)
+	go func() {
+		var stdout, stderr bytes.Buffer
+		code := Run([]string{"sdlc", "push", "--pr", f.projectID + "/" + f.runID}, &stdout, &stderr)
+		done <- result{code, stdout.String(), stderr.String()}
+	}()
+	finish := func() result {
+		if err := os.WriteFile(release, nil, 0o644); err != nil {
+			t.Error(err)
+		}
+		return <-done
+	}
+
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		if _, err := os.Stat(entered); err == nil {
+			break
+		}
+		select {
+		case r := <-done:
+			restoreRide()
+			t.Fatalf("push finished before gh pr list was held: exit=%d\nstdout=%s\nstderr=%s", r.code, r.stdout, r.stderr)
+		default:
+		}
+		if time.Now().After(deadline) {
+			r := finish()
+			restoreRide()
+			t.Fatalf("push never reached gh pr list: exit=%d\nstdout=%s\nstderr=%s", r.code, r.stdout, r.stderr)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// Take the lock the way a sweep's run.New does, then let gh answer.
+	// Everything below runs while the push's record window is shut out.
+	var r result
+	var dirty bool
+	var status string
+	var openErr error
+	if err := repolock.With(f.root, repolock.Options{Purpose: "run-new"}, func() error {
+		r = finish()
+		var err error
+		if dirty, err = run.WorkingTreeDirty(f.root); err != nil {
+			return err
+		}
+		if dirty {
+			status = gittest.Output(t, f.root, "status", "--porcelain")
+		}
+		_, openErr = run.New(f.root, f.projectID, run.Options{ID: "sweep-open", Workflow: "sdlc"})
+		return nil
+	}); err != nil {
+		restoreRide()
+		t.Fatal(err)
+	}
+	restoreRide()
+
+	if r.code == 0 {
+		t.Fatalf("push succeeded with the repo lock held elsewhere:\nstdout=%s\nstderr=%s", r.stdout, r.stderr)
+	}
+	if !strings.Contains(r.stderr, "commit push record:") {
+		t.Fatalf("push failed somewhere other than the record window:\n%s", r.stderr)
+	}
+	if dirty {
+		t.Errorf("bureaucracy root dirty after a shut-out PR record:\n%s", status)
+	}
+	if openErr != nil {
+		t.Errorf("run.New after a shut-out PR record: %v", openErr)
+	}
+	if md := f.reloadRun(); md.Status != run.StatusInProgress {
+		t.Errorf("status: want %s (flip belongs to the window), got %s", run.StatusInProgress, md.Status)
+	}
+	p := readPRPendingRecord(t, f.pushFixture)
+	if p.URL != f.url || !strings.Contains(p.Msg, "MoE-Consent: dynamic") || !strings.Contains(p.Msg, "MoE-PR: "+f.url) {
+		t.Fatalf("pending record: %+v", p)
+	}
+	if t.Failed() {
+		return
+	}
+
+	// The sweep's run is committed; resume under a different ride. The
+	// unflipped marker must take the resume route, not walk the push.
+	defer withRideMode(rideStatic)()
+	synthBefore := *f.synthCalls
+	ghBefore := f.ghCalls(t)
+	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
+	if code != 0 {
+		t.Fatalf("resume: exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "recorded PR: "+f.url) {
+		t.Fatalf("resume stdout missing URL:\n%s", stdout)
+	}
+	if *f.synthCalls != synthBefore {
+		t.Fatalf("resume reran synthesis: before=%d after=%d", synthBefore, *f.synthCalls)
+	}
+	if got := f.ghCalls(t); got != ghBefore {
+		t.Fatalf("resume called gh again:\nbefore=%s\nafter=%s", ghBefore, got)
+	}
+	if md := f.reloadRun(); md.Status != run.StatusPushed {
+		t.Fatalf("status after resume: want %s, got %s", run.StatusPushed, md.Status)
+	}
+	if got := push.TrailerValue(f.root, f.projectID, f.runID, "MoE-PR"); got != f.url {
+		t.Fatalf("MoE-PR after resume: want %q, got %q", f.url, got)
+	}
+	if body := lastCommitMessage(t, f.root); !strings.Contains(body, "MoE-Consent: dynamic") || strings.Contains(body, "MoE-Consent: static") {
+		t.Fatalf("resume did not preserve the shipping consent:\n%s", body)
+	}
+	if got := f.sheetAt("HEAD"); got != proposedSheet {
+		t.Fatalf("root stylesheet in resumed record = %q, want %q", got, proposedSheet)
+	}
+	if prPendingExists(f.pushFixture) {
+		t.Fatalf("%s should be removed after recovery", prRecordPendingName)
+	}
+	f.requireCleanRoot()
+}

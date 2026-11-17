@@ -16,7 +16,6 @@ import (
 	"github.com/modulecollective/moe/internal/push"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/stylesheet"
 	"github.com/modulecollective/moe/internal/sync"
 	"github.com/modulecollective/moe/internal/trailers"
 )
@@ -212,11 +211,13 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 			return 1, nil
 		}
 	}
-	// A failed PR-record commit happens after GitHub accepted the PR and
-	// run.json flipped to pushed. Finish that exact owed commit before
-	// route selection or any sandbox / GitHub work, preserving the consent
-	// trailer from the walk that actually shipped it.
-	if md.Status == run.StatusPushed {
+	// A failed PR record happens after GitHub accepted the PR, either
+	// before the push-pr window opened (run.json still in_progress, root
+	// clean) or inside it (run.json pushed, uncommitted). Finish that
+	// exact owed record before route selection or any sandbox / GitHub
+	// work, preserving the consent trailer from the walk that actually
+	// shipped it. Terminal statuses never resume a PR marker.
+	if md.Status == run.StatusInProgress || md.Status == run.StatusPushed {
 		if pending, ok := loadPRRecordPending(root, md, stderr); ok {
 			return resumePRRecord(root, md, pending, stdout, stderr), nil
 		}
@@ -623,17 +624,11 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch, req
 	// Status is only a projection; the scoped MoE-PR trailer says whether
 	// the first push is durable. A pushed run with no trailer is an older
 	// stranded record and must roll forward instead of being mistaken for
-	// an ordinary branch refresh.
+	// an ordinary branch refresh. The firstPush arm keeps a flip from
+	// ever being skipped; an unpushed run carrying the trailer is
+	// unreachable, since the trailer lands in the commit that flips.
 	firstPush := md.Status != run.StatusPushed
-	if firstPush {
-		md.Status = run.StatusPushed
-		if err := run.Save(root, md); err != nil {
-			moePrintf(stderr, "%v\n", err)
-			return 1
-		}
-	}
-	if push.TrailerValue(root, md.Project, md.ID, "MoE-PR") == "" {
-		runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
+	if firstPush || push.TrailerValue(root, md.Project, md.ID, "MoE-PR") == "" {
 		// walkConsent's ordinary rule, narrowed to the genuine first
 		// push: this record is also the provenance claim "shipped under a
 		// machine walk", and a markerless legacy repair cannot recover
@@ -642,18 +637,6 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch, req
 		consent := ""
 		if firstPush {
 			consent = walkConsent()
-		}
-		// The PR route's last point moe controls is the PR opening —
-		// the merge happens on GitHub — so the proposed stylesheet
-		// applies with this record.
-		paths := []string{runJSON}
-		sheetRel, err := applyProposedStylesheet(root, md)
-		if err != nil {
-			moePrintf(stderr, "%v\n", err)
-			return 1
-		}
-		if sheetRel != "" {
-			paths = append(paths, sheetRel)
 		}
 		msg := fmt.Sprintf("push: %s/%s\n\n", md.Project, md.ID) +
 			trailers.Block{
@@ -664,15 +647,9 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch, req
 				PR:       url,
 				Consent:  consent,
 			}.String()
-		err = repolock.With(root, repolock.Options{
-			Purpose: "push-pr",
-			Run:     md.Project + "/" + md.ID,
-		}, func() error {
-			return run.StageAndCommit(root, msg, paths...)
-		})
-		if err != nil {
+		if err := commitPRRecord(root, md, msg); err != nil {
 			moePrintf(stderr, "commit push record: %v\n", err)
-			if werr := savePRRecordPending(root, md, &pendingPRRecord{Msg: msg, URL: url, Stylesheet: sheetRel != ""}); werr != nil {
+			if werr := savePRRecordPending(root, md, &pendingPRRecord{Msg: msg, URL: url}); werr != nil {
 				moePrintf(stderr, "warning: save %s: %v\n", prRecordPendingName, werr)
 			}
 			moePrintf(stderr, "       the PR exists; only the local push record is missing —\n"+
@@ -687,24 +664,54 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch, req
 	return 0
 }
 
+// commitPRRecord is the PR record's whole tracked write: flip run.json
+// to pushed, apply the proposed stylesheet (the PR route's last point
+// moe controls is the PR opening — the merge happens on GitHub), and
+// commit both, all inside push-pr. Writing any of it before the lock
+// would leave the root dirty for the wait and fail every run.New that
+// holds the lock meanwhile. The first attempt and the resume both come
+// through here, so a resume recovers a window that never opened as well
+// as a commit that failed inside it.
+func commitPRRecord(root string, md *run.Metadata, msg string) error {
+	return repolock.With(root, repolock.Options{
+		Purpose: "push-pr",
+		Run:     md.Project + "/" + md.ID,
+	}, func() error {
+		paths := []string{filepath.Join(run.Dir(md.Project, md.ID), "run.json")}
+		if md.Status != run.StatusPushed {
+			md.Status = run.StatusPushed
+			if err := run.Save(root, md); err != nil {
+				return err
+			}
+		}
+		sheetRel, err := applyProposedStylesheet(root, md)
+		if err != nil {
+			return err
+		}
+		if sheetRel != "" {
+			paths = append(paths, sheetRel)
+		}
+		return run.StageAndCommit(root, msg, paths...)
+	})
+}
+
 // prRecordPendingName is the untracked marker openPRPath leaves when
-// GitHub has the PR and run.json says pushed, but the journal commit did
-// not land. Deliberately not gitignored: it shows up in `git status` as
-// the honest marker of owed work. The marker alone doesn't wedge the
-// dirty-tree gates — untracked files stopped counting as dirty — but on a
-// first push the run.json already flipped to pushed sits beside it
-// uncommitted, and that wedges them until a retry finishes the record.
+// GitHub has the PR but the journal record did not land. Deliberately
+// not gitignored: it shows up in `git status` as the honest marker of
+// owed work. The marker alone doesn't wedge the dirty-tree gates —
+// untracked files stopped counting as dirty. When the push-pr window
+// never opened, run.json still reads in_progress and the root is clean;
+// when a write inside the window failed, the flipped run.json (and any
+// applied stylesheet) sit beside it uncommitted and wedge the gates
+// until a retry finishes the record.
 const prRecordPendingName = "pr-record.pending"
 
 // pendingPRRecord preserves the inputs a later invocation cannot infer
 // faithfully. In particular, Msg carries MoE-Consent from the shipping
 // walk verbatim; URL is retained for the recovery success print.
-// Stylesheet says the record applied the run's proposed stylesheet, so
-// the resume stages the root file the failed commit left modified.
 type pendingPRRecord struct {
-	Msg        string `json:"msg"`
-	URL        string `json:"url"`
-	Stylesheet bool   `json:"stylesheet,omitempty"`
+	Msg string `json:"msg"`
+	URL string `json:"url"`
 }
 
 func prRecordPendingPath(root string, md *run.Metadata) string {
@@ -749,25 +756,14 @@ var removePRRecordPending = func(root string, md *run.Metadata) error {
 	return err
 }
 
-// resumePRRecord commits the exact record a prior PR ship left pending.
-// It intentionally runs before project loading, hooks, synthesis, branch
-// push, and GitHub calls. ErrNothingToCommit means an operator already
-// landed the staged record by hand, which is successful recovery.
+// resumePRRecord replays the exact record a prior PR ship left pending
+// through the same window as the first attempt: flip if still unflipped,
+// re-apply the stylesheet, commit. It intentionally runs before project
+// loading, hooks, synthesis, branch push, and GitHub calls.
+// ErrNothingToCommit means an operator already landed the record by
+// hand, which is successful recovery.
 func resumePRRecord(root string, md *run.Metadata, pending *pendingPRRecord, stdout, stderr io.Writer) int {
-	paths := []string{filepath.Join(run.Dir(md.Project, md.ID), "run.json")}
-	if pending.Stylesheet {
-		paths = append(paths, stylesheet.FileName)
-	}
-	err := repolock.With(root, repolock.Options{
-		Purpose: "push-pr",
-		Run:     md.Project + "/" + md.ID,
-	}, func() error {
-		if err := run.StageAndCommit(root, pending.Msg, paths...); err != nil && !errors.Is(err, run.ErrNothingToCommit) {
-			return err
-		}
-		return nil
-	})
-	if err != nil {
+	if err := commitPRRecord(root, md, pending.Msg); err != nil && !errors.Is(err, run.ErrNothingToCommit) {
 		moePrintf(stderr, "commit push record: %v\n", err)
 		moePrintf(stderr, "       the PR exists; only the local push record is missing —\n"+
 			"       re-run `moe %s push --pr %s/%s` to retry it\n",

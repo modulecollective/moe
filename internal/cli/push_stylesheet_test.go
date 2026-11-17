@@ -218,18 +218,16 @@ func TestPushPRRecordAppliesProposedStylesheet(t *testing.T) {
 	f.requireCleanRoot()
 }
 
-// TestPushResumedPRRecordCarriesStylesheet: the pending PR record says
-// it applied the stylesheet, so the resume stages the root file too.
+// TestPushResumedPRRecordCarriesStylesheet: the resume re-applies the
+// proposed stylesheet through the shared push-pr window, so the root
+// file lands in the record even after the index was reset in between.
 func TestPushResumedPRRecordCarriesStylesheet(t *testing.T) {
 	f := newPRRecordFixture(t)
 	f.proposeStylesheet(proposedSheet)
 	lift, _ := strandPRRecord(t, f)
-	if p := readPRPendingRecord(t, f.pushFixture); !p.Stylesheet {
-		t.Fatalf("pending PR record should flag the applied stylesheet: %+v", p)
-	}
 	lift()
 	// The failed commit leaves its paths staged; drop that so the
-	// resume has to stage the root file from the record, as it must
+	// resume has to re-apply and stage the root file itself, as it must
 	// after anything else resets the index in between.
 	gittest.Run(t, f.root, "reset", "-q")
 
