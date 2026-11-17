@@ -855,8 +855,8 @@ func TestUIBoardOmitsRoutineSweeps(t *testing.T) {
 					t.Fatalf("routine sweep leaked %q:\n%s", unwanted, all)
 				}
 			}
-			if !strings.HasPrefix(b.Lines[0], "ACTIVE (1)") || len(b.Items) != 1 {
-				t.Fatalf("unexpected board prefix or items: %+v", b)
+			if !strings.HasPrefix(b.Lines[0], "ACTIVE (1)") || len(b.Items) != 1 || len(b.Issues) != 0 {
+				t.Fatalf("unexpected board prefix, items or issues: %+v", b)
 			}
 			line := b.Lines[b.Items[0].Line]
 			for _, want := range []string{"moe/change-auth", "sdlc/build", "working · agent"} {
@@ -881,43 +881,69 @@ func TestUIBoardOmitsRoutineSweeps(t *testing.T) {
 	}
 }
 
-func TestUIBoardRetainsServiceExceptions(t *testing.T) {
+// Serve's exceptions are Console issues, not board rows, and their text
+// is time-stable so the Console logs each one once rather than on every
+// repaint. Routine sweeps and a dead serve's stale records say nothing.
+func TestUIBoardLogsServiceExceptionsAsIssues(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	now := time.Date(2026, 11, 13, 12, 30, 0, 0, time.Local)
-	for _, live := range []serveLiveness{serveAlive, serveUnknown, serveDead} {
+	for _, live := range []serveLiveness{serveAlive, serveDead, serveUnknown} {
 		t.Run([]string{"alive", "dead", "unknown"}[live], func(t *testing.T) {
 			s := newUISource("", DashFilter{}, os.Stdout)
 			s.serveNow = serveState{ok: true, live: live, ahead: 2, snap: serve.ActivitySnapshot{
 				Armed: true, Host: "rex", HostError: "host unavailable\x1b[2J", WrittenAt: now,
 				PushFailingSince: now.Add(-time.Minute), PushError: "push rejected",
+				PushRetryAt: now.Add(2 * time.Minute),
 				Projects: []serve.ActivityProject{
 					{Project: "sweeper", SweepStarted: now.Add(-8 * time.Minute), Decision: "the journal moved",
 						SweptAt: now.Add(-time.Hour), Fails: 2, CoolTicks: 2},
-					{Project: "cooler", CoolTicks: 2, SweptAt: now.Add(-time.Hour)},
+					{Project: "cooler", CoolTicks: 2, Fails: 1, SweptAt: now.Add(-time.Hour), Decision: "cooling off after 1 failure(s)"},
 					// The gate verdict alone is not a running sweep.
-					{Project: "faller", Sweep: true, SweptAt: now.Add(-time.Hour), Decision: "agent failed"},
+					{Project: "faller", Sweep: true, SweptAt: now.Add(-time.Hour), Fails: 3, Decision: "agent failed"},
 					{Project: "deferred", SweepDeferred: true, Decision: "quota tomorrow"},
+					{Project: "quiet", SweptAt: now.Add(-time.Hour), SweepClean: true},
 				},
 			}}
 			s.snap.Rows = []dash.Row{{Project: "moe", Run: "change-auth", Bucket: dash.BucketActiveRuns, When: now}}
 			b, _ := s.buildBoard(now)
-			all := strings.Join(b.Lines, "\n")
-			if strings.Contains(all, "sweeper") || strings.Contains(all, "the journal moved") || strings.ContainsRune(all, '\x1b') {
-				t.Fatalf("sweep or unsafe text leaked:\n%s", all)
+			if !strings.HasPrefix(b.Lines[0], "ACTIVE (1)") || len(b.Items) != 1 || b.Items[0].Line != 1 {
+				t.Fatalf("service lines displaced the board: %q %+v", b.Lines, b.Items)
 			}
-			for _, want := range []string{"host unavailable^[[2J", "push failing", "push rejected", "cooler", "cooling", "faller", "agent failed", "deferred", "quota tomorrow"} {
-				if strings.Contains(all, want) != (live != serveDead) {
-					t.Fatalf("liveness %v: unexpected presence of %q:\n%s", live, want, all)
-				}
+			if all := strings.Join(b.Lines, "\n"); strings.Contains(all, "rex") || strings.Contains(all, "push") || strings.Contains(all, "cooler") {
+				t.Fatalf("service text left in the board:\n%s", all)
 			}
-			if len(b.Items) != 1 || !strings.Contains(b.Lines[b.Items[0].Line], "moe/change-auth") {
-				t.Fatalf("service lines displaced item: %+v", b.Items)
+			at := now.Add(-time.Hour).Local().Format("15:04")
+			want := []string{
+				"serve: cooler sweep failed at " + at + " (1 in a row)",
+				"serve: deferred deferred — quota tomorrow",
+				"serve: faller sweep failed at " + at + " (3 in a row)",
+				// Raw here; the Console's wrapRows escapes it.
+				"serve: host rex — host unavailable\x1b[2J",
+				"serve: push failing since " + now.Add(-time.Minute).Local().Format("15:04") + " — push rejected",
+			}
+			if live == serveDead {
+				want = nil
+			}
+			if !slices.Equal(b.Issues, want) {
+				t.Fatalf("issues:\n got %q\nwant %q", b.Issues, want)
+			}
+			// An hour on, the same snapshot logs nothing new.
+			later, _ := s.buildBoard(now.Add(time.Hour))
+			if !slices.Equal(later.Issues, b.Issues) {
+				t.Fatalf("issues moved with the clock:\n%q\n%q", b.Issues, later.Issues)
 			}
 			if live == serveUnknown && !strings.Contains(b.Banner, "serve unknown (sandbox)") {
 				t.Fatalf("unknown banner lost: %q", b.Banner)
 			}
 		})
 	}
+	t.Run("unreadable", func(t *testing.T) {
+		s := newUISource("", DashFilter{}, os.Stdout)
+		s.serveNow = serveState{err: errors.New("serve: bad serve.json")}
+		if b, _ := s.buildBoard(now); !slices.Equal(b.Issues, []string{"serve: bad serve.json"}) || strings.Contains(strings.Join(b.Lines, "\n"), "serve.json") {
+			t.Fatalf("issues %q, lines %q", b.Issues, b.Lines)
+		}
+	})
 }
 
 func TestUIBoardSeparatesPinnedRegionsAndEscapesLabels(t *testing.T) {

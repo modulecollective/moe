@@ -216,10 +216,9 @@ func (s serveState) failing(now time.Time) int {
 
 // renderLines writes what serve earns below the banner: the parse
 // warning if the file was unreadable, then a row per noteworthy project.
-// Dash includes routine sweeps; the interactive UI excludes them to
-// reserve board space for runs and service exceptions. A healthy quiet
-// board writes nothing — its status is already in the banner's tail.
-func (s serveState) renderLines(w io.Writer, now time.Time, includeSweeps bool) {
+// A healthy quiet board writes nothing — its status is already in the
+// banner's tail.
+func (s serveState) renderLines(w io.Writer, now time.Time) {
 	if s.err != nil {
 		// The error already wears the "serve:" prefix (it names the file).
 		cliout.Printf(w, "%v\n", s.err)
@@ -244,9 +243,6 @@ func (s serveState) renderLines(w io.Writer, now time.Time, includeSweeps bool) 
 		fmt.Fprintf(tw, "  origin\t%s\t%s\n", state, detail)
 	}
 	for _, p := range s.snap.Projects {
-		if !includeSweeps && p.Sweeping() {
-			continue
-		}
 		state, detail := serveProjectState(now, p)
 		if state == "" {
 			continue
@@ -254,6 +250,46 @@ func (s serveState) renderLines(w io.Writer, now time.Time, includeSweeps bool) 
 		fmt.Fprintf(tw, "  %s\t%s\t%s\n", p.Project, state, detail)
 	}
 	tw.Flush()
+}
+
+// issues is what moe ui's Console logs for serve: renderLines' exceptions
+// without its routine sweeps, one line each. The Console logs a line once
+// per change of text, so these carry clock times rather than ages or
+// countdowns — a relative "31m ago" would relog on every repaint.
+func (s serveState) issues() []string {
+	if s.err != nil {
+		return []string{s.err.Error()} // already "serve:"-prefixed
+	}
+	if s.live == serveDead {
+		return nil // the banner's "dead" is the whole message, as in renderLines
+	}
+	var out []string
+	if s.snap.HostError != "" {
+		out = append(out, fmt.Sprintf("serve: host %s — %s", s.snap.Host, s.snap.HostError))
+	}
+	if !s.snap.PushFailingSince.IsZero() && s.ahead > 0 { // pushLine's condition
+		out = append(out, fmt.Sprintf("serve: push failing since %s — %s",
+			s.snap.PushFailingSince.Local().Format("15:04"), s.snap.PushError))
+	}
+	for _, p := range s.snap.Projects {
+		// Only the state is wanted; its detail is relative to now.
+		switch state, _ := serveProjectState(time.Time{}, p); state {
+		case "cooling", "failed":
+			// One shape for both: Decision is the gate's latest verdict, not
+			// the failure's cause, so it stays out.
+			line := "serve: " + p.Project + " sweep failed"
+			if !p.SweptAt.IsZero() {
+				line += " at " + p.SweptAt.Local().Format("15:04")
+			}
+			if p.Fails > 0 {
+				line += fmt.Sprintf(" (%d in a row)", p.Fails)
+			}
+			out = append(out, line)
+		case "deferred":
+			out = append(out, "serve: "+p.Project+" deferred — "+p.Decision)
+		}
+	}
+	return out
 }
 
 // pushLine decides whether the drain has earned a row of its own and

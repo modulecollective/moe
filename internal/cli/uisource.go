@@ -364,6 +364,7 @@ func (s *uiSource) buildBoard(now time.Time) (ui.Board, []cliout.ProgramStatus) 
 			b.Issues = append(b.Issues, key+": canvas unreadable: "+ex.bodyErr.Error())
 		}
 	}
+	b.Issues = append(b.Issues, s.serveNow.issues()...)
 	slices.Sort(b.Issues)
 	snap := s.snap
 	snap.Rows, snap.Observations = rows, obs
@@ -373,15 +374,8 @@ func (s *uiSource) buildBoard(now time.Time) (ui.Board, []cliout.ProgramStatus) 
 	// Printf's reset may follow its newline. This is exactly one banner row.
 	b.Banner = strings.ReplaceAll(buf.String(), "\n", "")
 	buf.Reset()
-	// Service detail is external text. Render without styles, then escape it
-	// before adding the trusted dashboard chrome below.
-	var service strings.Builder
-	s.serveNow.renderLines(&service, now, false)
-	for _, line := range strings.Split(strings.TrimSuffix(service.String(), "\n"), "\n") {
-		if service.Len() > 0 {
-			fmt.Fprintln(buf, ui.SafeText(line))
-		}
-	}
+	// Serve's exceptions are Console issues above, not board rows: they
+	// carry no action and would scroll with the runs.
 	if s.gerr != nil {
 		moePrintf(buf, "observation failed: %s (showing the last good board)\n", ui.SafeText(s.gerr.Error()))
 	}
