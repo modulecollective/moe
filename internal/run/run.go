@@ -23,6 +23,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/modulecollective/moe/internal/git"
@@ -746,30 +747,153 @@ func Load(root, projectID, id string) (*Metadata, error) {
 // Scan walks projects/*/runs/*/run.json under root and returns every
 // run's metadata, in unspecified order. The caller does the sorting
 // and bucketing (moe dash, moe history). A missing or empty projects/
-// directory returns (nil, nil) — a freshly-initialized bureaucracy is a
-// valid state, not an error.
+// directory returns no runs and no error — a freshly-initialized
+// bureaucracy is a valid state, not an error.
+//
+// Memoized per root on each file's stat — see scanMemo. Every call
+// returns fresh copies, so callers may mutate what they get back.
 func Scan(root string) ([]*Metadata, error) {
-	pattern := filepath.Join(root, "projects", "*", "runs", "*", "run.json")
-	matches, err := filepath.Glob(pattern)
+	projectsDir := filepath.Join(root, "projects")
+	projects, err := os.ReadDir(projectsDir)
 	if err != nil {
-		return nil, fmt.Errorf("run: glob: %w", err)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("run: scan: %w", err)
 	}
-	out := make([]*Metadata, 0, len(matches))
-	for _, path := range matches {
-		b, err := os.ReadFile(path)
+	scanMemo.Lock()
+	defer scanMemo.Unlock()
+	prev := scanMemo.entries[root]
+	next := make(map[string]scanMemoEntry, len(prev))
+	var out []*Metadata
+	for _, p := range projects {
+		runsDir := filepath.Join(projectsDir, p.Name(), "runs")
+		runs, err := os.ReadDir(runsDir)
 		if err != nil {
-			return nil, fmt.Errorf("run: read %s: %w", path, err)
+			if notDir(err) {
+				continue
+			}
+			return nil, fmt.Errorf("run: scan: %w", err)
 		}
-		md := &Metadata{}
-		if err := json.Unmarshal(b, md); err != nil {
-			return nil, fmt.Errorf("run: parse %s: %w", path, err)
+		for _, r := range runs {
+			path := filepath.Join(runsDir, r.Name(), "run.json")
+			fi, err := os.Stat(path)
+			if err != nil {
+				if notDir(err) {
+					continue
+				}
+				return nil, fmt.Errorf("run: stat %s: %w", path, err)
+			}
+			e, ok := prev[path]
+			if !ok || !e.modTime.Equal(fi.ModTime()) || e.size != fi.Size() {
+				md, err := parseRunFile(path)
+				if err != nil {
+					return nil, err
+				}
+				e = scanMemoEntry{modTime: fi.ModTime(), size: fi.Size(), md: md}
+			}
+			next[path] = e
+			out = append(out, e.md.clone())
 		}
-		if md.Workflow == "" {
-			return nil, fmt.Errorf("run: %s: workflow is required", path)
-		}
-		out = append(out, md)
 	}
+	if scanMemo.entries == nil {
+		scanMemo.entries = make(map[string]map[string]scanMemoEntry, 1)
+	}
+	scanMemo.entries[root] = next
 	return out, nil
+}
+
+// notDir reports whether a ReadDir or Stat error means "nothing here"
+// — the path is missing, or a component that should be a directory is
+// a file. The glob Scan used to run skipped both silently.
+func notDir(err error) bool {
+	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR)
+}
+
+// scanMemo caches every run.json Scan has parsed, per bureaucracy root,
+// keyed by path and validated by mtime and size. `moe ui` and `moe
+// serve` scan every few seconds and nearly every run is terminal and
+// untouched for weeks, so re-reading and re-parsing all of them was
+// ~40ms per pass of re-deriving an answer already in hand; a stat per
+// run is the cheapest check that still sees an uncommitted write, a
+// reopen or a checkout. A rewrite with the same byte length in the
+// same mtime tick would be missed; Save rewrites the whole file and
+// mtime is nanosecond-resolution, so that is accepted.
+//
+// Not keyed on HEAD like journalMemo: run.json is a working-tree file
+// Save writes before its commit, so HEAD would be blind until then.
+//
+// Each pass replaces the root's map with the paths it saw, so a deleted
+// run drops out. A failed pass leaves the previous map in place and
+// caches nothing from the error. The memo's Metadata is never handed
+// out — Scan returns clones — because callers mutate what they get
+// (pulse's CI repair sets Status) and a shared pointer would leak that
+// edit into every later scan.
+var scanMemo struct {
+	sync.Mutex
+	entries map[string]map[string]scanMemoEntry
+}
+
+type scanMemoEntry struct {
+	modTime time.Time
+	size    int64
+	md      *Metadata
+}
+
+// readRunFile is the file read Scan's parse goes through. A var so
+// tests can count reads; nothing on disk tells a memo hit from a
+// re-read.
+var readRunFile = os.ReadFile
+
+// parseRunFile reads and validates one run.json for Scan.
+func parseRunFile(path string) (*Metadata, error) {
+	b, err := readRunFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("run: read %s: %w", path, err)
+	}
+	md := &Metadata{}
+	if err := json.Unmarshal(b, md); err != nil {
+		return nil, fmt.Errorf("run: parse %s: %w", path, err)
+	}
+	if md.Workflow == "" {
+		return nil, fmt.Errorf("run: %s: workflow is required", path)
+	}
+	return md, nil
+}
+
+// clone returns a deep copy of m: every pointer and map field is
+// copied, so mutating the result never reaches m. A field added to
+// Metadata, Document, Turn or ReapNote that holds a pointer, map or
+// slice needs a line here; TestMetadataCloneSharesNothing fails until
+// it has one.
+func (m *Metadata) clone() *Metadata {
+	c := *m
+	if m.Reaped != nil {
+		r := *m.Reaped
+		c.Reaped = &r
+	}
+	if m.LastTurn != nil {
+		t := *m.LastTurn
+		c.LastTurn = &t
+	}
+	if m.Documents != nil {
+		c.Documents = make(map[string]*Document, len(m.Documents))
+		for k, d := range m.Documents {
+			if d == nil {
+				c.Documents[k] = nil
+				continue
+			}
+			dc := *d
+			if d.Sessions != nil {
+				dc.Sessions = make(map[string]string, len(d.Sessions))
+				for sk, sv := range d.Sessions {
+					dc.Sessions[sk] = sv
+				}
+			}
+			c.Documents[k] = &dc
+		}
+	}
+	return &c
 }
 
 // JournalIndex is the precomputed in-memory view of MoE-trailer
