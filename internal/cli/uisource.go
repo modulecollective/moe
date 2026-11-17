@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand"
 	"os"
 	"slices"
@@ -304,6 +305,15 @@ func (s *uiSource) currentReports() []cliout.ProgramStatus {
 	return s.reports()
 }
 
+// ownerGone reports a subscription error that means the owner is not
+// listening: its endpoint closed (every stage session closes it on the
+// way out) or nothing is bound. The board already names that state —
+// owned, no live status — so it is not an observation failure; a
+// silent owner, a refusal or a bad frame still is.
+func ownerGone(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, runsock.ErrNoOwner)
+}
+
 // overlay is the snapshot's observations with the live subscriptions'
 // latest snapshots applied, and each row's Control text recomputed from
 // them. s.mu is held.
@@ -314,6 +324,8 @@ func (s *uiSource) overlay(now time.Time) ([]dash.Row, map[string]RunObservation
 		if l := s.live[key]; l != nil && l.status != nil && !l.stale {
 			st := *l.status
 			o.Live, o.LiveErr = &st, nil
+		} else if l != nil && l.stale && ownerGone(l.err) {
+			o.Live, o.LiveErr = nil, fmt.Errorf("%w: endpoint closed", runsock.ErrNoOwner)
 		} else if l != nil && l.stale {
 			o.Live, o.LiveErr = nil, fmt.Errorf("contact lost: %v", l.err)
 		}
@@ -339,7 +351,7 @@ func (s *uiSource) buildBoard(now time.Time) (ui.Board, []cliout.ProgramStatus) 
 	}
 	for key, o := range obs {
 		for name, err := range map[string]error{"control": o.ControlErr, "owner": o.OwnerErr, "live": o.LiveErr, "receipts": o.UnrecordedErr} {
-			if err != nil {
+			if err != nil && !errors.Is(err, runsock.ErrNoOwner) {
 				b.Issues = append(b.Issues, key+": "+name+" observation failed: "+err.Error())
 			}
 		}
@@ -586,6 +598,10 @@ func (s *uiSource) runDetail(md *run.Metadata, row dash.Row, o RunObservation, o
 	}
 	if l != nil && l.status != nil {
 		switch {
+		case l.stale && ownerGone(l.err):
+			st := *l.status
+			out = append(out, fmt.Sprintf("live: owner endpoint closed; last heard %s ago, last known below is stale", dash.HumanDuration(now.Sub(l.heard))))
+			o.Live, o.LiveErr = &st, nil
 		case l.stale:
 			st := *l.status
 			out = append(out, fmt.Sprintf("live: contact lost %s ago (%v); last known below is stale", dash.HumanDuration(now.Sub(l.heard)), l.err))

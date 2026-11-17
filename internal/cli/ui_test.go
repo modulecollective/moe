@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -153,6 +154,124 @@ func TestUIWatchPushesWithoutGather(t *testing.T) {
 	if err != nil || probed.Load() == 0 || snap.Observations["moe/change-auth"].Live == nil {
 		t.Fatalf("cached gather: probed=%d err=%v", probed.Load(), err)
 	}
+}
+
+// An owner closing its endpoint — the end of every stage session — is a
+// state, not a failure: no Console issue, the row reads as owned with
+// no live status, and the detail keeps the last-known phase as stale. A
+// silent owner is still an issue.
+func TestUIOwnerEndpointClosedIsNotAnIssue(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	root, md := controlFixture(t)
+	ownForTest(t, root)
+	s := newUISource(root, DashFilter{}, os.Stdout)
+	prev := uiDiscovery
+	uiDiscovery = time.Hour // no gather may settle ownership in between
+	t.Cleanup(func() { uiDiscovery = prev })
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := s.refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() { s.run(ctx); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+
+	waitBoard := func(want func(ui.Board, ui.Item) bool) (ui.Board, ui.Item) {
+		t.Helper()
+		deadline := time.After(5 * time.Second)
+		for {
+			select {
+			case b := <-s.boards:
+				if it := uiItem(t, b, "moe", "change-auth", ui.ItemRun); want(b, it) {
+					return b, it
+				}
+			case <-deadline:
+				t.Fatal("no matching board")
+			}
+		}
+	}
+	publishPhase(root, md, runsock.PhaseRunning, "code", "")
+	waitBoard(func(_ ui.Board, it ui.Item) bool {
+		return strings.Contains(strings.Join(it.Detail, "\n"), "phase: agent running (stage code)")
+	})
+
+	// Close the endpoint and keep the guard, as a stage does between its
+	// session ending and the guard's release.
+	invocationRunsMu.Lock()
+	srv := invocationEndpoints[invocationRunKey(root, "moe", "change-auth")]
+	invocationRunsMu.Unlock()
+	srv.Close()
+	b, it := waitBoard(func(_ ui.Board, it ui.Item) bool {
+		return strings.Contains(strings.Join(it.Detail, "\n"), "owner endpoint closed")
+	})
+	for _, issue := range b.Issues {
+		if strings.Contains(issue, "change-auth") {
+			t.Fatalf("closed endpoint raised an issue: %q", issue)
+		}
+	}
+	if line := b.Lines[it.Line]; !strings.Contains(line, "owned · no live status") {
+		t.Fatalf("row = %q", line)
+	}
+	d := strings.Join(it.Detail, "\n")
+	if !strings.Contains(d, "last known below is stale") || !strings.Contains(d, "phase: agent running (stage code)") || strings.Contains(d, "EOF") {
+		t.Fatalf("detail:\n%s", d)
+	}
+
+	// Negative control: a silent owner is still an observation failure.
+	s.mu.Lock()
+	token := s.live["moe/change-auth"].token
+	s.mu.Unlock()
+	s.heard("moe/change-auth", token, nil, "watching", fmt.Errorf("%w for moe/change-auth in 30s", runsock.ErrContactLost))
+	b, _ = waitBoard(func(b ui.Board, _ ui.Item) bool { return len(b.Issues) > 0 })
+	if want := "moe/change-auth: live observation failed: contact lost: "; len(b.Issues) != 1 || !strings.HasPrefix(b.Issues[0], want) {
+		t.Fatalf("issues = %q, want one starting %q", b.Issues, want)
+	}
+}
+
+// An owned run serving no endpoint at all — the gather's probe and the
+// subscription's dial both find nothing — raises no live issue either.
+func TestUIOwnedWithoutEndpointIsNotAnIssue(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	root, _ := controlFixture(t)
+	rel, err := ownRun(root, "moe", "change-auth", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { rel() })
+	s := newUISource(root, DashFilter{}, os.Stdout)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() { cancel(); s.wg.Wait() })
+	if err := s.refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	check := func(b ui.Board) {
+		t.Helper()
+		if len(b.Issues) != 0 {
+			t.Fatalf("issues = %q", b.Issues)
+		}
+		it := uiItem(t, b, "moe", "change-auth", ui.ItemRun)
+		if line := b.Lines[it.Line]; !strings.Contains(line, "owned · no live status") {
+			t.Fatalf("row = %q", line)
+		}
+	}
+	check(takeBoard(t, s))
+	// The subscription's dial fails too; its stale error must read the same.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		s.mu.Lock()
+		l := s.live["moe/change-auth"]
+		stale := l != nil && l.stale
+		s.mu.Unlock()
+		if stale {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("subscription never failed")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	s.publish()
+	check(takeBoard(t, s))
 }
 
 // Notes and answers go through the input writers; a stale answer is a
