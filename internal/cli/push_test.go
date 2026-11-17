@@ -370,6 +370,7 @@ exit 0
 		t.Fatal(err)
 	}
 	mainBefore := f.originHead()
+	commitFollowup(t, f)
 
 	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
 	if code != 1 {
@@ -384,8 +385,40 @@ exit 0
 	if got := f.originHead(); got != mainBefore {
 		t.Fatalf("origin/main must not advance on a locked-main failure: want %s, got %s", mainBefore, got)
 	}
+	assertRejectedMergeLeftNothing(t, f)
+}
+
+// commitFollowup files and commits one unchecked follow-up on the
+// fixture run, the way a stage turn would, so the merge path's harvest
+// rewrite is a tracked change rather than an untracked file.
+func commitFollowup(t *testing.T, f *pushFixture) {
+	t.Helper()
+	writeFollowups(t, f.root, f.projectID, f.runID,
+		"- [ ] `chase-it` — Chase the thing\n")
+	gittest.Run(t, f.root, "add", run.FollowupsPath(f.projectID, f.runID))
+	gittest.Run(t, f.root, "commit", "-m", "work: file a followup")
+}
+
+// assertRejectedMergeLeftNothing pins the on-disk state after an
+// ff-push that never landed: run.json still reads its pre-merge status
+// (there is no flip to revert any more), the root is clean, and the
+// harvest made exactly one commit — a retry re-harvests
+// already-checked entries to a no-op and commits nothing.
+func assertRejectedMergeLeftNothing(t *testing.T, f *pushFixture) {
+	t.Helper()
 	if md := f.reloadRun(); md.Status != run.StatusInProgress {
-		t.Fatalf("status: want %s (reverted), got %s", run.StatusInProgress, md.Status)
+		t.Fatalf("status: want %s, got %s", run.StatusInProgress, md.Status)
+	}
+	if dirty, err := run.WorkingTreeDirty(f.root); err != nil || dirty {
+		t.Fatalf("root dirty after a rejected ff-push (err=%v):\n%s", err, gittest.Output(t, f.root, "status", "--porcelain"))
+	}
+	log := gittest.Output(t, f.root, "log", "--format=%H",
+		"--grep=^harvest: capture follow-ups, lore, and twin observations for "+f.projectID+"/"+f.runID)
+	if got := len(strings.Fields(log)); got != 1 {
+		t.Fatalf("harvest commits: want 1, got %d:\n%s", got, log)
+	}
+	if !strings.Contains(readFollowups(t, f.root, f.projectID, f.runID), "- [x] `chase-it`") {
+		t.Fatalf("followup not harvested:\n%s", readFollowups(t, f.root, f.projectID, f.runID))
 	}
 }
 
@@ -397,6 +430,7 @@ exit 0
 func TestPushExhaustsRetriesWhenOriginAdvancesEveryAttempt(t *testing.T) {
 	f := newPushFixture(t)
 
+	commitFollowup(t, f)
 	counter := filepath.Join(t.TempDir(), "n")
 	scratch := t.TempDir()
 	// Each hook run clones origin fresh, adds a uniquely-named file, and
@@ -425,9 +459,7 @@ git -C "$d" push -q origin main
 	if !strings.Contains(stderr, "advanced during checks on all 3 attempts") {
 		t.Fatalf("expected exhaustion message on stderr, got:\n%s", stderr)
 	}
-	if md := f.reloadRun(); md.Status != run.StatusInProgress {
-		t.Fatalf("status: want %s (reverted), got %s", run.StatusInProgress, md.Status)
-	}
+	assertRejectedMergeLeftNothing(t, f)
 	if !sandbox.Exists(f.root, f.projectID, f.runID) {
 		t.Fatalf("expected sandbox kept after exhaustion (nothing merged)")
 	}

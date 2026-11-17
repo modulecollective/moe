@@ -29,6 +29,7 @@ func TestTerminalStatusWriteIsCentralised(t *testing.T) {
 	terminalWritePattern := regexp.MustCompile(
 		`md\.Status\s*=\s*run\.Status(Merged|Closed)\b`,
 	)
+	markTerminalCall := regexp.MustCompile(`\bmarkTerminal\(`)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -52,6 +53,15 @@ func TestTerminalStatusWriteIsCentralised(t *testing.T) {
 			t.Fatalf("read %s: %v", e.Name(), err)
 		}
 		for i, line := range strings.Split(string(body), "\n") {
+			// markTerminal is the flip without the harvest. mergePath
+			// needs the halves apart (harvest before the ff-push, flip in
+			// the window that commits it); any other caller should take
+			// enterTerminal, which keeps them welded.
+			if markTerminalCall.MatchString(line) && e.Name() != "push.go" {
+				t.Errorf("%s:%d: markTerminal called outside terminal.go and push.go: %s\n"+
+					"       route this through enterTerminal so follow-up harvest stays attached to the transition",
+					e.Name(), i+1, strings.TrimSpace(line))
+			}
 			if !terminalWritePattern.MatchString(line) {
 				continue
 			}

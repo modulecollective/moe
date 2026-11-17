@@ -29,63 +29,98 @@ import (
 // Idempotent on harvest: lines already marked `[x]` are skipped, and
 // partial progress is committed by harvestFollowups itself, so a
 // retry after partial failure picks up where it left off.
+//
+// enterTerminal is harvestTerminal then markTerminal. mergePath is the
+// one caller that uses the halves apart: it commits the harvest before
+// the ff-push and flips inside the lock window that commits the flip,
+// so no tracked write sits on disk across the network call.
 func enterTerminal(root string, md *run.Metadata, newStatus string, skipEdit bool) ([]string, error) {
-	if newStatus != run.StatusMerged && newStatus != run.StatusClosed {
-		return nil, fmt.Errorf("enterTerminal: not a terminal status: %q", newStatus)
-	}
-	paths := []string{filepath.Join(run.Dir(md.Project, md.ID), "run.json")}
-	if !isCaptureWorkflow(md.Workflow) {
-		if err := harvestFollowups(root, md.Project, md.ID, md.Workflow, skipEdit); err != nil {
-			return nil, err
-		}
-		rel := run.FollowupsPath(md.Project, md.ID)
-		if _, err := os.Stat(filepath.Join(root, rel)); err == nil {
-			paths = append(paths, rel)
-		}
-		// Lore harvest is the parallel pop on feedback/lore.md: same
-		// shape, same idempotency, different destination
-		// (lore/<slug>.md at the bureaucracy root instead of an idea
-		// run). The promoted files plus the rewritten feedback file
-		// ride along on the close commit; stage lore/ as a dir so
-		// every newly-written slug gets picked up without enumerating
-		// them here.
-		if err := harvestLore(root, md.Project, md.ID, md.Workflow, skipEdit); err != nil {
-			return nil, err
-		}
-		loreRel := run.FeedbackPath(md.Project, md.ID, "lore")
-		if _, err := os.Stat(filepath.Join(root, loreRel)); err == nil {
-			paths = append(paths, loreRel)
-		}
-		if _, err := os.Stat(filepath.Join(root, lore.DirRel)); err == nil {
-			paths = append(paths, lore.DirRel)
-		}
-		// Twin feedback is the third pop, and the third destination:
-		// notes about the project's own twin fan out into ideas so a
-		// spotted twin edit gets scheduled rather than waiting for a
-		// pass that no longer exists.
-		if err := harvestTwinFeedback(root, md.Project, md.ID, md.Workflow, skipEdit); err != nil {
-			return nil, err
-		}
-		twinRel := run.FeedbackPath(md.Project, md.ID, "twin")
-		if _, err := os.Stat(filepath.Join(root, twinRel)); err == nil {
-			paths = append(paths, twinRel)
-		}
-	}
-	md.Status = newStatus
-	if err := run.Save(root, md); err != nil {
+	if err := checkTerminalStatus(newStatus); err != nil {
 		return nil, err
+	}
+	paths, err := harvestTerminal(root, md, skipEdit)
+	if err != nil {
+		return nil, err
+	}
+	runJSON, err := markTerminal(root, md, newStatus)
+	if err != nil {
+		return nil, err
+	}
+	return append([]string{runJSON}, paths...), nil
+}
+
+// harvestTerminal runs the three scratch harvests a non-capture run
+// owes on reaching a terminal status, and returns the repo-relative
+// paths they left on disk for the caller to commit. It writes no
+// status; markTerminal is its pair.
+func harvestTerminal(root string, md *run.Metadata, skipEdit bool) ([]string, error) {
+	if isCaptureWorkflow(md.Workflow) {
+		return nil, nil
+	}
+	var paths []string
+	if err := harvestFollowups(root, md.Project, md.ID, md.Workflow, skipEdit); err != nil {
+		return nil, err
+	}
+	rel := run.FollowupsPath(md.Project, md.ID)
+	if _, err := os.Stat(filepath.Join(root, rel)); err == nil {
+		paths = append(paths, rel)
+	}
+	// Lore harvest is the parallel pop on feedback/lore.md: same
+	// shape, same idempotency, different destination
+	// (lore/<slug>.md at the bureaucracy root instead of an idea
+	// run). The promoted files plus the rewritten feedback file
+	// ride along on the close commit; stage lore/ as a dir so
+	// every newly-written slug gets picked up without enumerating
+	// them here.
+	if err := harvestLore(root, md.Project, md.ID, md.Workflow, skipEdit); err != nil {
+		return nil, err
+	}
+	loreRel := run.FeedbackPath(md.Project, md.ID, "lore")
+	if _, err := os.Stat(filepath.Join(root, loreRel)); err == nil {
+		paths = append(paths, loreRel)
+	}
+	if _, err := os.Stat(filepath.Join(root, lore.DirRel)); err == nil {
+		paths = append(paths, lore.DirRel)
+	}
+	// Twin feedback is the third pop, and the third destination:
+	// notes about the project's own twin fan out into ideas so a
+	// spotted twin edit gets scheduled rather than waiting for a
+	// pass that no longer exists.
+	if err := harvestTwinFeedback(root, md.Project, md.ID, md.Workflow, skipEdit); err != nil {
+		return nil, err
+	}
+	twinRel := run.FeedbackPath(md.Project, md.ID, "twin")
+	if _, err := os.Stat(filepath.Join(root, twinRel)); err == nil {
+		paths = append(paths, twinRel)
 	}
 	return paths, nil
 }
 
+// markTerminal flips md to newStatus (merged or closed), saves
+// run.json and returns its repo-relative path. Outside enterTerminal
+// it must follow a harvestTerminal for the same transition; the lint
+// test pins push.go as the only such caller.
+func markTerminal(root string, md *run.Metadata, newStatus string) (string, error) {
+	if err := checkTerminalStatus(newStatus); err != nil {
+		return "", err
+	}
+	md.Status = newStatus
+	if err := run.Save(root, md); err != nil {
+		return "", err
+	}
+	return filepath.Join(run.Dir(md.Project, md.ID), "run.json"), nil
+}
+
+func checkTerminalStatus(status string) error {
+	if status != run.StatusMerged && status != run.StatusClosed {
+		return fmt.Errorf("enterTerminal: not a terminal status: %q", status)
+	}
+	return nil
+}
+
 // revertTerminal undoes the status flip a prior enterTerminal call
 // wrote to disk: it restores md.Status to priorStatus and re-saves
-// run.json. mergePath uses this when ffPushToDefault fails after
-// harvest succeeded — the harvest commits and any followups.md
-// rewrites are kept (idempotent on retry; harvest will skip the
-// already-checked entries), but the run goes back to its pre-merge
-// status so the next push attempt sees the correct gate state and
-// the operator's reloadRun reflects "merge didn't happen yet."
+// run.json. commitTerminal uses it when the flip's commit fails.
 //
 // Lives in terminal.go so the lint invariant ("only this file flips
 // terminal status") still holds — the priorStatus rewrite here is
@@ -106,8 +141,7 @@ func revertTerminal(root string, md *run.Metadata, priorStatus string) error {
 // only durable once this commit lands, so there is no state where a
 // revert here erases a real close.
 //
-// What survives the rollback is deliberate, and mirrors what mergePath
-// already leaves behind on an ff-push failure: the harvest's committed
+// What survives the rollback is deliberate: the harvest's committed
 // idea runs stay (harvest is idempotent — `[x]` lines skip on retry),
 // and the followups.md / feedback/lore.md rewrites plus any promoted
 // lore/<slug>.md files stay in the worktree, uncommitted. Those

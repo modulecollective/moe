@@ -801,15 +801,29 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 	}
 	touched := touchedChoresForBranch(root, md.Project, clonePath, pj.DefaultBranch, branch)
 
-	// Harvest follow-ups and flip run.json to merged before the
-	// ff-push: harvest (and any per-idea slug failures) must be
-	// reversible, and FastForwardToDefault is the point of no return
-	// for the merged transition. enterTerminal does the harvest under
-	// lock so each createIdea sees a held bureaucracy lock. Interactive
-	// push keeps the editor pop just like close; cascade push harvests
-	// as-is so a headless ship has no hidden interactive surface.
-	priorStatus := md.Status
-	var paths []string
+	// Every tracked root write lands inside the lock window that commits
+	// it. A run.json flip or a harvest rewrite left on disk across the
+	// ff-push dirties the whole root for the length of a network call,
+	// and every run.New that takes the lock meanwhile refuses on the
+	// repo-wide clean-tree check — one project's ship failing another's
+	// sweep.
+	//
+	// So this window harvests and commits its own rewrites, but leaves
+	// the status alone; the flip waits for the push-merge window, past
+	// the point of no return. A rejected ff-push then has nothing to
+	// revert, and a ship killed mid-push leaves a clean tree and a run
+	// that a re-run pushes again. Harvest runs under lock so each
+	// createIdea sees a held bureaucracy lock. Interactive push keeps
+	// the editor pop just like close; cascade push harvests as-is so a
+	// headless ship has no hidden interactive surface.
+	consent := walkConsent()
+	harvestMsg := fmt.Sprintf("harvest: capture follow-ups, lore, and twin observations for %s/%s\n\n", md.Project, md.ID) +
+		trailers.Block{
+			Run:      md.ID,
+			Project:  md.Project,
+			Workflow: md.Workflow,
+			Consent:  consent,
+		}.String()
 	err = repolock.With(root, repolock.Options{
 		Purpose: "push-harvest",
 		Run:     md.Project + "/" + md.ID,
@@ -817,9 +831,16 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 		// window can sit on the operator. See runClose.
 		Heartbeat: true,
 	}, func() error {
-		var ferr error
-		paths, ferr = enterTerminal(root, md, run.StatusMerged, skipTerminalEdit)
-		return ferr
+		paths, err := harvestTerminal(root, md, skipTerminalEdit)
+		if err != nil || len(paths) == 0 {
+			return err
+		}
+		// A run with nothing new to fan out — or an errFFRetryable
+		// retry re-harvesting already-checked entries — stages nothing.
+		if err := run.StageAndCommit(root, harvestMsg, paths...); err != nil && !errors.Is(err, run.ErrNothingToCommit) {
+			return err
+		}
+		return nil
 	})
 	if err != nil {
 		moePrintf(stderr, "push: harvest: %v\n", err)
@@ -828,13 +849,6 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 
 	moePrintf(stdout, "fast-forwarding %s to %s on %s...\n", pj.DefaultBranch, branch, pj.Remote)
 	if err := push.FastForwardToDefault(clonePath, branch, pj.DefaultBranch, stdout, stderr); err != nil {
-		// Roll back the status flip enterTerminal just wrote: the
-		// remote merge didn't happen, so the run shouldn't be
-		// "merged" on disk. Harvest commits and followups.md
-		// rewrites stay; harvest is idempotent on retry.
-		if rerr := revertTerminal(root, md, priorStatus); rerr != nil {
-			moePrintf(stderr, "warning: revert run.json after ff-push failure: %v\n", rerr)
-		}
 		moePrintf(stderr, "%v\n", err)
 		// Probe why the ff-push was rejected. If origin's default
 		// advanced past the branch, this is the mechanical race the
@@ -859,29 +873,10 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 		moePrintf(stderr, "warning: %v\n", err)
 	}
 
-	pushCanvasPath, err := writeMechanicalPushNote(root, md)
-	if err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1, nil
-	}
-	paths = append(paths, pushCanvasPath)
-	// After the ff-push, so a rejected merge leaves the root untouched.
-	// Riding paths means a failed record commit's pending marker carries
-	// the root stylesheet into resumeMergeRecord too.
-	sheetRel, err := applyProposedStylesheet(root, md)
-	if err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1, nil
-	}
-	if sheetRel != "" {
-		paths = append(paths, sheetRel)
-	}
-
 	// This merge path is the one `!!`/`!!!` cascades ship through, so
 	// the stamp doubles as the provenance claim the run page reads —
 	// unlike openPRPath there is no retry to disambiguate, so the plain
 	// rule stands.
-	consent := walkConsent()
 	msg := fmt.Sprintf("push: %s/%s merged\n\n", md.Project, md.ID) +
 		trailers.Block{
 			Run:          md.ID,
@@ -892,6 +887,8 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 			ChoreTouched: touched,
 			Consent:      consent,
 		}.String()
+	var paths []string
+	flipped := false
 	err = repolock.With(root, repolock.Options{
 		Purpose: "push-merge",
 		Run:     md.Project + "/" + md.ID,
@@ -900,8 +897,32 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 		// spans the network after the push moved to serve.
 		Heartbeat: true,
 	}, func() error {
+		// The flip goes first, ahead of the workspace release: the
+		// pending-marker resume below is gated on run.json reading
+		// merged, so a save that fails here must leave a run that a
+		// plain re-run pushes again, clone and all.
+		runJSON, err := markTerminal(root, md, run.StatusMerged)
+		if err != nil {
+			return err
+		}
+		flipped = true
+		paths = append(paths, runJSON)
 		if err := releaseRunWorkspace(root, md); err != nil {
 			moePrintf(stderr, "warning: release workspace: %v\n", err)
+		}
+		pushCanvasPath, err := writeMechanicalPushNote(root, md)
+		if err != nil {
+			return err
+		}
+		paths = append(paths, pushCanvasPath)
+		// Riding paths means a failed record commit's pending marker
+		// carries the root stylesheet into resumeMergeRecord too.
+		sheetRel, err := applyProposedStylesheet(root, md)
+		if err != nil {
+			return err
+		}
+		if sheetRel != "" {
+			paths = append(paths, sheetRel)
 		}
 		if err := run.StageAndCommit(root, msg, paths...); err != nil {
 			return err
@@ -915,6 +936,16 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 		}
 		return nil
 	})
+	if err != nil && !flipped {
+		// The window never opened or the flip never saved, so nothing was
+		// written: run.json still reads its pre-merge status and the
+		// sandbox is intact, so a re-run walks the push again and the
+		// already-landed ff-push is a no-op.
+		moePrintf(stderr, "push: record merge: %v\n", err)
+		moePrintf(stderr, "       the merge landed on origin/%s; re-run `moe %s push %s/%s` to record it\n",
+			pj.DefaultBranch, md.Workflow, md.Project, md.ID)
+		return 1, nil
+	}
 	if err != nil {
 		// The ff-push already landed, so the flip to merged is true and
 		// must not be rolled back — what's missing is only the local
@@ -930,7 +961,7 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 			// rather than build a second detection mechanism for it.
 			moePrintf(stderr, "warning: save %s: %v\n", mergeRecordPendingName, werr)
 			moePrintf(stderr, "       the merge landed on origin/%s; only the local record commit is missing, and\n"+
-				"       it could not be saved for retry — commit %s and lore/ by hand to clear the tree\n",
+				"       it could not be saved for retry — commit %s by hand to clear the tree\n",
 				pj.DefaultBranch, run.Dir(md.Project, md.ID))
 			return 1, nil
 		}
@@ -991,7 +1022,7 @@ func loadMergeRecordPending(root string, md *run.Metadata, stderr io.Writer) (*p
 	}
 	var p pendingMergeRecord
 	if err := json.Unmarshal(data, &p); err != nil || p.Msg == "" {
-		moePrintf(stderr, "warning: %s is unreadable — commit %s and lore/ by hand to clear the tree\n",
+		moePrintf(stderr, "warning: %s is unreadable — commit %s by hand to clear the tree\n",
 			filepath.Join(run.Dir(md.Project, md.ID), mergeRecordPendingName), run.Dir(md.Project, md.ID))
 		return nil, false
 	}
