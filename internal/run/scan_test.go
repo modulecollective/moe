@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // globScan is the implementation Scan replaced, kept as the reference
@@ -45,6 +46,12 @@ func writeRun(t *testing.T, root, project, id, status string) {
 		t.Fatal(err)
 	}
 	if err := Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+	// Old enough that the memo trusts its stat (see scanRacyWindow);
+	// a fresh file is re-read every pass, and the hit tests would fail.
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(filepath.Join(root, Dir(project, id), "run.json"), old, old); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -155,6 +162,32 @@ func TestScanSeesSavedChange(t *testing.T) {
 	}
 	if n := reads.Load(); n != 3 {
 		t.Fatalf("reads = %d, want 3 (two cold, one changed)", n)
+	}
+}
+
+// A same-length rewrite inside one mtime tick keeps mtime, size and
+// inode, so only the racy-timestamp rule catches it. Fresh files here
+// (no backdating): before the rule, a few hundred rounds went stale
+// 39% of the time on ext4 and 77% on tmpfs.
+func TestScanSeesSameLengthRewrite(t *testing.T) {
+	root := t.TempDir()
+	md := &Metadata{ID: "r", Project: "p", Workflow: "sdlc", Status: StatusMerged}
+	if err := os.MkdirAll(filepath.Join(root, Dir("p", "r")), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if len(StatusMerged) != len(StatusClosed) {
+		t.Fatal("fixture needs two statuses of one length")
+	}
+	for i := range 200 {
+		for _, status := range []string{StatusMerged, StatusClosed} {
+			md.Status = status
+			if err := Save(root, md); err != nil {
+				t.Fatal(err)
+			}
+			if got := mustScan(t, root)[0].Status; got != status {
+				t.Fatalf("round %d: Scan saw %q after saving %q", i, got, status)
+			}
+		}
 	}
 }
 

@@ -765,6 +765,9 @@ func Scan(root string) ([]*Metadata, error) {
 	defer scanMemo.Unlock()
 	prev := scanMemo.entries[root]
 	next := make(map[string]scanMemoEntry, len(prev))
+	// Taken before any stat, so a file this pass reads can't look older
+	// relative to it than it really is.
+	racyAfter := time.Now().Add(-scanRacyWindow)
 	var out []*Metadata
 	for _, p := range projects {
 		runsDir := filepath.Join(projectsDir, p.Name(), "runs")
@@ -785,12 +788,15 @@ func Scan(root string) ([]*Metadata, error) {
 				return nil, fmt.Errorf("run: stat %s: %w", path, err)
 			}
 			e, ok := prev[path]
-			if !ok || !e.modTime.Equal(fi.ModTime()) || e.size != fi.Size() {
+			if !ok || e.racy || !e.modTime.Equal(fi.ModTime()) || e.size != fi.Size() {
 				md, err := parseRunFile(path)
 				if err != nil {
 					return nil, err
 				}
-				e = scanMemoEntry{modTime: fi.ModTime(), size: fi.Size(), md: md}
+				e = scanMemoEntry{
+					modTime: fi.ModTime(), size: fi.Size(), md: md,
+					racy: fi.ModTime().After(racyAfter),
+				}
 			}
 			next[path] = e
 			out = append(out, e.md.clone())
@@ -816,9 +822,17 @@ func notDir(err error) bool {
 // untouched for weeks, so re-reading and re-parsing all of them was
 // ~40ms per pass of re-deriving an answer already in hand; a stat per
 // run is the cheapest check that still sees an uncommitted write, a
-// reopen or a checkout. A rewrite with the same byte length in the
-// same mtime tick would be missed; Save rewrites the whole file and
-// mtime is nanosecond-resolution, so that is accepted.
+// reopen or a checkout.
+//
+// The stat alone can't tell two writes apart inside one clock tick:
+// mtime holds nanoseconds, but the kernel stamps it from a clock that
+// advances once per timer tick (4ms on this box's ext4 and tmpfs), and
+// Save rewrites in place, so a same-length rewrite in the same tick
+// keeps mtime, size and inode. Hence git's racy-timestamp rule: an
+// entry read within scanRacyWindow of its mtime is re-read on every
+// pass until a pass sees it aged out; after that, any write lands far
+// enough past the recorded mtime to change it. The cost is re-reading
+// files written in the last second.
 //
 // Not keyed on HEAD like journalMemo: run.json is a working-tree file
 // Save writes before its commit, so HEAD would be blind until then.
@@ -838,7 +852,13 @@ type scanMemoEntry struct {
 	modTime time.Time
 	size    int64
 	md      *Metadata
+	racy    bool // read too soon after modTime for the stat to vouch for it
 }
+
+// scanRacyWindow is how long after its mtime a run.json must have been
+// read before the memo trusts its stat. Anything well past one clock
+// tick works; a second is git's margin.
+const scanRacyWindow = time.Second
 
 // readRunFile is the file read Scan's parse goes through. A var so
 // tests can count reads; nothing on disk tells a memo hit from a
