@@ -75,10 +75,11 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   current observations, not an event feed or a complete account of stage
   failures.
 
-  The UI board omits routine project `sweeping` service rows to leave room
-  for runs and service exceptions. Cooling, failed or quota-deferred
-  projects and host/origin errors remain visible when applicable. For
-  routine sweep status, use `moe dash` or the web `/serve` page.
+  The UI board carries no service rows. Cooling, failed or quota-deferred
+  projects and host/origin errors are logged once to the Console, with clock
+  times, when they appear or change; the banner's `N failing` count and push
+  item are the standing signal. For routine `sweeping` status and standing
+  detail, use `moe dash` or the web `/serve` page.
 
   `/` opens temporary board search from any pane. Type a case-insensitive
   literal substring of `project/run`; surrounding spaces are ignored. Search
