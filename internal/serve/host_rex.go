@@ -87,7 +87,6 @@ func (h *rexHost) spawn(id, moeBin string, args []string, root string, logger io
 	if cs.beforeLaunch != nil {
 		cs.beforeLaunch(id)
 	}
-	session := h.sessionID()
 	block, err := h.launch(id, argv)
 	if err != nil {
 		found, ferr := h.findLabel(id)
@@ -97,11 +96,7 @@ func (h *rexHost) spawn(id, moeBin string, args []string, root string, logger io
 		h.logf("rex: launch of %s reported %v, but block %s carries its label — taking it", id, err, found)
 		block = found
 	}
-	c := h.register(id, block, false, logger)
-	if h.sessionID() != session {
-		h.openUI()
-	}
-	return c, nil
+	return h.register(id, block, false, logger), nil
 }
 
 // register records a Rex-hosted child and starts its watcher. how is
@@ -182,7 +177,6 @@ func (s *Server) selectHost() {
 	}
 	h.permanentErr = err
 	h.children = s.children
-	h.moeBin = s.opts.MoeBin
 	if readErr == nil && strings.TrimSpace(string(body)) != "" {
 		h.session = strings.TrimSpace(string(body))
 	} else if recorded {
@@ -201,7 +195,6 @@ func (h *rexHost) reconcile() error {
 		if err := h.establish(); err != nil {
 			return err
 		}
-		h.openUI()
 	}
 	if h.ready {
 		return nil
@@ -235,82 +228,12 @@ func (h *rexHost) reconcile() error {
 		return fmt.Errorf("rex adoption pending: %w", err)
 	}
 	h.ready = true
-	h.openUI()
 	if h.candidate != "" {
 		return fmt.Errorf("rex session %s persistence pending", h.candidate)
 	}
 	return nil
 }
 func (h *rexHost) shutdown(context.Context, io.Writer) { h.cancel() }
-
-const rexUILabel = "ui"
-
-// openUI keeps a running editor across serve restarts: replacing it would
-// destroy drafts. Only a known exit, valid absence or proven executable
-// mismatch permits a new console.
-// Failures here never hold the heartbeat, and shutdown leaves the UI in Rex.
-func (h *rexHost) openUI() {
-	argv, err := rexJobArgv(h.moeBin, []string{"MOE_HOME=" + h.root}, []string{"ui"})
-	if err != nil {
-		h.logf("host: rex ui not opened: %v", err)
-		return
-	}
-	var current string
-	if session := h.sessionID(); session != "" {
-		bs, err := h.blocks(session)
-		if err != nil {
-			present, probeErr := h.sessionPresent(session)
-			if probeErr != nil || present {
-				h.logf("host: rex ui not opened: %v (session present: %t, check: %v)", err, present, probeErr)
-				return
-			}
-		}
-		for _, b := range bs {
-			if b.Label != rexUILabel {
-				continue
-			}
-			if current != "" {
-				h.logf("host: rex ui not opened: duplicate managed ui blocks; leaving editors alone")
-				return
-			}
-			current = b.ID
-		}
-	}
-	if current != "" {
-		proc, err := h.readProcess(current)
-		if err != nil {
-			h.logf("host: rex ui not opened: process state unknown for %s: %v", current, err)
-			return
-		}
-		if !proc.exited {
-			path, err := proc.otherExecutable(h.moeBin)
-			if err != nil {
-				h.logf("host: rex ui not opened: process state unknown for %s: %v", current, err)
-				return
-			}
-			if path == "" {
-				h.logf("host: rex ui retained in block %s", current)
-				return
-			}
-			h.logf("host: rex ui block %s runs %s, not moe; replacing", current, path)
-		}
-		if err := h.closeBlock(current); err != nil {
-			h.logf("host: rex ui not opened: close ui block: %v", err)
-			return
-		}
-	}
-	block, err := h.launch(rexUILabel, argv)
-	if err != nil {
-		found, readErr := h.findLabel(rexUILabel)
-		if readErr != nil || found == "" {
-			h.logf("host: rex ui not opened: launch unresolved: %v (readback: %v); leaving it alone", err, readErr)
-			return
-		}
-		h.logf("host: rex ui launch reported %v; label reconciled to %s", err, found)
-		block = found
-	}
-	h.logf("host: rex ui open in block %s", block)
-}
 
 // adopt picks up the jobs a previous serve launched. The session's
 // blocks labelled "heartbeat:<project>" are registered under that id and

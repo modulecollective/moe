@@ -52,13 +52,11 @@ func TestRexSessionPresent(t *testing.T) {
 
 func TestRexHeartbeatRecoversKilledSession(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		live     bool
-		dashFail bool
+		name string
+		live bool
 	}{
-		{"killed while live", true, false},
-		{"killed with retained failure", false, false},
-		{"dash failure preserves sweep", true, true},
+		{"killed while live", true},
+		{"killed with retained failure", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fake := newFakeRex(t)
@@ -129,13 +127,6 @@ func TestRexHeartbeatRecoversKilledSession(t *testing.T) {
 			fake.reply("new", `{"session_id":"session:NEW","initial_windows":[{"block_ids":["block:B2"]}]}`, 0)
 			fake.reply("block-ls@session:NEW", `{"blocks":[]}`, 0)
 			fake.reply("run@session:NEW", `{"block_ids":["block:B2"]}`, 0)
-			fake.reply("run@ui", `{"block_ids":["block:D"]}`, 0)
-			if tc.dashFail {
-				fake.reply("run@ui", "", 1)
-				// Even a failed dash launch must preserve the newly
-				// registered sweep, never create a second session.
-				fake.reply("ls", `{"sessions":[{"session_id":"session:NEW"}]}`, 0)
-			}
 			fake.reply("wait", `{"exit_code":1}`, 1)
 			s.heartbeatTick()
 			recovered, ok := s.children.get("heartbeat:alpha")
@@ -144,20 +135,11 @@ func TestRexHeartbeatRecoversKilledSession(t *testing.T) {
 			}
 			waitFor(t, "recovered sweep completion", func() bool { return len(gate.sweptList()) == 2 })
 			waitRexWorkers(t, testRex(s.children))
-			wantDash := "run --json --focus=false --keep-open -s session:NEW --label ui --cwd " + s.opts.Root +
-				" -- /usr/bin/env MOE_HOME=" + s.opts.Root + " " + moe + " ui"
-			if !slices.Contains(fake.calls(), wantDash) {
-				t.Fatalf("dash argv missing: %q; want %q", fake.calls(), wantDash)
-			}
-			if tc.dashFail && !strings.Contains(log.String(), "rex ui not opened") {
-				t.Fatalf("dash failure not logged: %q", log.String())
-			}
 			if body, err := os.ReadFile(rexSessionPath(s.opts.Root)); err != nil || string(body) != "session:NEW\n" {
 				t.Fatalf("replacement session file = %q, %v", body, err)
 			}
 
-			// Another ordinary sweep uses the replacement session
-			// without reopening or replacing the dash.
+			// Another ordinary sweep uses the replacement session.
 			waitFor(t, "second failure backoff", func() bool {
 				s.heartbeat.mu.Lock()
 				defer s.heartbeat.mu.Unlock()
@@ -168,17 +150,19 @@ func TestRexHeartbeatRecoversKilledSession(t *testing.T) {
 			s.heartbeatTick()
 			waitFor(t, "third sweep completion", func() bool { return len(gate.sweptList()) == 3 })
 			waitRexWorkers(t, testRex(s.children))
-			news, dashes := 0, 0
+			news := 0
 			for _, call := range fake.calls() {
 				if strings.HasPrefix(call, "new ") {
 					news++
 				}
-				if call == wantDash {
-					dashes++
+				// The session serve replaced is the sweep's; nothing else
+				// is launched into it.
+				if strings.HasPrefix(call, "run ") && !strings.Contains(call, " --label heartbeat:alpha ") {
+					t.Fatalf("rex launched %q beside the sweep", call)
 				}
 			}
-			if news != 1 || dashes != 1 || localArgv() != "" {
-				t.Fatalf("new = %d, dash = %d, local argv = %q; calls = %q", news, dashes, localArgv(), fake.calls())
+			if news != 1 || localArgv() != "" {
+				t.Fatalf("new = %d, local argv = %q; calls = %q", news, localArgv(), fake.calls())
 			}
 		})
 	}
@@ -271,7 +255,7 @@ func TestRexRecoveryCreationFailureIsBounded(t *testing.T) {
 	fake.reply("new", "", 1)
 	fake.reply("block-ls", "", 1)
 	cs := newChildren()
-	installTestRex(cs, newRexHost(fake.bin, t.TempDir(), io.Discard), "/bin/true")
+	installTestRex(cs, newRexHost(fake.bin, t.TempDir(), io.Discard))
 	t.Cleanup(func() { testRex(cs).cancel(); waitRexWorkers(t, testRex(cs)) })
 	testRex(cs).session = "session:S"
 	c, err := cs.spawn("heartbeat:alpha", "/bin/true", nil, testRex(cs).root, io.Discard)
@@ -343,7 +327,6 @@ func TestRexHeartbeatRetriesReplacementThroughAnotherProject(t *testing.T) {
 	fake.reply("ls", `{"sessions":[]}`, 0)
 	fake.reply("block-ls@session:NEW", `{"blocks":[]}`, 0)
 	fake.reply("run@session:NEW", `{"block_ids":["block:new"]}`, 0)
-	fake.reply("run@ui", `{"block_ids":["block:dash"]}`, 0)
 	fake.reply("wait", `{"exit_code":1}`, 1)
 	s.heartbeatTick()
 	waitRexWorkers(t, testRex(s.children))
@@ -358,17 +341,14 @@ func TestRexHeartbeatRetriesReplacementThroughAnotherProject(t *testing.T) {
 	if body, err := os.ReadFile(rexSessionPath(s.opts.Root)); err != nil || string(body) != "session:NEW\n" {
 		t.Fatalf("replacement session file = %q, %v", body, err)
 	}
-	news, dashes := 0, 0
+	news := 0
 	for _, call := range fake.calls() {
 		if strings.HasPrefix(call, "new ") {
 			news++
 		}
-		if strings.Contains(call, "--label ui ") {
-			dashes++
-		}
 	}
-	if news != 2 || dashes != 1 || localArgv() != "" {
-		t.Fatalf("new = %d, dash = %d, local argv = %q; calls = %q", news, dashes, localArgv(), fake.calls())
+	if news != 2 || localArgv() != "" {
+		t.Fatalf("new = %d, local argv = %q; calls = %q", news, localArgv(), fake.calls())
 	}
 }
 

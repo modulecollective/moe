@@ -57,7 +57,6 @@ var rexRetryDelay = 5 * time.Second
 // mutates readiness and candidates; observers read the published session under mu.
 type rexHost struct {
 	children         *children
-	moeBin           string
 	jobs             map[*child]string // resource handles, guarded by children.mu
 	ready            bool
 	discoveryPending bool
@@ -382,15 +381,13 @@ func (h *rexHost) waitExit(block string) (int, error) {
 }
 
 type rexProcess struct {
-	LastExit   json.RawMessage `json:"last_exit"`
-	Child      json.RawMessage `json:"child"`
-	Foreground json.RawMessage `json:"foreground"`
-	code       int
-	exited     bool
+	LastExit json.RawMessage `json:"last_exit"`
+	code     int
+	exited   bool
 }
 
 // readProcess validates exit state without interpreting optional identity:
-// the job waiter and known-exit UI recovery do not need that metadata.
+// the job waiter does not need that metadata.
 func (h *rexHost) readProcess(block string) (rexProcess, error) {
 	out, err := h.call(h.ctx, "block", "call", "-b", block, "process")
 	if err != nil {
@@ -417,49 +414,6 @@ func (h *rexHost) readProcess(block string) (rexProcess, error) {
 func (h *rexHost) lastExit(block string) (code int, exited bool, err error) {
 	proc, err := h.readProcess(block)
 	return proc.code, proc.exited, err
-}
-
-// otherExecutable returns the child path only when both child and foreground
-// prove this is not moe. A matching child suffices; a different child may be
-// a shell hosting moe. Missing or unresolvable identity is never permission
-// to discard a possibly live editor's drafts.
-func (p rexProcess) otherExecutable(moeBin string) (string, error) {
-	want, err := rexExecutable(moeBin)
-	if err != nil {
-		return "", err
-	}
-	var childPath string
-	for _, field := range []struct {
-		name string
-		raw  json.RawMessage
-	}{{"child", p.Child}, {"foreground", p.Foreground}} {
-		var identity struct {
-			Path string `json:"path"`
-		}
-		if err := json.Unmarshal(field.raw, &identity); err != nil || !filepath.IsAbs(identity.Path) {
-			return "", fmt.Errorf("rex process: invalid %s path", field.name)
-		}
-		if field.name == "child" {
-			childPath = identity.Path
-		}
-		// Preserve same-path old binaries across atomic upgrades, even if
-		// the file's inode changed or symlink resolution is unavailable.
-		if identity.Path == want {
-			return "", nil
-		}
-		resolvedWant, err := filepath.EvalSymlinks(want)
-		if err != nil {
-			return "", fmt.Errorf("resolve moe executable: %w", err)
-		}
-		resolvedPath, err := filepath.EvalSymlinks(identity.Path)
-		if err != nil {
-			return "", fmt.Errorf("resolve %s executable: %w", field.name, err)
-		}
-		if resolvedPath == resolvedWant {
-			return "", nil
-		}
-	}
-	return childPath, nil
 }
 
 // lookupBlock returns the block's current metadata, or a zero value once

@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -156,7 +155,7 @@ func rexServer(t *testing.T, fake *fakeRex, opts Options) *Server {
 	s := newTestServer(t, opts)
 	h := newRexHost(fake.bin, opts.Root, opts.Logger)
 	h.session = "session:S"
-	installTestRex(s.children, h, s.opts.MoeBin)
+	installTestRex(s.children, h)
 	return s
 }
 
@@ -243,6 +242,32 @@ func TestRexWaitWithoutPayloadReadsTheProcess(t *testing.T) {
 	}
 	if !fake.called("block call -b block:B1 process") {
 		t.Errorf("rex calls = %q, want a process read", fake.calls())
+	}
+}
+
+// TestRexLastExitIgnoresOptionalIdentity: the process record's child and
+// foreground fields are Rex's to add; the waiter reads last_exit alone.
+func TestRexLastExitIgnoresOptionalIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		process string
+		code    int
+		exited  bool
+	}{
+		{`{"last_exit":null}`, 0, false},
+		{`{"last_exit":null,"child":42,"foreground":[]}`, 0, false},
+		{`{"last_exit":{"exit_code":0},"child":{"path":42}}`, 0, true},
+		{`{"last_exit":{"exit_code":17},"child":[],"foreground":false}`, 17, true},
+	} {
+		t.Run(tc.process, func(t *testing.T) {
+			fake := newFakeRex(t)
+			fake.reply("block-call", tc.process, 0)
+			h := newRexHost(fake.bin, t.TempDir(), nil)
+			defer h.cancel()
+			code, exited, err := h.lastExit("block:JOB")
+			if err != nil || code != tc.code || exited != tc.exited {
+				t.Fatalf("lastExit = %d, %t, %v; want %d, %t, nil", code, exited, err, tc.code, tc.exited)
+			}
+		})
 	}
 }
 
@@ -531,8 +556,8 @@ func TestRexAdoptsAtStartup(t *testing.T) {
 }
 
 // TestRexStaleSessionStartsFresh: a session file naming a session Rex no
-// longer has is not an error; startup creates a new one around the
-// dash, rewrites the file, and the sweep runs in it.
+// longer has is not an error; the first sweep creates a new one,
+// rewrites the file, and runs in it.
 func TestRexStaleSessionStartsFresh(t *testing.T) {
 	fake := newFakeRex(t)
 	fake.reply("whoami", `{"instance_id":"i-1"}`, 0)
@@ -542,8 +567,7 @@ func TestRexStaleSessionStartsFresh(t *testing.T) {
 	fake.reply("run@session:GONE", "", 1)
 	fake.reply("block-ls@session:NEW", `{"blocks":[]}`, 0)
 	fake.reply("new", `{"session_id":"session:NEW","initial_windows":[{"block_ids":["block:BOOT"]}]}`, 0)
-	fake.reply("run@heartbeat:alpha", `{"block_ids":["block:B1"]}`, 0)
-	fake.reply("run", `{"block_ids":["block:B2"]}`, 0)
+	fake.reply("run@session:NEW", `{"block_ids":["block:B1"]}`, 0)
 	fake.reply("wait", `{"exit_code":0}`, 0)
 	useRexBin(t, fake.bin)
 	root := t.TempDir()
@@ -573,110 +597,69 @@ func rexStartupFake(t *testing.T) *fakeRex {
 	return fake
 }
 
-// TestRexStartupOpensTheDash: startup establishes the session with a harmless
-// bootstrap, then starts `moe ui` with its label at creation.
-// The env prefix carries MOE_HOME and not MOE_SERVE_AGENT — the dash is the
-// operator's eye, and that variable shuts the status gate it reports
-// to Rex through.
-func TestRexStartupOpensTheDash(t *testing.T) {
+// TestRexStartupCreatesNoSession: serve places no UI in Rex, so a host
+// with no recorded session makes none at startup — no `new`, no `run`.
+// The first sweep creates the session and is the only thing launched
+// into it.
+func TestRexStartupCreatesNoSession(t *testing.T) {
 	fake := rexStartupFake(t)
 	fake.reply("new", `{"session_id":"session:NEW","initial_windows":[{"block_ids":["block:BOOT"]}]}`, 0)
-	fake.reply("run@ui", `{"block_ids":["block:D"]}`, 0)
+	fake.reply("run@heartbeat:alpha", `{"block_ids":["block:B1"]}`, 0)
+	fake.reply("wait", `{"exit_code":0}`, 0)
 	moe, _ := argvRecorder(t, 0)
 	root := t.TempDir()
-	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: moe})
+	gate := &fakeHeartbeat{due: []string{"alpha"}}
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: moe, Heartbeat: gate})
 	s.selectHost()
 
-	want := "run --json --focus=false --keep-open -s session:NEW --label ui --cwd " + root + " -- /usr/bin/env MOE_HOME=" + root + " " + moe + " ui"
-	if !slices.Contains(fake.calls(), want) {
-		t.Errorf("rex calls = %q, want %q", fake.calls(), want)
+	h := testRex(s.children)
+	if h == nil || !h.ready || testPermanentError(s) != nil || testAdoptionError(s) != nil {
+		t.Fatalf("rex = %v, hostErr = %v, adoption = %v; want a ready rex host", h, testPermanentError(s), testAdoptionError(s))
 	}
-	if !fake.called("block close block:BOOT") {
-		t.Errorf("rex calls = %q, want bootstrap closed before the labelled dash", fake.calls())
+	if fake.called("new") || fake.called("run") || h.sessionID() != "" {
+		t.Fatalf("startup created a session or launched a block: %q", fake.calls())
 	}
-	if body, _ := os.ReadFile(rexSessionPath(root)); strings.TrimSpace(string(body)) != "session:NEW" {
-		t.Errorf(".moe/rex-session = %q, want session:NEW", body)
+	if _, err := os.Stat(rexSessionPath(root)); !os.IsNotExist(err) {
+		t.Fatalf(".moe/rex-session: %v, want none before the first sweep", err)
 	}
-	if _, ok := s.children.get(rexUILabel); ok {
-		t.Error("the dash was registered as a child; it is no job of the heartbeat's")
+
+	s.heartbeatTick()
+	waitFor(t, "the sweep to be recorded", func() bool { return len(gate.sweptList()) == 1 })
+	if !fake.called("new moe ") || !fake.called("run --json --focus=false --keep-open -s session:NEW --label heartbeat:alpha ") {
+		t.Errorf("rex calls = %q, want the sweep to create the session and run in it", fake.calls())
+	}
+	for _, call := range fake.calls() {
+		if strings.HasPrefix(call, "run ") && !strings.Contains(call, " --label heartbeat:alpha ") {
+			t.Errorf("rex launched %q beside the sweep", call)
+		}
 	}
 }
 
-// TestRexStartupOpensUIBesideOtherBlocks: with no ui block in the session,
-// startup launches one after adoption, and leaves every other block — the
-// adopted heartbeat, a pane labelled "dash" — as it is.
-func TestRexStartupOpensUIBesideOtherBlocks(t *testing.T) {
+// TestRexStartupLeavesLeftoverUIBlock: a `ui` block an older serve opened
+// may still hold drafts. Startup adopts the heartbeat beside it and
+// neither closes, adopts nor relaunches it — it is an operator block now.
+func TestRexStartupLeavesLeftoverUIBlock(t *testing.T) {
 	fake := rexStartupFake(t)
 	fake.reply("block-ls", `{"blocks":[`+
-		`{"block_id":"block:A","label":"heartbeat:alpha"},`+
-		`{"block_id":"block:OLD","label":"dash"}]}`, 0)
-	fake.reply("run", `{"block_ids":["block:D"]}`, 0)
+		`{"block_id":"block:UI","label":"ui"},`+
+		`{"block_id":"block:A","label":"heartbeat:alpha"}]}`, 0)
 	fake.hold("wait")
 	t.Cleanup(func() { fake.release("wait") })
 	root := t.TempDir()
 	_ = os.MkdirAll(filepath.Join(root, ".moe"), 0o755)
 	_ = os.WriteFile(rexSessionPath(root), []byte("session:S\n"), 0o644)
-	moe, _ := argvRecorder(t, 0)
-	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: moe})
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: "/bin/true"})
 	s.selectHost()
 
 	if _, ok := s.children.get(heartbeatChildPrefix + "alpha"); !ok {
 		t.Error("the heartbeat block was not adopted")
 	}
-	calls := fake.calls()
-	if !slices.Contains(calls, "run --json --focus=false --keep-open -s session:S --label ui --cwd "+root+
-		" -- /usr/bin/env MOE_HOME="+root+" "+moe+" ui") {
-		t.Errorf("rex calls = %q, want a ui launched", calls)
+	if _, ok := s.children.get("ui"); ok {
+		t.Error("the leftover ui block was adopted as a child")
 	}
-	if fake.called("block close") {
-		t.Errorf("rex calls = %q, want the heartbeat and dash blocks left alone", calls)
+	if fake.called("block close") || fake.called("run") || fake.called("new") {
+		t.Errorf("rex calls = %q, want the ui block left alone and nothing launched", fake.calls())
 	}
-}
-
-// TestRexDashFailureHoldsNothing: a dash that won't open is a log line.
-// The heartbeat dispatches on the next tick, creating the session the
-// dash couldn't — and an exited ui that won't close launches no second one.
-func TestRexDashFailureHoldsNothing(t *testing.T) {
-	t.Run("launch fails", func(t *testing.T) {
-		fake := rexStartupFake(t)
-		fake.reply("new", "", 1)
-		fake.reply("wait", `{"exit_code":0}`, 0)
-		var log syncBuf
-		moe, _ := argvRecorder(t, 0)
-		gate := &fakeHeartbeat{due: []string{"alpha"}}
-		s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: moe, Heartbeat: gate, Logger: &log})
-		s.selectHost()
-		if !strings.Contains(log.String(), "rex ui not opened") || testPermanentError(s) != nil {
-			t.Fatalf("log = %q, hostErr = %v; want the failure logged and the host usable", log.String(), testPermanentError(s))
-		}
-
-		fake.reply("new", `{"session_id":"session:NEW","initial_windows":[{"block_ids":["block:BOOT"]}]}`, 0)
-		fake.reply("run@heartbeat:alpha", `{"block_ids":["block:B1"]}`, 0)
-		s.heartbeatTick()
-		waitFor(t, "the sweep to be recorded", func() bool { return len(gate.sweptList()) == 1 })
-		if !fake.called("run --json --focus=false --keep-open -s session:NEW --label heartbeat:alpha ") {
-			t.Errorf("rex calls = %q, want the sweep to have created the session", fake.calls())
-		}
-	})
-	t.Run("close fails", func(t *testing.T) {
-		fake := rexStartupFake(t)
-		fake.reply("block-ls", `{"blocks":[{"block_id":"block:OLD","label":"ui"}]}`, 0)
-		fake.reply("block-call", `{"last_exit":{"exit_code":0}}`, 0)
-		fake.reply("block-close", "", 1)
-		var log syncBuf
-		root := t.TempDir()
-		_ = os.MkdirAll(filepath.Join(root, ".moe"), 0o755)
-		_ = os.WriteFile(rexSessionPath(root), []byte("session:S\n"), 0o644)
-		moe, _ := argvRecorder(t, 0)
-		s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, MoeBin: moe, Logger: &log})
-		s.selectHost()
-		if fake.called("run") {
-			t.Errorf("rex calls = %q, want no second dash beside the one that wouldn't close", fake.calls())
-		}
-		if !strings.Contains(log.String(), "rex ui not opened") {
-			t.Errorf("log = %q, want the failure logged", log.String())
-		}
-	})
 }
 
 // TestShutdownLeavesRexChildrenAlone: the four-phase wind-down is for
@@ -691,7 +674,7 @@ func TestShutdownLeavesRexChildrenAlone(t *testing.T) {
 		t.Fatal(err)
 	}
 	cs := newChildren()
-	installTestRex(cs, newRexHost(fake.bin, t.TempDir(), io.Discard), "/bin/true")
+	installTestRex(cs, newRexHost(fake.bin, t.TempDir(), io.Discard))
 	t.Cleanup(func() { testRex(cs).cancel(); waitRexWorkers(t, testRex(cs)) })
 	testRex(cs).session = "session:S"
 	testRex(cs).register("heartbeat:alpha", "block:A", true, io.Discard)
@@ -716,9 +699,8 @@ func TestShutdownLeavesRexChildrenAlone(t *testing.T) {
 }
 
 func testRex(cs *children) *rexHost { h, _ := cs.host.(*rexHost); return h }
-func installTestRex(cs *children, h *rexHost, moeBin string) {
+func installTestRex(cs *children, h *rexHost) {
 	h.children = cs
-	h.moeBin = moeBin
 	h.ready = true
 	cs.host = h
 }

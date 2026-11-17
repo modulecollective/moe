@@ -129,7 +129,6 @@ func TestRexStartupWaitsForReconciliation(t *testing.T) {
 			// gamma, and blocks that must not become heartbeat children.
 			fake.reply("block-ls", `{"blocks":[{"block_id":"block:A","label":"heartbeat:alpha"},{"block_id":"block:EXIT","label":"heartbeat:gamma"},{"block_id":"block:D","label":"dash"},{"block_id":"block:X","label":"shell"}]}`, 0)
 			fake.reply("wait@block:EXIT", `{"exit_code":1}`, 1)
-			fake.reply("run@ui", `{"block_ids":["block:D2"]}`, 0)
 			fake.reply("run@heartbeat:beta", `{"block_ids":["block:B"]}`, 0)
 			s.heartbeatTick()
 			a, ok := s.children.get("heartbeat:alpha")
@@ -168,20 +167,16 @@ func TestRexStartupWaitsForReconciliation(t *testing.T) {
 			before := len(fake.calls())
 			s.heartbeatTick()
 			if current, _ := s.children.get("heartbeat:alpha"); current != a || len(fake.calls()) != before {
-				t.Fatalf("later tick repeated adoption or dash: %q", fake.calls()[before:])
+				t.Fatalf("later tick repeated adoption: %q", fake.calls()[before:])
 			}
-			calls := fake.calls()
-			dashAt, betaAt, dashCount := -1, -1, 0
-			for i, call := range calls {
-				if strings.Contains(call, "--label ui ") {
-					dashAt, dashCount = i, dashCount+1
-				}
-				if strings.Contains(call, "--label heartbeat:beta ") {
-					betaAt = i
+			runs := 0
+			for _, call := range fake.calls() {
+				if strings.HasPrefix(call, "run ") {
+					runs++
 				}
 			}
-			if fake.called("block close block:D") || dashAt < 0 || betaAt <= dashAt || dashCount != 1 {
-				t.Fatalf("want one ui launch before beta, the dash block left alone: %q", calls)
+			if fake.called("block close block:D") || runs != 1 {
+				t.Fatalf("want beta the only launch, the dash block left alone: %q", fake.calls())
 			}
 			fake.release("wait")
 			waitRexWorkers(t, testRex(s.children))
@@ -228,44 +223,32 @@ func TestRexStartupRejectsPartialAdoption(t *testing.T) {
 }
 
 func TestRexStartupRecoversOnIdleTick(t *testing.T) {
-	for _, dashFails := range []bool{false, true} {
-		name := "dash opens"
-		if dashFails {
-			name = "dash fails"
-		}
-		t.Run(name, func(t *testing.T) {
-			fake := rexStartupFake(t)
-			fake.reply("block-ls", "", 1)
-			fake.reply("ls", `{"sessions":[{"session_id":"session:OLD"}]}`, 0)
-			fake.reply("wait", `{"exit_code":1}`, 1)
-			root := t.TempDir()
-			seedStartupRexSession(t, root)
-			gate := &fakeHeartbeat{quiet: []string{"alpha"}}
-			s := newTestServer(t, Options{Root: root, MoeBin: "/bin/true", Heartbeat: gate})
-			s.selectHost()
-			fake.reply("block-ls", `{"blocks":[]}`, 0)
-			fake.reply("run@ui", `{"block_ids":["block:D"]}`, 0)
-			if dashFails {
-				fake.reply("run@ui", "", 1)
-			}
-			s.heartbeatTick()
-			if testAdoptionError(s) != nil || !fake.called("run --json --focus=false --keep-open -s session:OLD --label ui ") || fake.called("new ") || len(s.children.all) != 0 {
-				t.Fatalf("idle recovery failed: error %v, calls %q", testAdoptionError(s), fake.calls())
-			}
-			before := len(fake.calls())
-			s.heartbeatTick()
-			if len(fake.calls()) != before {
-				t.Fatalf("idle tick repeated adoption/dash: %q", fake.calls()[before:])
-			}
-			gate.due, gate.quiet = []string{"alpha"}, nil
-			fake.reply("run@heartbeat:alpha", `{"block_ids":["block:A"]}`, 0)
-			s.heartbeatTick()
-			waitRexWorkers(t, testRex(s.children))
-			waitFor(t, "eligible sweep after dash attempt", func() bool { return len(gate.sweptList()) == 1 })
-			if testRex(s.children).sessionID() != "session:OLD" || fake.called("new ") {
-				t.Fatalf("empty block array replaced the session: %q", fake.calls())
-			}
-		})
+	fake := rexStartupFake(t)
+	fake.reply("block-ls", "", 1)
+	fake.reply("ls", `{"sessions":[{"session_id":"session:OLD"}]}`, 0)
+	fake.reply("wait", `{"exit_code":1}`, 1)
+	root := t.TempDir()
+	seedStartupRexSession(t, root)
+	gate := &fakeHeartbeat{quiet: []string{"alpha"}}
+	s := newTestServer(t, Options{Root: root, MoeBin: "/bin/true", Heartbeat: gate})
+	s.selectHost()
+	fake.reply("block-ls", `{"blocks":[]}`, 0)
+	s.heartbeatTick()
+	if testAdoptionError(s) != nil || !testRex(s.children).ready || fake.called("run ") || fake.called("new ") || len(s.children.all) != 0 {
+		t.Fatalf("idle recovery failed: error %v, calls %q", testAdoptionError(s), fake.calls())
+	}
+	before := len(fake.calls())
+	s.heartbeatTick()
+	if len(fake.calls()) != before {
+		t.Fatalf("idle tick repeated adoption: %q", fake.calls()[before:])
+	}
+	gate.due, gate.quiet = []string{"alpha"}, nil
+	fake.reply("run@heartbeat:alpha", `{"block_ids":["block:A"]}`, 0)
+	s.heartbeatTick()
+	waitRexWorkers(t, testRex(s.children))
+	waitFor(t, "eligible sweep after idle recovery", func() bool { return len(gate.sweptList()) == 1 })
+	if testRex(s.children).sessionID() != "session:OLD" || fake.called("new ") {
+		t.Fatalf("empty block array replaced the session: %q", fake.calls())
 	}
 }
 
@@ -283,12 +266,6 @@ func TestRexStartupMissingSessionRetainsIdentityOnFailedReplacement(t *testing.T
 			gate := &fakeHeartbeat{due: []string{"alpha"}}
 			s := newTestServer(t, Options{Root: root, MoeBin: "/bin/true", Heartbeat: gate})
 			s.selectHost()
-			if testAdoptionError(s) != nil || testRex(s.children).sessionID() != "session:OLD" || len(s.children.all) != 0 {
-				t.Fatalf("failed startup replacement lost identity: adoption %v, ID %q", testAdoptionError(s), testRex(s.children).sessionID())
-			}
-			if body, _ := os.ReadFile(rexSessionPath(root)); string(body) != "session:OLD\n" {
-				t.Fatalf("failed startup replacement changed persisted ID: %q", body)
-			}
 			newCalls := func() int {
 				n := 0
 				for _, call := range fake.calls() {
@@ -298,11 +275,23 @@ func TestRexStartupMissingSessionRetainsIdentityOnFailedReplacement(t *testing.T
 				}
 				return n
 			}
+			// Startup adopts nothing from the missing session and
+			// launches nothing; replacement waits for a sweep.
+			if testAdoptionError(s) != nil || newCalls() != 0 || fake.called("run ") {
+				t.Fatalf("startup adoption %v or replaced the session: %q", testAdoptionError(s), fake.calls())
+			}
+			s.heartbeatTick()
+			if testRex(s.children).sessionID() != "session:OLD" || len(s.children.all) != 0 {
+				t.Fatalf("failed replacement lost identity: ID %q", testRex(s.children).sessionID())
+			}
+			if body, _ := os.ReadFile(rexSessionPath(root)); string(body) != "session:OLD\n" {
+				t.Fatalf("failed replacement changed persisted ID: %q", body)
+			}
 			if newCalls() != 1 {
-				t.Fatalf("startup must make one replacement attempt: %q", fake.calls())
+				t.Fatalf("the sweep must make one replacement attempt: %q", fake.calls())
 			}
 
-			// Absence was true at startup; it is not cached permission
+			// Absence was true on that tick; it is not cached permission
 			// to create another session while the next probe is unavailable.
 			fake.reply("ls", "", 1)
 			s.heartbeatTick()
@@ -313,7 +302,6 @@ func TestRexStartupMissingSessionRetainsIdentityOnFailedReplacement(t *testing.T
 			fake.reply("new", `{"session_id":"session:NEW","initial_windows":[{"block_ids":["block:A"]}]}`, 0)
 			fake.reply("block-ls@session:NEW", `{"blocks":[]}`, 0)
 			fake.reply("run@session:NEW", `{"block_ids":["block:A"]}`, 0)
-			fake.reply("run@ui", `{"block_ids":["block:D"]}`, 0)
 			s.heartbeatTick()
 			waitRexWorkers(t, testRex(s.children))
 			waitFor(t, "replacement sweep backoff", func() bool {
@@ -327,8 +315,8 @@ func TestRexStartupMissingSessionRetainsIdentityOnFailedReplacement(t *testing.T
 			if body, _ := os.ReadFile(rexSessionPath(root)); string(body) != "session:NEW\n" {
 				t.Fatalf("successful replacement not persisted: %q", body)
 			}
-			if !fake.called("run --json --focus=false --keep-open -s session:NEW --label heartbeat:alpha ") || !fake.called("run --json --focus=false --keep-open -s session:NEW --label ui ") {
-				t.Fatalf("sweep/dash missing from replacement: %q", fake.calls())
+			if !fake.called("run --json --focus=false --keep-open -s session:NEW --label heartbeat:alpha ") {
+				t.Fatalf("sweep missing from replacement: %q", fake.calls())
 			}
 			s.heartbeat.record("alpha", false)
 			fake.reply("run@session:NEW", `{"block_ids":["block:B"]}`, 0)
@@ -337,34 +325,6 @@ func TestRexStartupMissingSessionRetainsIdentityOnFailedReplacement(t *testing.T
 			waitFor(t, "second sweep", func() bool { return len(gate.sweptList()) == 2 })
 			if newCalls() != 2 || !fake.called("run --json --focus=false --keep-open -s session:NEW --label heartbeat:alpha ") {
 				t.Fatalf("next sweep did not reuse replacement: %q", fake.calls())
-			}
-		})
-	}
-}
-
-func TestRexStartupAbsenceIsNotCachedForDash(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		ls     string
-		status int
-	}{
-		{"unavailable", "", 1},
-		{"invalid", `{}`, 0},
-		{"present", `{"sessions":[{"session_id":"session:S"}]}`, 0},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			fake := newFakeRex(t)
-			fake.reply("block-ls", "", 1)
-			fake.reply("ls", `{"sessions":[]}`, 0)
-			s := rexServer(t, fake, Options{Root: t.TempDir(), MoeBin: "/bin/true"})
-			h := testRex(s.children)
-			if err := h.adopt(); err != nil {
-				t.Fatalf("confirmed absence should complete adoption: %v", err)
-			}
-			fake.reply("ls", tc.ls, tc.status)
-			h.openUI()
-			if h.sessionID() != "session:S" || fake.called("run ") || fake.called("new ") || fake.called("block close ") {
-				t.Fatalf("dash reused obsolete absence evidence: %q", fake.calls())
 			}
 		})
 	}
