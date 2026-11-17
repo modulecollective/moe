@@ -174,7 +174,6 @@ func TestRexIdentityReadFailuresHoldAndRecover(t *testing.T) {
 			seedStartupRexSession(t, root)
 			fake.reply("block-ls", `{"blocks":[{"block_id":"block:A","label":"heartbeat:alpha"}]}`, 0)
 			fake.hold("wait")
-			fake.reply("run@dash", `{"block_ids":["block:D"]}`, 0)
 			s.heartbeatTick()
 			if _, ok := s.children.get("heartbeat:alpha"); !ok || s.activity.snapshot(time.Now()).HostError != "" {
 				t.Fatal("idle recovery did not adopt and clear hold")
@@ -274,7 +273,6 @@ func TestRexRecordedIdentityRetriesMissingDiscovery(t *testing.T) {
 			useRexBin(t, fake.bin)
 			fake.reply("whoami", `{"instance_id":"i-1"}`, 0)
 			fake.reply("block-ls", `{"blocks":[{"block_id":"block:A","label":"heartbeat:alpha"}]}`, 0)
-			fake.reply("run@dash", `{"block_ids":["block:D"]}`, 0)
 			fake.hold("wait")
 			s.heartbeatTick()
 			if _, ok := s.children.get("heartbeat:alpha"); !ok || s.activity.snapshot(time.Now()).HostError != "" {
