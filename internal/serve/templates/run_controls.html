@@ -3,6 +3,6 @@
     <input type="hidden" name="action" value="{{.}}">
     <input type="hidden" name="id" value="{{$.ControlID}}">
     <input type="hidden" name="revision" value="{{$.Control.Revision}}">
-    <button class="action" type="submit">{{.}}</button>
+    <button class="action" type="submit" title="{{tip .}}">{{.}}</button>
   </form>{{end}}
 {{end}}</div>

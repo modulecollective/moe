@@ -24,10 +24,10 @@
     <section class="actions">
       {{range $.Modes}}
       {{if eq . $.Mode}}
-      <span class="action disabled" aria-disabled="true">{{.}}</span>
+      <span class="action disabled" title="{{tip .}}" aria-disabled="true">{{.}}</span>
       {{else}}
       <form method="post" action="/projects/{{$.Project}}/mode" class="action-form">
-        <input type="hidden" name="mode" value="{{.}}"><button class="action" type="submit">{{.}}</button>
+        <input type="hidden" name="mode" value="{{.}}"><button class="action" type="submit" title="{{tip .}}">{{.}}</button>
       </form>
       {{end}}
       {{end}}
@@ -42,10 +42,10 @@
     <section class="actions">
       {{range $.Ships}}
       {{if eq . $.Ship}}
-      <span class="action disabled" aria-disabled="true">{{.}}</span>
+      <span class="action disabled" title="{{tip .}}" aria-disabled="true">{{.}}</span>
       {{else}}
       <form method="post" action="/projects/{{$.Project}}/ship" class="action-form">
-        <input type="hidden" name="ship" value="{{.}}"><button class="action" type="submit">{{.}}</button>
+        <input type="hidden" name="ship" value="{{.}}"><button class="action" type="submit" title="{{tip .}}">{{.}}</button>
       </form>
       {{end}}
       {{end}}

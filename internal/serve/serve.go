@@ -321,7 +321,7 @@ func New(opts Options) (*Server, error) {
 
 	addr := resolveAddr(opts.Addr, opts.Port)
 
-	tmpl, err := template.ParseFS(assets, "templates/*.html")
+	tmpl, err := template.New("").Funcs(template.FuncMap{"tip": tip}).ParseFS(assets, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("serve: parse templates: %w", err)
 	}

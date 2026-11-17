@@ -26,7 +26,7 @@ func TestRunControlLayout(t *testing.T) {
 				vm.Provenance = []ProvHop{{Verb: "opened by operator"}}
 			}
 			if ordinary {
-				vm.Actions = []runAction{{Label: "Close Run", Href: "/close", Method: "POST"}}
+				vm.Actions = []runAction{{Label: "Close Run", Href: "/close", Method: "POST", Title: closeRunTip}}
 			}
 			var out bytes.Buffer
 			if err := s.tmpl.ExecuteTemplate(&out, "run_fragment.html", vm); err != nil {
@@ -50,6 +50,8 @@ func TestRunControlLayout(t *testing.T) {
 			if strings.Count(actions, `class="action-form"`) != 5+len(vm.Actions) || strings.Count(actions, `class="action"`) != 5+len(vm.Actions) || strings.Count(actions, `name="revision" value="7"`) != 5 || strings.Count(actions, `name="id" value="request-id"`) != 5 {
 				t.Fatal("controls lost shared action styling or hidden fields")
 			}
+			// Every control word the CLI offers renders its hover help.
+			assertTitled(t, actions, "Hold this run.", "The same hold as pause", "Ask the current owner", "Ship this run.", "Release the hold.")
 			if strings.Contains(body[strings.Index(body, `id="run-status"`):], "<form") || strings.Contains(actions, "owner:") {
 				t.Fatal("diagnostics and controls are mixed")
 			}

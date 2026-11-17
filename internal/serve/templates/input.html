@@ -26,7 +26,7 @@
         <form method="post" action="/run/{{.Project}}/{{.Slug}}/input" class="input-reply">
           <input type="hidden" name="ping" value="{{.PingID}}">
           <textarea name="text" rows="3" placeholder="your answer, in prose" required></textarea>
-          <button class="action" type="submit">answer</button>
+          <button class="action" type="submit" title="{{tip "answer"}}">answer</button>
         </form>
       </li>
       {{end}}

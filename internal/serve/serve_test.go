@@ -1124,6 +1124,7 @@ func TestIdeaPageRendersActionsForInProgressIdea(t *testing.T) {
 		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
+	assertTitled(t, body, "Edit the text.", "License the machine to start this idea as a sdlc run", "License one design turn", "Close this capture")
 	for _, want := range []string{
 		`<section class="actions">`,
 		`href="/run/alpha/my-idea/edit"`,
@@ -1344,6 +1345,7 @@ func TestRunPageRendersTheAdvanceMark(t *testing.T) {
 		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
+	assertTitled(t, body, "Approve the code canvas.", "Close without shipping")
 	for _, want := range []string{
 		`action="/run/alpha/fix-it/advance"`,
 		`>advance past code</button>`,

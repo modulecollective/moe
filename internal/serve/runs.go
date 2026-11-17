@@ -216,6 +216,7 @@ type runAction struct {
 	Label  string
 	Href   string
 	Method string
+	Title  string // hover help: what a press does (help.go)
 }
 
 // canvasLink is one stage's canvas on the per-run page: a disclosure
@@ -718,17 +719,17 @@ func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Me
 			// consent. Tag chips stay idea-only — ideas are the only
 			// capture that promotes, and promotion is now the sweep's
 			// move, not a button's.
-			out := []runAction{{Label: "edit " + md.Workflow, Href: base + "/edit"}}
+			out := []runAction{{Label: "edit " + md.Workflow, Href: base + "/edit", Title: editTip}}
 			if md.Workflow == dash.IdeaWorkflow {
 				out = append(out, ideaTagActions(base, md, s.opts.TagWorkflows)...)
 			}
-			return append(out, runAction{Label: "close " + md.Workflow, Href: base + "/close", Method: "POST"})
+			return append(out, runAction{Label: "close " + md.Workflow, Href: base + "/close", Method: "POST", Title: closeCaptureTip})
 		case run.StatusClosed:
 			// Reopen stays idea-only: the intent verb set has no reopen
 			// (cli/intent.go), and the web must not exceed the CLI's.
 			if md.Workflow == dash.IdeaWorkflow {
 				return []runAction{
-					{Label: "reopen idea", Href: base + "/reopen", Method: "POST"},
+					{Label: "reopen idea", Href: base + "/reopen", Method: "POST", Title: reopenIdeaTip},
 				}
 			}
 		}
@@ -756,10 +757,10 @@ func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Me
 	// stage.
 	if markable && s.stageWorked(projectID, slug, nextStage) &&
 		s.stageGateOK(projectID, slug, nextStage, md) {
-		out = append(out, runAction{Label: "advance past " + nextStage, Href: base + "/advance", Method: "POST"})
+		out = append(out, runAction{Label: "advance past " + nextStage, Href: base + "/advance", Method: "POST", Title: advanceTip(nextStage)})
 	}
 	if ui.Close && !ui.Perpetual {
-		out = append(out, runAction{Label: "close run", Href: base + "/close", Method: "POST"})
+		out = append(out, runAction{Label: "close run", Href: base + "/close", Method: "POST", Title: closeRunTip})
 	}
 	return out
 }
@@ -808,6 +809,7 @@ func ideaTagActions(base string, md *run.Metadata, workflows []string) []runActi
 				Label:  "tag " + wf,
 				Href:   base + "/tag?workflow=" + url.QueryEscape(wf),
 				Method: "POST",
+				Title:  tagTip(wf),
 			})
 		}
 		if !current || !md.DesignOnly {
@@ -815,11 +817,12 @@ func ideaTagActions(base string, md *run.Metadata, workflows []string) []runActi
 				Label:  "tag " + wf + ", design only",
 				Href:   base + "/tag?workflow=" + url.QueryEscape(wf) + "&design_only=1",
 				Method: "POST",
+				Title:  tagDesignOnlyTip,
 			})
 		}
 	}
 	if md.PromoteTo != "" {
-		out = append(out, runAction{Label: "untag", Href: base + "/untag", Method: "POST"})
+		out = append(out, runAction{Label: "untag", Href: base + "/untag", Method: "POST", Title: untagTip})
 	}
 	return out
 }
