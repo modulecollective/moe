@@ -228,9 +228,6 @@ func (h *rexHost) reconcile() error {
 		return fmt.Errorf("rex adoption pending: %w", err)
 	}
 	h.ready = true
-	if h.candidate != "" {
-		return fmt.Errorf("rex session %s persistence pending", h.candidate)
-	}
 	return nil
 }
 func (h *rexHost) shutdown(context.Context, io.Writer) { h.cancel() }
