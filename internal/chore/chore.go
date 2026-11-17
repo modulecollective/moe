@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/modulecollective/moe/internal/git"
@@ -268,16 +269,71 @@ func ParseDuration(s string) (time.Duration, error) {
 	return time.ParseDuration(s)
 }
 
+// lastDefinitionEdit returns the commit time of the newest commit
+// touching rel, memoized on HEAD (see editMemo).
 func lastDefinitionEdit(root, rel string) time.Time {
+	head, err := git.HEAD(root)
+	if err != nil {
+		// No readable HEAD — nothing to key on. Fall through to the
+		// walk, which fails to the zero time as it always has.
+		t, _ := walkDefinitionEdit(root, rel)
+		return t
+	}
+	editMemo.Lock()
+	defer editMemo.Unlock()
+	e, ok := editMemo.entries[root]
+	if ok && e.head == head {
+		if t, ok := e.edits[rel]; ok {
+			return t
+		}
+	} else {
+		if editMemo.entries == nil {
+			editMemo.entries = make(map[string]*editMemoEntry, 1)
+		}
+		e = &editMemoEntry{head: head, edits: map[string]time.Time{}}
+		editMemo.entries[root] = e
+	}
+	t, err := walkDefinitionEdit(root, rel)
+	if err == nil {
+		e.edits[rel] = t
+	}
+	return t
+}
+
+// editMemo caches definition-edit times per bureaucracy root. `git log
+// -1 -- <path>` is a pure function of the commit graph reachable from
+// HEAD, so while HEAD holds still the cached answer is exact; a new
+// commit drops the root's whole map and each path re-walks once. The
+// walk is a path-limited trip back through the whole journal (~100ms
+// per chore on a long one) and LoadAll runs it per definition on every
+// `moe ui` discovery pass, so this memo is what keeps an idle board
+// cheap. Same shape as run's journalMemo: HEAD lives in the value so a
+// new commit replaces the entry, and the lock is held across the walk
+// so concurrent misses cost one walk.
+var editMemo struct {
+	sync.Mutex
+	entries map[string]*editMemoEntry
+}
+
+type editMemoEntry struct {
+	head  string
+	edits map[string]time.Time
+}
+
+// walkDefinitionEdit is the uncached walk. A path with no commits is a
+// successful walk returning the zero time — exact for this HEAD, so the
+// memo keeps it. Only a failed git invocation returns an error, which
+// the memo declines to store so a transient failure retries next call.
+func walkDefinitionEdit(root, rel string) (time.Time, error) {
 	out, err := git.Output(root, "log", "-1", "--format=%ct", "--", rel)
 	if err != nil {
-		return time.Time{}
+		return time.Time{}, err
 	}
 	sec, err := time.ParseDuration(strings.TrimSpace(out) + "s")
 	if err != nil {
-		return time.Time{}
+		return time.Time{}, nil
 	}
-	return time.Unix(int64(sec/time.Second), 0).UTC()
+	return time.Unix(int64(sec/time.Second), 0).UTC(), nil
 }
 
 func isTerminal(status string) bool {
