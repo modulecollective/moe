@@ -70,17 +70,27 @@ func TestExecuteArgsAddsClonePathForCodeStages(t *testing.T) {
 }
 
 // TestExecuteArgsResumeWhenNotNewSession swaps --session-id for
-// --resume on a returning session and omits InitialPrompt when empty.
+// --resume on a returning session, turns the system-prompt snapshot off
+// so the resumed session sees this turn's rebuilt prompt instead of the
+// one recorded at creation, and omits InitialPrompt when empty. The
+// snapshot flag sits after the variadic --add-dir block (and --model)
+// so it can't be eaten as a directory. The new-session tests above pin
+// its absence on create.
 func TestExecuteArgsResumeWhenNotNewSession(t *testing.T) {
 	args := executeArgs(agent.Request{
 		SessionID:  "sid-2",
 		NewSession: false,
 		Root:       "/bureaucracy",
+		AddDirs:    []string{"/tmp/moe-home"},
+		Model:      "fable",
 		Prompt:     "system",
 	})
 	want := []string{
 		"--resume", "sid-2",
 		"--add-dir", "/bureaucracy",
+		"--add-dir", "/tmp/moe-home",
+		"--model", "fable",
+		"--system-prompt-snapshot", "off",
 		"--settings", `{"sandbox":{"enabled":true}}`,
 		"--append-system-prompt", "system",
 	}

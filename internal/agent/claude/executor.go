@@ -105,8 +105,9 @@ const sandboxSettingsJSON = `{"sandbox":{"enabled":true}}`
 // shelling out to the binary.
 //
 // Ordering rule: `--add-dir` is variadic (<directories...>), so any
-// `--add-dir <path>` pair must sit before `--settings` /
-// `--append-system-prompt` and the optional positional prompt;
+// `--add-dir <path>` pair must sit before `--model` /
+// `--system-prompt-snapshot` / `--settings` / `--append-system-prompt`
+// and the optional positional prompt;
 // otherwise claude eats the next flag's value as another directory
 // and the session launches with nothing to send.
 func executeArgs(r agent.Request) []string {
@@ -137,6 +138,15 @@ func executeArgs(r agent.Request) []string {
 	// leaves the flag off, deferring to claude's configured default.
 	if r.Model != "" {
 		args = append(args, "--model", r.Model)
+	}
+	// Claude Code records a session's system prompt on its first
+	// request and resends that record on every resume, so without this
+	// a resumed session never sees the stage prompt rebuilt for this
+	// turn (canvas path under a fresh session worktree, operator input,
+	// headless vs interactive fragment). A new session has no record to
+	// override, so it keeps the default.
+	if !r.NewSession {
+		args = append(args, "--system-prompt-snapshot", "off")
 	}
 	args = append(args,
 		"--settings", sandboxSettingsJSON,
