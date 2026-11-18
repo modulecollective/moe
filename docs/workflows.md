@@ -974,11 +974,15 @@ recovery itself neither advances nor ships it, and leaves no reap tombstone.
 
 If close refuses because there is no committed canvas change, recovery stamps
 a tombstone before abandoning the session so the run re-parks. The tombstone
-names which stage died, when, and the abandoned branch tip, so a run whose turn
-was dropped stops reading like one the loop never reached; `moe dash` marks the
-row `· died` and the run page names the sha the transcript is still readable at.
-Other close failures leave the session in place for inspection and recovery;
-the log names `moe session resolve` and `moe session abandon`.
+names the unfinished stage, the reap time (not the agent's exit time), and the
+abandoned branch tip. `moe dash` marks the row `· unfinished`; the run page and
+reap commit point to `moe <workflow> log <project>/<run> <stage>` for the recorded
+outcome, when available. Reaping alone does not establish why the turn stopped.
+Older turns may lack archived diagnostics; the abandoned tip may contain
+session evidence readable until Git GC prunes it. Archived diagnostics are
+retained separately. Other close failures leave the session in place for
+inspection and recovery; the log names `moe session resolve` and
+`moe session abandon`.
 
 For an abandoned session, the tombstone is a brake as well as a record, and that
 is what keeps one refusal from costing a stage turn every sweep: a headless

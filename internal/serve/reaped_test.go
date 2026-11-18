@@ -25,10 +25,8 @@ func reapedServer(t *testing.T, note *run.ReapNote) *Server {
 }
 
 // TestRunPageRendersTheReapTombstone: the run page is where the operator
-// actually looks, so it is where a dropped machine turn has to say so —
-// which stage died, and the abandoned branch tip the transcript is still
-// readable at. Before this the two facts lived in a stderr nobody keeps
-// and a branch the reap deleted.
+// actually looks: name the unfinished stage, cleanup time and evidence
+// command even when the run has no archived diagnostics.
 func TestRunPageRendersTheReapTombstone(t *testing.T) {
 	s := reapedServer(t, &run.ReapNote{
 		Doc: "design",
@@ -42,10 +40,23 @@ func TestRunPageRendersTheReapTombstone(t *testing.T) {
 		`<strong>design</strong>`,
 		// Short sha, the form the operator pastes into `git show`.
 		`<code>81c2d5a</code>`,
-		`2026-08-23T23:46:03Z`,
+		`the last machine turn at <strong>design</strong> was unfinished;`,
+		`the heartbeat abandoned its session branch <span title="2026-08-23T23:46:03Z">`,
+		`<code>moe sdlc log alpha/src design</code>`,
+		`recorded outcome, when available`,
+		`Reaping alone does not establish the cause`,
+		`Session evidence`,
+		`until Git GC prunes it`,
+		`an operator touch on`,
+		`the thread releases it, and opening any stage here clears it outright`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("run page missing %q:\n%s", want, body)
+		}
+	}
+	for _, unwanted := range []string{"died", "crash", "timeout", "transcript survives"} {
+		if strings.Contains(body, unwanted) {
+			t.Errorf("run page claims %q:\n%s", unwanted, body)
 		}
 	}
 }
@@ -55,7 +66,7 @@ func TestRunPageRendersTheReapTombstone(t *testing.T) {
 func TestRunPageOmitsTheTombstoneWhenUnreaped(t *testing.T) {
 	body := getRunPage(t, reapedServer(t, nil), "/run/alpha/src")
 	if strings.Contains(body, `class="reaped"`) {
-		t.Errorf("untombstoned run rendered a death notice:\n%s", body)
+		t.Errorf("untombstoned run rendered an unfinished-turn notice:\n%s", body)
 	}
 }
 
@@ -65,7 +76,16 @@ func TestRunPageOmitsTheTombstoneWhenUnreaped(t *testing.T) {
 func TestRunPageRendersATombstoneWithAnUnreadableTimestamp(t *testing.T) {
 	s := reapedServer(t, &run.ReapNote{Doc: "code", At: "not a time", Tip: "deadbeefcafe"})
 	body := getRunPage(t, s, "/run/alpha/src")
-	if !strings.Contains(body, `<code>deadbee</code>`) {
-		t.Errorf("run page dropped the tombstone over a bad timestamp:\n%s", body)
+	for _, want := range []string{
+		`<code>deadbee</code>`,
+		`<strong>code</strong> was unfinished;`,
+		`<code>moe sdlc log alpha/src code</code>`,
+		`abandoned its session branch at not a time`,
+		`recorded outcome, when available`,
+		`the thread releases it, and opening any stage here clears it outright`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("run page missing %q with a bad timestamp:\n%s", want, body)
+		}
 	}
 }

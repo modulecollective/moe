@@ -320,9 +320,10 @@ func BuildRows(in Inputs) ([]Row, error) {
 			// mark is state rather than a question — the same slot
 			// `· input` sits in. It is here because a row that dropped a
 			// turn and a row that was never reached look identical
-			// otherwise, and the run page has the sha.
+			// otherwise. It describes the unfinished outcome, not its cause;
+			// the run page points to the evidence.
 			if md.Reaped != nil {
-				note = note + " · died"
+				note = note + " · unfinished"
 			}
 		}
 		// A run bound to a named workspace surfaces it as "@<name>" on

@@ -14,7 +14,7 @@ import (
 )
 
 // The reap hold's timeline, fixed so every assertion in this file reads
-// against one clock. reapAt is when the machine turn died; before and
+// against one clock. reapAt is when the session was reaped; before and
 // after straddle it.
 var (
 	reapBefore = time.Date(2026, 8, 21, 9, 0, 0, 0, time.UTC)
@@ -26,7 +26,7 @@ var (
 // carry, spelled out here rather than derived from reapHeldReason so
 // the tests pin the operator-facing sentence rather than agreeing with
 // whatever the code says today.
-const reapHeldPhrase = "its design turn died and was reaped at 2026-08-22T09:00:00Z" +
+const reapHeldPhrase = "its design turn was unfinished and was reaped at 2026-08-22T09:00:00Z" +
 	" — an operator touch on the thread releases it"
 
 // runJournalCommit lands one run-scoped journal commit at a chosen

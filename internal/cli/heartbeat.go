@@ -546,8 +546,8 @@ func choreClockReason(sc *pulseScan, projectID string, now time.Time) string {
 // the dash's ACTIVE row; recovery is `moe session resolve` / `abandon`,
 // one glance and one verb.
 //
-// *How* it clears depends on whether the dead turn got anything
-// written, and session.Close is the arbiter — the same rebase +
+// *How* it clears depends on whether the turn committed a canvas
+// change, and session.Close is the arbiter — the same rebase +
 // ff-merge `moe session resolve` runs, not a second opinion:
 //
 //   - **Close succeeds** → the turn committed real work and it lands on
@@ -555,9 +555,9 @@ func choreClockReason(sc *pulseScan, projectID string, now time.Time) string {
 //     artifact, and the journal tip moving is what gets the project
 //     swept again with the landed state in view. The run stays open at
 //     its stage; landing is recovery, concluding is a sweep's job.
-//   - **CanvasUnchangedError** → the session died before writing
-//     anything, so there is nothing to keep. Record a tombstone on the
-//     run, abandon, and the run re-parks for the ordinary groom-and-kick
+//   - **CanvasUnchangedError** → the turn has no committed canvas
+//     change. This does not establish why it stopped. Record a tombstone
+//     on the run, abandon, and the run re-parks for the ordinary groom-and-kick
 //     loop to retry — the original behaviour, now scoped to the shape it
 //     was right for and no longer silent about it.
 //   - **Any other Close error** → a branch that won't land cleanly may
@@ -663,26 +663,22 @@ func (g *heartbeatGate) reap(log io.Writer) {
 				s.Branch, s.Project, s.Run, s.Doc)
 			continue
 		}
-		fmt.Fprintf(log, "heartbeat: reaped dead machine session %s — %s/%s re-parks at %s, evidence at %s\n",
+		fmt.Fprintf(log, "heartbeat: reaped unfinished machine session %s — %s/%s re-parks at %s, evidence at %s\n",
 			s.Branch, s.Project, s.Run, s.Doc, git.ShortSHA(tip))
 	}
 }
 
-// tombstoneReap records a dead machine turn on its run and returns the
+// tombstoneReap records an unfinished machine turn on its run and returns the
 // session branch tip it recorded, so the reap's log line can name the
 // evidence too. Caller holds the repolock.
 //
-// This is the whole answer to "the loop dropped my thread". A ride whose
-// turn dies leaves its account in the kick loop's stderr, which nobody
-// keeps; the reap then deletes the session branch, which held the only
-// copy of the transcript. After that a run whose ride died reads exactly
-// like one the loop never reached, and telling them apart costs an
-// archaeology session over dangling objects. The note closes that gap at
-// the one choke point every dead machine session passes through.
+// Without the note, an abandoned turn reads like one the loop never
+// reached. Reaping knows the canvas was unchanged, not why the agent
+// stopped; the stage log can show the recorded outcome when available.
 //
 // It writes scalars only — see run.ReapNote. Tip is the reach: the
-// abandoned commits dangle rather than vanish, so the transcript stays
-// readable until gc prunes them.
+// abandoned commits dangle rather than vanish, so session evidence stays
+// readable until gc prunes them. Archived diagnostics survive separately.
 //
 // The commit is machine-marked deliberately: MoE-Consent is *the*
 // machine marker, and an unmarked commit at the journal tip would read
@@ -708,8 +704,12 @@ func tombstoneReap(root string, s *session.Session, now time.Time) (string, erro
 		return "", fmt.Errorf("reap tombstone: %w", err)
 	}
 	runJSON := filepath.Join(run.Dir(s.Project, s.Run), "run.json")
-	msg := fmt.Sprintf("reap: %s/%s %s turn died — abandoned %s\n\n",
-		s.Project, s.Run, s.Doc, git.ShortSHA(tip)) +
+	msg := fmt.Sprintf("reap: %s/%s %s turn unfinished — abandoned %s\n\n"+
+		"Read the recorded outcome, when available: `moe %s log %s/%s %s`.\n"+
+		"Reaping alone does not establish the cause.\n"+
+		"The abandoned tip may contain session evidence readable until Git GC prunes it;\n"+
+		"archived diagnostics are retained separately.\n\n",
+		s.Project, s.Run, s.Doc, git.ShortSHA(tip), md.Workflow, s.Project, s.Run, s.Doc) +
 		trailers.Block{
 			Run:      s.Run,
 			Project:  s.Project,
@@ -719,7 +719,7 @@ func tombstoneReap(root string, s *session.Session, now time.Time) (string, erro
 	// ErrNothingToCommit means an earlier tick already landed this exact
 	// note and died before abandoning; the retry proceeds to the abandon
 	// it owes. Rare in practice — At has second precision, so a retry a
-	// tick later stamps a fresh commit instead, and last death wins.
+	// tick later stamps a fresh commit instead, and the latest reap wins.
 	// Any other failure restores run.json — the caller keeps the
 	// branch, so leaving the edit loose in the canonical tree would only
 	// give the next session's rebase something to trip on. From HEAD, not
@@ -1003,7 +1003,7 @@ func parkedKickableThread(root string, sc *pulseScan, projectID string, markedOn
 		// A thread carrying a reaped turn no operator movement has
 		// released is skipped whole, members included — the same shape
 		// the occupancy hold takes. The recovery is the operator's touch
-		// and it is surfaced on the dash (`· died`) and the run page, so
+		// and it is surfaced on the dash (`· unfinished`) and the run page, so
 		// there is no stranded-work argument for descending past it the
 		// way the design-held leg below does. If one shows up, that
 		// incident earns the descent; the predicate takes the same

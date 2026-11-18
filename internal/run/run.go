@@ -131,15 +131,14 @@ type Metadata struct {
 	// deliberately does not.
 	DesignOnly bool `json:"design_only,omitempty"`
 	// Reaped, when non-nil, records that the run's last machine turn
-	// died before landing anything and the heartbeat's reap destroyed
-	// its session branch. Written by the reap's abandon ending — the one
-	// choke point every dead machine session passes through — and
-	// cleared by the next session start on the run. One writer, one
+	// was unfinished and the heartbeat abandoned its session branch.
+	// Written by the reap's abandon ending and cleared by the next
+	// session start on the run. One writer, one
 	// eraser; earlier tombstones survive in the journal's history.
 	//
 	// Without it a reaped run is byte-identical on disk to one the loop
-	// never reached, and the only copy of the dead turn's transcript
-	// goes with the branch.
+	// never reached. The note points to session evidence without
+	// inferring why the turn stopped.
 	Reaped *ReapNote `json:"reaped,omitempty"`
 	// LastTurn is the stage and backend of the last agent turn that
 	// settled on this run, written with that turn's commit. It is the
@@ -157,15 +156,14 @@ type Turn struct {
 }
 
 // ReapNote is the tombstone Metadata.Reaped carries. Scalars only: the
-// turn's prose is not copied here, because Tip reaches all of it. A
-// reaped branch's commits become dangling objects rather than deleted
-// ones, so `git show <tip>` reads the whole transcript until gc prunes
-// them — weeks, comfortably longer than any triage latency.
+// turn's prose is not copied here. A reaped branch's commits become
+// dangling objects, so `git show <tip>` can read session evidence until
+// gc prunes it. Not every tip contains a transcript; archived diagnostics
+// are retained separately.
 type ReapNote struct {
-	// Doc is the stage whose turn died ("design", "code", …).
+	// Doc is the stage whose turn was unfinished ("design", "code", …).
 	Doc string `json:"doc"`
-	// At is when the reap ran, RFC3339. Not when the turn died — the
-	// reap is the first moment anything durable can be written about it.
+	// At is when the reap ran, RFC3339, not when the agent exited.
 	At string `json:"at"`
 	// Tip is the full sha the session branch pointed at when it was
 	// abandoned.

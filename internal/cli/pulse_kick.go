@@ -702,7 +702,7 @@ func reapHeldReason(md *run.Metadata, touched time.Time) string {
 	} else if touched.After(at) {
 		return ""
 	}
-	return "its " + md.Reaped.Doc + " turn died and was reaped " + when +
+	return "its " + md.Reaped.Doc + " turn was unfinished and was reaped " + when +
 		" — an operator touch on the thread releases it"
 }
 

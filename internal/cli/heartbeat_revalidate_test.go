@@ -183,7 +183,7 @@ func assertSkippedReap(t *testing.T, g *heartbeatGate, log *bytes.Buffer, head s
 	if g.surveyed["tele"] != "already surveyed" {
 		t.Error("skipped reaper cleared surveyed cursor")
 	}
-	if strings.Contains(log.String(), "landed dead machine session") || strings.Contains(log.String(), "reaped dead machine session") {
+	if strings.Contains(log.String(), "landed dead machine session") || strings.Contains(log.String(), "reaped unfinished machine session") {
 		t.Errorf("skipped reaper logged success: %s", log)
 	}
 }

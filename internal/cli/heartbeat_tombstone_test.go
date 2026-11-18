@@ -90,11 +90,14 @@ func TestReapStampsATombstone(t *testing.T) {
 	}
 
 	body := gitLogFormat(t, root, 1, "HEAD", "%B")
-	wantSubject := "reap: moe/" + slug + " design turn died — abandoned " + git.ShortSHA(tip)
-	for _, want := range []string{wantSubject, "MoE-Run: " + slug, "MoE-Project: moe", "MoE-Consent: dynamic"} {
+	wantSubject := "reap: moe/" + slug + " design turn unfinished — abandoned " + git.ShortSHA(tip)
+	for _, want := range []string{wantSubject, "MoE-Run: " + slug, "MoE-Project: moe", "MoE-Consent: dynamic", "moe sdlc log moe/" + slug + " design", "session evidence", "until Git GC prunes it"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("tombstone commit missing %q:\n%s", want, body)
 		}
+	}
+	if strings.Contains(body, "MoE-Document:") {
+		t.Errorf("tombstone commit claims stage satisfaction: %s", body)
 	}
 	// Machine-marked deliberately: an unmarked commit at the journal tip
 	// reads as the operator's and holds the project for a quiet tick —
@@ -215,7 +218,7 @@ func TestReapDoesNotTombstoneALandingSession(t *testing.T) {
 
 // TestSessionStartClearsTheTombstone is the eraser half. One writer at
 // the reap, one eraser at the next session start: a run being worked
-// again is the answer to "the last machine turn died", so the note is
+// again is the answer to "the last machine turn was unfinished", so the note is
 // spent. Earlier tombstones stay in the journal's history.
 func TestSessionStartClearsTheTombstone(t *testing.T) {
 	root := newTestBureaucracy(t)

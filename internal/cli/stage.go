@@ -627,7 +627,7 @@ func (s *stageSession) buildSpec(workRoot string) (stageTurnSpec, error) {
 		return stageTurnSpec{}, err
 	}
 	// The eraser half of the reap's tombstone: a session opening
-	// on this run is the answer to "the last machine turn died",
+	// on this run is the answer to "the last machine turn was unfinished",
 	// so the note is spent. Its own reason to commit — a resume
 	// that mints no fresh session id still owes the erasure —
 	// which is why it sets mutated rather than riding one.

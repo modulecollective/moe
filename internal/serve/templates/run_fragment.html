@@ -1,8 +1,10 @@
 <div class="run-fragment">
   {{with .Reaped}}
-  <p class="reaped">the last machine turn at <strong>{{.Doc}}</strong> died before landing anything;
-    the heartbeat abandoned its session branch{{if .Ago}} <span title="{{.At}}">{{.Ago}}</span>{{end}}.
-    The turn's transcript survives at <code>{{.Tip}}</code> until git gc prunes it.
+  <p class="reaped">the last machine turn at <strong>{{.Doc}}</strong> was unfinished;
+    the heartbeat abandoned its session branch{{if .Ago}} <span title="{{.At}}">{{.Ago}}</span>{{else}} at {{.At}}{{end}}.
+    Read <code>{{.LogCommand}}</code> for the recorded outcome, when available.
+    Reaping alone does not establish the cause. Session evidence may remain at <code>{{.Tip}}</code>
+    until Git GC prunes it; archived diagnostics are retained separately.
     The sweep will not start this thread again while the note stands — an operator touch on
     the thread releases it, and opening any stage here clears it outright.</p>
   {{end}}

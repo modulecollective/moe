@@ -99,14 +99,21 @@ func readStageFailure(t *testing.T, path string) stageFailure {
 }
 
 func TestMissingCanvasRetainsDiagnostic(t *testing.T) {
-	for _, empty := range []bool{false, true} {
-		t.Run(map[bool]string{false: "missing", true: "empty"}[empty], func(t *testing.T) {
+	for _, refusal := range []string{"missing", "empty", "unchanged"} {
+		t.Run(refusal, func(t *testing.T) {
 			root, fake := diagnosticFixture(t)
 			defer withRideMode(rideStatic)()
-			fake.empty = empty
+			fake.empty = refusal == "empty"
+			var skeleton string
+			if refusal == "unchanged" {
+				// The real design opener seeds this before dispatch. Leaving it
+				// untouched must be distinguished from a missing or empty canvas.
+				skeleton = designCanvasSkeleton
+			}
 			var out, errb bytes.Buffer
 			code := runStageSession("tele", "fix-it", "design", stageSessionOpts{
 				Agent: "codex", Headless: true, SkipNextStage: true,
+				CanvasSkeleton: skeleton,
 			}, &out, &errb)
 			if code == 0 {
 				t.Fatal("missing canvas advanced")
@@ -146,7 +153,7 @@ func TestMissingCanvasRetainsDiagnostic(t *testing.T) {
 				t.Fatal(err)
 			}
 			writeDeadClaim(t, &session.Session{Root: root, Project: "tele", Run: "fix-it", Doc: "design", Branch: session.BranchName("tele", "fix-it", "design")}, false)
-			if code := runStageSession("tele", "fix-it", "design", stageSessionOpts{Agent: "codex", Headless: true, SkipNextStage: true}, &out, &errb); code == 0 {
+			if code := runStageSession("tele", "fix-it", "design", stageSessionOpts{Agent: "codex", Headless: true, SkipNextStage: true, CanvasSkeleton: skeleton}, &out, &errb); code == 0 {
 				t.Fatal("retry advanced without a canvas")
 			}
 			attempts, _ = filepath.Glob(filepath.Join(root, run.Dir("tele", "fix-it"), "diagnostics/design/*/failure.json"))
@@ -155,8 +162,11 @@ func TestMissingCanvasRetainsDiagnostic(t *testing.T) {
 			}
 			for _, path := range attempts {
 				failure := readStageFailure(t, path)
-				if failure.BackendSessionID != "11111111-1111-4111-8111-111111111111" || failure.Execution.ExitCode == nil || *failure.Execution.ExitCode != 0 || !failure.TranscriptAvailable || !failure.PromptAvailable || failure.ObservedAt.IsZero() {
+				if failure.BackendSessionID != "11111111-1111-4111-8111-111111111111" || failure.Execution.Outcome != "returned" || failure.Execution.ExitCode == nil || *failure.Execution.ExitCode != 0 || !failure.TranscriptAvailable || !failure.PromptAvailable || failure.ObservedAt.IsZero() {
 					t.Fatalf("incomplete failure: %+v", failure)
+				}
+				if failure.CanvasRefusal != refusal {
+					t.Fatalf("canvas refusal = %q, want %q", failure.CanvasRefusal, refusal)
 				}
 			}
 			if sha, _, err := run.LatestWorkTurnSHA(root, "tele", "fix-it", "design"); err != nil || sha != "" {
@@ -185,6 +195,33 @@ func TestMissingCanvasRetainsDiagnostic(t *testing.T) {
 			}
 			writeDeadClaim(t, sessions[0], true)
 			newHeartbeatGate(root).reap(&errb)
+			if remaining, err := session.List(root); err != nil || len(remaining) != 0 {
+				t.Fatalf("sessions after reap: %v %v", remaining, err)
+			}
+			md := loadRun(t, root, "tele", "fix-it")
+			if md.Reaped == nil || md.Reaped.Doc != "design" || md.Reaped.At == "" || md.Reaped.Tip == "" {
+				t.Fatalf("missing reap evidence: %+v", md.Reaped)
+			}
+			body = gitLogFormat(t, root, 1, "HEAD", "%B")
+			for _, want := range []string{
+				"reap: tele/fix-it design turn unfinished — abandoned " + git.ShortSHA(md.Reaped.Tip),
+				"moe sdlc log tele/fix-it design",
+				"recorded outcome, when available",
+				"Reaping alone does not establish the cause",
+				"MoE-Consent: dynamic",
+			} {
+				if !strings.Contains(body, want) {
+					t.Errorf("reap commit missing %q:\n%s", want, body)
+				}
+			}
+			for _, unwanted := range []string{"died", "death", "crash", "timeout", "MoE-Document:"} {
+				if strings.Contains(body, unwanted) {
+					t.Errorf("reap commit claims %q:\n%s", unwanted, body)
+				}
+			}
+			if sha, _, err := run.LatestWorkTurnSHA(root, "tele", "fix-it", "design"); err != nil || sha != "" {
+				t.Fatalf("reap satisfied stage: %s %v", sha, err)
+			}
 			if _, err := os.Stat(sessions[0].WorktreePath); !os.IsNotExist(err) {
 				t.Fatalf("worktree survived reap: %v; %s", err, errb.String())
 			}
@@ -198,6 +235,9 @@ func TestMissingCanvasRetainsDiagnostic(t *testing.T) {
 			errb.Reset()
 			if code := runLog("sdlc", "")([]string{"tele/fix-it", "design"}, &out, &errb); code != 0 || !strings.Contains(out.String(), "read context then stopped 2") {
 				t.Fatalf("log after reap: %s %s", out.String(), errb.String())
+			}
+			if !strings.Contains(out.String(), "Execution: returned (exit 0)") {
+				t.Fatalf("log lost the recorded outcome: %s", out.String())
 			}
 			// A successful retry supersedes the failure even if it has no new
 			// transcript; neither old diagnostic is removed.

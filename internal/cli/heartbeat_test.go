@@ -1184,7 +1184,7 @@ func TestHeartbeatReapsADeadMachineSession(t *testing.T) {
 	if git.HasRef(root, "refs/heads/"+s.Branch) {
 		t.Errorf("session branch survived the reap\n%s", log.String())
 	}
-	if !strings.Contains(log.String(), "reaped dead machine session") {
+	if !strings.Contains(log.String(), "reaped unfinished machine session") {
 		t.Errorf("log = %q, want the reap named", log.String())
 	}
 }
