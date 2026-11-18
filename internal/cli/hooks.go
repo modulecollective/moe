@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -41,8 +42,8 @@ func (e *hookFailure) Error() string {
 }
 
 // hookEnv carries the run context exposed to a hook. The dispatcher
-// exports the MOE_* vars to project scripts and passes the struct
-// directly to built-ins.
+// exports the MOE_* vars to project scripts (after any dev-env, so
+// they always win) and passes the struct directly to built-ins.
 type hookEnv struct {
 	Project      string
 	Run          string
@@ -70,10 +71,12 @@ func (e hookEnv) envVars() []string {
 // the rebase produced. Returning a non-nil error halts the chain;
 // richer error types (e.g. *rebaseConflictError) flow through
 // unchanged so the caller can errors.As on them and drive a custom
-// chain-back.
+// chain-back. The returned map is the env this built-in contributes to
+// the project scripts (the dev-env refresh returns the run's dev-env);
+// nil contributes nothing.
 type builtinHook struct {
 	Name string
-	Run  func(env hookEnv, stdout, stderr io.Writer) error
+	Run  func(env hookEnv, stdout, stderr io.Writer) (map[string]string, error)
 }
 
 var builtinHooks = map[hookEvent][]builtinHook{}
@@ -88,23 +91,29 @@ func registerBuiltinHook(event hookEvent, h builtinHook) {
 // project drop-in directory. Built-ins run first so project scripts
 // vet the post-rebase tree (the one about to be pushed) instead of
 // the pre-rebase tree the operator was editing — see hookEventPrePush.
-// Returns nil on success, *hookFailure when a project script exits
-// non-zero, or whatever error type a built-in chooses to return. A
-// missing or empty hooks dir is a no-op.
+// The env maps the built-ins return are merged in built-in order and
+// handed to the scripts. Returns nil on success, *hookFailure when a
+// project script exits non-zero, or whatever error type a built-in
+// chooses to return. A missing or empty hooks dir is a no-op.
 func runHooks(root string, event hookEvent, env hookEnv, stdout, stderr io.Writer) error {
+	devEnv := map[string]string{}
 	for _, b := range builtinHooks[event] {
-		if err := b.Run(env, stdout, stderr); err != nil {
+		contrib, err := b.Run(env, stdout, stderr)
+		if err != nil {
 			return err
 		}
+		maps.Copy(devEnv, contrib)
 	}
-	return runProjectHookScripts(root, event, env, stdout, stderr)
+	return runProjectHookScripts(root, event, env, devEnv, stdout, stderr)
 }
 
 // runProjectHookScripts walks projects/<p>/hooks/<event>.d in lex
-// order, executes each executable script with CWD = sandbox clone
-// and the MOE_* env vars exported, and returns *hookFailure on the
-// first non-zero exit.
-func runProjectHookScripts(root string, event hookEvent, env hookEnv, stdout, stderr io.Writer) error {
+// order, executes each executable script with CWD = sandbox clone,
+// and returns *hookFailure on the first non-zero exit. Each script's
+// environment is moe's own, then devEnv, then the MOE_* vars: scripts
+// find the tools the dev-env put on PATH, and a dev-env script can't
+// redirect MOE_SANDBOX or MOE_BUREAUCRACY for the gate.
+func runProjectHookScripts(root string, event hookEvent, env hookEnv, devEnv map[string]string, stdout, stderr io.Writer) error {
 	dirRel := filepath.Join(project.Dir(env.Project), "hooks", string(event)+".d")
 	dir := filepath.Join(root, dirRel)
 	// listExecutables filters dotfiles + non-executables upfront so the
@@ -133,7 +142,7 @@ func runProjectHookScripts(root string, event hookEvent, env hookEnv, stdout, st
 		var captured strings.Builder
 		cmd := exec.Command(path)
 		cmd.Dir = env.Sandbox
-		cmd.Env = append(os.Environ(), env.envVars()...)
+		cmd.Env = append(append(os.Environ(), mapToEnv(devEnv)...), env.envVars()...)
 		cmd.Stdout = io.MultiWriter(&captured, stdout)
 		cmd.Stderr = io.MultiWriter(&captured, stderr)
 		runErr := cmd.Run()

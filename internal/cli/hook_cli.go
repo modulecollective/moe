@@ -66,7 +66,7 @@ func runHookFire(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "Events:")
 		moePrintln(stderr, "  dev-env           run dev-env.d/* and dump the merged env on stdout")
 		moePrintln(stderr, "  dev-env-teardown  run dev-env.d/* in memory, then dev-env-teardown.d/*")
-		moePrintln(stderr, "  pre-push          run pre-push.d/* against the transient sandbox")
+		moePrintln(stderr, "  pre-push          run dev-env.d/* in memory, pre-push.d/* with that env, then dev-env-teardown.d/*")
 	}
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -164,12 +164,15 @@ var mintHookFireSandbox = func(root, projectID, runID string) (string, error) {
 // so tests can exercise the routing against a stub sandbox path,
 // without standing up a real submodule worktree.
 //
-// pre-push uses runProjectHookScripts (project scripts only) rather
-// than runHooks (built-ins + project scripts). The built-in is the
-// rebase-onto-default check; on a transient sandbox there's nothing
-// to rebase, and the operator running `moe hook fire pre-push` is
-// here to exercise their own scripts. They can test rebase mechanics
-// through a real run.
+// pre-push runs dev-env.d/* in memory (no cache: nothing later reads
+// one from a transient sandbox), hands that env to the project scripts
+// the way a real push does, then tears down with dev-env-teardown.d/*
+// whether or not the scripts passed, since nothing else can address
+// what setup created. It calls runProjectHookScripts rather than
+// runHooks: the rebase-onto-default built-in has nothing to rebase on
+// a transient sandbox, and the operator running `moe hook fire
+// pre-push` is here to exercise their own scripts. They can test
+// rebase mechanics through a real run.
 func dispatchHookFire(root, sandboxPath string, pj *project.Metadata, md *run.Metadata, event string, stdout, stderr io.Writer) int {
 	switch event {
 	case "dev-env":
@@ -205,11 +208,21 @@ func dispatchHookFire(root, sandboxPath string, pj *project.Metadata, md *run.Me
 			Bureaucracy:  root,
 			TargetBranch: targetBranch,
 		}
-		if err := runProjectHookScripts(root, hookEventPrePush, he, stdout, stderr); err != nil {
+		devEnv, err := runDevEnvSetup(root, sandboxPath, md, stdout, stderr)
+		if err != nil {
 			moePrintf(stderr, "%v\n", err)
 			return 1
 		}
-		return 0
+		exit := 0
+		if err := runProjectHookScripts(root, hookEventPrePush, he, devEnv, stdout, stderr); err != nil {
+			moePrintf(stderr, "%v\n", err)
+			exit = 1
+		}
+		if err := runDevEnvScripts(root, devEnvTeardownDirRel, sandboxPath, md, devEnv, stdout, stderr); err != nil {
+			moePrintf(stderr, "%v\n", err)
+			exit = 1
+		}
+		return exit
 	default:
 		// Defensive belt-and-suspenders: runHookFire gates on the same
 		// allowlist before we ever reach here, but new callers of

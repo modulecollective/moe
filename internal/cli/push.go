@@ -506,28 +506,28 @@ func closeNoShipRun(root string, md *run.Metadata, pj *project.Metadata, clonePa
 }
 
 // init registers the ordered pre-push built-ins: rebase first, then
-// dev-env refresh. Project scripts therefore see both the tree about to
-// be pushed and an environment that incorporates this run's committed
-// hook edits. Vetting the pre-rebase tree is how a stale call site
-// against a sibling branch's API change slips past local hooks and
-// breaks CI.
+// dev-env refresh. Project scripts therefore vet the tree about to be
+// pushed, and run with the env the refresh returns, so this run's
+// committed dev-env.d edits reach them. Vetting the pre-rebase tree is
+// how a stale call site against a sibling branch's API change slips
+// past local hooks and breaks CI.
 func init() {
 	registerBuiltinHook(hookEventPrePush, builtinHook{
 		Name: "rebase-onto-default",
-		Run: func(env hookEnv, stdout, stderr io.Writer) error {
+		Run: func(env hookEnv, stdout, stderr io.Writer) (map[string]string, error) {
 			branch := branchPrefix + env.Run
-			return push.EnsureRebasedOntoDefault(env.Sandbox, branch, env.TargetBranch, stdout)
+			return nil, push.EnsureRebasedOntoDefault(env.Sandbox, branch, env.TargetBranch, stdout)
 		},
 	})
 	registerBuiltinHook(hookEventPrePush, builtinHook{
 		Name: "dev-env",
-		Run: func(env hookEnv, stdout, stderr io.Writer) error {
+		Run: func(env hookEnv, stdout, stderr io.Writer) (map[string]string, error) {
 			md, err := run.Load(env.Bureaucracy, env.Project, env.Run)
 			if err != nil {
-				return err
+				return nil, err
 			}
-			_, _, err = devEnvSetupEnv(env.Bureaucracy, env.Sandbox, md, stdout, stderr)
-			return err
+			devEnv, _, err := devEnvSetupEnv(env.Bureaucracy, env.Sandbox, md, stdout, stderr)
+			return devEnv, err
 		},
 	})
 }

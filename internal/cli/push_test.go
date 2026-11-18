@@ -2190,14 +2190,14 @@ func TestPushRunsBuiltinsBeforeProjectHooks(t *testing.T) {
 	prev := builtinHooks[hookEventPrePush]
 	tracker := builtinHook{
 		Name: "test-tracker",
-		Run: func(_ hookEnv, _, _ io.Writer) error {
+		Run: func(_ hookEnv, _, _ io.Writer) (map[string]string, error) {
 			fh, err := os.OpenFile(orderFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			defer fh.Close()
 			_, err = fh.WriteString("builtin\n")
-			return err
+			return nil, err
 		},
 	}
 	// Prepend so the tracker fires before the real rebase built-in. We
@@ -2250,7 +2250,6 @@ func TestPushRefreshesDevEnvBeforeProjectHooks(t *testing.T) {
 
 	receipt := filepath.Join(t.TempDir(), "receipt")
 	writeHookScript(t, f.root, f.projectID, "pre-push", "10-read-env.sh", fmt.Sprintf(`#!/bin/sh
-. "$MOE_SANDBOX/.moe/dev-env.env"
 printf 'project-hook:%%s\n' "$GEN" > %q
 `, receipt))
 	gittest.Run(t, f.root, "add", "-A")

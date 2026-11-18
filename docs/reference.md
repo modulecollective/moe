@@ -503,9 +503,9 @@ Project hooks live under `projects/<project>/hooks/<event>.d/*` in the
 bureaucracy:
 
 - `dev-env.d/*` emits `KEY=VALUE` lines that MoE caches and supplies to agent
-  sessions and workspace shells. A run that commits a change in this directory
-  refreshes its cache before its next stage or real push; unrelated hook edits
-  leave the run's cache warm.
+  sessions, workspace shells, and pre-push scripts. A run that commits a change
+  in this directory refreshes its cache before its next stage or real push;
+  unrelated hook edits leave the run's cache warm.
 - `dev-env-teardown.d/*` cleans up when a run or workspace closes.
 - `pre-push.d/*` is an invocation-time ship gate; a failing script halts the
   push path and opens a recovery build session.

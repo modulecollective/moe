@@ -147,6 +147,83 @@ echo "ran pre-push in MOE_SANDBOX=$MOE_SANDBOX" > ` + receipt + `
 	}
 }
 
+// prePushFireFixture lays out a project whose dev-env.d emits
+// devEnvOut, whose pre-push.d runs prePush, and whose
+// dev-env-teardown.d records $GEN to the returned teardown receipt.
+func prePushFireFixture(t *testing.T, devEnvOut, prePush string) (root, sandboxPath, teardownReceipt string, md *run.Metadata, pj *project.Metadata) {
+	t.Helper()
+	root = t.TempDir()
+	projID := "tele"
+	teardownReceipt = filepath.Join(t.TempDir(), "teardown")
+	writeHookScript(t, root, projID, "dev-env", "10-env.sh", devEnvOut)
+	writeHookScript(t, root, projID, "pre-push", "10-check.sh", prePush)
+	writeHookScript(t, root, projID, "dev-env-teardown", "10-down.sh",
+		"#!/bin/sh\nprintf '%s' \"$GEN\" > "+teardownReceipt+"\n")
+	md = &run.Metadata{ID: "hook-fire-7", Project: projID, Workflow: hookFireWorkflow}
+	pj = &project.Metadata{ID: projID, DefaultBranch: "main"}
+	return root, t.TempDir(), teardownReceipt, md, pj
+}
+
+// TestHookFirePrePushSeesDevEnv: a pre-push script under fire runs with
+// the env dev-env.d emitted, MOE_* still wins over a dev-env script
+// that tries to redirect it, no cache file lands in the transient
+// sandbox, and teardown runs with the same env afterwards.
+func TestHookFirePrePushSeesDevEnv(t *testing.T) {
+	receipt := filepath.Join(t.TempDir(), "receipt")
+	root, sandboxPath, teardown, md, pj := prePushFireFixture(t,
+		"#!/bin/sh\nprintf 'GEN=fire\\nMOE_SANDBOX=/bogus\\n'\n",
+		"#!/bin/sh\nprintf '%s|%s' \"$GEN\" \"$MOE_SANDBOX\" > "+receipt+"\n")
+
+	var stdout, stderr bytes.Buffer
+	if code := dispatchHookFire(root, sandboxPath, pj, md, "pre-push", &stdout, &stderr); code != 0 {
+		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout.String(), stderr.String())
+	}
+	body, err := os.ReadFile(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(body), "fire|"+sandboxPath; got != want {
+		t.Fatalf("pre-push receipt = %q, want %q", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(sandboxPath, ".moe", "dev-env.env")); !os.IsNotExist(err) {
+		t.Fatalf("hook fire wrote a dev-env cache into the sandbox: %v", err)
+	}
+	if got, err := os.ReadFile(teardown); err != nil || string(got) != "fire" {
+		t.Fatalf("teardown receipt = %q, %v; want %q", got, err, "fire")
+	}
+}
+
+// TestHookFirePrePushTearsDownOnScriptFailure: a failing pre-push
+// script still exits 1, and teardown still runs.
+func TestHookFirePrePushTearsDownOnScriptFailure(t *testing.T) {
+	root, sandboxPath, teardown, md, pj := prePushFireFixture(t,
+		"#!/bin/sh\nprintf 'GEN=fire\\n'\n",
+		"#!/bin/sh\nexit 3\n")
+
+	if code := dispatchHookFire(root, sandboxPath, pj, md, "pre-push", io.Discard, io.Discard); code != 1 {
+		t.Fatalf("exit=%d, want 1", code)
+	}
+	if got, err := os.ReadFile(teardown); err != nil || string(got) != "fire" {
+		t.Fatalf("teardown receipt = %q, %v; want %q", got, err, "fire")
+	}
+}
+
+// TestHookFirePrePushSetupFailureStops: a failing dev-env.d script
+// exits 1 before any pre-push script runs.
+func TestHookFirePrePushSetupFailureStops(t *testing.T) {
+	receipt := filepath.Join(t.TempDir(), "receipt")
+	root, sandboxPath, _, md, pj := prePushFireFixture(t,
+		"#!/bin/sh\nexit 7\n",
+		"#!/bin/sh\ntouch "+receipt+"\n")
+
+	if code := dispatchHookFire(root, sandboxPath, pj, md, "pre-push", io.Discard, io.Discard); code != 1 {
+		t.Fatalf("exit=%d, want 1", code)
+	}
+	if _, err := os.Stat(receipt); !os.IsNotExist(err) {
+		t.Fatalf("pre-push script ran after dev-env setup failed: %v", err)
+	}
+}
+
 // TestHookFireUnknownEvent: a typo for the event name fails with exit
 // code 2 and lists the known events.
 func TestHookFireUnknownEvent(t *testing.T) {
