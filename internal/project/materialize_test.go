@@ -97,9 +97,9 @@ func TestEnsureMaterializedFailureSurfacesTypedError(t *testing.T) {
 }
 
 // TestEnsureMaterializedAllowsFileURL pins the CVE-2022-39253 escape
-// hatch: a submodule whose URL is a file:// path — the shape MoE's
-// workspace plumbing produces when parallel runs share a local clone
-// under .moe/clones/ — auto-inits cleanly. Without `-c
+// hatch: a submodule whose URL is a file:// path — an offline or
+// scratch bureaucracy's .gitmodules, or an operator's hand-set
+// override; moe itself never sets one — auto-inits cleanly. Without `-c
 // protocol.file.allow=always` on the `submodule update` call, modern
 // git (>=2.38.1) rejects the file transport with "fatal: transport
 // 'file' not allowed" and the gate dies.
@@ -109,7 +109,7 @@ func TestEnsureMaterializedFailureSurfacesTypedError(t *testing.T) {
 // `submodule update --init` clone its top-level file:// submodule, but
 // the *recursive* walk into nested submodules runs as a non-user
 // fetch and is rejected. The recursive walk is what actually breaks
-// for MoE workspace layouts, so the regression has to exercise it —
+// for a local-path bureaucracy, so the regression has to exercise it —
 // without the nested submodule, the test would pass even with the
 // fix removed.
 func TestEnsureMaterializedAllowsFileURL(t *testing.T) {
