@@ -290,9 +290,9 @@ brackets: `[agent running build 4m]`, `[waiting for operator]`,
 phase and since when, why it is waiting, its continuation (`prompt`, `!`, `!!`,
 `!!!`), where it came from (a terminal, serve's local pty, Rex; the parent
 sweep), its Rex block, any hold, the request log, and the exact command that
-resumes the last conversation. A reply proves the owner is alive, not that the
-agent is making progress, and an owner that does not answer is shown as
-unreachable — never as idle, and never as leave to start a replacement.
+returns to the last stage that ran. A reply proves the owner is alive, not
+that the agent is making progress, and an owner that does not answer is shown
+as unreachable — never as idle, and never as leave to start a replacement.
 
 Four controls steer a stageful run (SDLC today), from the terminal or the
 run's web page:
@@ -381,14 +381,16 @@ carry on.
 
 **Pause and handoff hold the run** from the moment they are accepted until
 an explicit resume — across sweeps, restarts and disconnects, and against
-CI repair on a pushed run. Handoff prints the stage command for the last
-conversation that actually ran, e.g. `moe sdlc build moe/change-auth --agent
-codex`. Two ways out: `moe control resume` (or the web's resume) releases the
-hold for a later eligible sweep and starts nothing; typing that stage command
-at a terminal resumes the conversation now, and clears the hold once it is
-admitted. Headless, machine and nested entries never clear a hold, and a
-resume that loses to another owner or an unresolved session leaves it in
-place.
+CI repair on a pushed run. Handoff prints the command for the last stage that
+ran, e.g. `moe sdlc build moe/change-auth --agent codex`. Two ways out:
+`moe control resume` (or the web's resume) releases the hold for a later
+eligible sweep and starts nothing; typing that stage command at a terminal
+opens the stage now, and clears the hold once it is admitted. Claude can
+resume its conversation; Codex starts fresh from the canvas and current
+guidance. See [Cleanup And Recovery](reference.md#cleanup-and-recovery) for
+backend session behavior. Headless, machine and nested entries never clear a
+hold, and a resume that loses to another owner or an unresolved session leaves
+it in place.
 
 **Park** asks only the current owner to yield, holds nothing, and is retired
 if that owner is gone before it reaches a boundary. It is refused when no
@@ -409,7 +411,7 @@ refused the commit, never as pending. A hold wins over finish, and an applied
 finish whose owner died is reconciled — shipped, or "recovery required" until
 a resume, never replayed.
 
-Notes stay notes. `moe input add` neither pauses nor resumes anything.
+`moe input add` starts no agent and does not clear a pause or handoff.
 
 ## Chat
 
@@ -849,12 +851,18 @@ next turn gets the question and your answer as a pair. One open question per
 run; a question on a run the survey is minting in the same gate, on a tagged
 idea, or on a chain head is refused with a line.
 
-**Nothing here holds anything.** An unanswered question does not stop the run —
-its turns are told the question was asked and no reply came, and they proceed
-on their best judgment and note the call on the canvas. Stillness stays the
-park's job: a survey that needs the answer first parks the thread and names the
-question in the reason. That keeps ask and hold separate, so a survey can also
-ask a question the work need not wait for.
+**Asking itself holds nothing.** Without a separate hold, turns are told the
+question was asked and no reply came, and they proceed on their best judgment
+and note the call on the canvas. Stillness stays the park's job: a survey that
+needs the answer first parks the thread and names the question in the reason.
+That keeps ask and hold separate, so a survey can also ask a question the work
+need not wait for.
+
+A stopped review loop can also open a question on the run, using the same
+input channel. Its hold is separate from the question; answering it or adding
+any note releases that hold for one more review turn. See
+[Blocked gates](#cascades-the-bang-vocabulary) for the recovery path. Input
+starts no agent and does not clear an explicit pause or handoff.
 
 There is no dismiss verb. A question you'd rather not answer is discharged by
 answering it — "not relevant, proceed" is prose the next turn can read.

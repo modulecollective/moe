@@ -129,8 +129,8 @@ inputs are plain markdown:
 - Open project intents supply operator-authored standing direction, inlined in
   full.
 - The project's knowledge index, when one exists, is named by path and size.
-- Operator input — prose pushed at the run, or a pulse question and your
-  answer — is delivered to that run's next stage prompt.
+- Operator input — prose pushed at the run, or a question and your answer — is
+  delivered to that run's next stage prompt.
 - Lore and followup pointers tell the agent where to look and where to leave
   traces.
 - Project-specific guidance such as `AGENTS.md` or `CLAUDE.md` is named

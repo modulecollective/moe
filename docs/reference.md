@@ -191,17 +191,18 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   next *successful* agent turn receives it verbatim in its prompt, once, and
   then it lives on the run page as history — the canvas that turn writes is
   where durable direction persists. `moe input answer <project>/<run>
-  [text ...]` fills the question a dynamic pulse asked on that run (one open
-  per run, so the run is the address). `moe input list [project]` shows both
-  halves, oldest first: what has asked you, then what you have given and no
-  turn has picked up.
+  [text ...]` fills the run's open question, whether asked by a dynamic survey
+  or a stopped review loop (one open per run, so the run is the address).
+  `moe input list [project]` shows both halves, oldest first: what has asked
+  you, then what you have given and no turn has picked up.
 
-  Nothing here holds anything. An unanswered question does not stop the run —
-  its turns are told it was asked and no reply came, and they proceed on their
-  best judgment. Stillness stays a pulse's `park`. Writing an entry starts
-  nothing either: it makes the prose available to the next agent turn and can
-  make eligible work actionable for an armed serve's sweep. Project mode,
-  readiness, and occupancy still apply; a hand-typed
+  A question itself holds nothing. A survey's `park` or a stopped review
+  loop's hold is separate; an answer or any note releases the latter for one
+  more review turn. See [Blocked gates](workflows.md#cascades-the-bang-vocabulary)
+  for review recovery. Input does not clear an explicit pause or handoff.
+  Writing an entry starts nothing: it makes the prose available to the next
+  agent turn and can make eligible work actionable for an armed serve's sweep.
+  Project mode, readiness, and occupancy still apply; a hand-typed
   `moe pulse new --dynamic <project>` is the expedite path. A pending note or
   answer counts as an operator mark under `safe` mode, consumed on delivery.
 - `moe usage [--project <id>] [--since <dur>]` sums the token usage recorded in
