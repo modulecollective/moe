@@ -1129,10 +1129,14 @@ func cascadeStageGate(wf *Workflow, dispatcher cascadeDispatcher, md *run.Metada
 			canvas, blocked := cascadeStageBlocked(md, stage, stderr)
 			spent := ""
 			if blocked {
-				spent = cascadeReviewLoopSpent(md, canvas, rounds, stderr)
+				var root string
+				root, spent = cascadeReviewLoopSpent(md, canvas, rounds, stderr)
 				if spent != "" {
 					// Falls through to the canonical park below.
 					moePrintf(stderr, "cascade: %s stays blocked: %s\n", stage, spent)
+					if root != "" {
+						askSpentReview(root, md, spent, stderr)
+					}
 				}
 			}
 			if blocked && spent == "" {
@@ -1173,16 +1177,17 @@ func cascadeStageGate(wf *Workflow, dispatcher cascadeDispatcher, md *run.Metada
 
 // cascadeReviewLoopSpent is reviewLoopSpent for the cascade, plus the
 // in-process bound: the rounds this call has already run can't pass
-// the cap even if the journal count never grows.
-func cascadeReviewLoopSpent(md *run.Metadata, canvas string, rounds int, stderr io.Writer) string {
-	if rounds >= maxReviewTurns {
-		return fmt.Sprintf("%d rounds in this cascade (cap %d)", rounds, maxReviewTurns)
-	}
+// the cap even if the journal count never grows. It returns the root it
+// resolved too, "" when there is none, so a spent park can ask in it.
+func cascadeReviewLoopSpent(md *run.Metadata, canvas string, rounds int, stderr io.Writer) (root, reason string) {
 	root, err := findRoot(stderr)
 	if err != nil {
-		return "no bureaucracy root to count review turns in"
+		return "", "no bureaucracy root to count review turns in"
 	}
-	return reviewLoopSpent(root, md, canvas)
+	if rounds >= maxReviewTurns {
+		return root, fmt.Sprintf("%d rounds in this cascade (cap %d)", rounds, maxReviewTurns)
+	}
+	return root, reviewLoopSpent(root, md, canvas)
 }
 
 // cascadeStageBlocked reports whether stage's canvas closed with a

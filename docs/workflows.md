@@ -156,11 +156,13 @@ Headless ship cascades (`!!` / `!!!`, and serve's ship) kick back to `build`
 headlessly with the blocking canvas, re-dispatch review, and repeat until
 review passes, the reviewer writes `{"status":"blocked","escalate":true}`
 (another build round won't help), or the run's journal holds ten review turns;
-then it parks. A sweep won't re-ride a run parked that way until you push a
-note, kick it back by hand (uncapped), or close it. `!` and `!<stage>` take no
-recovery turn of their own: they stop at the blocked gate and fall through to
-that same chain prompt (headless, a back-pointing `kick back to fix` nudge
-prints instead).
+then it parks and asks you a question on the run, which shows wherever open
+questions do: `moe input list`, serve's input page, the dash and Rex. A sweep
+won't re-ride a run parked that way until you answer it (or push any note),
+kick it back by hand (uncapped), or close it; an answer buys one more review
+turn with your reply in its prompt. `!` and `!<stage>` take no recovery turn of
+their own: they stop at the blocked gate and fall through to that same chain
+prompt (headless, a back-pointing `kick back to fix` nudge prints instead).
 
 Design starts with Problem, Decision, Scope, Verification and Open questions
 headings, plus a fenced JSON gate initially `blocked`. The headings guide

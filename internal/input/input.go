@@ -1,6 +1,7 @@
 // Package input owns the run-local human-input record: prose the
-// operator pushes at a run, and prose a pulse asks the operator for.
-// Both reach the run's next agent turn through its stage prompt.
+// operator pushes at a run, and prose a pulse — or the harness, at a
+// spent review park — asks the operator for. Both reach the run's next
+// agent turn through its stage prompt.
 //
 // The record is projects/<project>/runs/<run>/inputs.json, sibling of
 // run.json. It exists only for runs that have received something, so
@@ -82,10 +83,11 @@ type Entry struct {
 	// ID is one-based and dense within the file: entry n is at index
 	// n-1. Ids are per-run, so an entry's address is <project>/<run>#<id>.
 	ID int `json:"id"`
-	// AskedBy is the qualified "<project>/<run>" of the pulse that asked,
+	// AskedBy is the qualified "<project>/<run>" of the run that asked —
+	// a survey's pulse, or the run itself at a spent review park —
 	// set on pings and empty on operator notes.
 	AskedBy string `json:"asked_by,omitempty"`
-	// Question is a pulse's prose question, empty on an operator note.
+	// Question is the asker's prose question, empty on an operator note.
 	Question string `json:"question,omitempty"`
 	// Text is the operator's prose — the note, or the ping's answer.
 	// Empty means the ping is still open.
@@ -244,9 +246,9 @@ func Add(root, projectID, runID, text string) (Entry, error) {
 }
 
 // Ask opens one prose ping on a run and commits it. askedBy is the
-// qualified "<project>/<run>" of the asking pulse; consent is the
-// MoE-Consent value of the walk it made the ask under (a pulse always
-// has one — the ask is a machine act).
+// qualified "<project>/<run>" of the asking run; consent is the
+// MoE-Consent value of the walk it made the ask under, empty when no
+// machine walk is running (a hand-typed cascade's spent review park).
 //
 // Refuses a run that isn't in progress (ErrNotLive), an empty question
 // (ErrEmpty), and a run that already has one open (ErrOpenPing). All

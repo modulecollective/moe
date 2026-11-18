@@ -2,8 +2,11 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 
+	"github.com/modulecollective/moe/internal/input"
 	"github.com/modulecollective/moe/internal/run"
 )
 
@@ -49,6 +52,31 @@ func reviewLoopSpent(root string, md *run.Metadata, canvas string) string {
 	return ""
 }
 
+// askSpentReview opens the operator's ping for a review the loop gave
+// up on, so the park reaches every surface that projects an open
+// question — the phone queue, the dash, Rex — not just a sweep's held
+// line. An answer is a pending note, which reviewLoopHold releases on:
+// the reply is the release.
+//
+// Warn-only, like askThreadEntry: a refused ask is one stderr line and
+// changes nothing about the park or its exit code. ErrOpenPing is the
+// expected refusal — the run already has a question in front of the
+// operator, and one open ping per run stays the rule.
+func askSpentReview(root string, md *run.Metadata, reason string, stderr io.Writer) {
+	question := "Review is blocked and the loop has stopped: " + reason + ".\n" +
+		"Reply with direction and review gets one more turn with your answer; or kick it back by hand, or close the run."
+	e, err := input.Ask(root, md.Project, md.ID, md.Project+"/"+md.ID, question, walkConsent())
+	if errors.Is(err, input.ErrOpenPing) {
+		moePrintf(stderr, "cascade: review: operator already has an open question on this run\n")
+		return
+	}
+	if err != nil {
+		moePrintf(stderr, "cascade: review: could not ask the operator: %v\n", err)
+		return
+	}
+	moePrintf(stderr, "cascade: review: asked the operator %s/%s#%d\n", md.Project, md.ID, e.ID)
+}
+
 // reviewGateEscalated reports whether a review canvas closed
 // `{"status":"blocked","escalate":true}`. escalate only means something
 // on a blocked gate; every other reader sees the status alone, so an
@@ -90,5 +118,5 @@ func reviewLoopHold(root, threadRoot string, md *run.Metadata, groomed groomResu
 	if reason == "" || pendingInputOnThread(root, threadRoot, groomed) {
 		return ""
 	}
-	return "is parked at a blocked review: " + reason + " — push a note, kick it back by hand, or close it"
+	return "is parked at a blocked review: " + reason + " — answer its question, kick it back by hand, or close it"
 }

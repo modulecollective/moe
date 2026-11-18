@@ -252,8 +252,8 @@ func TestKickFloorHoldsASpentReviewLoop(t *testing.T) {
 			}
 		}
 	}
-	const escalatedHold = "is parked at a blocked review: the reviewer escalated — another build round won't clear it — push a note, kick it back by hand, or close it"
-	const capHold = "is parked at a blocked review: review has run 10 times (cap 10) — push a note, kick it back by hand, or close it"
+	const escalatedHold = "is parked at a blocked review: the reviewer escalated — another build round won't clear it — answer its question, kick it back by hand, or close it"
+	const capHold = "is parked at a blocked review: review has run 10 times (cap 10) — answer its question, kick it back by hand, or close it"
 	for _, tc := range []struct {
 		name   string
 		canvas string
@@ -294,5 +294,211 @@ func TestKickFloorHoldsASpentReviewLoop(t *testing.T) {
 				t.Errorf("kickFloorHold = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// seedLiveReviewRun lays down the run.json input.Ask reads to accept an
+// ask; the cascade fixtures otherwise carry only canvases.
+func seedLiveReviewRun(t *testing.T, root string, md *run.Metadata) {
+	t.Helper()
+	seedRunJSON(t, root, md.Project, md.ID, md.Workflow, md.Status)
+}
+
+// openPings returns the run's open pings — never more than one when
+// input.Ask is the only writer, so a second is a test failure.
+func openPings(t *testing.T, root string, md *run.Metadata) []input.Entry {
+	t.Helper()
+	f, err := input.Load(root, md.Project, md.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var open []input.Entry
+	for _, e := range f.Notes {
+		if e.Open() {
+			open = append(open, e)
+		}
+	}
+	return open
+}
+
+// TestSpentReviewAsksTheOperator: both spent exits — the reviewer's
+// escalation and the journal cap — open one ping on the run, asked by
+// the run, carrying the spent reason, and the park itself is unchanged.
+func TestSpentReviewAsksTheOperator(t *testing.T) {
+	for _, tc := range []struct {
+		name, canvas, reason string
+		prior                int
+	}{
+		{name: "escalated", canvas: escalatedReviewCanvas, reason: "the reviewer escalated — another build round won't clear it"},
+		{name: "cap", canvas: blockedReviewCanvas, prior: maxReviewTurns, reason: "review has run 10 times (cap 10)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := isolateCascadeMoeHome(t)
+			md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+			seedLiveReviewRun(t, root, md)
+			commitReviewTurns(t, root, md, tc.prior)
+			writeStageCanvas(t, root, md, "review", tc.canvas)
+			kicks := stubHeadlessKickback(t, 0, nil)
+
+			steps, code, stderr := runReviewGate(t, md)
+			if code != 1 || len(*kicks) != 0 || len(steps) != 0 {
+				t.Fatalf("code=%d kicks=%d steps=%v, want a park with no kickback; stderr=%q", code, len(*kicks), steps, stderr)
+			}
+			open := openPings(t, root, md)
+			if len(open) != 1 {
+				t.Fatalf("open pings = %+v, want one; stderr=%q", open, stderr)
+			}
+			want := "Review is blocked and the loop has stopped: " + tc.reason + "."
+			if open[0].FirstLine() != want || open[0].AskedBy != "tele/fix-it" {
+				t.Fatalf("ping = %+v, want first line %q asked by tele/fix-it", open[0], want)
+			}
+			if !strings.Contains(stderr, "cascade: review: asked the operator tele/fix-it#1") {
+				t.Fatalf("stderr should name the ask: %q", stderr)
+			}
+		})
+	}
+}
+
+// TestSpentReviewKeepsAnExistingPing: a run that already has a question
+// in front of the operator keeps it — one open ping per run — and the
+// park goes ahead unchanged.
+func TestSpentReviewKeepsAnExistingPing(t *testing.T) {
+	root := isolateCascadeMoeHome(t)
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+	seedLiveReviewRun(t, root, md)
+	if _, err := input.Ask(root, md.Project, md.ID, "tele/pulse-one", "Which store?", ""); err != nil {
+		t.Fatal(err)
+	}
+	writeStageCanvas(t, root, md, "review", escalatedReviewCanvas)
+	kicks := stubHeadlessKickback(t, 0, nil)
+
+	steps, code, stderr := runReviewGate(t, md)
+	if code != 1 || len(*kicks) != 0 || len(steps) != 0 {
+		t.Fatalf("code=%d kicks=%d steps=%v, want the same park", code, len(*kicks), steps)
+	}
+	open := openPings(t, root, md)
+	if len(open) != 1 || open[0].Question != "Which store?" {
+		t.Fatalf("open pings = %+v, want only the original", open)
+	}
+	if !strings.Contains(stderr, "cascade: review: operator already has an open question on this run") {
+		t.Fatalf("stderr should name the existing question: %q", stderr)
+	}
+}
+
+// TestUnspentReviewAsksNothing is the negative control: a loop that
+// blocks and then readies, and a non-yolo park, open no ping. Without
+// it the asserts above pass on a helper that asks at every blocked
+// round.
+func TestUnspentReviewAsksNothing(t *testing.T) {
+	t.Run("loop runs until ready", func(t *testing.T) {
+		root := isolateCascadeMoeHome(t)
+		md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+		seedLiveReviewRun(t, root, md)
+		writeStageCanvas(t, root, md, "review", blockedReviewCanvas)
+		stubReviewDispatch(t, root, md, true, func(n int) string {
+			if n < 3 {
+				return blockedReviewCanvas
+			}
+			return readyReviewCanvas
+		})
+		stubHeadlessKickback(t, 0, nil)
+		if _, code, stderr := runReviewGate(t, md); code != 0 {
+			t.Fatalf("gate code=%d, want 0; stderr=%q", code, stderr)
+		}
+		if open := openPings(t, root, md); len(open) != 0 {
+			t.Fatalf("open pings = %+v, want none", open)
+		}
+	})
+	t.Run("non-yolo park", func(t *testing.T) {
+		root := isolateCascadeMoeHome(t)
+		md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+		seedLiveReviewRun(t, root, md)
+		writeStageCanvas(t, root, md, "review", escalatedReviewCanvas)
+		stubHeadlessKickback(t, 0, nil)
+		wf, _ := LookupWorkflow("sdlc")
+		var stdout, stderr bytes.Buffer
+		if _, parked, _ := cascadeStageGate(wf, cascadeDispatchers["sdlc"], md, "review", false, &stdout, &stderr); !parked {
+			t.Fatalf("parked=false, want a park to prompt; stderr=%q", stderr.String())
+		}
+		if open := openPings(t, root, md); len(open) != 0 {
+			t.Fatalf("open pings = %+v, want none", open)
+		}
+	})
+}
+
+// TestSpentReviewAnswerReleasesAndReasks is the round trip: the ask is
+// not a work turn (so the hold survives the summons), the operator's
+// answer releases the hold, and a review that escalates again on the
+// released turn opens a fresh ping.
+func TestSpentReviewAnswerReleasesAndReasks(t *testing.T) {
+	defer withRideMode(rideDynamic)()
+	realGate := checkCascadeStageGate
+	root, _, _ := kickFixture(t)
+	checkCascadeStageGate = realGate // kickFixture stubs it; the park needs the real gate
+	md := &run.Metadata{ID: "loop", Project: "moe", Workflow: "sdlc", Status: run.StatusInProgress}
+	seedRun(t, root, "moe", "loop", "sdlc", run.StatusInProgress, time.Now().Local(),
+		map[string]string{"design": "# Loop\n\nbody\n", "review": escalatedReviewCanvas})
+	advanceAt(t, root, "moe", "loop", "design", time.Now().Local().Add(-time.Hour))
+	trailerstest.CommitWorkTurnAt(t, root, "moe", "loop", "sdlc", "build", time.Time{})
+	commitReviewTurns(t, root, md, 1)
+	stubHeadlessKickback(t, 0, nil)
+	hold := func() string {
+		t.Helper()
+		return kickFloorHold(root, "moe/loop", groomChains(root, "moe", "pulse-groom", nil, nil, io.Discard))
+	}
+
+	if _, code, stderr := runReviewGate(t, md); code != 1 {
+		t.Fatalf("gate code=%d, want the park; stderr=%q", code, stderr)
+	}
+	first := openPings(t, root, md)
+	if len(first) != 1 {
+		t.Fatalf("open pings = %+v, want one", first)
+	}
+	if n, last, err := reviewTurns(root, md); err != nil || n != 1 || !last {
+		t.Fatalf("reviewTurns after ask = %d, %v, %v; want 1, true — the ask must not count as a work turn", n, last, err)
+	}
+	if h := hold(); !strings.Contains(h, "answer its question") {
+		t.Fatalf("hold = %q, want the run held until the question is answered", h)
+	}
+
+	if _, err := input.Answer(root, "moe", "loop", 0, "the counter reset is in bar.go"); err != nil {
+		t.Fatal(err)
+	}
+	if h := hold(); h != "" {
+		t.Fatalf("an answered question should release the hold, got %q", h)
+	}
+
+	// The released review turn escalates again: a new exception, a new
+	// question.
+	commitReviewTurns(t, root, md, 1)
+	if _, code, stderr := runReviewGate(t, md); code != 1 {
+		t.Fatalf("gate code=%d, want the park; stderr=%q", code, stderr)
+	}
+	second := openPings(t, root, md)
+	if len(second) != 1 || second[0].ID == first[0].ID {
+		t.Fatalf("open pings = %+v, want one fresh ping beside answered #%d", second, first[0].ID)
+	}
+}
+
+// TestCascadeFromGateSpentReviewAsks drives the ask through the real
+// cascade call stack: a `!!` walk into an escalated review parks, and
+// the ask commits — no repo lock is held at the park site.
+func TestCascadeFromGateSpentReviewAsks(t *testing.T) {
+	root := isolateCascadeMoeHome(t)
+	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+	seedLiveReviewRun(t, root, md)
+	writeStageCanvas(t, root, md, "review", escalatedReviewCanvas)
+	writeStampedBuild(t, root, md)
+	stubReviewDispatch(t, root, md, false, func(int) string { return escalatedReviewCanvas })
+	kicks := stubHeadlessKickback(t, 0, nil)
+	pushes := stubPushFromCascade(t, 0, nil)
+
+	var stdout, stderr bytes.Buffer
+	res, code := cascadeFromGate("review", "", false, false, md, &stdout, &stderr)
+	if code == 0 || res.shipped || len(*kicks) != 0 || len(*pushes) != 0 {
+		t.Fatalf("code=%d shipped=%v kicks=%d pushes=%d, want a park; stderr=%q", code, res.shipped, len(*kicks), len(*pushes), stderr.String())
+	}
+	if open := openPings(t, root, md); len(open) != 1 || open[0].AskedBy != "tele/fix-it" {
+		t.Fatalf("open pings = %+v, want the run's own question; stderr=%q", open, stderr.String())
 	}
 }
