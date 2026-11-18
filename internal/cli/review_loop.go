@@ -73,8 +73,8 @@ func reviewGateEscalated(canvas string) bool {
 // re-run review on an unchanged tree and park again. Only a run whose
 // newest work turn is the blocked review is held — once any later work
 // turn has answered it (an operator's hand kickback to build or
-// design), the run waits for review, not at it. An undelivered note releases it for one turn, the
-// same release a design-only park takes.
+// design), the run waits for review, not at it. An undelivered note
+// releases it for one turn, the same release a design-only park takes.
 func reviewLoopHold(root, threadRoot string, md *run.Metadata, groomed groomResult) string {
 	if md.Workflow != "sdlc" {
 		return ""
