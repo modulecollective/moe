@@ -266,6 +266,12 @@ func TestKickFloorHoldsASpentReviewLoop(t *testing.T) {
 		{name: "ready review, rides", canvas: readyReviewCanvas, setUp: []func(*testing.T, string){turn("build"), reviews(maxReviewTurns)}},
 		{name: "build answered since, rides", canvas: escalatedReviewCanvas, setUp: []func(*testing.T, string){turn("review"), turn("build")}},
 		{
+			name: "design answered since, rides", canvas: escalatedReviewCanvas,
+			setUp: []func(*testing.T, string){turn("build"), turn("review"), turn("design"), func(t *testing.T, root string) {
+				advanceAt(t, root, "moe", "loop", "design", time.Now().Local().Add(time.Minute))
+			}},
+		},
+		{
 			name: "an undelivered note releases it", canvas: escalatedReviewCanvas,
 			setUp: []func(*testing.T, string){turn("build"), turn("review"), func(t *testing.T, root string) {
 				if _, err := input.Add(root, "moe", "loop", "the counter reset is in bar.go, look there"); err != nil {

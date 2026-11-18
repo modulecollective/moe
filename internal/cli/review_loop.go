@@ -14,7 +14,7 @@ import (
 const maxReviewTurns = 10
 
 // reviewTurns reads the run's journal for its review work-turn count
-// and whether review, rather than build, landed the newest of the two.
+// and whether review landed the run's newest work turn of any document.
 // A seam so a test can pin a count that never grows.
 var reviewTurns = func(root string, md *run.Metadata) (count int, reviewLast bool, err error) {
 	docs, err := run.WorkTurnDocs(root, md.Project, md.ID)
@@ -26,13 +26,7 @@ var reviewTurns = func(root string, md *run.Metadata) (count int, reviewLast boo
 			count++
 		}
 	}
-	for _, d := range docs {
-		if d == "review" || d == "build" {
-			reviewLast = d == "review"
-			break
-		}
-	}
-	return count, reviewLast, nil
+	return count, len(docs) > 0 && docs[0] == "review", nil
 }
 
 // reviewLoopSpent reports why the headless loop must stop kicking a
@@ -77,9 +71,9 @@ func reviewGateEscalated(canvas string) bool {
 // reviewLoopHold is the kick floor's leg for a run parked at a blocked
 // review the loop has given up on. Without it every armed sweep would
 // re-run review on an unchanged tree and park again. Only a run whose
-// newest build-or-review turn is the blocked review is held — once
-// build has answered (an operator's hand kickback), the run waits for
-// review, not at it. An undelivered note releases it for one turn, the
+// newest work turn is the blocked review is held — once any later work
+// turn has answered it (an operator's hand kickback to build or
+// design), the run waits for review, not at it. An undelivered note releases it for one turn, the
 // same release a design-only park takes.
 func reviewLoopHold(root, threadRoot string, md *run.Metadata, groomed groomResult) string {
 	if md.Workflow != "sdlc" {
