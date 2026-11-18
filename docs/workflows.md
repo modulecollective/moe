@@ -152,12 +152,15 @@ run back rather than parking. Interactively the chain prompt becomes a kickback
 offer `[Y/n/d/x]`: `Y` (default) reopens `build` seeded with the blocking
 canvas, `d` kicks back to `design`, `n` parks, and `x` scuttles the run; after
 the fix, MoE re-offers the gate that blocked instead of walking forward.
-Headless ship cascades (`!!` / `!!!`, and serve's ship) take one bounded
-`build` kickback carrying the blocking canvas, then re-dispatch the blocked
-stage and re-check its gate once — if the fix doesn't stick, it parks as before.
-`!` and `!<stage>` take no recovery turn of their own: they stop at the blocked
-gate and fall through to that same chain prompt (headless, a back-pointing `kick
-back to fix` nudge prints instead).
+Headless ship cascades (`!!` / `!!!`, and serve's ship) kick back to `build`
+headlessly with the blocking canvas, re-dispatch review, and repeat until
+review passes, the reviewer writes `{"status":"blocked","escalate":true}`
+(another build round won't help), or the run's journal holds ten review turns;
+then it parks. A sweep won't re-ride a run parked that way until you push a
+note, kick it back by hand (uncapped), or close it. `!` and `!<stage>` take no
+recovery turn of their own: they stop at the blocked gate and fall through to
+that same chain prompt (headless, a back-pointing `kick back to fix` nudge
+prints instead).
 
 Design starts with Problem, Decision, Scope, Verification and Open questions
 headings, plus a fenced JSON gate initially `blocked`. The headings guide
