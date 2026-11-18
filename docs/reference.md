@@ -367,11 +367,11 @@ The `codex` backend needs no setup in `~/.codex/config.toml`. MoE defines its
 own sandbox permissions profile (`moe-workspace-git`) inline on every Codex
 turn and selects it — read-only root, writable tmp, and writable `.` plus
 `.git` on the working directory and each `--add-dir` root. The profile also
-enables direct command networking on every interactive, resumed, and headless
-turn, so development tools such as `gh` can use the operator's existing
-credentials to reach their services. Codex's stock `workspace-write` mode
-leaves `.git` read-only, which fails a `git commit` inside the per-run clone;
-shipping the profile with MoE keeps that from depending on operator config.
+enables direct command networking on every interactive and headless turn, so
+development tools such as `gh` can use the operator's existing credentials to
+reach their services. Codex's stock `workspace-write` mode leaves `.git`
+read-only, which fails a `git commit` inside the per-run clone; shipping the
+profile with MoE keeps that from depending on operator config.
 
 Separately, MoE pins `GIT_EDITOR=true` and `GIT_SEQUENCE_EDITOR=true` for every
 Codex turn (interactive and headless): Codex never has a TTY for an editor, so a
@@ -659,15 +659,18 @@ finished and cannot resume. After addressing the underlying setup failure, run
 re-run the original stage command. Abandon discards that incomplete session's
 worktree and branch.
 
-Each document keeps its latest conversation per backend. Switching backends and
-returning resumes that backend's conversation; changing its model keeps the
-same conversation. The canvas carries shared work between backends. Headless
-turns still start fresh and replace only their backend's latest session ID.
+Each document keeps its latest session per backend. On Claude, switching
+backends and returning resumes that conversation, and changing its model keeps
+it. Codex starts a new conversation on every launch: it fixes a session's
+instructions when the session is created, so a resumed stage would run on the
+first turn's guidance. The canvas carries the work across Codex launches and
+between backends. Headless turns start fresh on both backends and replace only
+their backend's latest session ID.
 
 Stage logic can recover orphaned Claude sessions from the Claude cache or an
-identity-matching mirror. Codex requires its native rollout to resume. Missing
-history starts a fresh conversation with a notice. Malformed or conflicting
-mirror identity stops the turn before launch when recovery needs that mirror.
+identity-matching mirror. Missing history starts a fresh conversation with a
+notice. Malformed or conflicting mirror identity stops the turn before launch
+when recovery needs that mirror.
 
 Older runs' scalar session IDs are adopted lazily using the selected backend's
 native cache or mirror identity. The legacy value stays intact while new turns

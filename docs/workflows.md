@@ -416,7 +416,8 @@ that shouldn't touch code: a durable, resumable thinking thread that is
 read-only against the project, so exploration can't drift into unreviewed
 edits. Its single write surface is grooming the idea backlog. And the run
 persists across sittings — one long conversation the next `chat` continues, not
-a fresh amnesiac session each time.
+a fresh amnesiac session each time. Codex is the exception: each sitting there
+starts a new conversation.
 
 `moe chat` is the read-only project-review surface: a thinking partner that
 reads project source through a per-run sandbox clone, never edits it, and
