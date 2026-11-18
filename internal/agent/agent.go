@@ -146,7 +146,8 @@ type Request struct {
 	SessionID string
 	// NewSession is true when SessionID was just minted this turn
 	// (first call for this document/backend) and false when it already
-	// has a server-side session that should be resumed.
+	// has a server-side session that should be resumed. Codex never
+	// resumes and uses it only to pick the empty-launch fallback.
 	NewSession bool
 	// Prompt is the assembled system prompt from buildSystemPrompt.
 	Prompt string

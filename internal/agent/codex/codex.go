@@ -7,13 +7,17 @@
 // Two structural differences from claude shape the implementation:
 //
 //   - Codex generates session ids itself and does not (yet) accept a
-//     caller-supplied id. The first turn runs without `--resume`;
-//     subsequent turns pass `codex resume <sid>` (interactive) or
-//     `codex exec resume <sid>` (one-shot). The first turn reads the
-//     id back from the `thread.started` JSON event (one-shot, verified
-//     in 0.130.0) or from the rollout file's name suffix (interactive
-//     — TUI has no stdout stream to read). Callers persist the returned
-//     id when it differs from what they passed in.
+//     caller-supplied id, and MoE never resumes a codex session: every
+//     turn, interactive or one-shot, starts a new conversation. Codex
+//     records `developer_instructions` once, when the session is
+//     created, and silently drops the text a later `codex resume`
+//     passes, so a resumed stage would run on the first turn's canvas
+//     paths and stage guidance (knowledge topic codex-cli.md,
+//     "Developer instructions are fixed at session start"). Each turn
+//     reads the new id back from the `thread.started` JSON event
+//     (one-shot, verified in 0.130.0) or from the rollout file's name
+//     suffix (interactive — TUI has no stdout stream to read). Callers
+//     persist the returned id when it differs from what they passed in.
 //
 //   - Codex has no `--ask-for-approval` on `codex exec`. We pin the
 //     one-shot approval policy explicitly with `-c approval_policy=never`
@@ -23,12 +27,11 @@
 //     settings"). The sandbox stays on — the permissions profile in
 //     commonArgs plus the `--add-dir` set is still what bounds writes;
 //     this change only removes the human-in-the-loop expectation that
-//     the one-shot path can't satisfy. On interactive `codex` and on `codex
-//     resume`, we pass `--ask-for-approval never` so MoE-managed
-//     interactive Codex has the same approval posture while keeping the
-//     same sandbox boundary, plus `--no-daemon`: the `-c` overrides
-//     already force embedded mode, and the flag stops codex warning
-//     about it.
+//     the one-shot path can't satisfy. On interactive `codex` we pass
+//     `--ask-for-approval never` so MoE-managed interactive Codex has
+//     the same approval posture while keeping the same sandbox
+//     boundary, plus `--no-daemon`: the `-c` overrides already force
+//     embedded mode, and the flag stops codex warning about it.
 //
 // System prompt injection uses `-c developer_instructions="""<prompt>"""`.
 // The triple-quoted TOML multi-line form sidesteps the
@@ -124,14 +127,18 @@ func dropScrubbed(in []string) []string {
 // shape as claude.Agent.
 type Agent struct{}
 
-// Execute drives an interactive `codex` (or `codex resume <sid>`) turn
-// with stdio wired to the operator's terminal. Returns the session id
-// the agent used: when r.NewSession is true, this is discovered from
-// the rollout file written during the turn (codex's id, not the one
-// passed in); otherwise it's r.SessionID echoed back.
+// Execute drives an interactive `codex` turn with stdio wired to the
+// operator's terminal. Every launch is a new codex session, whatever
+// r.NewSession says (see the package comment for why codex never
+// resumes). Returns the id discovered from the rollout file written
+// during the turn — codex's id, not the one passed in.
 //
-// The interactive TUI has no JSON stdout to read, so first-turn id
-// readback finds a newly created rollout whose metadata names this cwd.
+// The interactive TUI has no JSON stdout to read, so id readback finds
+// a newly created rollout whose metadata names this cwd. Codex writes
+// no rollout when the operator quits before sending anything; on a
+// document that already has a session that returns r.SessionID, so an
+// empty reopen keeps the stored id and its mirror. On a document's
+// first launch there is nothing to fall back to and it stays an error.
 func (Agent) Execute(r agent.Request) (string, error) {
 	bin, err := exec.LookPath("codex")
 	if err != nil {
@@ -148,8 +155,8 @@ func (Agent) Execute(r agent.Request) (string, error) {
 	// runs cwd = r.SessionCwd because it encodes cwd into its on-disk
 	// session bucket and needs a stable cwd for `--resume`; codex
 	// keeps cwd=root because apply_patch enforces a project-scope
-	// check and rollouts are date-sharded so resume doesn't depend
-	// on cwd.
+	// check, and it never resumes, so there is no session lookup for
+	// cwd to keep stable.
 	cmd.Dir = r.Root
 	cmd.Env = filteredEnv(r.ExtraEnv)
 	cmd.Stdin = r.Stdin
@@ -165,12 +172,9 @@ func (Agent) Execute(r agent.Request) (string, error) {
 		cmd.Stderr = os.Stderr
 	}
 
-	var before map[string]struct{}
-	if r.NewSession {
-		before, err = rolloutSnapshot()
-		if err != nil {
-			return "", fmt.Errorf("codex: snapshot interactive rollouts: %w", err)
-		}
+	before, err := rolloutSnapshot()
+	if err != nil {
+		return "", fmt.Errorf("codex: snapshot interactive rollouts: %w", err)
 	}
 	// Route through agent.StartCommand so an operator Ctrl-C while
 	// codex is running becomes a non-nil runErr (ErrInterrupted) rather
@@ -184,12 +188,12 @@ func (Agent) Execute(r agent.Request) (string, error) {
 		runErr = ac.Wait()
 	}
 
-	sid := r.SessionID
-	if r.NewSession {
-		sid, err = discoverSessionID(before, r.Root)
-		if err != nil {
-			return "", errors.Join(runErr, fmt.Errorf("codex: discover interactive session: %w", err))
-		}
+	sid, err := discoverSessionID(before, r.Root)
+	if errors.Is(err, errNoRollout) && !r.NewSession {
+		sid, err = r.SessionID, nil
+	}
+	if err != nil {
+		return "", errors.Join(runErr, fmt.Errorf("codex: discover interactive session: %w", err))
 	}
 
 	// Transcript copy is best-effort, same shape as claude's path.
@@ -409,10 +413,11 @@ func rolloutPath(sessionID string) (string, error) {
 	return matches[0], nil
 }
 
-// executeArgs builds the full codex argv for the interactive path —
-// `codex …` for a new session, `codex resume <sid> …` for a returning
-// one. Kept separate from Execute so the argument shape (and its
-// dependence on AddDirs) is unit-testable without shelling out.
+// executeArgs builds the full codex argv for the interactive path. It
+// never emits `codex resume <sid>` (see the package comment), so the
+// argv does not depend on r.NewSession or r.SessionID. Kept separate
+// from Execute so the argument shape (and its dependence on AddDirs)
+// is unit-testable without shelling out.
 func executeArgs(r agent.Request) []string {
 	args := commonArgs(r.ClonePath, r.Prompt)
 	// Stage-provided AddDirs (dev-env MOE_HOME / MOE_DEV_TMPDIR) widen
@@ -423,8 +428,7 @@ func executeArgs(r agent.Request) []string {
 		args = append(args, "--add-dir", d)
 	}
 	// --model mirrors the one-shot path; empty leaves the flag off so
-	// codex uses its configured default. Rides the base args, so a resume
-	// turn becomes `codex resume <sid> ... --model <m>`.
+	// codex uses its configured default.
 	if r.Model != "" {
 		args = append(args, "--model", r.Model)
 	}
@@ -439,12 +443,6 @@ func executeArgs(r agent.Request) []string {
 	// from codex 0.156.0; `codex exec` has no such flag and never
 	// consults the daemon, so the one-shot path doesn't carry it.
 	args = append(args, "--no-daemon")
-	if !r.NewSession {
-		// Subsequent turn: `codex resume <sid> [prompt]`. The session
-		// id was stored on r.SessionID after the first turn returned
-		// what codex generated.
-		args = append([]string{"resume", r.SessionID}, args...)
-	}
 	if r.InitialPrompt != "" {
 		args = append(args, r.InitialPrompt)
 	}
@@ -507,8 +505,8 @@ const (
 	gitWritableProfileNetwork = `permissions.` + gitWritableProfileName + `.network.enabled=true`
 )
 
-// commonArgs builds the codex flag set shared across exec / interactive
-// / resume: developer-instructions injection, the sandbox permissions
+// commonArgs builds the codex flag set shared across exec and
+// interactive: developer-instructions injection, the sandbox permissions
 // profile, and the per-stage clone add-dir.
 //
 // cwd-inversion shape: every stage runs cwd = bureaucracy worktree,
@@ -607,6 +605,11 @@ func rolloutSnapshot() (map[string]struct{}, error) {
 	return snapshot, nil
 }
 
+// errNoRollout is discoverSessionID's answer when the turn created no
+// interactive rollout for cwd at all, as opposed to one it can't
+// safely bind. Execute falls back to the stored id on it.
+var errNoRollout = errors.New("no interactive rollout")
+
 // discoverSessionID accepts exactly one new interactive rollout owned by
 // cwd. A missing or ambiguous owner cannot safely bind the run.
 func discoverSessionID(before map[string]struct{}, cwd string) (string, error) {
@@ -659,7 +662,7 @@ func discoverSessionID(before map[string]struct{}, cwd string) (string, error) {
 		sid = id
 	}
 	if sid == "" {
-		return "", fmt.Errorf("no interactive rollout for %s", cwd)
+		return "", fmt.Errorf("%w for %s", errNoRollout, cwd)
 	}
 	return sid, nil
 }

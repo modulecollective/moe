@@ -218,12 +218,88 @@ func TestExecuteDiscoveryFailurePreservesMirrorAndChildError(t *testing.T) {
 	}
 }
 
-func TestExecuteResumeBypassesDiscovery(t *testing.T) {
+// TestExecuteReturningLaunchBindsNewSession: a document with a stored
+// codex session starts a new one and returns its id, so the caller
+// stores it and the mirror follows the new rollout.
+func TestExecuteReturningLaunchBindsNewSession(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	root := t.TempDir()
+	writeFakeRollout(t, home, "2026/09/23", chatID, rolloutMeta(chatID, root, "cli")+"old\n")
+	newBody := rolloutMeta(secondID, root, "cli") + "new\n"
+	argvPath := filepath.Join(t.TempDir(), "argv")
+	fakeCodexOnPath(t, fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$@\" > %q\ncat > %q <<'EOF'\n%sEOF\n",
+		argvPath, rolloutDest(t, home, "2026/09/24", secondID), newBody))
+	md := &run.Metadata{Project: "p", ID: "r"}
+	sid, err := (Agent{}).Execute(agent.Request{Root: root, Metadata: md, DocID: "chat", SessionID: chatID, NewSession: false, Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: io.Discard})
+	if err != nil || sid != secondID {
+		t.Fatalf("got %q, %v; want new session %s", sid, err, secondID)
+	}
+	argv, err := os.ReadFile(argvPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(argv), "resume") || strings.Contains(string(argv), chatID) {
+		t.Fatalf("returning launch resumed: %s", argv)
+	}
+	mirror := filepath.Join(root, run.ThreadPathFor("codex", "p", "r", "chat"))
+	got, err := os.ReadFile(mirror)
+	if err != nil || string(got) != newBody {
+		t.Fatalf("mirror = %q, %v; want new rollout", got, err)
+	}
+}
+
+// TestExecuteEmptyReopenKeepsStoredSession: the operator opens codex on
+// a document with a stored session and quits without sending anything,
+// so no rollout is written. That is not a discovery failure; the stored
+// id comes back with the child's own result.
+func TestExecuteEmptyReopenKeepsStoredSession(t *testing.T) {
+	for _, exit := range []int{0, 7} {
+		t.Run(fmt.Sprintf("exit %d", exit), func(t *testing.T) {
+			t.Setenv("CODEX_HOME", t.TempDir())
+			fakeCodexOnPath(t, fmt.Sprintf("#!/bin/sh\nexit %d\n", exit))
+			sid, err := (Agent{}).Execute(agent.Request{Root: t.TempDir(), SessionID: chatID, NewSession: false, Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: io.Discard})
+			if sid != chatID {
+				t.Fatalf("got %q; want stored ID", sid)
+			}
+			if exit == 0 && err != nil {
+				t.Fatalf("empty reopen errored: %v", err)
+			}
+			if exit != 0 {
+				var exitErr *exec.ExitError
+				if !errors.As(err, &exitErr) || exitErr.ExitCode() != exit || errors.Is(err, errNoRollout) {
+					t.Fatalf("want only the child's exit error, got %v", err)
+				}
+			}
+		})
+	}
+}
+
+// TestExecuteFirstLaunchWithoutRolloutStillFails: with no stored
+// session there is nothing to fall back to.
+func TestExecuteFirstLaunchWithoutRolloutStillFails(t *testing.T) {
 	t.Setenv("CODEX_HOME", t.TempDir())
 	fakeCodexOnPath(t, "#!/bin/sh\nexit 0\n")
-	sid, err := (Agent{}).Execute(agent.Request{Root: t.TempDir(), SessionID: chatID, NewSession: false, Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: io.Discard})
-	if err != nil || sid != chatID {
-		t.Fatalf("got %q, %v; want resume ID", sid, err)
+	sid, err := (Agent{}).Execute(agent.Request{Root: t.TempDir(), SessionID: chatID, NewSession: true, Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: io.Discard})
+	if sid != "" || !errors.Is(err, errNoRollout) {
+		t.Fatalf("got %q, %v; want errNoRollout", sid, err)
+	}
+}
+
+// TestExecuteReturningLaunchAmbiguousStillFails: the stored-id fallback
+// covers only "no rollout at all"; a rollout that can't be bound safely
+// stays an error on a returning launch too.
+func TestExecuteReturningLaunchAmbiguousStillFails(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	root := t.TempDir()
+	script := fmt.Sprintf("#!/bin/sh\ncat > %q <<'EOF'\n%sEOF\ncat > %q <<'EOF'\n%sEOF\n",
+		rolloutDest(t, home, "2026/09/25", pulseID), rolloutMeta(pulseID, root, "cli"),
+		rolloutDest(t, home, "2026/09/26", secondID), rolloutMeta(secondID, root, "cli"))
+	fakeCodexOnPath(t, script)
+	sid, err := (Agent{}).Execute(agent.Request{Root: root, SessionID: chatID, NewSession: false, Stdin: strings.NewReader(""), Stdout: io.Discard, Stderr: io.Discard})
+	if sid != "" || err == nil || errors.Is(err, errNoRollout) {
+		t.Fatalf("got %q, %v; want ambiguity error", sid, err)
 	}
 }
 

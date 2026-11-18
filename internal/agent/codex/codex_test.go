@@ -164,32 +164,31 @@ func TestExecuteArgsAppendsAddDirsBeforeApproval(t *testing.T) {
 	}
 }
 
-// TestExecuteArgsResumePrependsSid: a returning session prepends
-// `resume <sid>` to the flag set; the positional prompt still lands
-// after all flags.
-func TestExecuteArgsResumePrependsSid(t *testing.T) {
-	args := executeArgs(agent.Request{
+// TestExecuteArgsNeverResumes: a document with a stored session gets
+// the same argv as a first launch — no `resume <sid>` — because codex
+// drops refreshed developer_instructions on resume.
+func TestExecuteArgsNeverResumes(t *testing.T) {
+	req := agent.Request{
 		Root:          "/bureaucracy",
-		NewSession:    false,
+		ClonePath:     "/bureaucracy/clone",
 		SessionID:     "sid-1",
+		Model:         "gpt-5-codex",
 		Prompt:        "system",
 		InitialPrompt: "follow-up",
-	})
-	if len(args) < 2 || args[0] != "resume" || args[1] != "sid-1" {
-		t.Fatalf("expected leading `resume sid-1`, got %v", args)
 	}
-	if args[len(args)-1] != "follow-up" {
-		t.Errorf("InitialPrompt should be the last positional arg, got %q", args[len(args)-1])
+	returning := executeArgs(req)
+	req.NewSession = true
+	first := executeArgs(req)
+	if indexOf(returning, "resume") >= 0 || indexOf(returning, "sid-1") >= 0 {
+		t.Fatalf("returning launch should not resume: %v", returning)
 	}
-	if indexOf(args, "--no-daemon") < 0 {
-		t.Errorf("resume turn lost --no-daemon: %v", args)
+	if strings.Join(returning, "\x00") != strings.Join(first, "\x00") {
+		t.Fatalf("argv depends on NewSession:\nreturning %v\nfirst     %v", returning, first)
 	}
-	assertGitWritableProfile(t, args)
 }
 
 // TestExecuteArgsModel pins interactive `--model`: set → a `--model
-// <m>` pair rides the flag set (surviving the `resume <sid>` prepend on
-// a returning turn); unset → no flag at all.
+// <m>` pair rides the flag set; unset → no flag at all.
 func TestExecuteArgsModel(t *testing.T) {
 	args := executeArgs(agent.Request{
 		Root:       "/bureaucracy",
@@ -199,19 +198,6 @@ func TestExecuteArgsModel(t *testing.T) {
 	})
 	if !containsPair(args, "--model", "gpt-5-codex") {
 		t.Errorf("args missing `--model gpt-5-codex` pair: %v", args)
-	}
-
-	// Resume turn: --model still present alongside the `resume <sid>`
-	// prefix.
-	resume := executeArgs(agent.Request{
-		Root:       "/bureaucracy",
-		NewSession: false,
-		SessionID:  "sid-1",
-		Model:      "gpt-5-codex",
-		Prompt:     "system",
-	})
-	if resume[0] != "resume" || !containsPair(resume, "--model", "gpt-5-codex") {
-		t.Errorf("resume turn should keep `--model`: %v", resume)
 	}
 
 	// Unset Model → no --model flag.
