@@ -324,6 +324,9 @@ prefixes (`10-`, `20-`, …) leave room for inserts.
 - Read the `MOE_*` env the harness exports (`MOE_PROJECT`, `MOE_RUN`,
   `MOE_BUREAUCRACY`, `MOE_SANDBOX`, optionally `MOE_WORKSPACE`,
   `MOE_TARGET_BRANCH`) — that's the contract. Don't reach outside it.
+- `pre-push.d/*` also runs with the tree's dev-env, under the `MOE_*` vars: a
+  tool `dev-env.d` put on `PATH` is already there, so don't source
+  `.moe/dev-env.env` from the script.
 - `dev-env.d/*` must not mutate tracked files in `$MOE_SANDBOX`. Setup work
   writes to a path the script owns and emits (e.g. `MOE_DEV_TMPDIR=…`); the
   design stage's sandbox-boundary check would false-positive on a dirty tree.
