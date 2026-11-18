@@ -678,6 +678,40 @@ func LatestWorkTurnSHA(root, projectID, runID, docID string) (sha string, when t
 	return latestSubjectSHA(root, "work: update", projectID, runID, docID)
 }
 
+// WorkTurnDocs returns the document of every `work: update <doc>` commit
+// for the run, newest first. Same scoping as LatestWorkTurnSHA (anchored
+// subject, project and run trailers), with the document read from the
+// subject so one log walk answers every document — the review loop
+// counts review turns and asks whether review or build landed last.
+// The MoE-Document trailer must agree with the subject; a commit whose
+// two disagree is not a work turn this reader trusts.
+func WorkTurnDocs(root, projectID, runID string) ([]string, error) {
+	out, err := git.Output(root,
+		"log",
+		"--all-match",
+		"--grep", "^work: update [a-z0-9-]*$",
+		"--grep", trailers.GrepPattern("MoE-Project", projectID),
+		"--grep", trailers.GrepPattern("MoE-Run", runID),
+		"--format=%s%x00%(trailers:key=MoE-Document,valueonly,separator=%x01)",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("run: git log: %w", err)
+	}
+	var docs []string
+	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
+		subject, docTrailer, ok := strings.Cut(line, "\x00")
+		if !ok {
+			continue
+		}
+		doc := strings.TrimPrefix(subject, "work: update ")
+		if doc == subject || strings.TrimSpace(docTrailer) != doc {
+			continue
+		}
+		docs = append(docs, doc)
+	}
+	return docs, nil
+}
+
 // LatestAdvanceSHA returns the SHA and committer time of the most recent
 // `advance: <docID>` marker commit for the run — the click-forward marker
 // the chain prompt writes when the operator declines the next stage but

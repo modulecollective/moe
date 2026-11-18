@@ -1554,3 +1554,46 @@ func LastActivity(root, projectID, runID string) (time.Time, error) {
 	}
 	return time.Unix(epoch, 0).UTC(), nil
 }
+
+// TestWorkTurnDocsScopesToOneRun pins the journal read the review loop's
+// cap counts from: only this run's work turns, newest first, across
+// documents — not a sibling run's, not the same slug in another
+// project, not a session-start commit, and not a commit whose
+// MoE-Document trailer disagrees with its subject. A looser grep here
+// silently moves the cap.
+func TestWorkTurnDocsScopesToOneRun(t *testing.T) {
+	root := newTestRoot(t)
+	t0 := time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC)
+	i := 0
+	commit := func(subject, projectID, runID, docID string) {
+		t.Helper()
+		i++
+		stamp := t0.Add(time.Duration(i) * time.Minute).Format(time.RFC3339)
+		gittest.RunWithEnv(t, root, []string{"GIT_AUTHOR_DATE=" + stamp, "GIT_COMMITTER_DATE=" + stamp},
+			"commit", "--allow-empty", "-m", subject+"\n\n"+
+				"MoE-Run: "+runID+"\nMoE-Project: "+projectID+"\nMoE-Workflow: sdlc\nMoE-Document: "+docID+"\n")
+	}
+	commit("work: update design", "moe", "loop", "design")
+	commit("work: update build", "moe", "loop", "build")
+	commit("work: update review", "moe", "loop", "review")
+	commit("work: update review", "moe", "other", "review")      // sibling run
+	commit("work: update review", "lightpool", "loop", "review") // same slug, other project
+	commit("work: start session for review", "moe", "loop", "review")
+	commit("work: update review", "moe", "loop", "build") // subject and trailer disagree
+	commit("work: update build", "moe", "loop", "build")
+	commit("work: update review", "moe", "loop", "review")
+
+	got, err := WorkTurnDocs(root, "moe", "loop")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"review", "build", "review", "build", "design"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("WorkTurnDocs = %v, want %v", got, want)
+	}
+
+	none, err := WorkTurnDocs(root, "moe", "never")
+	if err != nil || len(none) != 0 {
+		t.Fatalf("WorkTurnDocs(never) = %v, %v; want empty, nil", none, err)
+	}
+}
