@@ -88,14 +88,15 @@ func EnsureMaterialized(root, projectID string) error {
 
 	fmt.Fprintf(os.Stderr, "project: initialising submodule %s ...\n", SubmoduleDir(projectID))
 	// -c protocol.file.allow=always relaxes CVE-2022-39253 hardening for
-	// this one invocation. MoE's own workspace plumbing rewrites
-	// submodule URLs to file:// paths under .moe/clones/ so parallel
-	// runs share a clone; without the flag, modern git (>=2.38.1)
+	// this one invocation. A submodule URL can be a local path — an
+	// offline or scratch bureaucracy whose .gitmodules names a local
+	// repo, or a submodule.<path>.url an operator overrode by hand; moe
+	// itself never sets one. Without the flag, modern git (>=2.38.1)
 	// rejects the transport and the auto-init dies with "fatal:
 	// transport 'file' not allowed". The threat model the guard
-	// protects against is malicious upstream submodule URLs, not MoE's
-	// own local clones — and the flag is scoped per-invocation, not
-	// written into persistent config.
+	// protects against is malicious upstream submodule URLs, not a
+	// path the operator chose — and the flag is scoped per-invocation,
+	// not written into persistent config.
 	out, err := git.Combined(root, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "--recursive", SubmoduleDir(projectID))
 	if err != nil {
 		return &SubmoduleInitError{
