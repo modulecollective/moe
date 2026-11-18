@@ -1079,13 +1079,14 @@ var checkCascadeStageGate = func(wf *Workflow, md *run.Metadata, stage string, s
 
 // cascadeStageGate evaluates a just-dispatched stage's gate and, on a
 // headless ship cascade (`!!` / `!!!`) that hit a *blocked* sdlc
-// review gate, makes one bounded headless kickback to build before
-// re-dispatching the stage and re-checking once. It is the judgement-
-// recovery analogue of cascadeShipStep's mechanical push retry: a real
-// review finding no longer dies silently in a headless chain, but the
-// loop stays bounded at a single attempt — if the fix doesn't stick the
-// run parks exactly as before. retries mirrors cascadeShipStep's
-// `retries >= 1` shape: one try per gate, then stop.
+// review gate, kicks back to build headlessly, re-dispatches review and
+// re-checks, round after round, until review passes or the loop is
+// spent (reviewLoopSpent): the reviewer escalated, or the run's journal
+// holds maxReviewTurns review turns. It is the judgement-recovery
+// analogue of cascadeShipStep's mechanical push retry. The count lives
+// in the journal so it survives across cascades and sweeps; the
+// in-process rounds bound is a belt in case a round lands no review
+// turn to count. A spent loop parks exactly as the single retry did.
 //
 // Recovery is gated to the ship cascade (yolo). A non-yolo cascade
 // (`!` / `!<stage>` / `--once` / `--to=`) that hits a *blocked* sdlc
@@ -1122,16 +1123,25 @@ func cascadeStageGate(wf *Workflow, dispatcher cascadeDispatcher, md *run.Metada
 			return nil, true, 0
 		}
 	}
-	retries := 0
+	rounds := 0
 	for {
-		if yolo && retries < 1 && md.Workflow == "sdlc" && stage == "review" {
-			if canvas, blocked := cascadeStageBlocked(md, stage, stderr); blocked {
+		if yolo && md.Workflow == "sdlc" && stage == "review" {
+			canvas, blocked := cascadeStageBlocked(md, stage, stderr)
+			spent := ""
+			if blocked {
+				spent = cascadeReviewLoopSpent(md, canvas, rounds, stderr)
+				if spent != "" {
+					// Falls through to the canonical park below.
+					moePrintf(stderr, "cascade: %s stays blocked: %s\n", stage, spent)
+				}
+			}
+			if blocked && spent == "" {
 				if cc := cascadeCheckpoint(md, "gate kickback to build", stderr); cc != 0 {
 					steps = append(steps, cascadeStepResult{stage: "build", code: cc})
 					return steps, false, cc
 				}
-				retries++
-				// One headless kickback to build, carrying the blocking
+				rounds++
+				// A headless kickback to build, carrying the blocking
 				// canvas as kickoff — the same seam the interactive
 				// kickback uses, run headless and re-checked by the loop.
 				recCode := openKickbackSession(md, "build", stage, canvas, true, stdout, stderr)
@@ -1159,6 +1169,20 @@ func cascadeStageGate(wf *Workflow, dispatcher cascadeDispatcher, md *run.Metada
 		}
 		return steps, false, gateCode
 	}
+}
+
+// cascadeReviewLoopSpent is reviewLoopSpent for the cascade, plus the
+// in-process bound: the rounds this call has already run can't pass
+// the cap even if the journal count never grows.
+func cascadeReviewLoopSpent(md *run.Metadata, canvas string, rounds int, stderr io.Writer) string {
+	if rounds >= maxReviewTurns {
+		return fmt.Sprintf("%d rounds in this cascade (cap %d)", rounds, maxReviewTurns)
+	}
+	root, err := findRoot(stderr)
+	if err != nil {
+		return "no bureaucracy root to count review turns in"
+	}
+	return reviewLoopSpent(root, md, canvas)
 }
 
 // cascadeStageBlocked reports whether stage's canvas closed with a

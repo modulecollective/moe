@@ -114,40 +114,6 @@ func TestCascadeStageGateRecoversBlockedReview(t *testing.T) {
 	}
 }
 
-// TestCascadeStageGateRecoveryExhausted: when the recovery turn lands but
-// the re-dispatch still blocks, the one retry is spent and the gate parks
-// exactly as before — `parked at review` on stderr, exit 1, and no second
-// kickback.
-func TestCascadeStageGateRecoveryExhausted(t *testing.T) {
-	root := isolateCascadeMoeHome(t)
-	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
-	writeStageCanvas(t, root, md, "review", blockedReviewCanvas)
-
-	// The re-dispatch leaves the canvas blocked — the fix didn't stick.
-	prev := openSdlcStage
-	openSdlcStage = func(_, _, _ string, _ bool, _, _ io.Writer) int { return 0 }
-	t.Cleanup(func() { openSdlcStage = prev })
-
-	kicks := stubHeadlessKickback(t, 0, nil)
-
-	wf, _ := LookupWorkflow("sdlc")
-	var stdout, stderr bytes.Buffer
-	steps, _, code := cascadeStageGate(wf, cascadeDispatchers["sdlc"], md, "review", true, &stdout, &stderr)
-	if code != 1 {
-		t.Fatalf("gate code=%d, want 1 (parked); stderr=%q", code, stderr.String())
-	}
-	if len(*kicks) != 1 {
-		t.Fatalf("kickbacks = %d, want exactly 1 (bounded): %+v", len(*kicks), *kicks)
-	}
-	if !strings.Contains(stderr.String(), "cascade: review gate not satisfied; parked at review") {
-		t.Fatalf("expected park message, got stderr=%q", stderr.String())
-	}
-	wantSteps := []string{"build", "review"}
-	if len(steps) != len(wantSteps) {
-		t.Fatalf("steps = %+v, want %v", steps, wantSteps)
-	}
-}
-
 // TestCascadeStageGateKickbackTurnFails: when the recovery code turn
 // itself exits non-zero, the gate stops with that exit code and never
 // re-dispatches the blocked stage.

@@ -517,7 +517,7 @@ const reviewCanvasSkeleton = `# Review
 {"status":"blocked"}
 ` + "```" + `
 
-Allowed values: "ready" or "blocked". Use "blocked" only for a known correctness, scope, maintainability, or reviewability problem that should stop the cascade. Non-blocking observations that shape verification can be recorded under Findings while leaving status "ready"; out-of-scope work worth doing later goes to the run's followups.md.
+Allowed values: "ready" or "blocked". Use "blocked" only for a known correctness, scope, maintainability, or reviewability problem that should stop the cascade; add "escalate": true when another build round won't clear it (a finding came back unrepaired, no net progress, or it needs a design change or operator decision). Non-blocking observations that shape verification can be recorded under Findings while leaving status "ready"; out-of-scope work worth doing later goes to the run's followups.md.
 
 ## Findings
 

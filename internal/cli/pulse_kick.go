@@ -357,7 +357,9 @@ func kickFloorHold(root, threadRoot string, groomed groomResult) string {
 	if hold := controlHoldPhrase(root, md); hold != "" {
 		return hold
 	}
-	return ""
+	// A blocked review the headless loop has given up on: re-riding it
+	// would spend a review turn on an unchanged tree and park again.
+	return reviewLoopHold(root, threadRoot, md, groomed)
 }
 
 // renderKickSection renders a plan as the `## Kick` section a dynamic

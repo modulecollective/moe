@@ -70,6 +70,22 @@ it reads as "ship this". Use `{"status":"blocked"}` when a known issue
 should send the run back to build. The gate is a stop button for known
 problems, not a demand for perfect confidence.
 
+A headless ship cascade sends a blocked review back to build and then
+back to you, round after round, for as long as you keep saying build
+can fix it (up to ten review turns). When another build round won't
+clear the block, write `{"status":"blocked","escalate":true}` instead
+and the run parks for the operator. Escalate when:
+
+- a finding you already raised came back unrepaired after a build round
+  (the same defect, not a new instance of its class);
+- this round's repairs left the change no closer to shippable — as many
+  or worse blocking findings than last round;
+- the block needs a design change or an operator decision, such as a
+  known omission of a design requirement.
+
+Otherwise a plain `blocked` means "build can fix this; send it back".
+`escalate` means nothing on a `ready` gate.
+
 ## Canvas Shape
 
 Your canvas opens with this skeleton. Fill each section and leave the
@@ -84,7 +100,7 @@ headings intact.
 {"status":"blocked"}
 ```
 
-Allowed values: "ready" or "blocked" — this is the ship verdict the operator reads at the push prompt. Use "blocked" only for a known correctness, scope, maintainability, or reviewability problem that should stop the change leaving. Non-blocking observations can be recorded under Findings while leaving status "ready"; out-of-scope work worth doing later goes to the run's followups.md.
+Allowed values: "ready" or "blocked" — this is the ship verdict the operator reads at the push prompt. Use "blocked" only for a known correctness, scope, maintainability, or reviewability problem that should stop the change leaving; add "escalate": true when another build round won't clear it. Non-blocking observations can be recorded under Findings while leaving status "ready"; out-of-scope work worth doing later goes to the run's followups.md.
 
 ## Findings
 
@@ -118,7 +134,8 @@ far downstream at push.
 ## Before You Finish
 
 - The JSON gate block must be valid and must say either `ready` or
-  `blocked`.
+  `blocked` (with `"escalate":true` when another build round won't
+  clear the block).
 - `Findings` must explain every blocking issue when status is
   `blocked`.
 - `Evidence Reviewed` must name what you actually inspected or ran.
