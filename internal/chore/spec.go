@@ -318,9 +318,11 @@ func write(root, projectID, name string, expected *Spec, s Spec, create bool) er
 			if expected != nil && cur.normalized() != expected.normalized() {
 				return fmt.Errorf("chore %s: %w", key, ErrChanged)
 			}
-			// The copy that keeps an unchanged save from committing. An
-			// empty-diff commit touching the directory would still read
-			// as "definition changed" and make a mechanical chore due.
+			// Same definition, so leave the files as they are. Without this
+			// an unchanged save of a hand-formatted chore.json would rewrite
+			// it in our layout and commit — and any commit touching the
+			// directory reads as "definition changed" and makes a mechanical
+			// chore due. (A byte-identical rewrite is caught in commitDir.)
 			if cur.normalized() == s {
 				return nil
 			}

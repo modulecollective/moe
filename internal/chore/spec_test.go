@@ -383,3 +383,27 @@ func TestParseSpecTextRefusals(t *testing.T) {
 		t.Fatalf("got %+v, %v", got, err)
 	}
 }
+
+// An unchanged save leaves a hand-formatted chore.json alone: rewriting
+// it in the writer's layout would commit, and any commit under the
+// directory reads as "definition changed".
+func TestUnchangedUpdateKeepsHandFormatting(t *testing.T) {
+	root := specRepo(t)
+	rel := "projects/moe/chores/audit/chore.json"
+	writeChore(t, root, rel, `{"cooldown":"90d","cadence":"90d","workflow":"sdlc"}`)
+	gittest.Run(t, root, "commit", "-q", "-am", "hand edit")
+	before := head(t, root)
+	s, err := LoadSpec(root, "moe", "audit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Update(root, "moe", "audit", s); err != nil {
+		t.Fatal(err)
+	}
+	if head(t, root) != before {
+		t.Fatal("an unchanged save committed a reformat")
+	}
+	if b, _ := os.ReadFile(filepath.Join(root, rel)); string(b) != `{"cooldown":"90d","cadence":"90d","workflow":"sdlc"}` {
+		t.Fatalf("rewritten: %q", b)
+	}
+}
