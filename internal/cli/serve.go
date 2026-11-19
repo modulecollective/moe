@@ -251,5 +251,16 @@ func serveOptions(root string, stderr io.Writer) serve.Options {
 			}
 			return chore.State{}, false, nil
 		},
+		CreateChore: func(project, name string, s chore.Spec) error { return choreCreate(root, project, name, s) },
+		UpdateChore: func(project, name string, s chore.Spec) error { return choreUpdate(root, project, name, s) },
+		// OpenChore is `moe chore open --now` with no tail: the open
+		// commit, and nothing spawned.
+		OpenChore: func(project, name string) (string, error) {
+			res, err := openChoreInProcess(root, project, name, choreOpenForced)
+			if err != nil {
+				return "", err
+			}
+			return res.Metadata.ID, nil
+		},
 	}
 }

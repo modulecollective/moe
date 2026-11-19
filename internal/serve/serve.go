@@ -236,6 +236,20 @@ type Options struct {
 	// the workflow registry. Absent means the chore page returns 500.
 	GatherChore func(project, name string) (state chore.State, ok bool, err error)
 
+	// CreateChore and UpdateChore write a chore definition through the
+	// cli's registry-checking wrapper around the chore writer (serve
+	// can't look a workflow up). Refusals come back as
+	// *chore.InvalidError or chore.ErrExists / chore.ErrNotFound. Delete
+	// needs no registry and calls chore.Remove directly.
+	CreateChore func(project, name string, s chore.Spec) error
+	UpdateChore func(project, name string, s chore.Spec) error
+
+	// OpenChore opens the chore's run now — due-ness and cooldown
+	// waived, an already-open run still refused — and returns its id.
+	// It writes the open commit and spawns nothing. Errors wrap
+	// chore.ErrNotFound (404) or chore.ErrNotOpenable (409).
+	OpenChore func(project, name string) (runID string, err error)
+
 	// WorkflowUI returns the serve declaration a workflow made at
 	// registration time — which stages the web may mark advanced, and
 	// whether a close pipeline exists. ok=false means the workflow
@@ -524,10 +538,17 @@ func (s *Server) registerRoutes() {
 	s.router.HandleFunc("GET /run/{project}/{slug}/status", s.handleRunStatus)
 	s.router.HandleFunc("POST /run/{project}/{slug}/control", s.handleRunControl)
 	s.router.HandleFunc("GET /run-status", s.handleRunStatuses)
-	// Chore detail page. A chore isn't a run, so it has its own /chore
-	// namespace; read-only, because serve opens due chores on its own
-	// cadence now and `moe chore open --now` is the operator's override.
+	// Chore pages. A chore isn't a run, so it has its own /chore
+	// namespace. The page edits and deletes the definition and can open
+	// its run now; none of it starts an agent. Create hangs off the
+	// project so /chore/{project}/new can't shadow a chore named "new".
 	s.router.HandleFunc("GET /chore/{project}/{name}", s.handleChorePage)
+	s.router.HandleFunc("GET /chore/{project}/{name}/edit", s.handleChoreEditForm)
+	s.router.HandleFunc("POST /chore/{project}/{name}/edit", s.handleChoreEditSubmit)
+	s.router.HandleFunc("POST /chore/{project}/{name}/delete", s.handleChoreDelete)
+	s.router.HandleFunc("POST /chore/{project}/{name}/open", s.handleChoreOpen)
+	s.router.HandleFunc("GET /projects/{project}/chores/new", s.handleChoreNewForm)
+	s.router.HandleFunc("POST /projects/{project}/chores/new", s.handleChoreNewSubmit)
 
 	// The heartbeat's own page: what it decided, what it spawned, what
 	// died. The boards carry a brief status cluster in their header and

@@ -76,6 +76,7 @@ func TestServePagesRenderSharedHead(t *testing.T) {
 	seedRun(t, root, "alpha", "fix-it", "sdlc")
 	seedRun(t, root, "alpha", "my-idea", "idea")
 	canvasPath := writeCanvas(t, root, "alpha", "fix-it", "design", "# design\n")
+	writeFile(t, root, "projects/alpha/chores/readme-refresh/chore.json", `{"trigger":"README.md"}`)
 	writeFile(t, root, "lore/widget-thing.md",
 		"---\ntitle: Widgets jam on Tuesdays\napplies-when: a widget is involved\n---\n\n# Widgets\n\nbody.\n")
 	now := time.Now().UTC()
@@ -104,6 +105,7 @@ func TestServePagesRenderSharedHead(t *testing.T) {
 		"/run/alpha/my-idea/edit",             // edit_idea
 		"/run/alpha/fix-it/transcript/design", // transcript (empty state)
 		"/chore/alpha/readme-refresh",         // chore
+		"/chore/alpha/readme-refresh/edit",    // chore_form
 		"/serve",                              // serve
 		"/lore",                               // lore_index
 		"/lore/widget-thing",                  // doc

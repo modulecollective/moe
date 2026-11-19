@@ -221,7 +221,9 @@ func TestRegisteredChoresGatherUIAndHTTP(t *testing.T) {
 	}
 	for _, name := range []string{"judged", "cooling", "linked"} {
 		body := request("/chore/alpha/" + name)
-		if !strings.Contains(body, "Full authored prompt") || strings.Contains(body, "/open\"") {
+		// "open now" is offered exactly when no run is open; it is a form
+		// post, so rendering it opens nothing (HEAD is checked below).
+		if !strings.Contains(body, "Full authored prompt") || strings.Contains(body, "/open\"") != (name != "linked") {
 			t.Fatalf("detail %s", name)
 		}
 		if name == "judged" && !strings.Contains(body, html.EscapeString(criterion)) {

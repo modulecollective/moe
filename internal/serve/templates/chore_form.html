@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+{{template "head" .}}
+<title>{{if .Create}}new chore{{else}}edit {{.Project}}/{{.Name}}{{end}} — MoE</title>
+</head>
+<body>
+<main>
+  <header class="page-header">
+    <div class="banner">
+      <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
+      <div class="banner-sub"><a href="/">dashboard</a> → <a href="/projects">projects</a> → <a href="/projects/{{.Project}}">{{.Project}}</a> → {{if .Create}}new chore{{else}}<a href="/chore/{{.Project}}/{{.Name}}">{{.Name}}</a> → edit{{end}}</div>
+    </div>
+    {{template "headeractions" .}}
+  </header>
+
+  {{if .ErrorBanner}}<p class="error">{{.ErrorBanner}}</p>{{end}}
+
+  <form method="post" action="{{if .Create}}/projects/{{.Project}}/chores/new{{else}}/chore/{{.Project}}/{{.Name}}/edit{{end}}" class="new-run">
+    {{if .Create}}
+    <label>
+      name
+      <input type="text" name="name" required autofocus value="{{.Name}}"
+             pattern="[a-z0-9][a-z0-9-]*"
+             autocapitalize="none" autocorrect="off" spellcheck="false"
+             placeholder="chore-name">
+    </label>
+    {{end}}
+    <p class="hint">Set one of trigger, cadence or when. Durations take h, m, s or d (e.g. <code>30d</code>).</p>
+    <label>trigger <span class="hint">(path glob; <code>*</code> for any change)</span>
+      <input type="text" name="trigger" value="{{.Trigger}}" autocapitalize="none" spellcheck="false">
+    </label>
+    <label>cadence <span class="hint">(due again after this long)</span>
+      <input type="text" name="cadence" value="{{.Cadence}}" autocapitalize="none" spellcheck="false">
+    </label>
+    <label>cooldown <span class="hint">(minimum gap between runs)</span>
+      <input type="text" name="cooldown" value="{{.Cooldown}}" autocapitalize="none" spellcheck="false">
+    </label>
+    <label>when <span class="hint">(prose condition the pulse judges; not with trigger or cadence)</span>
+      <input type="text" name="when" value="{{.When}}">
+    </label>
+    <label>workflow <span class="hint">(blank for sdlc)</span>
+      <input type="text" name="workflow" value="{{.Workflow}}" autocapitalize="none" spellcheck="false">
+    </label>
+    <label>
+      prompt <span class="hint">(markdown; seeds the run's first stage; blank stubs to <code># name</code>)</span>
+      <textarea name="prompt" rows="14" class="idea-body">{{.Prompt}}</textarea>
+    </label>
+
+    <button type="submit">{{if .Create}}add chore{{else}}save{{end}}</button>
+  </form>
+
+  {{if not .Create}}
+  <section class="actions">
+    <form method="post" action="/chore/{{.Project}}/{{.Name}}/delete" class="action-form">
+      <button class="action" type="submit" title="removes the definition in one commit; an open run carries on and git history is the undo">delete chore</button>
+    </form>
+  </section>
+  {{end}}
+</main>
+{{template "themejs" .}}
+</body>
+</html>

@@ -60,8 +60,11 @@ func TestChorePageRendersDefinition(t *testing.T) {
 			t.Errorf("body missing %q\n%s", want, body)
 		}
 	}
-	if strings.Contains(body, "/chore/alpha/readme-refresh/open") {
-		t.Errorf("the chore page must offer no open route\n%s", body)
+	// No run is open, so the page offers to open one now, and edit.
+	for _, want := range []string{`action="/chore/alpha/readme-refresh/open"`, `href="/chore/alpha/readme-refresh/edit"`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("body missing %q", want)
+		}
 	}
 	assertSharedHead(t, body)
 }
@@ -94,6 +97,9 @@ func TestChorePageNamesWhatAChoreIsWaitingOn(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("body missing %q\n%s", want, body)
 		}
+	}
+	if strings.Contains(body, "/chore/alpha/readme-refresh/open") {
+		t.Error("a chore with an open run offers no second open")
 	}
 }
 

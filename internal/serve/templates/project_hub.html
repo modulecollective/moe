@@ -108,7 +108,10 @@
   </section>
 
   <section class="dash-section">
-    <h2><span>chores <span class="count">({{len .Chores}})</span></span></h2>
+    <h2>
+      <span>chores <span class="count">({{len .Chores}})</span></span>
+      <a class="section-action" href="/projects/{{$.Project}}/chores/new">new chore</a>
+    </h2>
     {{if .Chores}}
     <ul class="rows">
       {{range .Chores}}

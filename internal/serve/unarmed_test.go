@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/modulecollective/moe/internal/chore"
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
@@ -30,7 +29,6 @@ func TestServeHasNoSpawnRoutes(t *testing.T) {
 		"/run/alpha/x/ship",
 		"/run/alpha/x/chain",
 		"/run/alpha/x/kick",
-		"/chore/alpha/x/open",
 	} {
 		t.Run(path, func(t *testing.T) {
 			// Armed on purpose: the claim is that the route is absent, not
@@ -227,29 +225,28 @@ func TestUnarmedServeSDLCPageOffersTheMarkAndClose(t *testing.T) {
 	}
 }
 
-// TestChorePageIsReadOnly: a due chore renders its schedule and its
-// verdict and offers nothing. Opening it is the heartbeat's job now —
-// the chore leg of the gate sweeps the project, and the sweep opens the
-// run — so a button here would be a second authority on the same
-// question.
-func TestChorePageIsReadOnly(t *testing.T) {
+// TestChoreOpenSpawnsNothing: "open now" writes the open commit through
+// the callback and redirects to the run. Armed on purpose: the claim is
+// that the route itself starts no agent, not that a flag hides it — an
+// armed heartbeat rides the commit on its own next tick.
+func TestChoreOpenSpawnsNothing(t *testing.T) {
+	calls := 0
 	s := newTestServer(t, Options{
-		Addr: "127.0.0.1:0", Root: t.TempDir(),
-		GatherChore: func(project, name string) (chore.State, bool, error) {
-			return dueChoreState(), true, nil
+		Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: "/bin/echo", Dynamic: true,
+		OpenChore: func(project, name string) (string, error) {
+			calls++
+			return name + "-1", nil
 		},
 	})
-
 	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/chore/alpha/readme-refresh", nil))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+	s.Handler().ServeHTTP(rr, httptest.NewRequest("POST", "/chore/alpha/readme-refresh/open", nil))
+	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/run/alpha/readme-refresh-1" {
+		t.Fatalf("got %d Location=%q body=%s", rr.Code, rr.Header().Get("Location"), rr.Body.String())
 	}
-	body := rr.Body.String()
-	if strings.Contains(body, "/chore/alpha/readme-refresh/open") {
-		t.Errorf("the chore page must offer no open route\n%s", body)
+	if calls != 1 {
+		t.Fatalf("OpenChore called %d times", calls)
 	}
-	if !strings.Contains(body, "schedule") {
-		t.Errorf("the chore page should still render the schedule detail\n%s", body)
+	if len(s.children.all) != 0 {
+		t.Errorf("nothing may spawn; registry has %d", len(s.children.all))
 	}
 }

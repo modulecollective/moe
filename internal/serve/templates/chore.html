@@ -22,7 +22,10 @@
 
     <section class="actions">
       {{if .Waiting}}<span class="action disabled" aria-disabled="true">waiting — {{.Waiting}}</span>{{end}}
-      {{if .OpenRun}}<a class="action" href="{{.OpenRunURL}}">open run: {{.OpenRun}}</a>{{end}}
+      {{if .OpenRun}}<a class="action" href="{{.OpenRunURL}}">open run: {{.OpenRun}}</a>{{else}}
+      <form method="post" action="/chore/{{.Project}}/{{.Name}}/open" class="action-form"><button class="action" type="submit" title="opens the run now, ahead of its schedule; starts no agent — an armed heartbeat picks it up">open now</button></form>
+      {{end}}
+      <a class="action" href="/chore/{{.Project}}/{{.Name}}/edit" title="change the schedule or prompt, or delete the chore">edit</a>
     </section>
 
     <section class="canvases">
