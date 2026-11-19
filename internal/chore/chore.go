@@ -3,7 +3,6 @@
 package chore
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -139,51 +138,16 @@ func loadProject(root, projectID string) ([]Definition, error) {
 	return defs, nil
 }
 
-// choreJSON is the on-disk wire shape of chore.json. Durations stay
-// strings so the d-suffix shorthand survives and the file stays
-// hand-editable; parseDuration turns them into time.Duration.
-type choreJSON struct {
-	Trigger  string `json:"trigger,omitempty"`
-	Workflow string `json:"workflow,omitempty"`
-	Cadence  string `json:"cadence,omitempty"`
-	Cooldown string `json:"cooldown,omitempty"`
-	When     string `json:"when,omitempty"`
-}
-
 func loadOne(root, projectID, name string) (Definition, error) {
-	dir := filepath.Join(root, project.Dir(projectID), "chores", name)
-	d := Definition{Project: projectID, Name: name, Workflow: DefaultWorkflow}
-	b, err := os.ReadFile(filepath.Join(dir, "chore.json"))
+	s, err := LoadSpec(root, projectID, name)
 	if err != nil {
-		return d, fmt.Errorf("chore %s/%s: read chore.json: %w", projectID, name, err)
+		return Definition{Project: projectID, Name: name, Workflow: DefaultWorkflow}, err
 	}
-	var cj choreJSON
-	if err := json.Unmarshal(b, &cj); err != nil {
-		return d, fmt.Errorf("chore %s/%s: parse chore.json: %w", projectID, name, err)
+	d, err := s.parse(projectID, name)
+	if err != nil {
+		return d, err
 	}
-	d.Trigger = cj.Trigger
-	d.When = strings.TrimSpace(cj.When)
-	if cj.Workflow != "" {
-		d.Workflow = cj.Workflow
-	}
-	if cj.Cooldown != "" {
-		d.Cooldown, err = ParseDuration(cj.Cooldown)
-		if err != nil {
-			return d, fmt.Errorf("chore %s/%s cooldown: %w", projectID, name, err)
-		}
-	}
-	if cj.Cadence != "" {
-		d.Cadence, err = ParseDuration(cj.Cadence)
-		if err != nil {
-			return d, fmt.Errorf("chore %s/%s cadence: %w", projectID, name, err)
-		}
-	}
-	if b, err := os.ReadFile(filepath.Join(dir, "prompt.md")); err == nil {
-		d.Prompt = string(b)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return d, fmt.Errorf("chore: read prompt.md: %w", err)
-	}
-	d.EditedAt = lastDefinitionEdit(root, filepath.ToSlash(filepath.Join(project.Dir(projectID), "chores", name)))
+	d.EditedAt = lastDefinitionEdit(root, Dir(projectID, name))
 	return d, Validate(d)
 }
 
