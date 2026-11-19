@@ -236,3 +236,21 @@ func TestChoreEditUnchangedSaysSo(t *testing.T) {
 		t.Fatalf("stdout %q", out.String())
 	}
 }
+
+// Saving the prefilled form untouched still registers the chore, and
+// says so: the seed is a proposal, not the definition on disk.
+func TestChoreNewWithAnUntouchedFormSaysAdded(t *testing.T) {
+	root := seedChoreRoot(t)
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "true")
+	var out, errb bytes.Buffer
+	if code := runChoreNew([]string{"moe/prices", "--cadence", "30d"}, &out, &errb); code != 0 {
+		t.Fatalf("new = %d: %s", code, errb.String())
+	}
+	if _, err := chore.LoadSpec(root, "moe", "prices"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "added chore moe/prices") {
+		t.Fatalf("stdout %q", out.String())
+	}
+}

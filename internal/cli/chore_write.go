@@ -150,7 +150,7 @@ func runChoreNew(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "chore new: set $EDITOR or $VISUAL — chore new needs an editor")
 		return 1
 	}
-	return choreEditorSave("chore new", projectID, name, s.Text(), "moe-chore-new-", func(edited chore.Spec) error {
+	return choreEditorSave("chore new", projectID, name, s.Text(), "moe-chore-new-", true, func(edited chore.Spec) error {
 		return choreCreate(root, projectID, name, edited)
 	}, "added chore", stdout, stderr)
 }
@@ -204,15 +204,17 @@ func runChoreEdit(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "chore edit: set $EDITOR or $VISUAL, or pass the fields to change as flags")
 		return 1
 	}
-	return choreEditorSave("chore edit", projectID, name, cur.Text(), "moe-chore-edit-", func(edited chore.Spec) error {
+	return choreEditorSave("chore edit", projectID, name, cur.Text(), "moe-chore-edit-", false, func(edited chore.Spec) error {
 		return choreUpdateChecked(root, projectID, name, cur, edited)
 	}, "edited chore", stdout, stderr)
 }
 
 // choreEditorSave pops $EDITOR on the text form and saves what comes
 // back. A save that fails to parse or is refused keeps the edited text
-// and names its path, so nothing typed is lost.
-func choreEditorSave(verb, projectID, name, seed, prefix string, save func(chore.Spec) error, done string, stdout, stderr io.Writer) int {
+// and names its path, so nothing typed is lost. create: the seed is a
+// proposal, not what is on disk, so saving it untouched still adds the
+// chore.
+func choreEditorSave(verb, projectID, name, seed, prefix string, create bool, save func(chore.Spec) error, done string, stdout, stderr io.Writer) int {
 	text, tmpPath, code := captureEditorBody(prefix, seed, stderr)
 	if code != 0 {
 		if tmpPath != "" {
@@ -230,7 +232,7 @@ func choreEditorSave(verb, projectID, name, seed, prefix string, save func(chore
 		return 1
 	}
 	os.RemoveAll(filepath.Dir(tmpPath))
-	if s.Text() == seed {
+	if !create && s.Text() == seed {
 		// The writer committed nothing; saying "edited" would claim a change.
 		moePrintf(stdout, "chore %s/%s unchanged\n", projectID, name)
 		return 0
