@@ -14,16 +14,16 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
 ### Re-Entry And Supervision
 
 - `moe dash [--all] [--project <id>] [--workflow <name>]` prints a snapshot
-  of the terminal dashboard, with due project chores at the head of BACKLOG
-  and a daily-activity histogram of recent run activity (`--project` scopes
-  the chart to one project). When a `moe serve` is running against this
-  bureaucracy, its status rides the banner's tail — armed or not, uptime,
-  next sweep — and a project earns a line of its own only when it is
-  sweeping, cooling off, or its last sweep died. The tail also carries the
-  drain to origin: `N unpushed` when commits are waiting (read from git, so
-  it shows with or without a serve), or `pushed 2m ago` once serve's pusher
-  has landed one. A push origin is refusing earns a row of its own with
-  git's reason.
+  of the terminal dashboard, with all registered chores in CHORES and a daily
+  histogram of recent run activity (`--project` scopes the chart to one
+  project). BACKLOG counts ideas only; workflow filters omit chores. When a
+  `moe serve` is running against this bureaucracy, its status rides the
+  banner's tail — armed or not, uptime, next sweep — and a project earns a
+  line of its own only when it is sweeping, cooling off, or its last sweep
+  died. The tail also carries the drain to origin: `N unpushed` when commits
+  are waiting (read from git, so it shows with or without a serve), or
+  `pushed 2m ago` once serve's pusher has landed one. A push origin is
+  refusing earns a row of its own with git's reason.
 - `moe ui [--project <id>] [--workflow <name>]` is the dashboard as a console:
   the whole board, every completed run included, above the selected item's
   details and a console of recent outcomes. Arrows or `j`/`k` select; `Tab` /

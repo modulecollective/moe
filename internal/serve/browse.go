@@ -180,7 +180,7 @@ type hubVM struct {
 	// bannerArtVM carries the project-scoped histogram + factory art the
 	// "bannerart" partial draws under the header, same as the home dash.
 	bannerArtVM
-	// rowBuckets is the same Active/Intents/Backlog/Completed split the
+	// rowBuckets is the same Active/Intents/Chores/Backlog/Completed split the
 	// home dash renders, over this project's rows alone.
 	rowBuckets
 	// Serve carries the header's serve cluster, board-wide as everywhere

@@ -585,15 +585,14 @@ Recurring maintenance otherwise lives in your memory or in a cron job you don't
 trust an agent to run unattended. A chore is standing intent instead: it turns
 recurring project maintenance into a run MoE knows how to open. A chore
 definition says what maintenance is due, when it becomes due, and which workflow
-run to open for it. MoE evaluates chores against the journal and surfaces the
-due ones; `moe chore open`, or a pulse's chore auto-open, mints the seeded run.
-What happens after that is what you armed: with no `moe serve --dynamic` up, the
-run waits in `moe dash` like any other until you start it, while under an armed
-serve the [heartbeat](#the-heartbeat) notices the chore coming due, sweeps, and
-that sweep both opens the run and rides it on through build, review, and ship. A
-chore coming due is a clock event on an otherwise quiet journal, so the
-heartbeat gate watches for it directly rather than waiting for something else to
-move.
+run to open for it. MoE evaluates chores against the journal; `moe chore open`,
+or a pulse's chore auto-open, mints the seeded run. What happens after that is
+what you armed: with no `moe serve --dynamic` up, the run waits in `moe dash`
+like any other until you start it, while under an armed serve the
+[heartbeat](#the-heartbeat) notices the chore coming due, sweeps, and that sweep
+both opens the run and rides it on through build, review, and ship. A chore
+coming due is a clock event on an otherwise quiet journal, so the heartbeat
+gate watches for it directly rather than waiting for something else to move.
 
 A chore is a directory under `projects/<project>/chores/<name>/` holding a
 `chore.json` of scheduler scalars and a `prompt.md` seed:
@@ -631,9 +630,21 @@ chore it is the anti-flap on a judgment that over-fires).
 Every family shares the same guards: a chore never goes due while it is cooling
 down or already has an open run.
 
-Judged chores don't appear in `moe chore list` (it is due-only) or on the dash
-until their run opens — `moe chore check` is where you see the registration,
-reported as `judged` rather than due/not-due.
+All registrations appear in CHORES between INTENTS and BACKLOG on `moe dash`,
+`moe ui`, the web dashboard and each project hub. Due chores come first; the
+rest sort by project/name. Rows show an open run, a local cooldown eligibility
+time, a due reason, `judged — pulse decides`, or `not due`, alongside the
+condition or schedule. A judged row records no recent LLM verdict, and an
+eligibility time promises no execution time. A linked run keeps its ordinary
+run row; registrations count neither as active runs nor as backlog ideas.
+Project filters apply, while workflow filters omit registrations.
+
+Select a chore in `moe ui` to inspect its full condition or trigger/cadence,
+cooldown, last completion, cooldown eligibility, linked run, workflow and seed
+prompt. Tab to the details pane and scroll to reach long text. Registrations
+are read-only. Web rows link to the existing chore detail page and its open
+run. `moe chore list` remains due-only and omits judged chores;
+`moe chore check` dry-runs all families.
 
 The runtime, mirroring hooks:
 
@@ -674,6 +685,12 @@ that costs is latency — a finding after a ship waits for the next tick (≤20
 minutes) or a hand-run pulse. What it buys is one walker: a sweep's picture of
 the board stays the board it walks, so what it says it is starting is what
 starts.
+
+The LLM supplies content judgment: what warrants a followup, a bounded fix,
+a design investigation, a judged chore, a repair or a park. The harness
+validates those nominations and enforces consent, deduplication, readiness and
+execution. A heartbeat tick first checks mechanically whether a sweep is
+warranted; it does not automatically spend an LLM turn.
 
 Every pulse does three things:
 

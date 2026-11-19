@@ -61,9 +61,8 @@ type dashRowVM struct {
 	Note    template.HTML // escaped note with lineage targets linkified (noteHTML)
 	When    string        // dash.HumanAgo output
 	// URL is where the row's slug links. Runs, ideas and intents go to
-	// /run/; a due chore isn't a run yet and goes to /chore/. The backlog
-	// section renders both kinds, so it links through this rather than
-	// building the path itself.
+	// /run/; a chore registration goes to /chore/. Shared row templates
+	// use this rather than building the path themselves.
 	URL string
 	// Depth is how many levels the row renders nested under a parent —
 	// 0 top-level, 1 for a completed spawned run (a tailed pulse), 2+ for
@@ -234,12 +233,13 @@ func newCompletedVM(rows []dashRowVM, topCap int) completedVM {
 	return vm
 }
 
-// rowBuckets is the Active/Intents/Backlog/Completed split of a dash
+// rowBuckets is the Active/Intents/Chores/Backlog/Completed split of a dash
 // snapshot, shared by the home dash and the project hub. Both embed it,
 // so `.Active` and friends resolve unchanged in Go and in the templates.
 type rowBuckets struct {
 	Active    []dashRowVM
 	Intents   []dashRowVM
+	Chores    []dashRowVM
 	Backlog   []dashRowVM
 	Completed completedVM
 }
@@ -267,10 +267,11 @@ func newRowBuckets(now time.Time, rows []dash.Row, topCap int) rowBuckets {
 			out.Active = append(out.Active, row)
 		case dash.BucketIntents:
 			out.Intents = append(out.Intents, row)
-		case dash.BucketChores, dash.BucketBacklog:
-			// Chores head the backlog rather than holding a section of
-			// their own — the same fold the CLI dash does, and BuildRows
-			// has already ordered them ahead of the idea rows.
+		case dash.BucketChores:
+			// Chore criteria are prose, not run-note link syntax.
+			row.Note = template.HTML(template.HTMLEscapeString(r.Note))
+			out.Chores = append(out.Chores, row)
+		case dash.BucketBacklog:
 			out.Backlog = append(out.Backlog, row)
 		case dash.BucketCompletedRuns:
 			completed = append(completed, row)
@@ -600,7 +601,7 @@ func eventRunURL(ev activityEvent) string {
 	return "/run/" + ev.Subject
 }
 
-// dashVM is the data the dash template renders against. Same three
+// dashVM is the data the dash template renders against. Same five
 // buckets as the CLI dash; COMPLETED arrives pre-capped so the template
 // needs no slice math.
 type dashVM struct {

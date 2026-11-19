@@ -332,6 +332,9 @@ func (s *uiSource) overlay(now time.Time) ([]dash.Row, map[string]RunObservation
 		obs[key] = o
 	}
 	for i := range rows {
+		if rows[i].Bucket == dash.BucketChores {
+			continue
+		}
 		if o, ok := obs[rows[i].Project+"/"+rows[i].Run]; ok {
 			rows[i].Control = o.Summary(now)
 		}
@@ -468,8 +471,24 @@ func (s *uiSource) item(row dash.Row, now time.Time, obs map[string]RunObservati
 	it := ui.Item{Project: row.Project, Run: row.Run, Bucket: int(row.Bucket)}
 	if row.Bucket == dash.BucketChores {
 		it.Kind = ui.ItemChore
-		it.Detail = []string{"chore " + row.Project + "/" + row.Run, "due: " + row.Note,
-			"Chores run from the pulse; nothing here acts on them."}
+		st := s.snap.Chores[key]
+		d := st.Definition
+		it.Detail = []string{"chore " + key, st.Status(), "workflow: " + d.Workflow}
+		it.Detail = append(it.Detail, strings.Split(d.Summary(), "\n")...)
+		it.Detail = append(it.Detail, "cooldown: "+d.Cooldown.String())
+		last := "never"
+		if !st.LastCompleted.IsZero() {
+			last = st.LastCompleted.Local().Format("2006-01-02 15:04 MST")
+		}
+		it.Detail = append(it.Detail, "last completion: "+last)
+		if !st.NextEligible.IsZero() {
+			it.Detail = append(it.Detail, "cooldown eligible: "+st.NextEligible.Local().Format("2006-01-02 15:04 MST"))
+		}
+		if st.OpenRun != "" {
+			it.Detail = append(it.Detail, "linked run: "+st.OpenRun)
+		}
+		it.Detail = append(it.Detail, "", "prompt:")
+		it.Detail = append(it.Detail, strings.Split(d.Prompt, "\n")...)
 		return it
 	}
 	md := s.snap.Runs[key]

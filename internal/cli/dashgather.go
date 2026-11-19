@@ -35,6 +35,8 @@ type DashSnapshot struct {
 	Observations map[string]RunObservation
 	// Runs is the scanned metadata, keyed by project/run.
 	Runs map[string]*run.Metadata
+	// Chores retains the evaluated definitions used by rows, keyed by project/name.
+	Chores map[string]chore.State
 }
 
 // DashFilter mirrors the `moe dash` flag set so the gatherer can be
@@ -122,24 +124,23 @@ func gatherDashSnapshot(root string, now time.Time, filter DashFilter, cached li
 		nextByRun[md.Project+"/"+md.ID] = dec
 	}
 	var choreInputs []dash.ChoreInput
+	choreStates := map[string]chore.State{}
 	if filter.WorkflowFilter == "" {
 		defs, err := chore.LoadAll(root)
 		if err != nil {
 			return DashSnapshot{}, err
 		}
 		for _, s := range chore.EvaluateAll(defs, mds, idx, now) {
-			if !s.Due {
+			if filter.ProjectFilter != "" && s.Definition.Project != filter.ProjectFilter {
 				continue
 			}
-			when := s.LastCompleted
-			if touched := s.Definition.EditedAt; touched.After(when) {
-				when = touched
-			}
+			choreStates[s.Definition.Key()] = s
 			choreInputs = append(choreInputs, dash.ChoreInput{
 				Project: s.Definition.Project,
 				Name:    s.Definition.Name,
-				Reason:  s.ReasonString(),
-				When:    when,
+				Status:  s.Status(),
+				Summary: s.Definition.Summary(),
+				Due:     s.Due,
 			})
 		}
 	}
@@ -223,6 +224,7 @@ func gatherDashSnapshot(root string, now time.Time, filter DashFilter, cached li
 		SessionError:   sessionErr,
 		Observations:   observations,
 		Runs:           runsByKey(mds),
+		Chores:         choreStates,
 	}, nil
 }
 
@@ -294,7 +296,7 @@ func GatherRunRow(root string, projectID, slug string, now time.Time) (dash.Row,
 		return dash.Row{}, false, err
 	}
 	for _, r := range snap.Rows {
-		if r.Run == slug {
+		if r.Run == slug && r.Bucket != dash.BucketChores {
 			return r, true, nil
 		}
 	}

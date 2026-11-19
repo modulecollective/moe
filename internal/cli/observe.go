@@ -354,6 +354,9 @@ func observeRows(root string, rows []dash.Row, mds []*run.Metadata, now time.Tim
 	var live []*run.Metadata
 	seen := map[string]bool{}
 	for _, r := range rows {
+		if r.Bucket == dash.BucketChores {
+			continue
+		}
 		key := r.Project + "/" + r.Run
 		md := byKey[key]
 		if md == nil || seen[key] || (md.Status != run.StatusInProgress && md.Status != run.StatusPushed) {
@@ -364,6 +367,9 @@ func observeRows(root string, rows []dash.Row, mds []*run.Metadata, now time.Tim
 	}
 	obs := observeRuns(root, live, now, cached)
 	for i := range rows {
+		if rows[i].Bucket == dash.BucketChores {
+			continue
+		}
 		if o, ok := obs[rows[i].Project+"/"+rows[i].Run]; ok {
 			rows[i].Control = o.Summary(now)
 		}

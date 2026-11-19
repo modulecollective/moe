@@ -60,6 +60,42 @@ func (s State) ReasonString() string {
 	return strings.Join(s.Reasons, ",")
 }
 
+// Status describes the evaluated state without implying a recent survey verdict
+// or promising when work will execute.
+func (s State) Status() string {
+	switch {
+	case s.OpenRun != "":
+		return "open run " + s.OpenRun
+	case s.CooldownBlocking:
+		return "cooling down until " + s.NextEligible.Local().Format("2006-01-02 15:04 MST")
+	case s.Due:
+		return "due — " + s.ReasonString()
+	case s.Definition.Judged():
+		return "judged — pulse decides"
+	default:
+		return "not due"
+	}
+}
+
+// Summary is the authored condition or mechanical schedule for a standing row.
+func (d Definition) Summary() string {
+	if d.Judged() {
+		return "when " + d.When
+	}
+	var parts []string
+	if d.Trigger != "" {
+		parts = append(parts, "on "+d.Trigger)
+	}
+	if d.Cadence > 0 {
+		cadence := d.Cadence.String()
+		if d.Cadence%(24*time.Hour) == 0 {
+			cadence = fmt.Sprintf("%dd", d.Cadence/(24*time.Hour))
+		}
+		parts = append(parts, "every "+cadence)
+	}
+	return strings.Join(parts, " · ")
+}
+
 func LoadAll(root string) ([]Definition, error) {
 	projects, warnings, err := project.List(root)
 	if err != nil {

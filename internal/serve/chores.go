@@ -85,16 +85,7 @@ func newChoreVM(now time.Time, st chore.State) choreVM {
 	// judged chore, which is never mechanically due and waits on the
 	// sweep's judgment.
 	if !st.Due {
-		switch {
-		case st.OpenRun != "":
-			vm.Waiting = "open run " + st.OpenRun
-		case st.CooldownBlocking:
-			vm.Waiting = "cooling down until " + vm.NextEligible
-		case vm.Judged:
-			vm.Waiting = "judged — the sweep decides"
-		default:
-			vm.Waiting = "not due"
-		}
+		vm.Waiting = st.Status()
 	}
 	return vm
 }

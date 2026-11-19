@@ -156,9 +156,7 @@ func TestNewChoreVMWaitingPrecedence(t *testing.T) {
 }
 
 // TestDashChoreRowsLinkToChorePage: a chore row wraps its slug in an <a>
-// pointing at the chore detail page (the dead-text fix) — including now
-// that the row renders inside the backlog section beside idea rows,
-// which link at /run/.
+// pointing at the chore detail page, independently of ordinary run links.
 func TestDashChoreRowsLinkToChorePage(t *testing.T) {
 	now := time.Now().UTC()
 	gather := func(string) ([]dash.Row, int, int, []int, error) {

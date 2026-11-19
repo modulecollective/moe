@@ -147,12 +147,8 @@ type Bucket int
 const (
 	BucketActiveRuns Bucket = iota // in-progress runs with a next stage
 	BucketIntents                  // open intents: operator-authored standing direction, above the backlog
-	// BucketChores is due project chores, before they become runs. It has
-	// no section of its own: a due chore is pending, unopened work, so it
-	// renders at the head of BACKLOG and counts in that total — which is
-	// why it sorts immediately ahead of BucketBacklog. The bucket survives
-	// as the row's *identity*: chore rows link to /chore/ rather than
-	// /run/, and the per-project chore count reads it.
+	// BucketChores holds all standing registrations, independent of their runs.
+	// They have their own section and count neither as active work nor backlog.
 	BucketChores
 	BucketBacklog       // captured ideas, not yet promoted to a run
 	BucketCompletedRuns // pushed or terminal runs, shown as "done"
@@ -222,8 +218,9 @@ type NextDecision struct {
 type ChoreInput struct {
 	Project string
 	Name    string
-	Reason  string
-	When    time.Time
+	Status  string
+	Summary string
+	Due     bool
 }
 
 // Inputs is everything BuildRows needs. The caller computes most of
@@ -356,7 +353,7 @@ func BuildRows(in Inputs) ([]Row, error) {
 	rows = nestPromotedIdeas(rows, in.Index)
 	// Intents ride in from Inputs (not classify — they carry a title read
 	// off-disk and never join the run board). Splice them after the ACTIVE
-	// prefix so INTENTS sits directly above the backlog, sorted by project
+	// prefix so INTENTS sits above chores and backlog, sorted by project
 	// then slug for a stable render.
 	var intentRows []Row
 	for _, it := range in.Intents {
@@ -384,24 +381,32 @@ func BuildRows(in Inputs) ([]Row, error) {
 		rows = append(rows[:insert], append(intentRows, rows[insert:]...)...)
 	}
 
-	// Due chores head the backlog: they splice after the ACTIVE/INTENTS
-	// prefix, immediately ahead of the idea rows they render beside.
+	// Registrations sit between standing direction and captured ideas.
+	chores := slices.Clone(in.Chores)
+	sort.SliceStable(chores, func(i, j int) bool {
+		if chores[i].Due != chores[j].Due {
+			return chores[i].Due
+		}
+		if chores[i].Project != chores[j].Project {
+			return chores[i].Project < chores[j].Project
+		}
+		return chores[i].Name < chores[j].Name
+	})
 	var choreRows []Row
-	for _, c := range in.Chores {
+	for _, c := range chores {
+		if in.WorkflowFilter != "" {
+			continue
+		}
 		if in.ProjectFilter != "" && c.Project != in.ProjectFilter {
 			continue
 		}
 		choreRows = append(choreRows, Row{
 			Project: c.Project,
 			Run:     c.Name,
-			Note:    c.Reason,
-			When:    c.When,
+			Note:    c.Status + " · " + c.Summary,
 			Bucket:  BucketChores,
 		})
 	}
-	sort.SliceStable(choreRows, func(i, j int) bool {
-		return choreRows[i].When.After(choreRows[j].When)
-	})
 	if len(choreRows) > 0 {
 		insert := 0
 		for insert < len(rows) && (rows[insert].Bucket == BucketActiveRuns || rows[insert].Bucket == BucketIntents) {
@@ -1282,10 +1287,7 @@ func FactoryStateFromRows(rows []Row) FactoryState {
 				Stage:      r.Stage,
 				RunningDoc: r.RunningDoc,
 			})
-		case BucketChores, BucketBacklog:
-			// Chores drive no station glyph — they're pre-run work — but
-			// they are backlog: the crates count what the BACKLOG heading
-			// counts.
+		case BucketBacklog:
 			state.BacklogCount++
 		case BucketCompletedRuns:
 			state.CompletedCount++
@@ -1317,8 +1319,8 @@ func rowPrefix(r Row) string {
 	return nestPrefix(r.Depth)
 }
 
-// Render prints the full dashboard: factory art, three sections
-// (ACTIVE, BACKLOG, COMPLETED), and the footer. tabwriter aligns
+// Render prints the full dashboard: factory art, board sections
+// (ACTIVE, INTENTS, CHORES, BACKLOG, COMPLETED), and the footer. tabwriter aligns
 // columns per section so a long idea title doesn't widen the run
 // rows. COMPLETED is capped at CompletedCap unless showAll is set.
 //
@@ -1404,18 +1406,17 @@ func RenderIndexedRows(w io.Writer, now time.Time, rows []Row, projectCount, act
 			lines[i] = lw.n + k
 		}
 	}
-	var active, intents, backlog, completed []Row
-	var activeAt, intentsAt, backlogAt, completedAt []int // each row's index in rows
+	var active, intents, chores, backlog, completed []Row
+	var activeAt, intentsAt, choresAt, backlogAt, completedAt []int // each row's index in rows
 	for i, r := range rows {
 		switch r.Bucket {
 		case BucketActiveRuns:
 			active, activeAt = append(active, r), append(activeAt, i)
 		case BucketIntents:
 			intents, intentsAt = append(intents, r), append(intentsAt, i)
-		case BucketChores, BucketBacklog:
-			// Chores head the backlog rather than holding a section of
-			// their own. BuildRows already splices them ahead of the idea
-			// rows, so appending in row order is the whole ordering.
+		case BucketChores:
+			chores, choresAt = append(chores, r), append(choresAt, i)
+		case BucketBacklog:
 			backlog, backlogAt = append(backlog, r), append(backlogAt, i)
 		case BucketCompletedRuns:
 			completed, completedAt = append(completed, r), append(completedAt, i)
@@ -1447,6 +1448,19 @@ func RenderIndexedRows(w io.Writer, now time.Time, rows []Row, projectCount, act
 		place(intentsAt)
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, r := range intents {
+			fmt.Fprintf(tw, "  %s/%s\t%s\n", r.Project, r.Run, r.Note)
+		}
+		tw.Flush()
+	}
+	fmt.Fprintln(w)
+
+	cliout.Printf(w, "CHORES (%d)\n", len(chores))
+	if len(chores) == 0 {
+		fmt.Fprintln(w, "  (none)")
+	} else {
+		place(choresAt)
+		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		for _, r := range chores {
 			fmt.Fprintf(tw, "  %s/%s\t%s\n", r.Project, r.Run, r.Note)
 		}
 		tw.Flush()
