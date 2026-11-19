@@ -156,3 +156,16 @@ func TestCaptureVerbsInertOnChore(t *testing.T) {
 		t.Fatal("the idea's details list the chore's draft")
 	}
 }
+
+// Keeping a chore draft out of the idea save dialogue must not take a
+// note on an idea out of it: that save has always offered the tag.
+func TestNoteOnIdeaStillOffersTheTag(t *testing.T) {
+	m, _ := testModel(t)
+	m.setBoard(board(1, idea("p", "i", 1), editableChore("p", "i")))
+	press(m, Key{Code: KeyRune, Rune: 'n'})
+	typed(m, "a thought")
+	press(m, Key{Code: KeyCtrlS})
+	if m.mode != modeSave {
+		t.Fatalf("a note on an idea saved without the save/tag choice: mode=%v", m.mode)
+	}
+}

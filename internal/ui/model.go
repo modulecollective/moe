@@ -770,7 +770,7 @@ func (m *model) isIdea(k draftKey) bool {
 	if k.purpose == "new-idea" {
 		return true
 	}
-	if k.purpose != "body" {
+	if choreDraft(k.purpose) {
 		return false
 	}
 	for _, it := range m.board.Items {
