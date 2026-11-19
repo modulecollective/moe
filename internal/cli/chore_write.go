@@ -150,7 +150,7 @@ func runChoreNew(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "chore new: set $EDITOR or $VISUAL — chore new needs an editor")
 		return 1
 	}
-	return choreEditorSave(root, projectID, name, s.Text(), "moe-chore-new-", func(edited chore.Spec) error {
+	return choreEditorSave("chore new", projectID, name, s.Text(), "moe-chore-new-", func(edited chore.Spec) error {
 		return choreCreate(root, projectID, name, edited)
 	}, "added chore", stdout, stderr)
 }
@@ -193,6 +193,10 @@ func runChoreEdit(args []string, stdout, stderr io.Writer) int {
 			moePrintf(stderr, "chore edit: %v\n", err)
 			return 1
 		}
+		if next == cur {
+			moePrintf(stdout, "chore %s/%s unchanged\n", projectID, name)
+			return 0
+		}
 		moePrintf(stdout, "edited chore %s/%s\n", projectID, name)
 		return 0
 	}
@@ -200,7 +204,7 @@ func runChoreEdit(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "chore edit: set $EDITOR or $VISUAL, or pass the fields to change as flags")
 		return 1
 	}
-	return choreEditorSave(root, projectID, name, cur.Text(), "moe-chore-edit-", func(edited chore.Spec) error {
+	return choreEditorSave("chore edit", projectID, name, cur.Text(), "moe-chore-edit-", func(edited chore.Spec) error {
 		return choreUpdateChecked(root, projectID, name, cur, edited)
 	}, "edited chore", stdout, stderr)
 }
@@ -208,11 +212,11 @@ func runChoreEdit(args []string, stdout, stderr io.Writer) int {
 // choreEditorSave pops $EDITOR on the text form and saves what comes
 // back. A save that fails to parse or is refused keeps the edited text
 // and names its path, so nothing typed is lost.
-func choreEditorSave(root, projectID, name, seed, prefix string, save func(chore.Spec) error, done string, stdout, stderr io.Writer) int {
+func choreEditorSave(verb, projectID, name, seed, prefix string, save func(chore.Spec) error, done string, stdout, stderr io.Writer) int {
 	text, tmpPath, code := captureEditorBody(prefix, seed, stderr)
 	if code != 0 {
 		if tmpPath != "" {
-			moePrintf(stderr, "chore: your edited definition is preserved at %s\n", tmpPath)
+			moePrintf(stderr, "%s: your edited definition is preserved at %s\n", verb, tmpPath)
 		}
 		return code
 	}
@@ -221,11 +225,16 @@ func choreEditorSave(root, projectID, name, seed, prefix string, save func(chore
 		err = save(s)
 	}
 	if err != nil {
-		moePrintf(stderr, "chore: %v\n", err)
-		moePrintf(stderr, "chore: your edited definition is preserved at %s\n", tmpPath)
+		moePrintf(stderr, "%s: %v\n", verb, err)
+		moePrintf(stderr, "%s: your edited definition is preserved at %s\n", verb, tmpPath)
 		return 1
 	}
 	os.RemoveAll(filepath.Dir(tmpPath))
+	if s.Text() == seed {
+		// The writer committed nothing; saying "edited" would claim a change.
+		moePrintf(stdout, "chore %s/%s unchanged\n", projectID, name)
+		return 0
+	}
 	moePrintf(stdout, "%s %s/%s\n", done, projectID, name)
 	return 0
 }

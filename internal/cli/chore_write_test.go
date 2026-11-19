@@ -215,3 +215,24 @@ func TestChoreRmWithOpenRun(t *testing.T) {
 		t.Fatalf("dash gather after rm: %v", err)
 	}
 }
+
+// An editor save that changes nothing commits nothing and says so.
+func TestChoreEditUnchangedSaysSo(t *testing.T) {
+	root := seedChoreRoot(t)
+	cur, err := chore.LoadSpec(root, "moe", "readme-refresh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fakeChoreEditor(t, cur.Text())
+	before := gittest.Output(t, root, "rev-parse", "HEAD")
+	var out, errb bytes.Buffer
+	if code := runChoreEdit([]string{"moe/readme-refresh"}, &out, &errb); code != 0 {
+		t.Fatalf("edit = %d: %s", code, errb.String())
+	}
+	if gittest.Output(t, root, "rev-parse", "HEAD") != before {
+		t.Fatal("an unchanged save committed")
+	}
+	if !strings.Contains(out.String(), "moe/readme-refresh unchanged") {
+		t.Fatalf("stdout %q", out.String())
+	}
+}
