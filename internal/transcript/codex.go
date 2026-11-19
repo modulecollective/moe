@@ -392,39 +392,39 @@ type codexUsageLine struct {
 // stays zero — a gap in the source, not a claim that nothing was
 // written.
 func parseCodexUsage(r io.Reader) (Usage, error) {
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 64*1024), 8*1024*1024)
+	// Tool output can make individual records arbitrarily large. Buffer
+	// one complete record so unrelated output cannot hide later usage.
+	reader := bufio.NewReader(r)
 	var model string
 	var last ModelUsage
 	steps := 0
-	for sc.Scan() {
-		line := sc.Bytes()
-		if len(line) == 0 || line[0] != '{' {
-			continue
+	for {
+		line, readErr := reader.ReadBytes('\n')
+		if readErr != nil && readErr != io.EOF {
+			return nil, fmt.Errorf("transcript: read codex jsonl for usage: %w", readErr)
 		}
 		var ev codexUsageLine
-		if err := json.Unmarshal(line, &ev); err != nil {
-			continue
-		}
-		switch {
-		case ev.Type == "turn_context":
-			if ev.Payload.Model != "" {
-				model = ev.Payload.Model
+		if len(line) > 0 && line[0] == '{' && json.Unmarshal(line, &ev) == nil {
+			switch {
+			case ev.Type == "turn_context":
+				if ev.Payload.Model != "" {
+					model = ev.Payload.Model
+				}
+			case ev.Type == "event_msg" && ev.Payload.Type == "token_count" && ev.Payload.Info != nil:
+				t := ev.Payload.Info.TotalTokenUsage
+				steps++
+				last = ModelUsage{
+					// input_tokens is the whole prompt; the cached share is
+					// broken out, so the uncached remainder is the difference.
+					Input:     t.InputTokens - t.CachedInputTokens,
+					CacheRead: t.CachedInputTokens,
+					Output:    t.OutputTokens,
+				}
 			}
-		case ev.Type == "event_msg" && ev.Payload.Type == "token_count" && ev.Payload.Info != nil:
-			t := ev.Payload.Info.TotalTokenUsage
-			steps++
-			last = ModelUsage{
-				// input_tokens is the whole prompt; the cached share is
-				// broken out, so the uncached remainder is the difference.
-				Input:     t.InputTokens - t.CachedInputTokens,
-				CacheRead: t.CachedInputTokens,
-				Output:    t.OutputTokens,
-			}
 		}
-	}
-	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("transcript: scan codex jsonl for usage: %w", err)
+		if readErr == io.EOF {
+			break
+		}
 	}
 	out := Usage{}
 	if steps > 0 {

@@ -1,9 +1,12 @@
 package transcript
 
 import (
+	"errors"
+	"io"
 	"os"
 	"strings"
 	"testing"
+	"testing/iotest"
 )
 
 // claudeUsageFixture is two assistant turns. The first is written as
@@ -98,6 +101,105 @@ func TestParseCodexUsageEmptyRollout(t *testing.T) {
 	}
 	if len(u) != 0 {
 		t.Errorf("usage = %v, want no entries", u)
+	}
+}
+
+func TestParseCodexUsageOversizedRecords(t *testing.T) {
+	large := `{"type":"event_msg","payload":{"type":"item_completed","padding":"` + strings.Repeat("x", 8*1024*1024+1) + `"}}` + "\n"
+	fixture := codexUsageFixture + large + large + `{"type":"turn_context","payload":{"model":"gpt-6.1-sol"}}
+{"type":"turn_context","payload":{"model":""}}
+{"type":"event_msg","payload":{"type":"token_count","info":null}}
+{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":17000,"cached_input_tokens":15000,"output_tokens":900}}}}
+`
+	u, err := ParseUsage("codex", strings.NewReader(fixture))
+	if err != nil {
+		t.Fatalf("ParseUsage: %v", err)
+	}
+	want := ModelUsage{Input: 2000, CacheRead: 15000, Output: 900, Steps: 3}
+	if len(u) != 1 || u["gpt-6.1-sol"] != want {
+		t.Fatalf("usage = %+v, want final model gpt-6.1-sol with %+v", u, want)
+	}
+}
+
+func TestParseCodexUsageOversizedAccountingRecords(t *testing.T) {
+	lines := strings.Split(strings.TrimSuffix(codexUsageFixture, "\n"), "\n")
+	for _, tc := range []struct {
+		name string
+		line int
+	}{
+		{"model", 0},
+		{"tokens", len(lines) - 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			padded := append([]string(nil), lines...)
+			padded[tc.line] = strings.TrimSuffix(padded[tc.line], "}") + `,"padding":"` + strings.Repeat("x", 8*1024*1024+1) + `"}`
+			// No trailing newline: the oversized accounting record must
+			// also be processed when ReadBytes returns its bytes with EOF.
+			u, err := ParseUsage("codex", strings.NewReader(strings.Join(padded, "\n")))
+			if err != nil {
+				t.Fatalf("ParseUsage: %v", err)
+			}
+			want := ModelUsage{Input: 1000, CacheRead: 8000, Output: 400, Steps: 2}
+			if len(u) != 1 || u["gpt-5.5"] != want {
+				t.Fatalf("usage = %+v, want gpt-5.5 with %+v", u, want)
+			}
+		})
+	}
+}
+
+func TestParseCodexUsageRecoveryAndEOF(t *testing.T) {
+	want := ModelUsage{Input: 1000, CacheRead: 8000, Output: 400, Steps: 2}
+	for _, tc := range []struct {
+		name    string
+		fixture string
+		empty   bool
+	}{
+		{"empty", "", true},
+		{"malformed before usage", "\nnot json\n{bad json}\n" + codexUsageFixture, false},
+		{"final usage without newline", strings.TrimSuffix(codexUsageFixture, "\n"), false},
+		{"malformed final tail", codexUsageFixture + `{"type":`, false},
+		{"non JSON final tail", codexUsageFixture + "not json", false},
+		{"blank final tail", codexUsageFixture + "\n", false},
+		{"oversized final record without newline", codexUsageFixture + `{"padding":"` + strings.Repeat("x", 8*1024*1024+1) + `"}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			u, err := ParseUsage("codex", strings.NewReader(tc.fixture))
+			if err != nil {
+				t.Fatalf("ParseUsage: %v", err)
+			}
+			if tc.empty {
+				if len(u) != 0 {
+					t.Fatalf("usage = %+v, want no entries", u)
+				}
+			} else if len(u) != 1 || u["gpt-5.5"] != want {
+				t.Fatalf("usage = %+v, want gpt-5.5 with %+v", u, want)
+			}
+		})
+	}
+}
+
+func TestParseCodexUsageShortReads(t *testing.T) {
+	r := iotest.OneByteReader(strings.NewReader(strings.TrimSuffix(codexUsageFixture, "\n")))
+	u, err := ParseUsage("codex", r)
+	if err != nil {
+		t.Fatalf("ParseUsage: %v", err)
+	}
+	want := ModelUsage{Input: 1000, CacheRead: 8000, Output: 400, Steps: 2}
+	if len(u) != 1 || u["gpt-5.5"] != want {
+		t.Fatalf("usage = %+v, want gpt-5.5 with %+v", u, want)
+	}
+}
+
+func TestParseCodexUsageReadError(t *testing.T) {
+	readErr := errors.New("read interrupted")
+	for _, tail := range []string{"", "\n", "not json", "{bad json}", strings.TrimSuffix(codexUsageFixture, "\n")} {
+		t.Run(tail, func(t *testing.T) {
+			r := io.MultiReader(strings.NewReader(codexUsageFixture+tail), iotest.ErrReader(readErr))
+			u, err := ParseUsage("codex", r)
+			if !errors.Is(err, readErr) || u != nil {
+				t.Fatalf("ParseUsage = (%+v, %v), want nil usage and wrapped read error", u, err)
+			}
+		})
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -163,6 +164,38 @@ func TestUsageBucketsByWorkflowStageModel(t *testing.T) {
 	}
 	if len(rep.Unpriced) != 0 {
 		t.Errorf("unpriced = %v, want every seeded model priced", rep.Unpriced)
+	}
+}
+
+func TestUsageIncludesCodexTranscriptWithOversizedRecord(t *testing.T) {
+	root := gittest.InitSeeded(t)
+	now := time.Now().Local()
+	seedRun(t, root, "tele", "large-record", "sdlc", run.StatusMerged, now, nil)
+	gittest.Commit(t, root, "seed run")
+	large := `{"type":"event_msg","payload":{"type":"item_completed","padding":"` + strings.Repeat("x", 8*1024*1024+1) + `"}}` + "\n"
+	seedThread(t, root, "tele", "large-record", "build", "codex",
+		large+codexTurn("gpt-6.1-sol", 17000, 15000, 900))
+
+	var warnings bytes.Buffer
+	rep, err := Gather(root, Filter{Cutoff: now.Add(-24 * time.Hour)}, &warnings)
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	if warnings.Len() != 0 {
+		t.Errorf("warnings = %q, want none", warnings.String())
+	}
+	want := transcript.ModelUsage{Input: 2000, CacheRead: 15000, Output: 900, Steps: 1}
+	if rep.Transcripts != 1 || rep.Total != want {
+		t.Fatalf("transcripts = %d, total = %+v, want one transcript with %+v", rep.Transcripts, rep.Total, want)
+	}
+	if len(rep.Buckets) != 1 || rep.Buckets[0] != (Bucket{
+		Workflow: "sdlc", Stage: "build", Model: "gpt-6.1-sol", Runs: 1, Usage: want,
+	}) {
+		t.Errorf("buckets = %+v, want one build/model bucket with %+v", rep.Buckets, want)
+	}
+	r, ok := runByKey(rep, "tele/large-record")
+	if len(rep.Runs) != 1 || !ok || r.Stages != 1 || r.Usage != want {
+		t.Errorf("runs = %+v, want tele/large-record with %+v", rep.Runs, want)
 	}
 }
 
