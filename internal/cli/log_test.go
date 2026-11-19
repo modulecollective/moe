@@ -187,6 +187,27 @@ func TestMoeLog_AgentFlagPins(t *testing.T) {
 	}
 }
 
+func TestMoeLog_CodexOversizedRecord(t *testing.T) {
+	root := newMoeHome(t)
+	t.Setenv("NO_COLOR", "1")
+	trailerstest.SeedRun(t, root, "moe", "demo-run", "sdlc", run.StatusInProgress)
+	writeThread(t, root, "moe", "demo-run", "design", "codex", []string{
+		`{"type":"event_msg","payload":{"type":"item_completed","padding":"` + strings.Repeat("x", 9*1024*1024) + `"}}`,
+		`{"type":"turn_context","payload":{"model":"gpt-6.2-sol"}}`,
+		`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"visible after oversized record"}]}}`,
+	})
+	var out, errb bytes.Buffer
+	code := Run([]string{"sdlc", "log", "--agent", "codex", "moe/demo-run", "design"}, &out, &errb)
+	if code != 0 || errb.Len() != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	for _, want := range []string{"visible after oversized record", "gpt-6.2-sol"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output missing %q: %s", want, out.String())
+		}
+	}
+}
+
 func TestMoeLog_AmbiguousAgentRefuses(t *testing.T) {
 	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")

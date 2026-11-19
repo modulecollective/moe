@@ -61,16 +61,21 @@ type codexPayload struct {
 // payload types are skipped — same forensic-file rationale as the
 // claude adapter.
 func parseCodex(r io.Reader) ([]Event, error) {
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 64*1024), 8*1024*1024)
+	// Bookkeeping and tool output can exceed scanner limits. Read complete
+	// records so they cannot hide later events or model changes.
+	reader := bufio.NewReader(r)
 	var out []Event
 	// model is the current turn's model, updated by each turn_context and
 	// stamped onto the events every other line produces. A file that
 	// resumes under a different model carries a second turn_context, so
 	// later events pick up the new value.
 	var model string
-	for sc.Scan() {
-		line := sc.Bytes()
+	var readErr error
+	for readErr == nil {
+		var line []byte
+		line, readErr = reader.ReadBytes('\n')
+		// Process returned bytes even with a terminal error; keeping the
+		// error in the loop condition also terminates early decode skips.
 		if len(line) == 0 || line[0] != '{' {
 			continue
 		}
@@ -100,8 +105,8 @@ func parseCodex(r io.Reader) ([]Event, error) {
 		}
 		out = append(out, evs...)
 	}
-	if err := sc.Err(); err != nil {
-		return out, fmt.Errorf("transcript: scan codex jsonl: %w", err)
+	if readErr != io.EOF {
+		return out, fmt.Errorf("transcript: read codex jsonl: %w", readErr)
 	}
 	return out, nil
 }

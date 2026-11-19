@@ -1,10 +1,151 @@
 package transcript
 
 import (
+	"errors"
+	"fmt"
+	"io"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
+	"testing/iotest"
+	"time"
 )
+
+func TestParseCodexOversizedContinuation(t *testing.T) {
+	padding := strings.Repeat("x", 9*1024*1024)
+	bookkeeping := `{"type":"event_msg","payload":{"type":"item_completed","padding":"` + padding + `"}}`
+	message := `{"timestamp":"2026-11-18T12:00:00Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"visible"}]}}`
+	input := strings.Join([]string{
+		`{"type":"turn_context","payload":{"model":"model-a"}}`, message,
+		bookkeeping, bookkeeping,
+		`{"type":"turn_context","payload":{"model":"model-b"}}`, message,
+		`{"timestamp":"2026-11-18T12:00:01Z","type":"event_msg","payload":{"type":"turn_aborted","reason":"interrupted"}}`,
+	}, "\n")
+	events, err := Parse("codex", strings.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := time.Date(2026, 11, 18, 12, 0, 0, 0, time.UTC)
+	want := []Event{
+		{Kind: KindAssistantText, Text: "visible", Model: "model-a", Time: ts},
+		{Kind: KindAssistantText, Text: "visible", Model: "model-b", Time: ts},
+		{Kind: KindSystem, Text: "codex turn aborted: interrupted", Model: "model-b", Time: ts.Add(time.Second)},
+	}
+	if !reflect.DeepEqual(events, want) {
+		t.Fatalf("events = %+v, want %+v", events, want)
+	}
+}
+
+func TestParseCodexOversizedRetention(t *testing.T) {
+	padding := strings.Repeat("x", 9*1024*1024)
+	input := strings.Join([]string{
+		`{"type":"turn_context","payload":{"model":"large-context","padding":"` + padding + `"}}`,
+		`{"type":"response_item","payload":{"type":"function_call_output","call_id":"large-call","output":"Process exited with code 2\nOutput:\n` + padding + `"}}`,
+		`{"type":"event_msg","payload":{"type":"turn_aborted","reason":"sentinel"}}`,
+		// A visible oversized final record must also survive without a newline.
+		`{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"` + padding + `"}]}}`,
+	}, "\n")
+	events, err := Parse("codex", strings.NewReader(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 3 {
+		t.Fatalf("got %d events, want 3", len(events))
+	}
+	result := events[0]
+	if result.Kind != KindToolResult || result.Output != padding || result.CallID != "large-call" || !result.Error {
+		t.Fatalf("tool result: kind=%v output bytes=%d call=%q error=%v", result.Kind, len(result.Output), result.CallID, result.Error)
+	}
+	if events[1].Kind != KindSystem || events[1].Text != "codex turn aborted: sentinel" {
+		t.Fatalf("sentinel = %+v", events[1])
+	}
+	if events[2].Kind != KindAssistantText || events[2].Text != padding {
+		t.Fatalf("final event: kind=%v text bytes=%d", events[2].Kind, len(events[2].Text))
+	}
+	for i, ev := range events {
+		if ev.Model != "large-context" {
+			t.Errorf("event %d model = %q", i, ev.Model)
+		}
+	}
+}
+
+func TestParseCodexLineRecovery(t *testing.T) {
+	visible := `{"type":"event_msg","payload":{"type":"turn_aborted"}}`
+	for _, tail := range []string{"", "\n", "\r\n", "{broken", "   ", "\n\n"} {
+		t.Run("tail="+tail, func(t *testing.T) {
+			input := "\nnot json\n" + " " + visible + "\n{broken\n" +
+				`{"type":"event_msg","payload":[]}` + "\n" +
+				`{"type":"event_msg","payload":{"type":123}}` + "\n" +
+				`{"type":"turn_context","payload":{"model":"old"}}` + "\n" +
+				`{"type":"turn_context","payload":{"model":""}}` + "\r\n" +
+				visible + "\r\n" + tail
+			events, err := Parse("codex", strings.NewReader(input))
+			want := []Event{{Kind: KindSystem, Text: "codex turn aborted"}}
+			if err != nil || !reflect.DeepEqual(events, want) {
+				t.Fatalf("events=%+v error=%v", events, err)
+			}
+		})
+	}
+	for _, input := range []string{"", "\n", "{broken", "   "} {
+		if events, err := Parse("codex", strings.NewReader(input)); err != nil || len(events) != 0 {
+			t.Fatalf("empty/malformed input: %d events, error=%v", len(events), err)
+		}
+	}
+	input := `{"broken":"` + strings.Repeat("x", 9*1024*1024) + "\n" + visible
+	if events, err := Parse("codex", strings.NewReader(input)); err != nil || len(events) != 1 || events[0].Text != "codex turn aborted" {
+		t.Fatalf("oversized malformed recovery: %d events, error=%v", len(events), err)
+	}
+}
+
+// Return the terminal bytes and error together, rather than relying on a
+// reader that reports its error only on a subsequent call.
+type codexTerminalReader struct {
+	data string
+	err  error
+}
+
+func (r *codexTerminalReader) Read(p []byte) (int, error) {
+	n := copy(p, r.data)
+	r.data = r.data[n:]
+	if len(r.data) == 0 {
+		return n, r.err
+	}
+	return n, nil
+}
+
+func TestParseCodexReaderBoundary(t *testing.T) {
+	visible := `{"type":"event_msg","payload":{"type":"turn_aborted"}}`
+	readErr := errors.New("interrupted read")
+	for _, terminalErr := range []error{io.EOF, readErr} {
+		for _, tail := range []string{visible, visible + "\n", "{broken", "{broken\n", " ", "\n"} {
+			for _, shortChunks := range []bool{false, true} {
+				t.Run(fmt.Sprintf("error=%v/tail=%q/short=%v", terminalErr, tail, shortChunks), func(t *testing.T) {
+					var r io.Reader = &codexTerminalReader{data: visible + "\n" + tail, err: terminalErr}
+					if shortChunks {
+						r = iotest.OneByteReader(r)
+					}
+					events, err := Parse("codex", r)
+					if terminalErr == io.EOF && err != nil || terminalErr != io.EOF && !errors.Is(err, readErr) {
+						t.Fatalf("error=%v, terminal=%v", err, terminalErr)
+					}
+					wantCount := 1
+					if strings.HasPrefix(tail, visible) {
+						wantCount++
+					}
+					if len(events) != wantCount {
+						t.Fatalf("got %d events, want %d", len(events), wantCount)
+					}
+					for _, ev := range events {
+						if ev.Kind != KindSystem || ev.Text != "codex turn aborted" {
+							t.Fatalf("event=%+v", ev)
+						}
+					}
+				})
+			}
+		}
+	}
+}
 
 func TestParseCodex_TestdataFixture(t *testing.T) {
 	f, err := os.Open("testdata/codex.jsonl")
