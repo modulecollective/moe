@@ -64,6 +64,14 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   capture bodies. It needs a terminal on stdout (Linux or macOS) and restores
   it on every exit; quitting mid-save waits for and prints that save's outcome.
 
+  On a CHORES row, `e` (or `:edit`) opens the chore's definition in the text
+  form described under [Chore definitions](#chore-definitions) and `Ctrl-S`
+  saves it, refusing if the definition changed meanwhile. `:new-chore
+  <project>/<name>` opens a blank form and adds the chore on save. `:delete`
+  asks, then removes the definition. `o` (or `:open`) opens the chore's run
+  now, ahead of its schedule, and selects it; it starts nothing. Skip stays
+  `moe chore skip`.
+
   In a Rex terminal, UI reports live sweeps, outstanding operator questions,
   control state and observation health through OSC 7501. Activity and
   questions follow the board filters; health explicitly includes serve-wide
@@ -177,7 +185,8 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   in one project, without stopping the process. See below.
 - `moe chore list|check|open|skip` lists due project chores, dry-runs a chore
   definition, opens the run a due chore configures, or clears a due chore until
-  it is next triggered.
+  it is next triggered. `moe chore new|edit|rm` registers, changes or removes
+  a definition; see [Chore definitions](#chore-definitions).
 - `moe control show <project>/<run>` prints a stageful run's live owner,
   phase, hold and request log. It submits nothing.
 - `moe control pause|handoff|park|finish|resume [--id <id>] <project>/<run>`
@@ -542,6 +551,47 @@ too vague to judge.
 `prompt.md` is the seed for the opened workflow's first canvas: a markdown
 sibling read verbatim, not folded into `chore.json`. Use `moe chore check` as
 the dry-run loop rather than opening a run to test a definition.
+
+Three surfaces write definitions through one writer, each change one commit
+(`chore: add|edit|remove <project>/<name>`) touching only the chore's
+directory:
+
+```
+moe chore new  <project>/<name> [--trigger G] [--cadence D] [--cooldown D] [--when TEXT] [--workflow W]
+moe chore edit <project>/<name> [same flags]
+moe chore rm   <project>/<name>
+```
+
+`new` opens `$EDITOR` on the text form below, flags prefilled. `edit` with
+flags sets exactly those fields (an empty value clears one) and opens nothing;
+with none it opens the editor. A save that fails to parse or validate keeps the
+edited text in a temp file and prints its path. `rm` removes the directory; git
+is the undo. The web chore page offers edit (delete is on the edit page) and
+the project page a `new chore` link; `moe ui` offers the same on a CHORES row.
+An unchanged save commits nothing; a real edit makes a mechanical chore due
+("definition changed") unless it is cooling down. Rename is `rm` then `new`;
+a recreated name inherits its history.
+
+The text form, used by `$EDITOR` and `moe ui` (never on disk), is five
+`key: value` lines, each shown even when blank, then a line that is exactly
+`---`, then the prompt verbatim:
+
+```
+trigger:
+cadence: 90d
+cooldown: 90d
+when:
+workflow:
+---
+# context-use-audit
+
+Prompt text, verbatim to the end of the buffer.
+```
+
+The web chore page and `moe ui` can also open a chore's run now: due-ness and
+cooldown are waived, an already-open run is not. It writes the open commit and
+starts nothing; an armed `moe serve --dynamic` heartbeat picks the run up on its
+next tick.
 
 ### Knowledge topics
 
