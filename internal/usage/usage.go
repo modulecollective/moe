@@ -35,7 +35,7 @@ import (
 )
 
 // Model prices in US dollars per million tokens, published API rates.
-// Standard-processing, short-context rates verified 2026-10-20 against:
+// Standard-processing, short-context rates verified 2026-11-18 against:
 //   - https://platform.claude.com/docs/en/about-claude/pricing
 //   - https://developers.openai.com/api/docs/pricing
 //
@@ -59,6 +59,8 @@ type modelPrice struct {
 }
 
 var modelPrices = []modelPrice{
+	// https://platform.claude.com/docs/en/models/fable-5-2/overview
+	{"claude-fable-5-2", 8, 0.20, 40},
 	{"claude-fable-5-1", 10, 0.25, 50},
 	{"claude-fable-5", 10, 1, 50},
 	// https://platform.claude.com/docs/en/models/opus-5-5/overview
@@ -70,6 +72,8 @@ var modelPrices = []modelPrice{
 	{"claude-opus-5", 5, 0.50, 25},
 	{"claude-opus-4-8", 5, 0.50, 25},
 	{"claude-opus-4-7", 5, 0.50, 25},
+	// https://platform.claude.com/docs/en/models/sonnet-5-5/overview
+	{"claude-sonnet-5-5", 2, 0.10, 10},
 	{"claude-sonnet-5", 2, 0.20, 10},
 	{"claude-haiku-4-5", 1, 0.10, 5},
 	// OpenAI API sticker (developers.openai.com/api/docs/pricing). The
@@ -83,7 +87,7 @@ var modelPrices = []modelPrice{
 	// GPT-6.1 Sol standard rate verified 2026-09-29:
 	// https://openai.com/index/introducing-gpt-6-1-sol/
 	{"gpt-6.1-sol", 2, 0.10, 10},
-	// Published promotional rate through at least 2026-11-21. There is no
+	// Published promotional rate available until 2026-11-30. There is no
 	// announced replacement rate, so the monthly pricing chore will
 	// re-verify it rather than guessing an automatic reversion.
 	{"gpt-5.6-sol", 4, 0.40, 20},
