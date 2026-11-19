@@ -641,28 +641,47 @@ Project filters apply, while workflow filters omit registrations.
 
 Select a chore in `moe ui` to inspect its full condition or trigger/cadence,
 cooldown, last completion, cooldown eligibility, linked run, workflow and seed
-prompt. Tab to the details pane and scroll to reach long text. Registrations
-are read-only. Web rows link to the existing chore detail page and its open
-run. `moe chore list` remains due-only and omits judged chores;
-`moe chore check` dry-runs all families.
+prompt. Tab to the details pane and scroll to reach long text. Web rows link to
+the chore detail page and its open run. `moe chore list` remains due-only and
+omits judged chores; `moe chore check` dry-runs all families.
 
-The runtime, mirroring hooks:
+Manage definitions and open runs from the CLI:
 
 ```sh
+moe chore new <project>/<name> [--cadence D] [--cooldown D]  # create in the editor
+moe chore edit <project>/<name> [--cadence D]  # edit those fields, or open the editor with no flags
+moe chore rm <project>/<name>                 # remove the definition
 moe chore list [--project <p>]                # show what's due
 moe chore check [--project <p>] [<project>/<chore>]  # dry-run validation and due-state
 moe chore open [--now] [--park|--ship|--chain] <project>/<chore>  # open the seeded run for a due chore
 moe chore skip <project>/<chore>              # clear a due chore until it is next triggered
 ```
 
+`new` opens the definition form in your editor with any flags prefilled. `edit`
+with flags changes only those fields; without flags it opens the form. See
+[Chore definitions](reference.md#chore-definitions) for all flags, the form and
+recovery after a refused save. Removing a definition leaves an existing run
+intact; it retires the registration.
+
+On the web, use the project's `new chore` link to create a definition. A chore's
+page offers edit, delete from the edit page, and open-now. In `moe ui`, use
+`:new-chore <project>/<name>` to create one, or select a CHORES row and use `e`
+or `:edit` to edit, `:delete` to remove, and `o` or `:open` to open its run now.
+Save the console form with `Ctrl-S`; see the
+[console reference](reference.md#re-entry-and-supervision) for details. Skip
+stays CLI-only with `moe chore skip`.
+
 `moe chore open` refuses if the chore isn't due, already has an open run, or is
 cooling down. Pass `--now` to open it anyway when it's cooling down or not yet
-due — it still refuses if a run is already open.
+due — it still refuses if a run is already open. Web and console open-now also
+waive due-ness and cooldown, refuse an already-open run, and start no agent.
+Work starts through a later eligible [armed sweep](#the-heartbeat) or an
+explicit terminal stage command.
 
-Editing a definition is a plain file edit, or an sdlc run: a stage's per-turn
-commit picks up `projects/<project>/chores/`, so `moe sdlc design → build →
-close` is the journaled route. For a mechanical chore, due-ness notices either
-way: subject to the open-run and cooldown guards, a definition edit committed
+You can also edit a definition's files directly or use an sdlc run: a stage's
+per-turn commit picks up `projects/<project>/chores/`, so
+`moe sdlc design → build → close` is the journaled route. For a mechanical
+chore, subject to the open-run and cooldown guards, a definition edit committed
 by any means makes the chore due as "definition changed." A judged chore's
 edited criterion remains for the survey to evaluate; editing it does not make
 the chore mechanically due.

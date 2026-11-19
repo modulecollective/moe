@@ -142,10 +142,10 @@ permissions-profile setup because MoE supplies it. See
 `moe dash` is the terminal home screen for re-entry.
 [`moe ui`](docs/workflows.md#seeing-and-steering-a-running-run) is the
 interactive terminal console: select runs, follow live details, send notes and
-controls, and edit ideas and intents. `moe serve` serves the web UI, pushes
-pending bureaucracy journal commits to origin armed or unarmed, and optionally
-runs the heartbeat with `--dynamic`. `moe help` and per-command usage are the
-source of truth for the exact command surface.
+controls, edit ideas and intents, and manage chores. `moe serve` serves the web
+UI, pushes pending bureaucracy journal commits to origin armed or unarmed, and
+optionally runs the heartbeat with `--dynamic`. `moe help` and per-command usage
+are the source of truth for the exact command surface.
 
 ## The Workflows
 
@@ -166,9 +166,11 @@ Four bureaucracy-side artifacts have no workflow of their own — project
 [hooks](docs/workflows.md#hooks), [chores](docs/workflows.md#chores),
 [knowledge topics](docs/workflows.md#knowledge), and the
 [digital twin](docs/workflows.md#twin). Edit them by hand, or let an sdlc run
-land them: a stage's per-turn commit picks all four up. Such a run ships nothing
-to the target repo — build's `test.md` gate says so (`ship: none`) and `push`
-closes it.
+land them: a stage's per-turn commit picks all four up. Chores also have direct
+CLI, web and console management; see the
+[Chores guide](docs/workflows.md#chores). Such an artifact-only run ships
+nothing to the target repo — build's `test.md` gate says so (`ship: none`) and
+`push` closes it.
 
 ## Going Deeper
 

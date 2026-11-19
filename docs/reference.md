@@ -562,15 +562,16 @@ moe chore edit <project>/<name> [same flags]
 moe chore rm   <project>/<name>
 ```
 
-`new` opens `$EDITOR` on the text form below, flags prefilled. `edit` with
-flags sets exactly those fields (an empty value clears one) and opens nothing;
-with none it opens the editor. A save that fails to parse or validate keeps the
+`new` opens `$EDITOR` on the text form below, flags prefilled. `edit` with flags
+sets exactly those fields (an empty value clears one) and opens nothing; with
+none it opens the editor. A save that fails to parse or validate keeps the
 edited text in a temp file and prints its path. `rm` removes the directory; git
-is the undo. The web chore page offers edit (delete is on the edit page) and
-the project page a `new chore` link; `moe ui` offers the same on a CHORES row.
-An unchanged save commits nothing; a real edit makes a mechanical chore due
-("definition changed") unless it is cooling down. Rename is `rm` then `new`;
-a recreated name inherits its history.
+is the undo. The web chore page offers edit (delete is on the edit page) and the
+project page a `new chore` link; `moe ui` offers the same on a CHORES row. An
+unchanged edit of an existing definition commits nothing; saving a valid new
+form creates the chore even if its prefilled text is unchanged. A real edit
+makes a mechanical chore due ("definition changed") unless it is cooling down.
+Rename is `rm` then `new`; a recreated name inherits its history.
 
 The text form, used by `$EDITOR` and `moe ui` (never on disk), is five
 `key: value` lines, each shown even when blank, then a line that is exactly
@@ -590,8 +591,9 @@ Prompt text, verbatim to the end of the buffer.
 
 The web chore page and `moe ui` can also open a chore's run now: due-ness and
 cooldown are waived, an already-open run is not. It writes the open commit and
-starts nothing; an armed `moe serve --dynamic` heartbeat picks the run up on its
-next tick.
+starts no agent; a later eligible armed sweep or an explicit terminal stage
+command starts work. See [The heartbeat](workflows.md#the-heartbeat) for the
+scheduling guards.
 
 ### Knowledge topics
 
