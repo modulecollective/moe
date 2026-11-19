@@ -23,6 +23,9 @@ func init() {
 	g.Register(&Command{Name: "check", Summary: "dry-run chore validation and due-state evaluation", Run: runChoreCheck})
 	g.Register(&Command{Name: "open", Summary: "open the workflow run for a due chore", Run: runChoreOpen})
 	g.Register(&Command{Name: "skip", Summary: "clear a due chore until it is next triggered", Run: runChoreSkip})
+	g.Register(&Command{Name: "new", Summary: "register a chore: $EDITOR on its definition", Run: runChoreNew})
+	g.Register(&Command{Name: "edit", Summary: "change a chore: set flags, or $EDITOR on its definition", Run: runChoreEdit})
+	g.Register(&Command{Name: "rm", Summary: "remove a chore's definition (its history stays)", Run: runChoreRm})
 	RegisterGroup(g)
 }
 
@@ -217,6 +220,8 @@ func (e *choreNotFoundError) Error() string {
 	return fmt.Sprintf("chore open: %s/%s not found", e.Project, e.Name)
 }
 
+func (e *choreNotFoundError) Unwrap() error { return chore.ErrNotFound }
+
 // choreNotOpenableError is returned when the chore exists but its state
 // forbids opening (an open run already exists, it's cooling down, or
 // it's simply not due). serve maps it to 409. Reason is the human tail
@@ -234,6 +239,8 @@ type choreNotOpenableError struct {
 func (e *choreNotOpenableError) Error() string {
 	return fmt.Sprintf("chore open: %s %s", e.Key, e.Reason)
 }
+
+func (e *choreNotOpenableError) Unwrap() error { return chore.ErrNotOpenable }
 
 // choreOpenResult carries what a successful in-process chore open
 // produced: the destination run metadata plus the workflow + first

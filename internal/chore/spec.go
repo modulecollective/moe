@@ -32,6 +32,9 @@ var (
 	// ErrChanged: UpdateChecked found a definition other than the one
 	// the editor started from.
 	ErrChanged = errors.New("the chore changed since it was opened")
+	// ErrNotOpenable: the chore exists but its state forbids opening a
+	// run for it (one is already open, it is cooling down, not due).
+	ErrNotOpenable = errors.New("chore not openable")
 )
 
 // InvalidError is a definition refused before anything was written.
@@ -131,21 +134,37 @@ func (s Spec) normalized() Spec {
 // Check parses and validates s as project/name's definition without
 // writing anything. Every refusal is an *InvalidError.
 func (s Spec) Check(projectID, name string) error {
+	if err := s.CheckFields(projectID, name); err != nil {
+		return err
+	}
+	d, _ := s.normalized().parse(projectID, name)
+	if err := Validate(d); err != nil {
+		return &InvalidError{Err: err}
+	}
+	return nil
+}
+
+// CheckFields is the half of Check that judges each field on its own —
+// the name, one-line values, durations, the glob — and not whether the
+// definition is complete. `moe chore new` runs it on its flags before
+// the editor opens, when the family may still be unset.
+func (s Spec) CheckFields(projectID, name string) error {
 	if !namePattern.MatchString(name) {
 		return invalid("chore name %q must match %s", name, namePattern)
 	}
 	s = s.normalized()
-	for k, v := range map[string]string{"trigger": s.Trigger, "workflow": s.Workflow, "cadence": s.Cadence, "cooldown": s.Cooldown, "when": s.When} {
-		if strings.ContainsAny(v, "\r\n") {
+	for _, k := range textKeys {
+		if strings.ContainsAny(*s.field(k), "\r\n") {
 			return invalid("chore %s/%s: %s must be one line", projectID, name, k)
 		}
 	}
-	d, err := s.parse(projectID, name)
-	if err != nil {
+	if _, err := s.parse(projectID, name); err != nil {
 		return &InvalidError{Err: err}
 	}
-	if err := Validate(d); err != nil {
-		return &InvalidError{Err: err}
+	if s.Trigger != "" && s.Trigger != "*" {
+		if _, err := filepath.Match(s.Trigger, "x"); err != nil {
+			return invalid("chore %s/%s trigger: %w", projectID, name, err)
+		}
 	}
 	return nil
 }
