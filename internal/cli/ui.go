@@ -3,8 +3,9 @@ package cli
 // `moe ui`: the terminal console. internal/ui owns the screen; this file
 // supplies what is on it (uisource.go) and does what the operator asks
 // through the same writers the CLI and web use — input.Add and Answer,
-// deliverControl and runcontrol.Resume, runopen's capture writers, and
-// the optional Rex reveal (uirex.go). Nothing here launches an agent.
+// deliverControl and runcontrol.Resume, runopen's capture writers, the
+// chore writer, and the optional Rex reveal (uirex.go). Nothing here
+// launches an agent.
 
 import (
 	"bytes"
@@ -19,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
+	"github.com/modulecollective/moe/internal/chore"
 	"github.com/modulecollective/moe/internal/cliout"
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git"
@@ -133,6 +135,14 @@ func uiDo(ctx context.Context, root string, a ui.Action) ui.Result {
 		return uiTag(root, a)
 	case ui.ActReveal:
 		return revealTerminal(ctx, root, a)
+	case ui.ActChoreCreate:
+		return uiChoreCreate(root, a)
+	case ui.ActChoreEdit:
+		return uiChoreEdit(root, a)
+	case ui.ActChoreDelete:
+		return uiChoreDelete(root, a)
+	case ui.ActChoreOpen:
+		return uiChoreOpen(root, a)
 	}
 	return ui.Result{Message: "unknown action"}
 }
@@ -145,13 +155,15 @@ func definite(err error) bool {
 	_, nested := errors.AsType[*repolock.NestedError](err)
 	_, reserved := errors.AsType[*session.UnresolvedError](err)
 	_, refused := errors.AsType[*runsock.RefusedError](err)
-	if timeout || nested || reserved || refused {
+	_, invalid := errors.AsType[*chore.InvalidError](err)
+	if timeout || nested || reserved || refused || invalid {
 		return true
 	}
 	for _, e := range []error{
 		run.ErrRunNotFound, run.ErrSlugTaken,
 		input.ErrEmpty, input.ErrNotLive, input.ErrStalePing, input.ErrNoOpenPing, input.ErrMalformed,
 		runopen.ErrNotCapture, runopen.ErrCaptureChanged, runopen.ErrNotTaggableIdea,
+		chore.ErrNotFound, chore.ErrExists, chore.ErrChanged, chore.ErrNotOpenable,
 		runcontrol.ErrMalformed, runcontrol.ErrNotLive, runcontrol.ErrBadKind, runcontrol.ErrConflict,
 		runcontrol.ErrHeld, runcontrol.ErrRecovery, runcontrol.ErrNoOwner, runcontrol.ErrNotOwner, runcontrol.ErrStale,
 	} {
@@ -369,4 +381,58 @@ func uiTag(root string, a ui.Action) ui.Result {
 		what += " (already so)"
 	}
 	return ui.Result{OK: true, Message: what}
+}
+
+// uiChoreCreate adds a chore from its text form. A form that doesn't
+// parse, or a definition the writer refuses, is a definite refusal: the
+// draft stays open with the reason.
+func uiChoreCreate(root string, a ui.Action) ui.Result {
+	s, err := chore.ParseSpecText(a.Text)
+	if err != nil {
+		return ui.Result{Message: oneLine(err.Error())}
+	}
+	if err := choreCreate(root, a.Project, a.Run, s); err != nil {
+		return failure(err, nil)
+	}
+	return ui.Result{OK: true, Message: "added chore " + a.Project + "/" + a.Run}
+}
+
+// uiChoreEdit saves an edited text form, only if the definition on disk
+// is still the one the editor opened (Expected).
+func uiChoreEdit(root string, a ui.Action) ui.Result {
+	s, err := chore.ParseSpecText(a.Text)
+	if err != nil {
+		return ui.Result{Message: oneLine(err.Error())}
+	}
+	expected, err := chore.ParseSpecText(a.Expected)
+	if err != nil {
+		return ui.Result{Message: "the definition this draft opened from does not parse: " + oneLine(err.Error())}
+	}
+	err = choreUpdateChecked(root, a.Project, a.Run, expected, s)
+	switch {
+	case err == nil:
+		return ui.Result{OK: true, Message: "saved chore " + a.Project + "/" + a.Run}
+	case errors.Is(err, chore.ErrChanged):
+		return ui.Result{Changed: true, Message: "the chore changed since you opened it; nothing saved — Ctrl-X discards your draft, then e opens the current definition"}
+	}
+	return failure(err, nil)
+}
+
+func uiChoreDelete(root string, a ui.Action) ui.Result {
+	if err := chore.Remove(root, a.Project, a.Run); err != nil {
+		return failure(err, nil)
+	}
+	return ui.Result{OK: true, Message: "deleted chore " + a.Project + "/" + a.Run + "; its history stays in git"}
+}
+
+// uiChoreOpen is `moe chore open --now` with no tail: it writes the open
+// commit and starts nothing.
+func uiChoreOpen(root string, a ui.Action) ui.Result {
+	res, err := openChoreInProcess(root, a.Project, a.Run, choreOpenForced)
+	if err != nil {
+		return failure(err, nil)
+	}
+	md := res.Metadata
+	return ui.Result{OK: true, Opened: md.ID, Message: fmt.Sprintf("opened %s/%s for chore %s/%s; nothing started — an armed heartbeat picks it up, or run `moe %s %s %s/%s`",
+		md.Project, md.ID, a.Project, a.Run, res.Workflow, res.FirstStage, md.Project, md.ID)}
 }

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modulecollective/moe/internal/chore"
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
@@ -147,8 +148,16 @@ func TestRegisteredChoresGatherUIAndHTTP(t *testing.T) {
 		t.Fatalf("incomplete detail: %s", d)
 	}
 	for _, it := range b.Items {
-		if it.Kind == ui.ItemChore && (it.Controls || it.Editable || it.Notes || it.Terminal || it.Question != nil || it.Generation != "") {
+		// A chore is editable (its definition, in the text form) and takes
+		// none of a run's capabilities.
+		if it.Kind == ui.ItemChore && (it.Controls || !it.Editable || it.Notes || it.Terminal || it.Question != nil || it.Generation != "") {
 			t.Fatalf("chore capabilities: %+v", it)
+		}
+		if it.Kind == ui.ItemChore {
+			spec, err := chore.ParseSpecText(it.Body)
+			if want, _ := chore.LoadSpec(root, it.Project, it.Run); err != nil || spec != want {
+				t.Fatalf("chore body %q does not round-trip: %v", it.Body, err)
+			}
 		}
 	}
 	rows, _ := source.overlay(now)

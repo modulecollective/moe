@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/modulecollective/moe/internal/chore"
 )
 
 type pane int
@@ -39,7 +41,7 @@ func keyOf(it Item) itemKey { return itemKey{it.Project, it.Run, it.Bucket} }
 // is also bound to the question it answers.
 type draftKey struct {
 	project, run string
-	purpose      string // note, answer, body, new-idea, new-intent
+	purpose      string // note, answer, body, new-idea, new-intent, chore, new-chore
 	question     int
 }
 
@@ -60,6 +62,16 @@ type draft struct {
 }
 
 func (d *draft) dirty() bool { return d.ed.String() != d.base }
+
+// choreDraft: the draft edits or creates a chore definition.
+func choreDraft(purpose string) bool { return purpose == "chore" || purpose == "new-chore" }
+
+// draftFor reports whether it is the item k targets. A chore and a run
+// may share a project/run label, so a chore draft only ever targets the
+// chore and every other draft only ever targets the run.
+func draftFor(k draftKey, it Item) bool {
+	return it.Project == k.project && it.Run == k.run && (it.Kind == ItemChore) == choreDraft(k.purpose)
+}
 
 // job is one mutation sequence on the worker: a save, then optionally a
 // tag of the same idea, which runs only if the save succeeded.
@@ -101,24 +113,25 @@ type model struct {
 	drafts map[draftKey]*draft
 	active *draft
 
-	cmd         *editor
-	search      *boardSearch
-	cmdTarget   *Item // captured when : opened
-	completion  *commandCompletion
-	confirm     *pendingConfirm
-	choices     []Choice
-	choiceFor   Action
-	saveDraft   *draft
-	progress    int // already reported steps of the in-flight job
-	busy        *job
-	queue       chan<- job
-	console     console
-	observed    map[string]bool
-	lastResult  map[string][]string // by project/run
-	retry       map[string]Action   // uncertain control requests, by target+verb
-	pendingSel  *itemKey            // select this item once it appears
-	width, high int
-	color       bool // cliout.Enabled on the actual output writer
+	cmd          *editor
+	search       *boardSearch
+	cmdTarget    *Item // captured when : opened
+	completion   *commandCompletion
+	confirm      *pendingConfirm
+	choices      []Choice
+	choiceFor    Action
+	saveDraft    *draft
+	progress     int // already reported steps of the in-flight job
+	busy         *job
+	queue        chan<- job
+	console      console
+	observed     map[string]bool
+	lastResult   map[string][]string // by project/run
+	retry        map[string]Action   // uncertain control requests, by target+verb
+	pendingSel   *itemKey            // select this item once it appears
+	pendingChore bool                // pendingSel names a chore, not a run
+	width, high  int
+	color        bool // cliout.Enabled on the actual output writer
 }
 
 type pendingConfirm struct {
@@ -193,17 +206,12 @@ const keptHeading = "KEPT DRAFTS"
 // retargeted. Drafts whose
 // target is on b record it as last seen.
 func (m *model) withKept(b Board) Board {
-	present := map[string]Item{}
-	for _, it := range b.Items {
-		if _, ok := present[it.Label()]; !ok {
-			present[it.Label()] = it
-		}
-	}
 	var gone []Item
 	listed := map[string]bool{}
 	for _, d := range m.drafts {
 		l := d.key.project + "/" + d.key.run
-		if it, ok := present[l]; ok {
+		if i := slices.IndexFunc(b.Items, func(it Item) bool { return draftFor(d.key, it) }); i >= 0 {
+			it := b.Items[i]
 			d.seen = &it
 			continue
 		}
@@ -262,7 +270,7 @@ func (m *model) applyBoard() {
 	m.clampBoard()
 	if m.pendingSel != nil {
 		for _, it := range b.Items {
-			if it.Project == m.pendingSel.project && it.Run == m.pendingSel.run {
+			if it.Project == m.pendingSel.project && it.Run == m.pendingSel.run && (it.Kind == ItemChore) == m.pendingChore {
 				m.sel, m.has, m.pendingSel = keyOf(it), true, nil
 				m.scrollToSelection()
 				return
@@ -490,6 +498,12 @@ func (m *model) normalKey(k Key) effect {
 		case 't':
 			m.reveal("")
 			return effNone
+		case 'o':
+			var target *Item
+			if it, ok := m.selected(); ok {
+				target = &it
+			}
+			return m.runCommand("open", target)
 		case 'g', 'd', 'u':
 			var target *Item
 			if it, ok := m.selected(); ok {
@@ -624,19 +638,14 @@ func (m *model) openDraft(key draftKey, seed string) {
 	d, ok := m.drafts[key]
 	if !ok {
 		d = &draft{key: key, ed: newEditor(seed, false), base: seed}
-		for _, it := range m.raw.Items {
-			if it.Project == key.project && it.Run == key.run {
-				d.seen = &it
-				break
-			}
+		if i := slices.IndexFunc(m.raw.Items, func(it Item) bool { return draftFor(key, it) }); i >= 0 {
+			it := m.raw.Items[i]
+			d.seen = &it
 		}
 		m.drafts[key] = d
 	}
 	if strings.HasPrefix(key.purpose, "new-") && d.seen == nil {
-		kind := ItemIdea
-		if key.purpose == "new-intent" {
-			kind = ItemIntent
-		}
+		kind := map[string]ItemKind{"new-idea": ItemIdea, "new-intent": ItemIntent, "new-chore": ItemChore}[key.purpose]
 		d.seen = &Item{Project: key.project, Run: key.run, Kind: kind, Detail: []string{draftWhat(key) + ": not created until save"}}
 		m.applyBoard()
 	}
@@ -747,6 +756,10 @@ func draftWhat(k draftKey) string {
 		return "new idea " + k.project + "/" + k.run
 	case "new-intent":
 		return "new intent " + k.project + "/" + k.run
+	case "chore":
+		return "edit of chore " + k.project + "/" + k.run
+	case "new-chore":
+		return "new chore " + k.project + "/" + k.run
 	}
 	return "draft"
 }
@@ -756,6 +769,9 @@ func draftWhat(k draftKey) string {
 func (m *model) isIdea(k draftKey) bool {
 	if k.purpose == "new-idea" {
 		return true
+	}
+	if k.purpose != "body" {
+		return false
 	}
 	for _, it := range m.board.Items {
 		if it.Project == k.project && it.Run == k.run && it.Kind == ItemIdea {
@@ -819,6 +835,10 @@ func (m *model) runDraft(d *draft, tag string, designOnly bool) {
 		a.Kind, a.Expected = ActEdit, d.base
 	case "new-idea", "new-intent":
 		a.Kind, a.Workflow = ActCreate, strings.TrimPrefix(k.purpose, "new-")
+	case "chore":
+		a.Kind, a.Expected = ActChoreEdit, d.base
+	case "new-chore":
+		a.Kind = ActChoreCreate
 	}
 	j := job{label: draftWhat(k), steps: []Action{a}, draft: &k, target: itemKey{project: k.project, run: k.run}}
 	if tag != "" {
@@ -896,8 +916,20 @@ func (m *model) finished(r jobResult) {
 				msgs = append(msgs, msg)
 				m.say(msg)
 			} else {
-				m.pendingSel = &itemKey{project: step.Project, run: step.Run}
+				m.pendingSel, m.pendingChore = &itemKey{project: step.Project, run: step.Run}, false
 			}
+		}
+		if step.Kind == ActChoreCreate && res.OK {
+			if m.raw.ProjectFilter != "" && m.raw.ProjectFilter != step.Project {
+				msg := "chore " + step.Project + "/" + step.Run + " was added; hidden by current filters"
+				msgs = append(msgs, msg)
+				m.say(msg)
+			} else {
+				m.pendingSel, m.pendingChore = &itemKey{project: step.Project, run: step.Run}, true
+			}
+		}
+		if step.Kind == ActChoreOpen && res.OK && res.Opened != "" {
+			m.pendingSel, m.pendingChore = &itemKey{project: step.Project, run: res.Opened}, false
 		}
 	}
 	if len(r.results) == 1 && len(j.steps) == 2 {
@@ -1030,8 +1062,16 @@ func commandHint(line string, target *Item) string {
 		if target != nil {
 			return "→ " + target.Label()
 		}
-	case "new-idea", "new-intent":
+	case "new-idea", "new-intent", "new-chore":
 		return "creates on save"
+	case "delete":
+		if target != nil {
+			return "→ " + target.Label() + ": removes the chore (asks first)"
+		}
+	case "open":
+		if target != nil {
+			return "→ " + target.Label() + ": opens its run now; starts nothing"
+		}
 	}
 	if target == nil {
 		return "no selection"
@@ -1096,12 +1136,35 @@ func (m *model) runCommand(line string, target *Item) effect {
 			return effNone
 		}
 		m.openDraft(draftKey{project: p, run: slug, purpose: verb}, "# "+slug+"\n")
+	case "new-chore":
+		if !need(len(f) == 2, "usage: :new-chore <project>/<name>") {
+			return effNone
+		}
+		p, name, ok := strings.Cut(f[1], "/")
+		if !need(ok && p != "" && validSlug(name), "want <project>/<name> with a lowercase-kebab name") {
+			return effNone
+		}
+		m.openDraft(draftKey{project: p, run: name, purpose: verb}, chore.Spec{Prompt: "# " + name + "\n"}.Text())
+	case "delete":
+		if !need(len(f) == 1, "takes no arguments") || !need(target != nil && target.Kind == ItemChore && target.Editable, "select a chore") {
+			return effNone
+		}
+		t := *target
+		m.ask("Delete chore "+t.Label()+"? Its definition is removed in one commit; an open run carries on", func(m *model) {
+			m.start(job{label: "delete chore " + t.Label(), steps: []Action{{Kind: ActChoreDelete, Project: t.Project, Run: t.Run}}, target: keyOf(t)})
+		})
+	case "open":
+		// No confirm: the run is closable, and opening starts no agent.
+		if !need(len(f) == 1, "takes no arguments") || !need(target != nil && target.Kind == ItemChore && target.Editable, "select a chore") {
+			return effNone
+		}
+		m.start(job{label: "open a run for chore " + target.Label(), steps: []Action{{Kind: ActChoreOpen, Project: target.Project, Run: target.Run}}, target: keyOf(*target)})
 	case "edit":
 		if need(len(f) == 1, "takes no arguments") {
 			m.startEditBodyOf(target)
 		}
 	case "close":
-		if !need(len(f) == 1, "takes no arguments") || !need(target != nil && target.Editable, "select an open idea or intent") {
+		if !need(len(f) == 1, "takes no arguments") || !need(target != nil && target.Editable && target.Kind != ItemChore, "select an open idea or intent") {
 			return effNone
 		}
 		t := *target
@@ -1134,14 +1197,18 @@ func (m *model) runCommand(line string, target *Item) effect {
 }
 
 func (m *model) startEditBodyOf(target *Item) {
-	if target != nil && m.reopenKept(draftKey{project: target.Project, run: target.Run, purpose: "body"}) {
+	purpose := "body"
+	if target != nil && target.Kind == ItemChore {
+		purpose = "chore"
+	}
+	if target != nil && m.reopenKept(draftKey{project: target.Project, run: target.Run, purpose: purpose}) {
 		return
 	}
 	if target == nil || !target.Editable {
-		m.say("edit: select an open idea or intent")
+		m.say("edit: select an open idea, intent or chore")
 		return
 	}
-	m.openDraft(draftKey{project: target.Project, run: target.Run, purpose: "body"}, target.Body)
+	m.openDraft(draftKey{project: target.Project, run: target.Run, purpose: purpose}, target.Body)
 }
 
 func validSlug(s string) bool {
@@ -1227,7 +1294,7 @@ func (m *model) staleAnswer(it Item) *draft {
 // longer accepts that write.
 func (m *model) targetClosed(k draftKey) bool {
 	for _, it := range m.board.Items {
-		if it.Project == k.project && it.Run == k.run {
+		if draftFor(k, it) {
 			return k.purpose == "body" && !it.Editable || k.purpose == "note" && !it.Notes
 		}
 	}

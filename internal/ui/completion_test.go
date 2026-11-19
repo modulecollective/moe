@@ -11,12 +11,13 @@ func TestCommandCompletionVocabularyAndCycles(t *testing.T) {
 		line  string
 		words []string
 	}{
-		{"", []string{"close", "edit", "finish", "handoff", "help", "new-idea", "new-intent", "park", "pause", "quit", "resume", "tag-design", "tag-sdlc", "terminal", "untag"}},
+		{"", []string{"close", "delete", "edit", "finish", "handoff", "help", "new-chore", "new-idea", "new-intent", "open", "park", "pause", "quit", "resume", "tag-design", "tag-sdlc", "terminal", "untag"}},
 		{"p", []string{"park", "pause"}},
 		{"new-i", []string{"new-idea", "new-intent"}},
 		{"tag-", []string{"tag-design", "tag-sdlc"}},
 		{"tag-s", []string{"tag-sdlc"}},
-		{"ne", []string{"new-idea", "new-intent"}},
+		{"ne", []string{"new-chore", "new-idea", "new-intent"}},
+		{"o", []string{"open"}},
 	} {
 		for _, existing := range []bool{false, true} {
 			for _, reverse := range []bool{false, true} {
@@ -58,8 +59,8 @@ func TestCommandCompletionAtCursor(t *testing.T) {
 		{"\u2003new-ix  p/é", 6, "\u2003new-idea  p/é", 9},
 		{"  new-ixxx  p/é", 7, "  new-idea  p/é", 10},
 		{"paZZ p/世界", 2, "park p/世界", 4},
-		{"new-intent p/é", 3, "new-idea p/é", 8},
-		{"new-  p/é", 4, "new-idea  p/é", 8},
+		{"new-intent p/é", 3, "new-chore p/é", 9},
+		{"new-  p/é", 4, "new-chore  p/é", 9},
 		{"tag-x p/é", 4, "tag-design p/é", 10},
 		{"New-i", 5, "New-i", 5},
 		{"bogus", 5, "bogus", 5},

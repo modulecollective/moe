@@ -15,11 +15,12 @@ const helpText = `Keys
   Tab/Shift-Tab  cycle board, details and console
   n              write a note to the selected run or idea
   a              answer the selected run's open question
-  e              edit the selected open idea or intent
+  e              edit the selected open idea, intent or chore
   g              set the selected open idea's SDLC licence
   d              set its design-only licence
   u              clear either idea licence
   t              reveal the selected run's Rex terminal
+  o              open a run for the selected chore now (starts nothing)
   :              command line for the selected item
   ?              this help (Esc closes)
   q, Ctrl-C      quit (asks first when drafts are unsaved)
@@ -54,6 +55,8 @@ Commands (:)
   new-intent <project>/<slug>
   Slugs use lowercase letters, digits and hyphens, e.g. :new-idea p/my-idea
   edit | close                                the selected idea or intent
+  new-chore <project>/<name>                  opens a chore definition; adds it on save
+  edit | open | delete                        the selected chore (delete asks first)
   tag-sdlc | tag-design | untag               the selected idea's licence
   terminal | help | quit
 
@@ -67,7 +70,9 @@ Confirmations: y accepts, Esc cancels; arrows/page/Home/End scroll the question.
 Notes reach the run's next prompt; they never pause, resume or start
 work. finish ships the run (!!) from its next boundary. resume releases
 a hold and starts nothing. Tagging licenses later pickup; it launches
-nothing.`
+nothing. A chore edits as a header of key: value lines, a --- line,
+then its prompt; open writes its run and leaves starting it to you or
+the heartbeat.`
 
 // frame is one painted screen: exactly m.high rows, plus where the
 // cursor goes when it shows.
@@ -347,7 +352,7 @@ func reopenKey(purpose string) string {
 		return "n"
 	case "answer":
 		return "a"
-	case "body":
+	case "body", "chore":
 		return "e"
 	}
 	return ": new again"
@@ -356,7 +361,7 @@ func reopenKey(purpose string) string {
 func (m *model) draftsFor(it Item) []*draft {
 	var out []*draft
 	for _, d := range m.drafts {
-		if d.key.project == it.Project && d.key.run == it.Run {
+		if draftFor(d.key, it) {
 			out = append(out, d)
 		}
 	}
@@ -413,6 +418,9 @@ func (m *model) footerRow(w int) (string, int) {
 		}
 		if it.Terminal {
 			keys = append(keys, "t terminal")
+		}
+		if it.Kind == ItemChore && it.Editable {
+			keys = append(keys, "o open now")
 		}
 	}
 	keys = append(keys, ": command", "? help", "q quit")

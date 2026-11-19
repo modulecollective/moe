@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/banner"
+	"github.com/modulecollective/moe/internal/chore"
 	"github.com/modulecollective/moe/internal/cliout"
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/input"
@@ -489,6 +490,12 @@ func (s *uiSource) item(row dash.Row, now time.Time, obs map[string]RunObservati
 		}
 		it.Detail = append(it.Detail, "", "prompt:")
 		it.Detail = append(it.Detail, strings.Split(d.Prompt, "\n")...)
+		// The definition as written, in the text form e opens. A chore
+		// whose files can't be read back offers no edit; its gather
+		// already failed loudly if it didn't load at all.
+		if spec, err := chore.LoadSpec(s.root, d.Project, d.Name); err == nil {
+			it.Body, it.Editable = spec.Text(), true
+		}
 		return it
 	}
 	md := s.snap.Runs[key]

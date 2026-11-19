@@ -39,10 +39,12 @@ type Item struct {
 	// Detail is what the detail pane shows, one fact per line. Plain
 	// text; the console makes it safe to paint.
 	Detail []string
-	// Body is a capture's canvas (ideas and intents).
+	// Body is a capture's canvas (ideas and intents), or a chore's
+	// definition in its editable text form.
 	Body string
 	// Editable: an open capture whose body can be edited, closed and —
-	// for ideas — tagged.
+	// for ideas — tagged; or a chore whose definition can be edited,
+	// deleted and opened now.
 	Editable bool
 	// Notes: the run takes operator notes.
 	Notes bool
@@ -106,6 +108,13 @@ const (
 	ActClose
 	ActTag
 	ActReveal
+	// The chore actions. ActChoreEdit carries Expected, the text form
+	// the editor opened; ActChoreOpen opens the chore's run and starts
+	// nothing.
+	ActChoreCreate
+	ActChoreEdit
+	ActChoreDelete
+	ActChoreOpen
 )
 
 // Action is one mutation, bound to the identity it was captured against
@@ -126,7 +135,8 @@ type Action struct {
 	// HoldRevision binds a resume to the hold that was shown.
 	Generation   string
 	HoldRevision int
-	// Expected is the capture body an edit started from.
+	// Expected is the capture body, or the chore text form, an edit
+	// started from.
 	Expected string
 	// Workflow is the capture workflow to create (idea, intent), or the
 	// tag's workflow ("" untags). DesignOnly narrows an sdlc tag.
@@ -150,6 +160,8 @@ type Result struct {
 	Choices []Choice
 	// RequestID is the control request id used, for a retry.
 	RequestID string
+	// Opened is the run an ActChoreOpen created, to select it.
+	Opened string
 }
 
 // Choice is one option in a pick list.
@@ -184,6 +196,14 @@ func (a Action) describe() string {
 		return strings.TrimSpace(tagLabel(a.Workflow, a.DesignOnly) + " " + target)
 	case ActReveal:
 		return "reveal " + target
+	case ActChoreCreate:
+		return "add chore " + target
+	case ActChoreEdit:
+		return "edit chore " + target
+	case ActChoreDelete:
+		return "delete chore " + target
+	case ActChoreOpen:
+		return "open a run for chore " + target
 	}
 	return target
 }
