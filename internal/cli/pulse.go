@@ -470,7 +470,7 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 // fails the close and the run stays open on the dash's ACTIVE list:
 // escalation by visibility, the pulse's standard failure mode.
 //
-// A failed stamped close is put back the way it was: the canvas bytes
+// A failed terminal commit is put back the way it was: the canvas bytes
 // the stamp overwrote, if it got that far, and one reset over the whole
 // run dir, which covers the canvas, run.json, and anything the harvest
 // staged before the commit failed. The status flip needs no repair here:
@@ -485,6 +485,9 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 // on its way out, this only rewrites files this process itself
 // half-wrote, and the index-lock retry in internal/git covers the
 // git-level race.
+// Resource cleanup follows the terminal commit outside repolock. Its failure
+// retains committed terminal truth and the stamp; it must never restore old
+// canvas bytes over a successful journal commit.
 func closePulseRunStamped(root, projectID, runID, name string, rewrite func(body []byte) []byte, stderr io.Writer, extraTrailers ...trailers.Block) error {
 	reg, ok := lookupCloseRegistration(pulseWorkflow)
 	if !ok {
@@ -493,9 +496,9 @@ func closePulseRunStamped(root, projectID, runID, name string, rewrite func(body
 	canvasRel := run.ContentPath(projectID, runID, pulseDoc)
 	canvas := filepath.Join(root, canvasRel)
 	var before []byte
-	cleanup := reg.cleanup
+	var prepare closeCleanup
 	if rewrite != nil {
-		cleanup = func(root string, md *run.Metadata) error {
+		prepare = func(root string, md *run.Metadata) error {
 			body, err := os.ReadFile(canvas)
 			if err != nil {
 				return fmt.Errorf("read pulse canvas: %w", err)
@@ -509,15 +512,13 @@ func closePulseRunStamped(root, projectID, runID, name string, rewrite func(body
 			if err := run.Stage(root, canvasRel); err != nil {
 				return err
 			}
-			if reg.cleanup != nil {
-				return reg.cleanup(root, md)
-			}
 			return nil
 		}
 	}
-	err := closeRunInProcess(root, pulseWorkflow, reg.subject, cleanup,
+	err := closeRunPrepared(root, pulseWorkflow, reg.subject, reg.cleanup, prepare,
 		projectID, runID, true /*skipEdit*/, stderr, extraTrailers...)
-	if err != nil && rewrite != nil {
+	_, cleanupFailed := errors.AsType[*terminalCleanupError](err)
+	if err != nil && !cleanupFailed && rewrite != nil {
 		if before != nil {
 			_ = os.WriteFile(canvas, before, 0o644)
 		}
@@ -542,6 +543,10 @@ func closePulseRunStamped(root, projectID, runID, name string, rewrite func(body
 // cycles.
 func disposePulseRun(root, projectID, runID string, stderr io.Writer) {
 	if err := disposePulseRunReason(root, projectID, runID, "the operator interrupted the pulse before the survey started", stderr); err != nil {
+		if _, ok := errors.AsType[*terminalCleanupError](err); ok {
+			moePrintf(stderr, "pulse: %v\n", err)
+			return
+		}
 		moePrintf(stderr, "pulse: skip-close %s/%s: %v — leaving run open\n", projectID, runID, err)
 		return
 	}

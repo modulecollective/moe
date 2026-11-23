@@ -112,12 +112,9 @@ func resolveRunWorkspacePath(root string, md *run.Metadata) (string, error) {
 // another run has since claimed (the binding is written at open, the
 // claim at attach), and its close must not move the holder's tree or
 // drop the holder's claim. An unclaimed workspace is left alone too —
-// only the holder moves the tree. Teardown is invoked best-effort —
-// a non-zero exit is logged but doesn't block sandbox removal,
-// because a half-removed sandbox is worse than a half-cleaned dev
-// resource (the operator can re-run cleanup; they can't undo
-// "sandbox stuck in a corrupt state"). The workspace reposition is
-// similarly best-effort: the merge has already landed by the time
+// only the holder moves the tree. A per-run teardown failure retains the
+// original tree/cache and returns an error. Named-workspace reposition remains
+// best-effort: the merge has already landed by the time
 // this is called, so any failure is logged and the claim is still
 // released. The operator can recover by hand with `moe workspace
 // shell` and a manual `git checkout <default> && git pull`.
@@ -126,7 +123,7 @@ func releaseRunWorkspace(root string, md *run.Metadata) error {
 		if sandbox.Exists(root, md.Project, md.ID) {
 			workTree := sandbox.Path(root, md.Project, md.ID)
 			if err := devEnvRunTeardown(root, workTree, md, os.Stdout, os.Stderr); err != nil {
-				fmt.Fprintf(os.Stderr, "dev-env: teardown for %s/%s: %v\n", md.Project, md.ID, err)
+				return fmt.Errorf("dev-env teardown for %s/%s; clone/cache retained at %s: %w", md.Project, md.ID, workTree, err)
 			}
 		}
 		return sandbox.Remove(root, md.Project, md.ID)

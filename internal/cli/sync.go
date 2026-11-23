@@ -202,11 +202,11 @@ func reconcilePushedRuns(root, projectID string, stdout, stderr io.Writer) (int,
 			continue
 		}
 		ok, err := reconcileOnePushedRun(root, md, stdout, stderr)
-		if err != nil {
-			return moved, err
-		}
 		if ok {
 			moved++
+		}
+		if err != nil {
+			return moved, err
 		}
 	}
 	return moved, nil
@@ -295,23 +295,19 @@ func reconcileOnePushedRun(root string, md *run.Metadata, stdout, stderr io.Writ
 	}
 
 	ok, err := finalizePushedRun(root, md.Project, md.ID, status, extra, stderr)
-	if err != nil {
-		return false, err
-	}
 	if ok {
 		moePrintf(stdout, "%s", line)
 	}
-	return ok, nil
+	return ok, err
 }
 
 // finalizePushedRun is phase two: the one lock window a transition
-// needs. Inside it, harvest follow-ups, flip the status, drop the
-// sandbox clone, and commit run.json with the closing trailer. The
+// needs. Inside it, harvest follow-ups and commit terminal status. Then
+// release the source environment outside repolock under the run guard. The
 // cleanup mirrors the direct-merge path so the end state is
 // indistinguishable regardless of how the run reached a terminal
-// status. Sandbox teardown failures are warned but non-fatal — the
-// reconciliation has otherwise succeeded and a stray clone is a
-// cleanup nuisance, not a correctness bug.
+// status. Cleanup failure returns (true, error): reconciliation committed,
+// while surviving clone/cache evidence remains available for recovery.
 //
 // It re-loads run.json and re-judges under the lock, and that is the
 // load-bearing line. Phase one's read of the status happened outside
@@ -328,15 +324,11 @@ func reconcileOnePushedRun(root string, md *run.Metadata, stdout, stderr io.Writ
 // retries. Returns (true, nil) when the transition committed.
 func finalizePushedRun(root, projectID, runID, status string, extra trailers.Block, stderr io.Writer) (bool, error) {
 	moved := false
+	var finalized *run.Metadata
 	err := repolock.With(root, repolock.Options{
 		Purpose: "reconcile",
 		Run:     projectID + "/" + runID,
 		Budget:  repolock.CronBudget,
-		// releaseRunWorkspace runs the project's dev-env teardown
-		// hooks and rm -rf's a whole sandbox clone; neither is bounded
-		// by anything moe controls, so the window keeps its heartbeat
-		// rather than risk reading as a crashed holder.
-		Heartbeat: true,
 	}, func() error {
 		md, err := run.Load(root, projectID, runID)
 		if err != nil {
@@ -353,11 +345,9 @@ func finalizePushedRun(root, projectID, runID, status string, extra trailers.Blo
 			moePrintf(stderr, "moe sync: %s/%s harvest failed: %v; retry next sync\n", projectID, runID, err)
 			return nil
 		}
-		if err := releaseRunWorkspace(root, md); err != nil {
-			moePrintf(stderr, "warning: %s/%s: release workspace: %v\n", projectID, runID, err)
-		}
 		extra.Run = runID
 		extra.Project = projectID
+		extra.Workflow = md.Workflow
 		extra.Document = "push"
 		extra.Consent = walkConsent()
 		msg := fmt.Sprintf("sync: %s/%s %s\n\n", projectID, runID, strings.ToLower(status)) +
@@ -366,10 +356,16 @@ func finalizePushedRun(root, projectID, runID, status string, extra trailers.Blo
 			return fmt.Errorf("moe sync: commit %s for %s/%s: %w", strings.ToLower(status), projectID, runID, err)
 		}
 		moved = true
+		finalized = md
 		return nil
 	})
 	if err != nil {
 		return false, err
+	}
+	if moved {
+		if err := releaseRunWorkspace(root, finalized); err != nil {
+			return true, &terminalCleanupError{Project: projectID, Run: runID, Status: status, Err: err}
+		}
 	}
 	return moved, nil
 }

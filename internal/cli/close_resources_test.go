@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/git/gittest"
+	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/sandbox"
 	"github.com/modulecollective/moe/internal/session"
@@ -201,7 +202,7 @@ func TestWorkflowClosePreservesReservedResources(t *testing.T) {
 	}
 }
 
-func TestPulseStampedCloseCleanupFailureRollsBack(t *testing.T) {
+func TestPulseStampedCloseCleanupFailureKeepsCommittedStamp(t *testing.T) {
 	root := seedCloseFixture(t, "tele", "finish", pulseWorkflow, run.StatusInProgress)
 	writePulseGate(t, root, "tele", "finish", `{"status":"ok"}`)
 	installCloseResourceHooks(t, root, "tele")
@@ -211,13 +212,19 @@ func TestPulseStampedCloseCleanupFailureRollsBack(t *testing.T) {
 	t.Cleanup(func() { closeRegistrations[pulseWorkflow] = reg })
 	called := false
 	broken := reg
-	broken.cleanup = func(string, *run.Metadata) error {
+	broken.cleanup = func(root string, md *run.Metadata) error {
 		called = true
 		if !strings.Contains(readPulseCanvas(t, root, "tele", "finish"), "Stamped") {
 			t.Error("cleanup ran before stamp")
 		}
-		if staged := gittest.Output(t, root, "diff", "--cached", "--name-only"); !strings.Contains(staged, "content.md") {
-			t.Errorf("stamp not staged: %s", staged)
+		if staged := gittest.Output(t, root, "diff", "--cached", "--name-only"); staged != "" {
+			t.Errorf("cleanup ran before stamp commit: %s", staged)
+		}
+		if md.Status != run.StatusClosed {
+			t.Errorf("cleanup preceded terminal state: %s", md.Status)
+		}
+		if err := repolock.With(root, repolock.Options{Purpose: "test cleanup outside lock"}, func() error { return nil }); err != nil {
+			t.Errorf("cleanup still holds repolock: %v", err)
 		}
 		return errors.New("cleanup refused")
 	}
@@ -227,10 +234,10 @@ func TestPulseStampedCloseCleanupFailureRollsBack(t *testing.T) {
 		t.Fatalf("err=%v called=%v", err, called)
 	}
 	resources.assertRetained(t)
-	if got := readPulseCanvas(t, root, "tele", "finish"); got != before {
-		t.Errorf("canvas not restored: %q", got)
+	if got := readPulseCanvas(t, root, "tele", "finish"); got != before+"\nStamped\n" {
+		t.Errorf("committed stamp was changed: %q", got)
 	}
-	if got := loadRun(t, root, "tele", "finish").Status; got != run.StatusInProgress {
+	if got := loadRun(t, root, "tele", "finish").Status; got != run.StatusClosed {
 		t.Errorf("status=%s", got)
 	}
 	if got := strings.TrimSpace(gittest.Output(t, root, "status", "--porcelain", "--untracked-files=no")); got != "" {
@@ -238,7 +245,7 @@ func TestPulseStampedCloseCleanupFailureRollsBack(t *testing.T) {
 	}
 }
 
-func TestPulseStampedCloseCommitFailureCanRetryAfterCleanup(t *testing.T) {
+func TestPulseStampedCloseCommitFailurePreservesResourcesForRetry(t *testing.T) {
 	root := seedCloseFixture(t, "tele", "finish", pulseWorkflow, run.StatusInProgress)
 	writePulseGate(t, root, "tele", "finish", `{"status":"ok"}`)
 	installCloseResourceHooks(t, root, "tele")
@@ -248,7 +255,7 @@ func TestPulseStampedCloseCommitFailureCanRetryAfterCleanup(t *testing.T) {
 	if err := disposePulseRunReason(root, "tele", "finish", "test disposal", io.Discard); err == nil {
 		t.Fatal("commit unexpectedly succeeded")
 	}
-	resources.assertReleased(t)
+	resources.assertRetained(t)
 	if got := readPulseCanvas(t, root, "tele", "finish"); got != before {
 		t.Errorf("canvas not restored: %q", got)
 	}

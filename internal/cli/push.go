@@ -893,7 +893,7 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 		// spans the network after the push moved to serve.
 		Heartbeat: true,
 	}, func() error {
-		// The flip goes first, ahead of the workspace release: the
+		// The flip goes first, ahead of journal content preparation: the
 		// pending-marker resume below is gated on run.json reading
 		// merged, so a save that fails here must leave a run that a
 		// plain re-run pushes again, clone and all.
@@ -903,9 +903,6 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 		}
 		flipped = true
 		paths = append(paths, runJSON)
-		if err := releaseRunWorkspace(root, md); err != nil {
-			moePrintf(stderr, "warning: release workspace: %v\n", err)
-		}
 		pushCanvasPath, err := writeMechanicalPushNote(root, md)
 		if err != nil {
 			return err
@@ -946,8 +943,7 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 		// The ff-push already landed, so the flip to merged is true and
 		// must not be rolled back — what's missing is only the local
 		// record. Persist it: the message can't be rebuilt on a later
-		// run (the ff-push collapsed the chore diff, and the clone the
-		// tip came from was just released), so a re-run has to read it
+		// run (the ff-push collapsed the chore diff), so a re-run reads it
 		// back rather than re-derive it.
 		moePrintf(stderr, "commit merge record: %v\n", err)
 		pending := &pendingMergeRecord{Msg: msg, Paths: paths, Tip: tipSHA}
@@ -967,6 +963,10 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 		return 1, nil
 	}
 	moePrintf(stdout, "merged %s/%s at %s\n", md.Project, md.ID, git.ShortSHA(tipSHA))
+	if err := releaseRunWorkspace(root, md); err != nil {
+		moePrintf(stderr, "%v\n", &terminalCleanupError{Project: md.Project, Run: md.ID, Status: md.Status, Err: err})
+		return 1, nil
+	}
 	return 0, nil
 }
 
@@ -1030,9 +1030,8 @@ func loadMergeRecordPending(root string, md *run.Metadata, stderr io.Writer) (*p
 // original closure never reached. Rolling forward is the only honest
 // move here — the ff-push landed, so the run really is merged.
 //
-// Two things it deliberately does not repeat from mergePath's closure.
-// releaseRunWorkspace already ran on the first attempt. And
-// ErrNothingToCommit is success, not failure: it means the operator
+// Cleanup starts only after the record is committed and its pending receipt
+// cleared. ErrNothingToCommit is success: it means the operator
 // committed the staged record by hand.
 func resumeMergeRecord(root string, md *run.Metadata, pending *pendingMergeRecord, stdout, stderr io.Writer) int {
 	err := repolock.With(root, repolock.Options{
@@ -1056,8 +1055,13 @@ func resumeMergeRecord(root string, md *run.Metadata, pending *pendingMergeRecor
 	}
 	if err := os.Remove(mergeRecordPendingPath(root, md)); err != nil && !os.IsNotExist(err) {
 		moePrintf(stderr, "warning: remove %s: %v\n", mergeRecordPendingName, err)
+		return 1
 	}
 	moePrintf(stdout, "merged %s/%s at %s\n", md.Project, md.ID, git.ShortSHA(pending.Tip))
+	if err := releaseRunWorkspace(root, md); err != nil {
+		moePrintf(stderr, "%v\n", &terminalCleanupError{Project: md.Project, Run: md.ID, Status: md.Status, Err: err})
+		return 1
+	}
 	return 0
 }
 

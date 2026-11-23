@@ -61,10 +61,12 @@ func pendingRecordExists(f *pushFixture) bool {
 // commit fails after the ff-push has landed, the flip to merged is
 // true and stays — what gets written is the marker that makes the
 // commit recoverable. The record can't be rebuilt later (the ff-push
-// collapses the chore diff and the clone the tip came from is already
-// released), so the trailers have to survive in the marker itself.
+// collapses the chore diff), so the trailers survive in the marker itself.
+// Source cleanup waits for that record commit.
 func TestPushMergeRecordFailurePersistsPendingRecord(t *testing.T) {
 	f := newPushFixture(t)
+	installCloseResourceHooks(t, f.root, f.projectID)
+	resources := allocateCloseResources(t, f.root, f.projectID, f.runID)
 	defer failMergeRecordCommits(t, f.root)()
 
 	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
@@ -79,6 +81,7 @@ func TestPushMergeRecordFailurePersistsPendingRecord(t *testing.T) {
 	if md := f.reloadRun(); md.Status != run.StatusMerged {
 		t.Fatalf("status on disk: want %s, got %s", run.StatusMerged, md.Status)
 	}
+	resources.assertRetained(t)
 	// Nothing committed, so nothing to read the merge SHA back from.
 	if sha := push.MergedSHA(f.root, f.projectID, f.runID); sha != "" {
 		t.Fatalf("record commit failed but MoE-Merged resolves to %s", sha)
@@ -114,6 +117,8 @@ func TestPushMergeRecordFailurePersistsPendingRecord(t *testing.T) {
 // the marker.
 func TestPushResumesStrandedMergeRecord(t *testing.T) {
 	f := newPushFixture(t)
+	installCloseResourceHooks(t, f.root, f.projectID)
+	resources := allocateCloseResources(t, f.root, f.projectID, f.runID)
 	lift := failMergeRecordCommits(t, f.root)
 
 	// Strand under a machine walk so the record carries MoE-Consent...
@@ -124,6 +129,7 @@ func TestPushResumesStrandedMergeRecord(t *testing.T) {
 		}
 	}
 	strand()
+	resources.assertRetained(t)
 	lift()
 
 	// ...and resume outside one. The consent below can only have come
@@ -132,6 +138,7 @@ func TestPushResumesStrandedMergeRecord(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("resume: exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
 	}
+	resources.assertReleased(t)
 	if strings.Contains(stdout, "already merged") {
 		t.Fatalf("resume printed the already-merged lie:\n%s", stdout)
 	}

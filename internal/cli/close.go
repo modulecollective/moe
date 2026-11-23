@@ -25,10 +25,19 @@ import (
 // the harvest and the canvas seal.
 func isCaptureWorkflow(workflow string) bool { return dash.IsCapture(workflow) }
 
-// closeCleanup runs workflow-specific tear-down after state guards pass
-// and before the shared status-flip commit. Returning an error aborts
-// the close before run.json is modified.
+// closeCleanup runs workflow-specific teardown after the terminal commit,
+// outside repolock while the caller still owns the run.
 type closeCleanup func(root string, md *run.Metadata) error
+
+type terminalCleanupError struct {
+	Project, Run, Status string
+	Err                  error
+}
+
+func (e *terminalCleanupError) Error() string {
+	return fmt.Sprintf("run %s/%s is %s; cleanup failed and resources were retained: %v", e.Project, e.Run, e.Status, e.Err)
+}
+func (e *terminalCleanupError) Unwrap() error { return e.Err }
 
 // closeRegistration is the (subject, cleanup) pair a workflow handed
 // to closeCommand, recorded so other close entry points — today
@@ -139,8 +148,8 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 }
 
 // closeRunInProcess runs the shared close pipeline — state guards,
-// workflow cleanup, feedback harvest, status flip, trailered
-// commit — for an already-resolved run, returning an error instead of
+// feedback harvest, status flip/commit, then workspace cleanup —
+// for an already-resolved run, returning an error instead of
 // printing. Both the CLI wrapper (runClose) and `moe serve` (via the
 // CloseRun option, wired in cli/serve.go) drive it; the CLI wrapper owns
 // flag/arg parse, sdlc slug resolution, and the success/nudge print,
@@ -152,6 +161,11 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 // (serve answers 500). skipEdit threads to enterTerminal's harvest
 // pre-flight: serve always passes true since it can't host $EDITOR.
 func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, projectID, runID string, skipEdit bool, stderr io.Writer, extraTrailers ...trailers.Block) error {
+	return closeRunPrepared(root, workflow, subject, cleanup, nil, projectID, runID, skipEdit, stderr, extraTrailers...)
+}
+
+// prepare contributes journal content (pulse's stamp), never resource cleanup.
+func closeRunPrepared(root, workflow, subject string, cleanup, prepare closeCleanup, projectID, runID string, skipEdit bool, stderr io.Writer, extraTrailers ...trailers.Block) error {
 	var md *run.Metadata
 	err := repolock.With(root, repolock.Options{
 		Purpose: workflow + "-close",
@@ -276,8 +290,8 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 			return err
 		}
 
-		if cleanup != nil {
-			if err := cleanup(root, md); err != nil {
+		if prepare != nil {
+			if err := prepare(root, md); err != nil {
 				return err
 			}
 		}
@@ -289,6 +303,11 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 	})
 	if err != nil {
 		return err
+	}
+	if cleanup != nil {
+		if err := cleanup(root, md); err != nil {
+			return &terminalCleanupError{Project: md.Project, Run: md.ID, Status: md.Status, Err: err}
+		}
 	}
 
 	// The close is durable and the repolock released. Advisory only,
