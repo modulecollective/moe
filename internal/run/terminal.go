@@ -129,7 +129,11 @@ func LatestTerminalTransition(ctx context.Context, root string, md *Metadata, no
 				return none, err
 			}
 			parts := strings.Split(meta, "\x00")
-			if len(parts) != 4 || strings.TrimSpace(parts[1]) != md.Project || strings.TrimSpace(parts[2]) != md.ID || strings.TrimSpace(parts[3]) != md.Workflow {
+			// Sync's established record has project/run attribution without a
+			// workflow trailer (adding one changes the heartbeat's work view).
+			// Workflow identity is already checked in each committed metadata
+			// snapshot; an explicit contradictory trailer still refuses.
+			if len(parts) != 4 || strings.TrimSpace(parts[1]) != md.Project || strings.TrimSpace(parts[2]) != md.ID || (strings.TrimSpace(parts[3]) != "" && strings.TrimSpace(parts[3]) != md.Workflow) {
 				return none, errors.New("terminal history lacks matching journal attribution")
 			}
 			seconds, err := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)

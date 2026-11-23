@@ -125,3 +125,23 @@ func TestNonterminalNeverExpires(t *testing.T) {
 		}
 	}
 }
+
+func TestTerminalTransitionAcceptsSyncAttributionAndRejectsConflictingWorkflow(t *testing.T) {
+	root := gittest.Init(t)
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	md := &Metadata{ID: "r", Project: "p", Workflow: "sdlc", Status: StatusPushed}
+	terminalCommit(t, root, md, at.Add(-time.Hour))
+	md.Status = StatusClosed
+	terminalCommit(t, root, md, at)
+	message := "sync: p/r closed\n\nMoE-Project: p\nMoE-Run: r\nMoE-Document: push\nMoE-Closed: fixture\n"
+	gittest.RunWithEnv(t, root, []string{"GIT_COMMITTER_DATE=" + at.Format(time.RFC3339)}, "commit", "--amend", "-m", message)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if got, err := LatestTerminalTransition(ctx, root, md, at.Add(CloneRetention)); err != nil || !got.At.Equal(at) {
+		t.Fatalf("sync evidence rejected: %+v %v", got, err)
+	}
+	gittest.RunWithEnv(t, root, []string{"GIT_COMMITTER_DATE=" + at.Format(time.RFC3339)}, "commit", "--amend", "-m", message+"MoE-Workflow: chat\n")
+	if _, err := LatestTerminalTransition(ctx, root, md, at.Add(CloneRetention)); err == nil {
+		t.Fatal("conflicting workflow trailer accepted")
+	}
+}

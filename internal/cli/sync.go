@@ -347,7 +347,6 @@ func finalizePushedRun(root, projectID, runID, status string, extra trailers.Blo
 		}
 		extra.Run = runID
 		extra.Project = projectID
-		extra.Workflow = md.Workflow
 		extra.Document = "push"
 		extra.Consent = walkConsent()
 		msg := fmt.Sprintf("sync: %s/%s %s\n\n", projectID, runID, strings.ToLower(status)) +
