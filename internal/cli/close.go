@@ -184,6 +184,9 @@ func closeRunPreparedOwned(owner *runowner.Handle, root, workflow, subject strin
 		return err
 	}
 	if _, err := cloneRunState(owner); err != nil {
+		if errors.Is(err, run.ErrRunNotFound) {
+			return fmt.Errorf("%s %s/%s does not exist", workflow, projectID, runID)
+		}
 		return err
 	}
 	var md *run.Metadata

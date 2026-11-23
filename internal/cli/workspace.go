@@ -113,17 +113,12 @@ func resolveRunWorkspacePath(root string, md *run.Metadata) (string, error) {
 	return workspace.Path(root, md.Project, md.Workspace), nil
 }
 
-// releaseRunWorkspace drops the run's hold on its workspace at
-// terminal status. For per-run sandboxes that means running the
-// project's dev-env teardown hooks (so postgres dbs / tmpdirs / etc.
-// die alongside the sandbox), then removing the clone — the branch
-// and worktree go with it. For named workspaces that means parking
-// the working tree on the project's default branch at the merged tip
-// (so the next claim doesn't anchor itself to a stale view), deleting
-// the local run branch, then releasing the claim. The directory
-// itself stays for the next run to reuse; dev-env teardown happens at
-// explicit `moe workspace refresh` or `moe workspace remove`, since
-// the workspace's env is expected to outlive the run.
+// releaseRunWorkspace follows the terminal reclamation policy under the
+// caller's explicit owner. Per-run preservation holds retain both tree and
+// resources; eligible generations use the same teardown/removal as clone gc.
+// Named workspaces park on the project's default branch, delete the local run
+// branch and release the claim. Their directory and dev-env remain warm until
+// explicit workspace refresh or removal.
 //
 // Idempotent: a run that never attached a source workspace (no clone, no
 // claim) is a no-op either way. A named workspace is touched only when
@@ -247,13 +242,10 @@ func checkWorkspaceBinding(root, runProject, value, self string, stderr io.Write
 	return name, 0
 }
 
-// runTreeWork reports what the run has in its current working tree that
-// a rebind would strand: commits on the run branch ahead of
-// origin/<default>, and modified tracked files. held is false when
-// there is no tree to drop — a per-run clone that was never made, or a
-// named workspace this run doesn't hold — and then there is no work
-// either. Untracked files don't count: in a per-run clone they're
-// scratch that goes with it, and a named workspace keeps its directory.
+// runTreeWork reports branch commits ahead of origin/<default> and tracked
+// changes for rebind diagnostics. Per-run rebind first requires the complete
+// preservation and cleanup proof; this narrower check governs named trees,
+// whose untracked contents stay in the retained workspace directory.
 func runTreeWork(root string, md *run.Metadata) (path string, commits, modified int, held bool, err error) {
 	if md.Workspace == "" {
 		if !sandbox.Exists(root, md.Project, md.ID) {
