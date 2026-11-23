@@ -40,6 +40,8 @@ import (
 // before deleting the workspace dir, and `moe workspace refresh`
 // invokes them before clearing the cache so the rebuild starts from
 // a torn-down slate.
+// Failed setup or cache publication rolls back synchronously with the
+// exports collected in memory, before any reusable cache exists.
 //
 // The hook directory layout matches pre-push: lex-sorted, executable
 // only, dotfiles skipped, missing-or-empty is a no-op.
@@ -139,7 +141,7 @@ func devEnvSetupEnv(root, workTree string, md *run.Metadata, stdout, stderr io.W
 		return nil, false, err
 	}
 	if err := writeDevEnvCacheRevision(cachePath, env, owner, revision); err != nil {
-		return nil, false, err
+		return nil, false, errors.Join(err, rollbackDevEnvSetup(root, workTree, md, env, stdout, stderr))
 	}
 	return env, true, nil
 }
@@ -203,7 +205,7 @@ func devEnvInspectCache(root, workTree string, md *run.Metadata) (map[string]str
 // lex order with the cached env sourced into each script's
 // environment. The teardown scripts address resources by the same
 // names the setup scripts emitted (`$DATABASE_URL`, `$MOE_DEV_TMPDIR`,
-// etc.), so the cached file is the load-bearing record.
+// etc.). Failed setup instead passes its in-memory exports to rollback.
 //
 // A missing cache, missing teardown directory, or empty directory is
 // a no-op — same shape as pre-push's "no scripts on disk" case.
@@ -345,7 +347,7 @@ func writeDevEnvCacheRevision(cachePath string, env map[string]string, owner, re
 // stdout into a merged KEY=VALUE map. Stderr passes through to the
 // operator's terminal (so the script's human-readable status lines —
 // "created postgres db myapp_dev_foo" — surface verbatim). Non-zero
-// exit halts the chain and bubbles up.
+// exit or parse failure halts the chain and rolls back collected exports.
 func runDevEnvSetup(root, workTree string, md *run.Metadata, stdout, stderr io.Writer) (map[string]string, error) {
 	dirRel := filepath.Join(project.Dir(md.Project), "hooks", devEnvDirRel)
 	dir := filepath.Join(root, dirRel)
@@ -372,16 +374,34 @@ func runDevEnvSetup(root, workTree string, md *run.Metadata, stdout, stderr io.W
 		// them. IndentStderr passes through on non-TTY destinations.
 		out, runErr := runDevEnvSetupScript(filepath.Join(dir, script), root, workTree, md, env, banner.IndentStderr(stderr))
 		banner.HookDone(stdout, script, time.Since(start))
-		if runErr != nil {
-			return nil, runErr
-		}
-		parsed, err := parseDevEnvLines(strings.NewReader(out), stderr)
-		if err != nil {
-			return nil, fmt.Errorf("dev-env: parse output of %s: %w", script, err)
-		}
+		parsed, parseErr := parseDevEnvLines(strings.NewReader(out), stderr)
 		maps.Copy(env, parsed)
+		if parseErr != nil {
+			parseErr = fmt.Errorf("dev-env: parse output of %s: %w", script, parseErr)
+		}
+		if err := errors.Join(runErr, parseErr); err != nil {
+			return nil, errors.Join(err, rollbackDevEnvSetup(root, workTree, md, env, stdout, stderr))
+		}
 	}
 	return env, nil
+}
+
+func rollbackDevEnvSetup(root, workTree string, md *run.Metadata, env map[string]string, stdout, stderr io.Writer) error {
+	if len(env) == 0 {
+		return nil
+	}
+	// Absent ownership exports must not fall through to the outer agent's
+	// managed roots. Keep masking local to rollback, including its map.
+	cleanupEnv := maps.Clone(env)
+	for _, key := range devEnvWritableDirKeys {
+		if _, ok := cleanupEnv[key]; !ok {
+			cleanupEnv[key] = ""
+		}
+	}
+	if err := runDevEnvScripts(root, devEnvTeardownDirRel, workTree, md, cleanupEnv, stdout, stderr); err != nil {
+		return fmt.Errorf("dev-env: rollback failed: %w", err)
+	}
+	return nil
 }
 
 // runDevEnvSetupScript executes a single setup script and returns its
@@ -396,7 +416,7 @@ func runDevEnvSetupScript(path, root, workTree string, md *run.Metadata, accumul
 	cmd.Stdout = &stdoutBuf
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("dev-env: %s exited non-zero: %w", path, err)
+		return stdoutBuf.String(), fmt.Errorf("dev-env: %s exited non-zero: %w", path, err)
 	}
 	return stdoutBuf.String(), nil
 }
@@ -591,7 +611,9 @@ func mapToEnv(m map[string]string) []string {
 // Blank lines and `#` comments are ignored. Lines that don't match
 // the shape (no `=`, or an empty key) are skipped with a warning on
 // warnDst (when non-nil) — same forgiving-but-loud parse contract
-// pre-push uses for its trailers. Returns the merged map.
+// pre-push uses for its trailers. Returns the parsed prefix even on scanner
+// failure so setup can retain resource addresses for rollback. Cache readers
+// must reject the accompanying error.
 func parseDevEnvLines(r io.Reader, warnDst io.Writer) (map[string]string, error) {
 	out := map[string]string{}
 	scanner := bufio.NewScanner(r)
@@ -620,7 +642,7 @@ func parseDevEnvLines(r io.Reader, warnDst io.Writer) (map[string]string, error)
 		out[k] = v
 	}
 	if err := scanner.Err(); err != nil {
-		return nil, err
+		return out, err
 	}
 	return out, nil
 }

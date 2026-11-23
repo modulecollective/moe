@@ -224,6 +224,36 @@ func TestHookFirePrePushSetupFailureStops(t *testing.T) {
 	}
 }
 
+func TestHookFireRollsBackPartialSetup(t *testing.T) {
+	for _, event := range hookFireEvents {
+		t.Run(event, func(t *testing.T) {
+			root, workTree, md := devEnvRollbackFixture(t)
+			md.Workflow = hookFireWorkflow
+			writeHookScript(t, root, md.Project, "dev-env", "20-fail.sh", "#!/bin/sh\necho setup-failed >&2\nexit 7\n")
+			writeHookScript(t, root, md.Project, "pre-push", "10-check.sh", "#!/bin/sh\ntouch \"$MOE_SANDBOX/pre-push-ran\"\n")
+			var stdout, stderr bytes.Buffer
+			if code := dispatchHookFire(root, workTree, &project.Metadata{ID: md.Project}, md, event, &stdout, &stderr); code != 1 {
+				t.Fatalf("exit=%d, want 1; stderr=%s", code, stderr.String())
+			}
+			if !strings.Contains(stderr.String(), "setup-failed") || !strings.Contains(stderr.String(), "exit status 7") {
+				t.Fatalf("missing setup failure: %s", stderr.String())
+			}
+			for _, name := range []string{"resource", "later", "pre-push-ran", devEnvCacheRel} {
+				if _, err := os.Stat(filepath.Join(workTree, name)); !os.IsNotExist(err) {
+					t.Errorf("unexpected residue %s: %v", name, err)
+				}
+			}
+			want := "down:" + filepath.Join(workTree, "resource") + "\nafter\n"
+			if trace, err := os.ReadFile(filepath.Join(workTree, "trace")); err != nil || string(trace) != want {
+				t.Fatalf("teardown did not run exactly once: %q, %v; want %q", trace, err, want)
+			}
+			if got, err := os.ReadFile(filepath.Join(workTree, "sentinel")); err != nil || string(got) != "keep" {
+				t.Fatalf("unrelated sentinel changed: %q, %v", got, err)
+			}
+		})
+	}
+}
+
 // TestHookFireUnknownEvent: a typo for the event name fails with exit
 // code 2 and lists the known events.
 func TestHookFireUnknownEvent(t *testing.T) {

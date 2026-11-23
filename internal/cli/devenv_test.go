@@ -85,6 +85,253 @@ func TestParseDevEnvLinesPreservesValueWhitespace(t *testing.T) {
 	}
 }
 
+func TestParseDevEnvLinesReturnsPrefixButCachesRejectScannerError(t *testing.T) {
+	body := "K=old\nK=  latest  \n" + strings.Repeat("x", 1024*1024) + "\nAFTER=no\n"
+	env, err := parseDevEnvLines(strings.NewReader(body), nil)
+	if err == nil || env["K"] != "  latest  " || len(env) != 1 {
+		t.Fatalf("prefix = %v, error = %v", env, err)
+	}
+	cachePath := filepath.Join(t.TempDir(), "cache")
+	if err := os.WriteFile(cachePath, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if env, ok, err := readDevEnvCache(cachePath); err == nil || ok || env != nil {
+		t.Fatalf("raw reader accepted partial cache: %v, %v, %v", env, ok, err)
+	}
+	if cache, ok, err := readDevEnvCacheRevision(cachePath); err == nil || ok || cache.env != nil {
+		t.Fatalf("revision reader accepted partial cache: %v, %v, %v", cache, ok, err)
+	}
+}
+
+// All allocations and sentinels belong to the fixture. No cleanup script
+// may see the stage's own managed roots, even when testing a broken guard.
+func devEnvRollbackFixture(t *testing.T) (root, workTree string, md *run.Metadata) {
+	t.Helper()
+	for _, key := range devEnvWritableDirKeys {
+		t.Setenv(key, "")
+	}
+	root = newDevEnvTestRoot(t)
+	workTree = t.TempDir()
+	md = &run.Metadata{Project: "tele", ID: "verify", Workflow: "sdlc"}
+	if err := os.WriteFile(filepath.Join(workTree, "sentinel"), []byte("keep"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeHookScript(t, root, md.Project, "dev-env", "10-create.sh", `#!/bin/sh
+set -eu
+printf 'setup\n' >> "$MOE_SANDBOX/setup-trace"
+mkdir "$MOE_SANDBOX/resource"
+printf 'MOE_DEV_TMPDIR=%s/resource\n' "$MOE_SANDBOX"
+`)
+	writeHookScript(t, root, md.Project, "dev-env", "30-later.sh", `#!/bin/sh
+touch "$MOE_SANDBOX/later"
+`)
+	writeHookScript(t, root, md.Project, "dev-env-teardown", "10-down.sh", `#!/bin/sh
+set -eu
+printf 'down:%s\n' "$MOE_DEV_TMPDIR" >> "$MOE_SANDBOX/trace"
+if [ -n "$MOE_DEV_TMPDIR" ]; then rm -rf -- "$MOE_DEV_TMPDIR"; fi
+`)
+	writeHookScript(t, root, md.Project, "dev-env-teardown", "20-after.sh", `#!/bin/sh
+printf 'after\n' >> "$MOE_SANDBOX/trace"
+`)
+	return root, workTree, md
+}
+
+func TestDevEnvSetupEnvRollbackFailures(t *testing.T) {
+	oversized := "head -c 1048576 /dev/zero | tr '\\000' x\nprintf '\\n'\n"
+	for _, tc := range []struct {
+		name        string
+		failHook    string
+		body        string
+		publication bool
+		cleanupFail bool
+		wantErrors  []string
+	}{
+		{name: "late-hook", failHook: "20-fail.sh", body: "exit 7\n", wantErrors: []string{"20-fail.sh", "exit status 7"}},
+		{name: "failing-hook-emits", failHook: "10-create.sh", body: "mkdir \"$MOE_SANDBOX/resource\"\nprintf 'MOE_DEV_TMPDIR=%s/resource\\n' \"$MOE_SANDBOX\"\nexit 7\n", wantErrors: []string{"10-create.sh", "exit status 7"}},
+		{name: "parse-prefix", failHook: "20-fail.sh", body: "printf 'MOE_HOME=%s/partial-home\\n' \"$MOE_SANDBOX\"\nmkdir \"$MOE_SANDBOX/partial-home\"\n" + oversized, wantErrors: []string{"parse output of 20-fail.sh", "token too long"}},
+		{name: "process-and-parse", failHook: "20-fail.sh", body: oversized + "exit 7\n", wantErrors: []string{"exit status 7", "parse output of 20-fail.sh", "token too long"}},
+		{name: "publication", failHook: "20-fail.sh", body: "mkdir -p \"$MOE_SANDBOX/.moe/dev-env.env\"\n", publication: true, wantErrors: []string{"publish cache"}},
+		{name: "setup-and-cleanup", failHook: "20-fail.sh", body: "exit 7\n", cleanupFail: true, wantErrors: []string{"exit status 7", "rollback failed", "10-down.sh", "exit status 9"}},
+		{name: "publication-and-cleanup", failHook: "20-fail.sh", body: "mkdir -p \"$MOE_SANDBOX/.moe/dev-env.env\"\n", publication: true, cleanupFail: true, wantErrors: []string{"publish cache", "rollback failed", "exit status 9"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, workTree, md := devEnvRollbackFixture(t)
+			// The parse case emits a second address in its valid prefix.
+			if tc.name == "parse-prefix" {
+				writeHookScript(t, root, md.Project, "dev-env-teardown", "15-home.sh", "#!/bin/sh\nrm -rf -- \"$MOE_HOME\"\n")
+			}
+			writeHookScript(t, root, md.Project, "dev-env", tc.failHook, "#!/bin/sh\nset -eu\n"+tc.body)
+			if tc.cleanupFail {
+				writeHookScript(t, root, md.Project, "dev-env-teardown", "10-down.sh", "#!/bin/sh\nprintf 'down:%s\\n' \"$MOE_DEV_TMPDIR\" >> \"$MOE_SANDBOX/trace\"\necho cleanup-failed >&2\nexit 9\n")
+			}
+			var stderr bytes.Buffer
+			env, fresh, err := devEnvSetupEnv(root, workTree, md, io.Discard, &stderr)
+			if err == nil || env != nil || fresh {
+				t.Fatalf("failed setup returned usable env: %v, %v, %v", env, fresh, err)
+			}
+			for _, want := range tc.wantErrors {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q missing %q", err, want)
+				}
+			}
+			resource := filepath.Join(workTree, "resource")
+			_, statErr := os.Stat(resource)
+			if tc.cleanupFail {
+				if statErr != nil || !strings.Contains(stderr.String(), "cleanup-failed") {
+					t.Fatalf("cleanup failure lost residue or diagnostic: %v, %s", statErr, stderr.String())
+				}
+			} else if !os.IsNotExist(statErr) {
+				t.Fatalf("resource survived rollback: %v", statErr)
+			}
+			wantTrace := "down:" + resource + "\n"
+			if !tc.cleanupFail {
+				wantTrace += "after\n"
+			}
+			if trace, err := os.ReadFile(filepath.Join(workTree, "trace")); err != nil || string(trace) != wantTrace {
+				t.Fatalf("teardown order/count = %q, %v; want %q", trace, err, wantTrace)
+			}
+			if tc.name == "parse-prefix" {
+				if _, err := os.Stat(filepath.Join(workTree, "partial-home")); !os.IsNotExist(err) {
+					t.Fatalf("parsed address not cleaned: %v", err)
+				}
+			}
+			if !tc.publication {
+				if _, err := os.Stat(filepath.Join(workTree, "later")); !os.IsNotExist(err) {
+					t.Fatalf("later setup ran: %v", err)
+				}
+				if _, err := os.Stat(filepath.Join(workTree, devEnvCacheRel)); !os.IsNotExist(err) {
+					t.Fatalf("failed setup published cache: %v", err)
+				}
+			} else if info, err := os.Stat(filepath.Join(workTree, devEnvCacheRel)); err != nil || !info.IsDir() {
+				t.Fatalf("publication obstruction was removed: %v, %v", info, err)
+			}
+			if got, err := os.ReadFile(filepath.Join(workTree, "sentinel")); err != nil || string(got) != "keep" {
+				t.Fatalf("unrelated sentinel changed: %q, %v", got, err)
+			}
+		})
+	}
+}
+
+func TestDevEnvSetupEnvRollbackRetry(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		stale       bool
+		publication bool
+	}{
+		{name: "setup"},
+		{name: "stale-rebuild", stale: true},
+		{name: "publication", publication: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, workTree, md := devEnvRollbackFixture(t)
+			cachePath := filepath.Join(workTree, devEnvCacheRel)
+			wantTrace := ""
+			if tc.stale {
+				old := filepath.Join(workTree, "old-missing")
+				if err := writeDevEnvCacheRevision(cachePath, map[string]string{"MOE_DEV_TMPDIR": old}, "", ""); err != nil {
+					t.Fatal(err)
+				}
+				wantTrace = "down:" + old + "\nafter\n"
+			}
+			writeHookScript(t, root, md.Project, "dev-env", "20-fail.sh", "#!/bin/sh\nexit 7\n")
+			if tc.publication {
+				writeHookScript(t, root, md.Project, "dev-env", "20-fail.sh", "#!/bin/sh\nmkdir -p \"$MOE_SANDBOX/.moe/dev-env.env\"\n")
+			}
+			if _, _, err := devEnvSetupEnv(root, workTree, md, io.Discard, io.Discard); err == nil {
+				t.Fatal("expected failed first attempt")
+			}
+			wantTrace += "down:" + filepath.Join(workTree, "resource") + "\nafter\n"
+			if trace, err := os.ReadFile(filepath.Join(workTree, "trace")); err != nil || string(trace) != wantTrace {
+				t.Fatalf("stale teardown vs rollback: %q, %v; want %q", trace, err, wantTrace)
+			}
+			if _, err := os.Stat(filepath.Join(workTree, "resource")); !os.IsNotExist(err) {
+				t.Fatalf("first allocation survived: %v", err)
+			}
+			if tc.publication {
+				if err := os.Remove(cachePath); err != nil {
+					t.Fatal(err)
+				}
+			}
+			writeHookScript(t, root, md.Project, "dev-env", "20-fail.sh", "#!/bin/sh\nexit 0\n")
+			writeHookScript(t, root, md.Project, "dev-env", "10-create.sh", `#!/bin/sh
+set -eu
+printf 'setup\n' >> "$MOE_SANDBOX/setup-trace"
+mkdir "$MOE_SANDBOX/new-resource"
+printf 'MOE_DEV_TMPDIR=%s/new-resource\n' "$MOE_SANDBOX"
+`)
+			for i := 0; i < 2; i++ {
+				env, fresh, err := devEnvSetupEnv(root, workTree, md, io.Discard, io.Discard)
+				if err != nil || fresh != (i == 0) || env["MOE_DEV_TMPDIR"] != filepath.Join(workTree, "new-resource") {
+					t.Fatalf("retry/cache hit %d: %v, %v, %v", i, env, fresh, err)
+				}
+			}
+			if trace, err := os.ReadFile(filepath.Join(workTree, "setup-trace")); err != nil || string(trace) != "setup\nsetup\n" {
+				t.Fatalf("setup retried unexpectedly: %q, %v", trace, err)
+			}
+			if trace, err := os.ReadFile(filepath.Join(workTree, "trace")); err != nil || string(trace) != wantTrace {
+				t.Fatalf("retry/cache hit ran teardown: %q, %v", trace, err)
+			}
+			cached, ok, err := readDevEnvCache(cachePath)
+			if err != nil || !ok || cached["MOE_DEV_TMPDIR"] != filepath.Join(workTree, "new-resource") {
+				t.Fatalf("new cache = %v, %v, %v", cached, ok, err)
+			}
+		})
+	}
+}
+
+func TestDevEnvRollbackAmbientIsolation(t *testing.T) {
+	for _, mode := range []string{"no-exports", "malformed-only", "discovery-error", "unrelated-export"} {
+		t.Run(mode, func(t *testing.T) {
+			root, workTree, md := devEnvRollbackFixture(t)
+			outer := t.TempDir()
+			for _, key := range devEnvWritableDirKeys {
+				t.Setenv(key, outer)
+			}
+			if err := os.WriteFile(filepath.Join(outer, "sentinel"), []byte("outer"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			body := "#!/bin/sh\nexit 7\n"
+			if mode == "malformed-only" {
+				body = "#!/bin/sh\necho malformed\nexit 7\n"
+			} else if mode == "unrelated-export" {
+				body = "#!/bin/sh\nprintf 'UNRELATED=ok\\n'\nexit 7\n"
+			}
+			writeHookScript(t, root, md.Project, "dev-env", "10-create.sh", body)
+			if mode == "discovery-error" {
+				if err := os.Symlink(filepath.Join(workTree, "missing"), filepath.Join(root, project.Dir(md.Project), "hooks", devEnvDirRel, "05-broken")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			writeHookScript(t, root, md.Project, "dev-env-teardown", "10-down.sh", `#!/bin/sh
+set -eu
+printf '%s|%s|%s\n' "$MOE_HOME" "$MOE_DEV_TMPDIR" "${UNRELATED:-}" > "$MOE_SANDBOX/masked"
+for dir in "$MOE_HOME" "$MOE_DEV_TMPDIR"; do
+  if [ -n "$dir" ]; then rm -rf -- "$dir"; fi
+done
+`)
+			if env, fresh, err := devEnvSetupEnv(root, workTree, md, io.Discard, io.Discard); err == nil || env != nil || fresh {
+				t.Fatalf("expected failure: %v, %v, %v", env, fresh, err)
+			}
+			masked, err := os.ReadFile(filepath.Join(workTree, "masked"))
+			if mode == "unrelated-export" {
+				if err != nil || string(masked) != "||ok\n" {
+					t.Fatalf("inherited managed roots reached rollback: %q, %v", masked, err)
+				}
+			} else if !os.IsNotExist(err) {
+				t.Fatalf("rollback ran without exports: %q, %v", masked, err)
+			}
+			if got, err := os.ReadFile(filepath.Join(outer, "sentinel")); err != nil || string(got) != "outer" {
+				t.Fatalf("inherited root changed: %q, %v", got, err)
+			}
+			for _, key := range devEnvWritableDirKeys {
+				if os.Getenv(key) != outer {
+					t.Fatalf("parent %s changed", key)
+				}
+			}
+		})
+	}
+}
+
 // TestDevEnvCacheRoundTrip: writing and re-reading the cache file
 // yields the same map, sorted on disk for diff-friendliness.
 func TestDevEnvCacheRoundTrip(t *testing.T) {

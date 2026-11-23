@@ -532,12 +532,30 @@ bureaucracy:
   sessions, workspace shells, and pre-push scripts. A run that commits a change
   in this directory refreshes its cache before its next stage or real push;
   unrelated hook edits leave the run's cache warm.
-- `dev-env-teardown.d/*` cleans up when a run or workspace closes.
+- `dev-env-teardown.d/*` cleans up when a run or workspace closes, and rolls back
+  failed setup using exports collected before the failure.
 - `pre-push.d/*` is an invocation-time ship gate; a failing script halts the
   push path and opens a recovery build session.
 
 Use `moe hook fire <project> dev-env|dev-env-teardown|pre-push` to exercise one
 event in a transient sandbox without creating a run.
+
+MoE publishes the reusable dev-env cache only after every setup script succeeds.
+On setup execution, output parsing, or fresh-cache publication failure, MoE
+attempts teardown once if any exports were collected. It uses those in-memory
+exports in normal lexical order, stopping at the first teardown failure. The
+invocation still fails; a rollback failure is reported alongside the original
+error. Rollback does not fall back to inherited `MOE_HOME` or `MOE_DEV_TMPDIR`
+values when setup has not emitted them. A later invocation can start setup afresh
+after successful rollback.
+
+Setup hooks should emit resource addresses promptly. Teardown hooks must tolerate
+absent resources and partial initialization, and use this attempt's exports as
+ownership evidence rather than unrelated inherited variables or credentials.
+Hooks own cleanup of allocations they never emitted. MoE cannot recover exports
+after a scanner error, overwritten addresses, or resources left by missing or
+failing teardown hooks; it does not retain a durable partial-setup journal or
+recover from process death.
 
 Hooks, chore definitions, knowledge topics, and twin documents are
 bureaucracy-side artifacts: edit them by hand, or let an sdlc run land them. An
