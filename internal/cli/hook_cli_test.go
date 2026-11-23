@@ -269,14 +269,8 @@ func TestHookFireUnknownEvent(t *testing.T) {
 	}
 }
 
-// TestHookFireRejectsUnknownEventBeforeMint pins the no-side-effects
-// contract for a typo'd event name end-to-end. The load-bearing
-// assertion is that .moe/clones/<p>/ has no hook-fire-* child — a
-// future regression that moved the gate below mintHookFireSandbox
-// would re-introduce the original bug while exit=2 stayed correct
-// (the dispatcher's defensive default still catches the typo). With a
-// real bureaucracy on disk, findRoot and project.Load would both
-// succeed if reached, so this test would notice the regression.
+// TestHookFireRejectsUnknownEventBeforeMint checks both scratch and legacy
+// namespaces: a typo must return before either cleanup or allocation.
 func TestHookFireRejectsUnknownEventBeforeMint(t *testing.T) {
 	root := t.TempDir()
 	projID := "tele"
@@ -307,6 +301,9 @@ func TestHookFireRejectsUnknownEventBeforeMint(t *testing.T) {
 	}
 	if strings.Contains(stdout.String(), "sandbox:") {
 		t.Errorf("stdout printed sandbox banner after typo: %q", stdout.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, ".moe", "hook-fire")); !os.IsNotExist(err) {
+		t.Fatalf("scratch namespace created despite typo: %v", err)
 	}
 	clonesDir := filepath.Join(root, ".moe", "clones", projID)
 	entries, err := os.ReadDir(clonesDir)
@@ -357,21 +354,16 @@ echo "CWD_SENTINEL=found"
 		t.Fatal(err)
 	}
 
-	// Stub the sandbox mint so we don't need a real submodule on disk.
-	// `moe hook fire` checks out a per-run branch after the mint, so the
-	// stubbed dir needs a real git repo on a default branch.
 	gittest.SetupEnv(t)
-	prev := mintHookFireSandbox
-	t.Cleanup(func() { mintHookFireSandbox = prev })
-	mintHookFireSandbox = func(root, projectID, runID string) (string, error) {
-		sb := t.TempDir()
-		if err := git.Run(sb, "init", "-b", "main"); err != nil {
-			return "", err
-		}
-		if err := git.Run(sb, "commit", "--allow-empty", "-m", "init"); err != nil {
-			return "", err
-		}
-		return sb, nil
+	src := filepath.Join(projDir, "src")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := git.Run(src, "init", "-b", "main"); err != nil {
+		t.Fatal(err)
+	}
+	if err := git.Run(src, "commit", "--allow-empty", "-m", "init"); err != nil {
+		t.Fatal(err)
 	}
 
 	// chdir into cwdRoot for the duration of the test so os.Getwd
@@ -400,49 +392,5 @@ echo "CWD_SENTINEL=found"
 	}
 	if !strings.Contains(stderr.String(), "MOE_HOME") {
 		t.Errorf("stderr nag should name $MOE_HOME:\n%s", stderr.String())
-	}
-}
-
-// TestCleanPriorHookFireSandboxesStrictPrefix: prior hook-fire-*
-// directories get removed; a real-run sandbox (slug without the
-// hook-fire- prefix) stays put. Load-bearing safety check — without
-// the strict prefix match, this verb could wipe an in-flight run's
-// working tree.
-func TestCleanPriorHookFireSandboxesStrictPrefix(t *testing.T) {
-	root := t.TempDir()
-	projID := "tele"
-	base := filepath.Join(root, ".moe", "clones", projID)
-	dirs := []string{
-		"hook-fire-1700000000",
-		"hook-fire-1700000001",
-		"my-real-run",
-		"another-real-run-2026-05-13",
-	}
-	for _, d := range dirs {
-		if err := os.MkdirAll(filepath.Join(base, d), 0o755); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := cleanPriorHookFireSandboxes(root, projID, io.Discard); err != nil {
-		t.Fatal(err)
-	}
-	for _, d := range []string{"hook-fire-1700000000", "hook-fire-1700000001"} {
-		if _, err := os.Stat(filepath.Join(base, d)); !os.IsNotExist(err) {
-			t.Errorf("%s still present after clean (err=%v)", d, err)
-		}
-	}
-	for _, d := range []string{"my-real-run", "another-real-run-2026-05-13"} {
-		if _, err := os.Stat(filepath.Join(base, d)); err != nil {
-			t.Errorf("real-run sandbox %s was removed: %v", d, err)
-		}
-	}
-}
-
-// TestCleanPriorHookFireSandboxesMissingDir: a project that has never
-// had a fire (no .moe/clones/<p>/ dir yet) is a clean no-op.
-func TestCleanPriorHookFireSandboxesMissingDir(t *testing.T) {
-	root := t.TempDir()
-	if err := cleanPriorHookFireSandboxes(root, "never-fired", io.Discard); err != nil {
-		t.Fatalf("missing dir should be a no-op, got: %v", err)
 	}
 }

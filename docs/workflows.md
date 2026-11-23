@@ -1091,11 +1091,18 @@ Hooks are that layer — drop-in executable scripts with no manifest, discovered
 by directory.
 
 `moe hook fire <project> <event>` is the iteration loop: it creates a transient
-sandbox, runs one event's scripts once, prints the sandbox path, and exits — no
-run needed to test a 30-line bash change. Landing a change is a plain file edit,
-or an sdlc run whose per-turn commit picks up `projects/<project>/hooks/`
-(`moe sdlc design → build → close`) when you want the edit journaled with a
-canvas.
+sandbox, runs one event's scripts once, prints `sandbox: <path>`, and exits. Each
+fire gets a unique wrapper at `.moe/hook-fire/<project>/hook-fire-<unique>/`, with
+the clone in its `sandbox/` child. The next fire removes only wrappers with a
+valid harness completion record written after successful dispatch. Failed,
+interrupted, ambiguous and legacy fires under `.moe/clones/` remain for manual
+inspection/removal; run clones are never scanned. Firing `dev-env` alone still
+leaves its resources running; completion is scratch-disposal permission, not a
+teardown receipt.
+
+No run is needed to test a 30-line bash change. Landing a change is a plain file
+edit, or an sdlc run whose per-turn commit picks up `projects/<project>/hooks/`
+(`moe sdlc design → build → close`) when you want the edit journaled with a canvas.
 
 The hook events themselves (`dev-env.d`, `dev-env-teardown.d`, `pre-push.d`) and
 per-project dev secrets are covered in

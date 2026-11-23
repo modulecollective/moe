@@ -538,7 +538,11 @@ bureaucracy:
   push path and opens a recovery build session.
 
 Use `moe hook fire <project> dev-env|dev-env-teardown|pre-push` to exercise one
-event in a transient sandbox without creating a run.
+event in a transient sandbox without creating a run. Each clone lives at
+`.moe/hook-fire/<project>/hook-fire-<unique>/sandbox`. Subsequent fires clean only
+wrappers marked complete after successful dispatch. Failed/interrupted fires
+and legacy scratch under `.moe/clones/` are retained for manual inspection;
+this cleanup never touches run clones.
 
 MoE publishes the reusable dev-env cache only after every setup script succeeds.
 On setup execution, output parsing, or fresh-cache publication failure, MoE

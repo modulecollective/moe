@@ -1,16 +1,13 @@
 package cli
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/project"
@@ -35,9 +32,7 @@ func init() {
 	RegisterGroup(g)
 }
 
-// hookFirePrefix is the run-id stem for transient hook-fire sandboxes.
-// Strict prefix match: cleanPriorHookFireSandboxes never touches a
-// real run's sandbox.
+// hookFirePrefix names scratch wrappers, never identifies ownership by itself.
 const hookFirePrefix = "hook-fire-"
 
 // hookFireWorkflow is the synthetic workflow name written to the
@@ -102,8 +97,10 @@ func runHookFire(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	runID := fmt.Sprintf("%s%d", hookFirePrefix, time.Now().Unix())
-	sandboxPath, err := mintHookFireSandbox(root, projectID, runID)
+	sandboxPath, runID, err := mintHookFireSandbox(root, projectID)
+	if sandboxPath != "" {
+		defer moePrintf(stdout, "sandbox: %s\n", sandboxPath)
+	}
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -124,7 +121,12 @@ func runHookFire(args []string, stdout, stderr io.Writer) int {
 	}
 
 	exit := dispatchHookFire(root, sandboxPath, pj, md, event, stdout, stderr)
-	moePrintf(stdout, "sandbox: %s\n", sandboxPath)
+	if exit == 0 {
+		if err := completeHookFireSandbox(sandboxPath, projectID, runID); err != nil {
+			moePrintf(stderr, "hook fire: retain %s: publish completion: %v\n", sandboxPath, err)
+			return 1
+		}
+	}
 	return exit
 }
 
@@ -150,14 +152,6 @@ func findHookFireRoot(stderr io.Writer) (string, error) {
 			root, bureaucracy.EnvHome, ignored)
 	}
 	return root, nil
-}
-
-// mintHookFireSandbox calls sandbox.EnsureAt against a per-fire path
-// under .moe/clones/<project>/hook-fire-<unix-ts>/. A var so tests
-// can swap in a tempdir without needing a real submodule on disk.
-var mintHookFireSandbox = func(root, projectID, runID string) (string, error) {
-	dst := filepath.Join(root, ".moe", "clones", projectID, runID)
-	return sandbox.EnsureAt(root, projectID, dst)
 }
 
 // dispatchHookFire is the per-event dispatch. Split out from runHookFire
@@ -244,33 +238,4 @@ func dumpEnvSorted(w io.Writer, env map[string]string) {
 	for _, k := range keys {
 		moePrintf(w, "%s=%s\n", k, env[k])
 	}
-}
-
-// cleanPriorHookFireSandboxes removes every prior
-// .moe/clones/<project>/hook-fire-* worktree — keep-only-latest gives
-// a disk-bounded story without a separate `moe hook clean` verb. The
-// prefix match is strict: a real run's sandbox (slug never starts with
-// hook-fire-) is never touched. Failures are reported and skipped — a
-// stuck older sandbox shouldn't block today's fire.
-func cleanPriorHookFireSandboxes(root, projectID string, stderr io.Writer) error {
-	clonesDir := filepath.Join(root, ".moe", "clones", projectID)
-	entries, err := os.ReadDir(clonesDir)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return fmt.Errorf("hook fire: read %s: %w", clonesDir, err)
-	}
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		if !strings.HasPrefix(e.Name(), hookFirePrefix) {
-			continue
-		}
-		if err := sandbox.Remove(root, projectID, e.Name()); err != nil {
-			moePrintf(stderr, "hook fire: leaving prior sandbox at %s: %v\n", filepath.Join(clonesDir, e.Name()), err)
-		}
-	}
-	return nil
 }
