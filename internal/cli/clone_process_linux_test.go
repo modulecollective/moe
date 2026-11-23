@@ -312,3 +312,61 @@ func TestCloneGCApplyOwnsHooksAgainstAnotherCollector(t *testing.T) {
 	}
 	resources.assertReleased(t)
 }
+
+func TestCloneGCRecoversAfterParentDiesDuringTeardown(t *testing.T) {
+	root, _ := gcFixture(t, run.StatusInProgress, time.Now().UTC())
+	parent := installCloseResourceHooks(t, root, "tele")
+	script := filepath.Join(root, "projects", "tele", "hooks", devEnvTeardownDirRel, "10-resources.sh")
+	body, err := os.ReadFile(script)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, script, strings.Replace(string(body), "set -eu\n", "set -eu\nprintf started > \"$TEST_CLOSE_PARENT/started\"\ni=0; while [ ! -f \"$TEST_CLOSE_PARENT/release\" ] && [ \"$i\" -lt 800 ]; do i=$((i+1)); sleep .01; done\n", 1))
+	gittest.Run(t, root, "add", script)
+	gittest.Commit(t, root, "parent-death cleanup contract")
+	resources := allocateCloseResources(t, root, "tele", "finish")
+	commitGCState(t, root, run.StatusClosed, time.Now().UTC().Add(-time.Hour))
+	cmd := cloneCLICommand(t, root, "clone", "gc", "--apply", "--json", "tele/finish")
+	output, err := os.CreateTemp(t.TempDir(), "collector-output")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer output.Close()
+	cmd.Stdout, cmd.Stderr = output, output
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	reaped := false
+	defer func() {
+		os.WriteFile(filepath.Join(parent, "release"), nil, 0o600)
+		if !reaped {
+			cmd.Process.Kill()
+			<-done
+		}
+		waitCloneCondition(t, "cleanup supervisor teardown", func() bool { busy, err := runowner.Busy(root, "tele", "finish"); return err == nil && !busy })
+	}()
+	waitCloneCondition(t, "cleanup supervisor hook", func() bool { _, err := os.Stat(filepath.Join(parent, "started")); return err == nil })
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+		reaped = true
+	case <-time.After(5 * time.Second):
+		t.Fatal("collector parent did not exit")
+	}
+	if busy, err := runowner.Busy(root, "tele", "finish"); err != nil || !busy {
+		t.Fatal("parent death lost worker ownership")
+	}
+	if err := os.WriteFile(filepath.Join(parent, "release"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	waitCloneCondition(t, "completed worker releases guard", func() bool { busy, err := runowner.Busy(root, "tele", "finish"); return err == nil && !busy })
+	result := collectClone(root, "tele", "finish", true, true, time.Now().UTC(), io.Discard, io.Discard)
+	if result.Outcome != "removed" {
+		t.Fatalf("roll forward cleanup: %+v", result)
+	}
+	resources.assertReleased(t)
+}

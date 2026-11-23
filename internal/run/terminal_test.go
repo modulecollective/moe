@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -73,7 +74,7 @@ func TestLatestTerminalTransition(t *testing.T) {
 }
 
 func TestTerminalEvidenceRefusesUnprovableHistory(t *testing.T) {
-	for _, kind := range []string{"initial-terminal", "future", "uncommitted", "unattributed", "contradictory", "wrong-identity", "replacement", "graft", "promisor"} {
+	for _, kind := range []string{"initial-terminal", "future", "uncommitted", "unattributed", "contradictory", "wrong-identity", "replacement", "graft", "promisor", "shallow"} {
 		t.Run(kind, func(t *testing.T) {
 			root := gittest.Init(t)
 			at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -105,11 +106,17 @@ func TestTerminalEvidenceRefusesUnprovableHistory(t *testing.T) {
 				}
 			case "promisor":
 				gittest.Run(t, root, "config", "remote.origin.promisor", "true")
+			case "shallow":
+				if err := os.WriteFile(filepath.Join(root, ".git", "shallow"), []byte(sha+"\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			if got, err := LatestTerminalTransition(ctx, root, md, now); err == nil {
 				t.Fatalf("accepted %s: %+v", kind, got)
+			} else if kind == "shallow" && !strings.Contains(err.Error(), "shallow journal history") {
+				t.Fatalf("did not reach shallow journal guard: %v", err)
 			}
 		})
 	}

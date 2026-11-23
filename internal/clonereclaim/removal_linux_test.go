@@ -250,3 +250,33 @@ func TestConfinedRemovalRequiresExactAuthorization(t *testing.T) {
 		t.Fatal("authorization failure lost contents")
 	}
 }
+
+func TestConfinedRemovalResumesPartialInventoryWithoutTouchingReplacement(t *testing.T) {
+	h, r, d := disposalFixture(t, false)
+	attempt, err := r.disposalDir(d.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer attempt.Close()
+	parent, err := openAbsoluteDir(filepath.Dir(r.Identity.Path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parent.Close()
+	if err := renameNoReplace(parent, filepath.Base(r.Identity.Path), attempt, "tree"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(attempt.Name(), "tree", "nested", "evidence")); err != nil {
+		t.Fatal(err)
+	}
+	writeFixture(t, filepath.Join(r.Identity.Path, "replacement"), "survives")
+	if err := r.FinishRemoval(h, d.ID, d.Basis); err != nil {
+		t.Fatal("partial inventory could not resume:", err)
+	}
+	if b, err := os.ReadFile(filepath.Join(r.Identity.Path, "replacement")); err != nil || string(b) != "survives" {
+		t.Fatal("retry touched original-path replacement")
+	}
+	if _, err := os.Stat(filepath.Join(attempt.Name(), "tree")); !os.IsNotExist(err) {
+		t.Fatal("authorized partial tree survived")
+	}
+}
