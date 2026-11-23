@@ -5,10 +5,12 @@ package clonereclaim
 
 import (
 	"context"
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"io/fs"
 	"os"
@@ -66,11 +68,21 @@ func InspectPreservation(ctx context.Context, clone, source string, artifacts ma
 			return result, nil
 		}
 	}
-	state, err := read(clone, "status", "--porcelain=v1", "-z", "--untracked-files=no", "--ignore-submodules=none")
+	// Cached diff reads objects, never worktree content filters. Status can
+	// execute those filters and hide unique local bytes (even with no diff).
+	state, err := read(clone, "diff", "--cached", "--raw", "-z", "--no-ext-diff", "--no-textconv", "HEAD", "--")
 	if err != nil {
 		return result, err
 	}
 	if state != "" {
+		result.Reason = "local_modifications"
+		return result, nil
+	}
+	unchanged, err := inspectTrackedBytes(ctx, clone)
+	if err != nil {
+		return result, err
+	}
+	if !unchanged {
 		result.Reason = "local_modifications"
 		return result, nil
 	}
@@ -157,6 +169,95 @@ func InspectPreservation(ctx context.Context, clone, source string, artifacts ma
 		return result, errors.New("empty Git object inventory")
 	}
 	return result, nil
+}
+
+// Compare the actual bytes with the index blobs, independent of Git's stat
+// cache and all conversions (clean/process filters, EOL, ident and encoding).
+// The index must already match HEAD; the later object scan proves retention.
+func inspectTrackedBytes(ctx context.Context, clone string) (bool, error) {
+	entries, err := git.Inspect(ctx, clone, scanOutputLimit, "ls-files", "--stage", "-z")
+	if err != nil {
+		return false, err
+	}
+	root, err := os.OpenRoot(clone)
+	if err != nil {
+		return false, err
+	}
+	defer root.Close()
+	remaining := int64(1 << 30)
+	for entry := range strings.SplitSeq(entries, "\x00") {
+		if entry == "" {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		meta, path, ok := strings.Cut(entry, "\t")
+		fields := strings.Fields(meta)
+		if !ok || len(fields) != 3 || !objectID(fields[1]) || !filepath.IsLocal(path) {
+			return false, errors.New("invalid tracked blob inventory")
+		}
+		if fields[2] != "0" {
+			return false, nil
+		}
+		info, err := root.Lstat(path)
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		var body io.Reader
+		var file *os.File
+		size := info.Size()
+		if size > remaining {
+			return false, errors.New("tracked byte inventory limit exceeded")
+		}
+		switch fields[0] {
+		case "100644", "100755":
+			if !info.Mode().IsRegular() || (info.Mode()&0o111 != 0) != (fields[0] == "100755") {
+				return false, nil
+			}
+			file, err = root.Open(path)
+			if err != nil {
+				return false, err
+			}
+			body = file
+		case "120000":
+			if info.Mode()&os.ModeSymlink == 0 {
+				return false, nil
+			}
+			target, err := root.Readlink(path)
+			if err != nil {
+				return false, err
+			}
+			size = int64(len(target))
+			body = strings.NewReader(target)
+		default:
+			return false, nil
+		}
+		var sum hash.Hash = sha1.New()
+		if len(fields[1]) == 64 {
+			sum = sha256.New()
+		}
+		fmt.Fprintf(sum, "blob %d\x00", size)
+		n, readErr := io.Copy(sum, io.LimitReader(body, remaining+1))
+		var closeErr error
+		if file != nil {
+			closeErr = file.Close()
+		}
+		if err := errors.Join(readErr, closeErr, ctx.Err()); err != nil {
+			return false, err
+		}
+		remaining -= n
+		if remaining < 0 {
+			return false, errors.New("tracked byte inventory limit exceeded")
+		}
+		if n != size || hex.EncodeToString(sum.Sum(nil)) != fields[1] {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // An ordinary .git directory can still redirect Git through core.worktree or

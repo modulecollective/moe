@@ -49,6 +49,42 @@ func TestPreservationRetainedClone(t *testing.T) {
 	}
 }
 
+func TestPreservationRawBlobFormats(t *testing.T) {
+	for _, format := range []string{"sha1", "sha256"} {
+		t.Run(format, func(t *testing.T) {
+			gittest.SetupEnv(t)
+			source := t.TempDir()
+			gittest.Run(t, source, "init", "--object-format="+format)
+			put(t, filepath.Join(source, "tracked"), "retained\n")
+			if err := os.Symlink("tracked", filepath.Join(source, "link")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(filepath.Join(source, "tracked"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			gittest.Commit(t, source, "executable and symlink")
+			clone := filepath.Join(t.TempDir(), "clone")
+			gittest.Run(t, "", "clone", "--shared", source, clone)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			got, err := InspectPreservation(ctx, clone, source, nil)
+			if err != nil || got.Reason != "" {
+				t.Fatalf("retained raw blobs: %+v %v", got, err)
+			}
+			if err := os.Remove(filepath.Join(clone, "link")); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink("unique target", filepath.Join(clone, "link")); err != nil {
+				t.Fatal(err)
+			}
+			got, err = InspectPreservation(ctx, clone, source, nil)
+			if err != nil || got.Reason != "local_modifications" {
+				t.Fatalf("changed raw link: %+v %v", got, err)
+			}
+		})
+	}
+}
+
 func TestPreservationLocalWork(t *testing.T) {
 	for _, kind := range []string{"dirty", "staged", "untracked", "ignored", "stash", "detached", "ref", "reflog", "dangling", "operation"} {
 		t.Run(kind, func(t *testing.T) {
