@@ -82,6 +82,12 @@ const (
 // only). A project with no dev-env.d directory and no cache yields an
 // empty map — the single-driver default.
 func devEnvSetupEnv(root, workTree string, md *run.Metadata, stdout, stderr io.Writer) (map[string]string, bool, error) {
+	return devEnvSetupWithLifecycle(root, workTree, md, stdout, stderr, nil, nil)
+}
+
+// The owned per-run path supplies durable teardown and pre-publication
+// ownership recording; named workspaces retain their existing warm cache.
+func devEnvSetupWithLifecycle(root, workTree string, md *run.Metadata, stdout, stderr io.Writer, teardown func() error, beforePublish func([]byte) error) (map[string]string, bool, error) {
 	cachePath := filepath.Join(workTree, devEnvCacheRel)
 	cache, ok, err := readDevEnvCacheRevision(cachePath)
 	if err != nil {
@@ -115,8 +121,14 @@ func devEnvSetupEnv(root, workTree string, md *run.Metadata, stdout, stderr io.W
 			} else {
 				moePrintf(stderr, "dev-env: cached environment predates this run's hook revision; rebuilding\n")
 			}
-			if err := devEnvRunTeardown(root, workTree, md, stdout, stderr); err != nil {
-				return nil, false, err
+			var teardownErr error
+			if teardown != nil {
+				teardownErr = teardown()
+			} else {
+				teardownErr = devEnvRunTeardown(root, workTree, md, stdout, stderr)
+			}
+			if teardownErr != nil {
+				return nil, false, teardownErr
 			}
 			if err := devEnvClearCache(workTree); err != nil {
 				return nil, false, err
@@ -139,6 +151,11 @@ func devEnvSetupEnv(root, workTree string, md *run.Metadata, stdout, stderr io.W
 	env, err := runDevEnvSetup(root, workTree, md, stdout, stderr)
 	if err != nil {
 		return nil, false, err
+	}
+	if beforePublish != nil {
+		if err := beforePublish(devEnvCacheContents(env, owner, revision)); err != nil {
+			return nil, false, errors.Join(err, rollbackDevEnvSetup(root, workTree, md, env, stdout, stderr))
+		}
 	}
 	if err := writeDevEnvCacheRevision(cachePath, env, owner, revision); err != nil {
 		return nil, false, errors.Join(err, rollbackDevEnvSetup(root, workTree, md, env, stdout, stderr))
@@ -318,6 +335,13 @@ func validDevEnvRevision(revision string) bool {
 }
 
 func writeDevEnvCacheRevision(cachePath string, env map[string]string, owner, revision string) error {
+	if err := atomicfile.Write(cachePath, devEnvCacheContents(env, owner, revision), 0o644); err != nil {
+		return fmt.Errorf("dev-env: publish cache: %w", err)
+	}
+	return nil
+}
+
+func devEnvCacheContents(env map[string]string, owner, revision string) []byte {
 	keys := make([]string, 0, len(env))
 	for k := range env {
 		keys = append(keys, k)
@@ -337,10 +361,7 @@ func writeDevEnvCacheRevision(cachePath string, env map[string]string, owner, re
 		b.WriteString(env[k])
 		b.WriteByte('\n')
 	}
-	if err := atomicfile.Write(cachePath, []byte(b.String()), 0o644); err != nil {
-		return fmt.Errorf("dev-env: publish cache: %w", err)
-	}
-	return nil
+	return []byte(b.String())
 }
 
 // runDevEnvSetup walks dev-env.d/* and accumulates each script's
