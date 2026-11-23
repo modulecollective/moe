@@ -103,6 +103,18 @@ func (cs *children) get(id string) (*child, bool) {
 	return c, ok
 }
 
+// sweepActive reports whether any heartbeat sweep has yet to settle.
+func (cs *children) sweepActive() bool {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	for id, c := range cs.all {
+		if heartbeatProject(id) != "" && !c.isSettled() {
+			return true
+		}
+	}
+	return false
+}
+
 // shutdown suppresses notifications before invoking the host's stop policy.
 func (cs *children) shutdown(ctx context.Context, logger io.Writer) {
 	cs.mu.Lock()

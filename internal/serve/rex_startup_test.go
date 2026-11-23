@@ -135,9 +135,9 @@ func TestRexStartupWaitsForReconciliation(t *testing.T) {
 			if !ok || testBlock(s.children, a) != "block:A" || testAdoptionError(s) != nil {
 				t.Fatalf("alpha not reconciled before dispatch: child %v, error %v", a, testAdoptionError(s))
 			}
-			b, ok := s.children.get("heartbeat:beta")
-			if !ok || testBlock(s.children, b) != "block:B" || len(s.children.all) != 3 {
-				t.Fatalf("beta not dispatched or foreign block adopted: %d children", len(s.children.all))
+			// The adopted live sweep holds the server's one slot.
+			if _, ok := s.children.get("heartbeat:beta"); ok || len(s.children.all) != 2 {
+				t.Fatalf("beta dispatched beside adopted alpha or foreign block adopted: %d children", len(s.children.all))
 			}
 			if fake.called("run --json --focus=false --keep-open -s session:OLD --label heartbeat:alpha ") || fake.called("new ") || fake.called("block close block:X") {
 				t.Fatalf("recovery duplicated alpha, replaced session, or closed foreign block: %q", fake.calls())
@@ -163,11 +163,28 @@ func TestRexStartupWaitsForReconciliation(t *testing.T) {
 			if gammaFails != 1 {
 				t.Fatalf("adopted exited block backoff = %d, want 1", gammaFails)
 			}
-			waitFor(t, "live watchers", func() bool { return fake.called("wait --json block:A") && fake.called("wait --json block:B") })
+			waitFor(t, "live watcher", func() bool { return fake.called("wait --json block:A") })
 			before := len(fake.calls())
 			s.heartbeatTick()
 			if current, _ := s.children.get("heartbeat:alpha"); current != a || len(fake.calls()) != before {
 				t.Fatalf("later tick repeated adoption: %q", fake.calls()[before:])
+			}
+			for _, call := range fake.calls() {
+				if strings.HasPrefix(call, "run ") {
+					t.Fatalf("launched while adopted alpha held the slot: %q", fake.calls())
+				}
+			}
+			fake.release("wait")
+			select {
+			case <-a.settled:
+			case <-time.After(5 * time.Second):
+				t.Fatal("adopted alpha never settled")
+			}
+			// Alpha's exit frees the slot; it is cooling, so beta starts.
+			s.heartbeatTick()
+			b, ok := s.children.get("heartbeat:beta")
+			if !ok || testBlock(s.children, b) != "block:B" {
+				t.Fatalf("beta not dispatched once the slot freed: child %v", b)
 			}
 			runs := 0
 			for _, call := range fake.calls() {
@@ -178,7 +195,6 @@ func TestRexStartupWaitsForReconciliation(t *testing.T) {
 			if fake.called("block close block:D") || runs != 1 {
 				t.Fatalf("want beta the only launch, the dash block left alone: %q", fake.calls())
 			}
-			fake.release("wait")
 			waitRexWorkers(t, testRex(s.children))
 			waitFor(t, "completion backoff", func() bool {
 				s.heartbeat.mu.Lock()

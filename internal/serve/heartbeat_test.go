@@ -278,6 +278,35 @@ func TestHeartbeatSingleFlightsItsOwnChild(t *testing.T) {
 	}
 }
 
+// TestHeartbeatStartsOneSweepAcrossProjects: two projects due in one tick
+// produce one child, and a later tick starts nothing while it runs.
+func TestHeartbeatStartsOneSweepAcrossProjects(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "slow-moe")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nsleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gate := &fakeHeartbeat{due: []string{"alpha", "beta"}}
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: bin, Heartbeat: gate,
+	})
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		s.children.shutdown(ctx, io.Discard)
+	})
+
+	s.heartbeatTick()
+	s.heartbeatTick()
+
+	if _, ok := s.children.get(heartbeatChildPrefix + "alpha"); !ok {
+		t.Fatal("the first due project should hold the slot")
+	}
+	if _, ok := s.children.get(heartbeatChildPrefix + "beta"); ok {
+		t.Fatal("a second sweep started while the first was running")
+	}
+}
+
 // TestHeartbeatChildIdCannotCollideWithARun: the heartbeat/Rex label
 // identifies a project job and cannot be mistaken for a run id.
 func TestHeartbeatChildIdCannotCollideWithARun(t *testing.T) {

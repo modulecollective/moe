@@ -214,14 +214,14 @@ func (s *Server) heartbeatTick() {
 			s.saveActivity()
 			continue
 		}
-		// A heartbeat child of our own still running is the ticker's
-		// single-flight: a sweep that kicked a ride can outlive many
-		// ticks, and the sweep child itself walks the board while it
-		// lives.
-		id := heartbeatChildPrefix + projectID
-		if c, ok := s.children.get(id); ok && !c.isSettled() {
-			continue
+		// The server is serial: one working agent, bureaucracy-wide. Any
+		// unsettled sweep holds the slot, including one adopted from a
+		// previous serve's Rex session, and a sweep that kicked a ride can
+		// hold it for many ticks.
+		if s.children.sweepActive() {
+			return
 		}
+		id := heartbeatChildPrefix + projectID
 		// --heartbeat is the child saying who invoked it. The command is
 		// otherwise spelled exactly like the one an operator types, and the
 		// per-project mode caps the clock rather than the operator — so
@@ -239,6 +239,8 @@ func (s *Server) heartbeatTick() {
 			continue
 		}
 		s.logf("heartbeat: sweeping %s", projectID)
+		// One start per tick, even if this child has already exited.
+		return
 	}
 }
 
