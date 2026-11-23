@@ -743,10 +743,13 @@ Nonterminal runs, including pushed and interrupted runs, remain indefinitely.
 For closed, merged and promoted runs, the latest committed terminal transition
 starts a fixed 168-hour interval. Before its deadline, cleanup requires clean
 local contents and independent canonical retention of every available Git
-object, including reflog-only and unreachable objects. A preservation hold also
-prevents teardown. At the deadline, clone-local leftovers may be discarded;
-lifetime, generation, session, resource and path checks still apply. Missing or
-unprovable journal history holds. GC never closes or abandons a run.
+object, including reflog-only and unreachable objects. Clean Git status alone
+does not suffice: actual tracked bytes must match retained blobs without content
+filters. Converted line endings or expanded ident strings can therefore hold
+cleanup until expiry. A preservation hold also prevents teardown. At the
+deadline, clone-local leftovers may be discarded; lifetime, generation, session,
+resource and path checks still apply. Missing or unprovable journal history
+holds. GC never closes or abandons a run.
 
 New clones enroll under ownership before setup or agent execution. Legacy trees
 hold until host recovery confirms that old binaries, shells, descendants and
