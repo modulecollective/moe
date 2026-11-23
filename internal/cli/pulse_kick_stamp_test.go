@@ -22,9 +22,17 @@ func TestPulseSurveyStampsTheKickOrder(t *testing.T) {
 	defer withRideMode(rideDynamic)()
 	root, stages, _ := kickFixture(t)
 	minted := groomFixture(t, root, "aa-board", "zz-gate-head", "zz-gate-tail")
+	installCloseResourceHooks(t, root, "moe")
+	var resources closeResources
+	dispatch := openSdlcStage
+	openSdlcStage = func(stage, projectID, runID string, headless bool, stdout, stderr io.Writer) int {
+		resources.assertReleased(t)
+		return dispatch(stage, projectID, runID, headless, stdout, stderr)
+	}
 
 	orig := openPulse
 	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+		resources = allocateCloseResources(t, root, projectID, runID)
 		writePulseGate(t, root, projectID, runID,
 			`{"status":"ok","threads":[{"runs":["zz-gate-head","zz-gate-tail"]}]}`)
 		return surveyOutcome{code: 0, agentStarted: true}

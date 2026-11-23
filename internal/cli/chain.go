@@ -78,7 +78,7 @@ func init() {
 		Run:     runChainKick,
 		argKind: argProjectRun,
 	})
-	g.Register(closeCommand(chainWorkflow, "Close chain run %s/%s", nil))
+	g.Register(closeCommand(chainWorkflow, "Close chain run %s/%s", releaseWorkspaceCleanup))
 	g.Register(&Command{
 		Name:    "clear",
 		Summary: "drop every currently-live chain edge",

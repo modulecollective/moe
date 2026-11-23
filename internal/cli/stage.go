@@ -513,12 +513,11 @@ func (s *stageSession) enter(freshOwner bool, acquired time.Time) int {
 }
 
 func (s *stageSession) prepareWorkspace() error {
-	// Code workspace — still keyed off the canonical bureaucracy
+	// Source workspace — still keyed off the canonical bureaucracy
 	// root so per-run sandbox persistence works across turns.
-	// Document-only stages see no clone; code stages insist on one
-	// and pre-position it on the moe/<run-id> branch so the
-	// agent's commits (and any later `moe sdlc push`) land on a
-	// branch we own; design opts in read-only. attachRunWorkspace
+	// NeedsSandbox opts source-reading stages into a clone, positioned
+	// on the moe/<run-id> branch so permitted agent commits and any
+	// later `moe sdlc push` land on a branch we own. attachRunWorkspace
 	// routes per-run sandbox vs named workspace based on
 	// md.Workspace; the callers here don't need to know which.
 	s.clonePath = ""
@@ -532,7 +531,7 @@ func (s *stageSession) prepareWorkspace() error {
 			return err
 		}
 		s.clonePath = clonePath
-		// Dev-env hooks fire on every code/review/test stage open
+		// Dev-env setup is checked on every source-stage open
 		// against this working tree. First touch runs the
 		// project's dev-env.d/* setup scripts and caches the
 		// parsed KEY=VALUE output to <tree>/.moe/dev-env.env;

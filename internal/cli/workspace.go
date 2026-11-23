@@ -106,7 +106,7 @@ func resolveRunWorkspacePath(root string, md *run.Metadata) (string, error) {
 // explicit `moe workspace refresh` or `moe workspace remove`, since
 // the workspace's env is expected to outlive the run.
 //
-// Idempotent: a run that never reached `sdlc build` (no clone, no
+// Idempotent: a run that never attached a source workspace (no clone, no
 // claim) is a no-op either way. A named workspace is touched only when
 // the claim on disk names this run: a run can be bound to a workspace
 // another run has since claimed (the binding is written at open, the

@@ -59,6 +59,21 @@ func TestChainKickChainRunHeadClosesAndRides(t *testing.T) {
 		t.Fatalf("chain runs %v, want 1", heads)
 	}
 	head := heads[0]
+	installCloseResourceHooks(t, root, "moe")
+	// Chain heads allocate no source tree today; this is an owned leftover.
+	resources := allocateCloseResources(t, root, "moe", head)
+	child := allocateCloseResources(t, root, "moe", "fix-one")
+	dispatch := openSdlcStage
+	openSdlcStage = func(stage, projectID, runID string, headless bool, stdout, stderr io.Writer) int {
+		resources.assertReleased(t)
+		if _, err := os.Stat(child.owned); err != nil {
+			t.Errorf("head close removed child's dev root: %v", err)
+		}
+		if _, err := os.Stat(child.clone); err != nil {
+			t.Errorf("head close removed child's clone: %v", err)
+		}
+		return dispatch(stage, projectID, runID, headless, stdout, stderr)
+	}
 
 	var out, errb bytes.Buffer
 	if code := runChainKick([]string{"moe/" + head}, &out, &errb); code != 0 {

@@ -53,7 +53,7 @@ func lookupCloseRegistration(workflow string) (closeRegistration, bool) {
 
 // closeCommand builds the `close` subcommand for a workflow. The
 // state-guard / status-flip / trailered-commit skeleton is shared; the
-// workflow-specific piece is the optional cleanup (e.g., sdlc removes
+// workflow-specific piece is the optional cleanup (staged workflows remove
 // the sandbox clone and its moe/<run> branch in one sweep).
 //
 // subject is the commit subject template — a fmt.Sprintf string taking
@@ -311,10 +311,9 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 // means dropping the claim file and leaving the directory in place
 // for the next run to reuse, which is the whole point of named
 // workspaces. Idempotent: a never-opened workspace (operator
-// abandoned before the code stage) is a no-op either way.
+// abandoned before the first source stage) is a no-op either way.
 //
-// Used by sdlc close to release the run workspace after abandoning code
-// work. It is idempotent so closing before first code attach is still safe.
+// Used by staged-workflow closes, including automatic pulse disposal.
 func releaseWorkspaceCleanup(root string, md *run.Metadata) error {
 	if err := releaseRunWorkspace(root, md); err != nil {
 		return fmt.Errorf("release workspace: %w", err)

@@ -78,12 +78,7 @@ func init() {
 		Summary: "open (or resume) an interactive thinking-partner session on the project",
 		Run:     runChat,
 	})
-	// chat has no workspace, no push, and no moe/<run> branch worth a
-	// bespoke teardown (its read-only clone is reaped by `moe clone gc`
-	// at terminal status), so the shared close skeleton
-	// rides the standard harvest / state-guard / status-flip path with a
-	// nil cleanup.
-	g.Register(closeCommand(chatWorkflow, "Close chat run %s/%s", nil))
+	g.Register(closeCommand(chatWorkflow, "Close chat run %s/%s", releaseWorkspaceCleanup))
 	g.Register(harvestCommand(chatWorkflow))
 	g.Register(&Command{
 		Name:    "cat",
@@ -263,8 +258,8 @@ func promptChatClose(closeCmd *Command, projectID, runID string, stdout, stderr 
 // status refuses loud rather than guessing. A non-zero return is a hard
 // failure (root/load/flip error or unexpected status); 0 means "carry on
 // and open the session". The transcript lives in the bureaucracy and
-// survives close, and NeedsSandbox re-mints the read-only clone if
-// `moe clone gc` reaped it, so the conversation continues either way.
+// survives close; normal stage setup recreates the read-only clone and
+// dev environment released by close.
 func reopenClosedChat(projectID, runID string, stdout, stderr io.Writer) int {
 	root, err := findRoot(stderr)
 	if err != nil {

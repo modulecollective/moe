@@ -96,14 +96,13 @@ func init() {
 	// and did nothing. The retry is a fresh sweep, which is what the
 	// heartbeat does on its own next tick anyway.
 	//
-	// Pulse has no workspace and no moe/<run> branch, so close has
-	// nothing workflow-specific to clean up — pass nil and ride the
-	// shared harvest / state-guard / status-flip path. The happy-path
-	// survey auto-closes through this same registration (skipEdit, so
+	// Release the survey's source clone and cached dev environment through
+	// the shared close path. The happy-path survey auto-closes through
+	// this same registration (skipEdit, so
 	// filings promote to ideas unreviewed); the verb itself is the manual
 	// ending for a refused or failed sweep, where the editor-pop prune
 	// gate still applies.
-	g.Register(closeCommand(pulseWorkflow, "Close pulse run %s/%s", nil))
+	g.Register(closeCommand(pulseWorkflow, "Close pulse run %s/%s", releaseWorkspaceCleanup))
 	g.Register(&Command{
 		Name:    "cat",
 		Summary: "dump a stage canvas to stdout (pulse cat <project>/<run> <stage>)",
@@ -460,11 +459,9 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 // rewrite, when non-nil, stamps the canvas inside the close's locked
 // closure — after the dirty-tree gate, before the status flip — and
 // stages it, so the stamp and the status flip land in the *same* commit.
-// name labels the stamp in its error. It rides as the close's cleanup
-// argument rather than the registration's own hook because pulse
-// registered nil (no workspace, no branch to tear down — see the
-// closeCommand registration above), so a nil rewrite is exactly the
-// registered close.
+// name labels the stamp in its error. Stamping precedes the registered
+// workspace cleanup, so a failed stamp preserves the clone and dev env.
+// A nil rewrite uses the registered cleanup directly.
 //
 // The fold is the point. A stamp in its own lock and its own commit could
 // fail while the close went on to succeed, and the run would close with
@@ -496,9 +493,9 @@ func closePulseRunStamped(root, projectID, runID, name string, rewrite func(body
 	canvasRel := run.ContentPath(projectID, runID, pulseDoc)
 	canvas := filepath.Join(root, canvasRel)
 	var before []byte
-	var stamp closeCleanup
+	cleanup := reg.cleanup
 	if rewrite != nil {
-		stamp = func(root string, _ *run.Metadata) error {
+		cleanup = func(root string, md *run.Metadata) error {
 			body, err := os.ReadFile(canvas)
 			if err != nil {
 				return fmt.Errorf("read pulse canvas: %w", err)
@@ -509,10 +506,16 @@ func closePulseRunStamped(root, projectID, runID, name string, rewrite func(body
 			}
 			// Staging is what carries the stamp into the close's commit:
 			// StageAndCommit's `git commit -m` takes the whole index.
-			return run.Stage(root, canvasRel)
+			if err := run.Stage(root, canvasRel); err != nil {
+				return err
+			}
+			if reg.cleanup != nil {
+				return reg.cleanup(root, md)
+			}
+			return nil
 		}
 	}
-	err := closeRunInProcess(root, pulseWorkflow, reg.subject, stamp,
+	err := closeRunInProcess(root, pulseWorkflow, reg.subject, cleanup,
 		projectID, runID, true /*skipEdit*/, stderr, extraTrailers...)
 	if err != nil && rewrite != nil {
 		if before != nil {
