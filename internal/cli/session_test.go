@@ -342,10 +342,8 @@ func TestSessionGCPartialFailureExits1(t *testing.T) {
 
 // TestSessionGCHoldsALiveClaim pins the rule that makes these five
 // rules safe to run on a timer: a candidate whose claimant is alive is
-// not an orphan at all. `moe <wf> close` has no open-session guard, so
-// an operator sitting in a stage while close is typed in another pane
-// produces rule 1's exact shape — and reaping it would take their
-// uncommitted work along with the worktree.
+// not an orphan at all. Legacy close residue can leave a terminal run
+// with an occupied session; GC must preserve its uncommitted work.
 //
 // Held is silent, not an error: somebody is inside, the dash already
 // shows the session, and there is nothing for the operator to fix.

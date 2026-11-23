@@ -195,9 +195,8 @@ func releasedClaim(c Claim) bool {
 		!c.ReleasedAt.Before(c.StartedAt) && !c.ReleasedAt.Before(c.HeartbeatAt)
 }
 
-// ReadClaim returns the record for a session, or ok=false when there is
-// none (including an unreadable or malformed one — both read as
-// unknown, which is the safe answer).
+// ReadClaim returns the decoded record, or ok=false for absent, unreadable
+// or malformed claims. False means unknown ownership, not proven absence.
 func ReadClaim(root, projectID, runID, docID string) (Claim, bool) {
 	body, err := os.ReadFile(ClaimPath(root, projectID, runID, docID))
 	if err != nil {
@@ -208,6 +207,24 @@ func ReadClaim(root, projectID, runID, docID string) (Claim, bool) {
 		return Claim{}, false
 	}
 	return c, true
+}
+
+// GCClaimHeld protects rules 1–4 of run-based session GC. Only genuine
+// absence or a matching, provably dead claim lifts the hold; neither alone
+// authorizes deletion. Uncertain ownership must preserve the session's work.
+func GCClaimHeld(root, projectID, runID, docID string, now time.Time) bool {
+	info, err := os.Lstat(ClaimPath(root, projectID, runID, docID))
+	if os.IsNotExist(err) {
+		return false
+	}
+	if err != nil || !info.Mode().IsRegular() {
+		return true
+	}
+	c, ok := ReadClaim(root, projectID, runID, docID)
+	if !ok || c.Branch != BranchName(projectID, runID, docID) {
+		return true
+	}
+	return !claimDead(c, now)
 }
 
 // clearClaim removes a session's record. Called by the clean endings;
@@ -230,30 +247,29 @@ func Reapable(s *Session, now time.Time) bool {
 }
 
 // Dead reports whether a session's claimant is provably gone, whoever it
-// was. It tests claim death without authorizing teardown: a dead
-// *operator* session may never be touched, but it has also stopped
-// meaning "somebody is inside this project", which is the
-// only thing the heartbeat's stand-down asks it.
+// was. It tests claim death without authorizing teardown: a dead operator
+// session is not claim-reapable, but it has stopped meaning "somebody is
+// inside this project", which is all the heartbeat's stand-down asks.
 //
 // Without that split, a Ctrl-C'd `moe pulse new` — or any operator stage
 // pane lost to a box reboot — leaves a branch nothing ever clears, and
 // every subsequent tick reads the project occupied and stands down
 // forever. Ambiguity still reads as alive here, same as everywhere else
-// on this file: no claim, another host, an unparsable owner, a live pid
-// or a fresh beat all report false and keep the project held.
+// in this file: no matching claim, another host, an unparsable owner,
+// a live pid or a fresh beat all report false and keep the project held.
 //
 // Takes path parts rather than a *Session because its caller holds
 // branch names, not sessions: the tick enumerates refs, deliberately,
 // so that an orphan branch with no worktree is still seen.
 func Dead(root, projectID, runID, docID string, now time.Time) bool {
 	c, ok := ReadClaim(root, projectID, runID, docID)
-	if !ok {
+	if !ok || c.Branch != BranchName(projectID, runID, docID) {
 		return false
 	}
 	return claimDead(c, now)
 }
 
-// claimDead is the "provably dead" core both predicates share: same
+// claimDead is the shared "provably dead" core: same
 // host, same pid namespace, pid gone *and* heartbeat stale.
 //
 // Both dead signals are required, not either. The pid probe alone

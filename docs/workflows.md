@@ -1039,11 +1039,18 @@ landing a journal commit the machine didn't stamp — releases it for one retry,
 and opening a stage there clears it outright. If that retry refuses too, its
 fresh tombstone re-arms the hold: each thing you do buys one attempt and no more.
 
-Sessions you started, sessions whose claimant might still be alive, and sessions
-with no record at all are never touched; they surface on the dash's ACTIVE row
-and `moe session resolve` / `moe session abandon` are still yours. See
-[Cleanup And Recovery](reference.md#cleanup-and-recovery) for manual recovery
-conditions.
+Claim-based recovery leaves operator sessions and sessions with unknown
+ownership alone. Separately, the heartbeat runs the same orphan rules as
+`moe session gc`: registered sessions on terminal or missing runs/projects,
+and branches without worktrees, remain eligible when their claim is genuinely
+absent. A present claim must name that exact branch and prove its owner dead,
+whether machine or operator. Unreadable, malformed, mismatched or uncertain
+claims hold the session for inspection, even on terminal runs. Release alone
+does not authorize GC. Held registered sessions remain visible in
+`moe session list`; worktree-less refs can be inspected with
+`git branch --list 'session/*'`. `moe session resolve` / `moe session abandon`
+are still yours. See [Cleanup And Recovery](reference.md#cleanup-and-recovery)
+for manual recovery conditions.
 
 ## Twin
 

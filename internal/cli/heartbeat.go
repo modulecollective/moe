@@ -743,26 +743,10 @@ func tombstoneReap(root string, s *session.Session, now time.Time) (string, erro
 // `moe session gc`'s rule set on the tick's cadence instead of the
 // operator's memory.
 //
-// It exists because those branches are the other half of "somebody is
-// already inside the project", and the reap above cannot touch them.
-// The reap reasons from a claim: a machine session whose process is
-// provably dead. A branch left behind by an ending has no claim to
-// probe — the clean endings delete it, and branches older than the
-// mechanism never had one — and a claim it cannot read reads as
-// occupied, deliberately. So the project stands down every tick,
-// forever, and nothing but a hand-run `moe session gc` ever moves it.
-//
-// This step reasons from the run instead, which needs no claim: a
-// terminal run has nobody inside it whatever its branch says. Between
-// them the two steps cover both doors residue comes in by — a branch
-// predating the claim mechanism, and an ending that deletes the claim
-// while the branch survives.
-//
-// What keeps a timer safe to point at a destructive rule is that the
-// rule was already codified as trash (gc's rule 1) and that a live
-// claim holds a candidate back — see sessionClaimHeld. Scan first and
-// lock only when there is something to reap: a clean board is the
-// common case and must not take the repo lock every twenty minutes.
+// Unlike claim-based reap, this recovers claimless ending residue. A
+// present claim must match the branch and prove its owner dead; unreadable
+// or uncertain claims hold even on terminal runs (session.GCClaimHeld).
+// Scan first and lock only with candidates, then recollect under the lock.
 //
 // Warn-only like everything else in the tick. A reap that fails is a
 // branch that stays and a project that stays held; the next tick

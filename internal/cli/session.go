@@ -164,8 +164,8 @@ func printSessionRecovery(s *session.Session, stderr io.Writer) {
 // the reap is consistent against parallel `moe session open` /
 // `session abandon` calls.
 //
-// Rules 1–4 are held back by a live claim — see sessionClaimHeld. Rule
-// 5 has no run behind it and so no claim concept.
+// Rules 1–4 hold unless the claim is absent or matching and provably dead
+// — see session.GCClaimHeld. Rule 5 has no run or claim concept.
 //
 // Partial-failure shape mirrors `moe clone gc`: per-orphan errors go to
 // stderr, surviving orphans are still listed for the operator, exit 1
@@ -287,7 +287,7 @@ func reapSessionOrphans(root string, o sessionOrphans) (reaped []reapedSession, 
 
 // sessionGCPass is the whole gc act: take the lock, collect under it,
 // reap. Both callers go through here, so the five rules and the
-// live-claim hold have one implementation rather than two that must
+// claim hold have one implementation rather than two that must
 // agree forever.
 //
 // The collect inside the lock is the authoritative one. A caller may
@@ -311,35 +311,11 @@ func sessionGCPass(root string, opts repolock.Options) ([]reapedSession, []strin
 	return reaped, reapErrs, nil
 }
 
-// sessionClaimHeld reports whether a session's liveness record still
-// vouches for somebody being inside it: a claim exists and is not
-// provably dead. Every rule with a run behind it skips a held
-// candidate — silently, because a held session is not an orphan at all.
-//
-// This is what makes the rules safe to run on a timer. `moe <wf> close`
-// has no open-session guard, so an operator sitting in a design pane
-// while `close` is typed in another produces rule 1's exact shape:
-// terminal status, session branch present, claimant alive and beating.
-// Reaping that pulls the worktree out from under them and takes the
-// uncommitted work with it. Tolerable while gc was a deliberate hand
-// verb; not once a tick runs it every twenty minutes.
-//
-// Composed from the two existing exports rather than a new liveness
-// predicate: ReadClaim answers presence, Dead answers provably-gone.
-// Ambiguity keeps its usual direction — another host, an unparsable
-// owner, a live pid or a fresh beat all read as held.
-func sessionClaimHeld(root, projectID, runID, docID string, now time.Time) bool {
-	if _, ok := session.ReadClaim(root, projectID, runID, docID); !ok {
-		return false
-	}
-	return !session.Dead(root, projectID, runID, docID, now)
-}
-
 // findOrphanSessions returns the registered-worktree sessions whose run
 // state says they're reapable: terminal status, missing run.json, or
 // missing project directory. Pushed and in-progress runs are skipped —
 // their worktrees are still load-bearing for live stage sessions — and
-// so is any session whose claim is still live.
+// so is any session whose present claim cannot prove this owner dead.
 // Result is sorted by branch so the verb's output order is stable.
 func findOrphanSessions(root string, now time.Time) ([]*session.Session, error) {
 	sessions, err := session.List(root)
@@ -356,8 +332,8 @@ func findOrphanSessions(root string, now time.Time) ([]*session.Session, error) 
 	}
 	var out []*session.Session
 	for _, s := range sessions {
-		// Somebody is inside this one, whatever its run says.
-		if sessionClaimHeld(root, s.Project, s.Run, s.Doc, now) {
+		// Terminal run status cannot resolve uncertain ownership.
+		if session.GCClaimHeld(root, s.Project, s.Run, s.Doc, now) {
 			continue
 		}
 		// Rule 3: project directory missing on disk.
@@ -386,9 +362,8 @@ func findOrphanSessions(root string, now time.Time) ([]*session.Session, error) 
 // findOrphanSessionBranches returns `session/<p>/<r>/<d>` branches with
 // no worktree currently checked out. This is the rule-4 residue
 // `session.Open` refuses with "branch %s exists without a registered
-// worktree — abandoned close?". A branch whose claim is still live is
-// held, same as the registered rules. Result is sorted so the verb's
-// output is stable.
+// worktree — abandoned close?". Present claims must prove this owner dead,
+// just as for registered worktrees. Result is sorted for stable output.
 func findOrphanSessionBranches(root string, now time.Time) ([]string, error) {
 	out, err := git.Output(root, "for-each-ref", "--format=%(refname:short)", "refs/heads/session/")
 	if err != nil {
@@ -409,10 +384,8 @@ func findOrphanSessionBranches(root string, now time.Time) ([]string, error) {
 		if wtBranches[b] {
 			continue
 		}
-		// A worktree-less branch with a live claim is a session whose
-		// worktree went missing under a running process — vanishingly
-		// rare, and not ours to clear while the claimant is alive.
-		if p, r, d, ok := session.ParseBranch(b); ok && sessionClaimHeld(root, p, r, d, now) {
+		// A missing worktree is no proof that its claimant is gone.
+		if p, r, d, ok := session.ParseBranch(b); ok && session.GCClaimHeld(root, p, r, d, now) {
 			continue
 		}
 		orphans = append(orphans, b)

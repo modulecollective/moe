@@ -725,6 +725,15 @@ gone: same host and PID namespace, dead process, and a heartbeat older than ten
 minutes. Fresh crashes wait; live unreleased, missing, unreadable, mismatched
 or foreign claims refuse takeover. Do not delete claims to bypass these checks.
 
+Session GC distinguishes absent claims from unreadable ones. Its orphan rules
+for registered sessions and worktree-less branches still permit claimless
+cleanup. A present claim holds GC unless it names that exact branch and proves
+its owner dead; malformed JSON, unreadable files and unexpected file types hold
+too. A released claim still needs the same death proof. Held sessions are
+silently skipped by both `moe session gc` and the heartbeat. Registered sessions
+remain visible in `moe session list`; inspect worktree-less refs with
+`git branch --list 'session/*'` before explicit recovery.
+
 An interrupted close records its validated tip before merging. Retry finishes
 cleanup if that exact tip already landed, even if main has advanced. For older
 sessions without a close receipt, `moe session resolve <branch>` can explicitly

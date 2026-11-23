@@ -201,6 +201,24 @@ func TestDeadIsReapableWithoutTheMachineBit(t *testing.T) {
 		want  bool
 	}{
 		{
+			name: "missing branch",
+			setup: func(t *testing.T, s *Session) {
+				deadClaim(t, s, false, 2*StaleAfter)
+				c, _ := ReadClaim(s.Root, s.Project, s.Run, s.Doc)
+				c.Branch = ""
+				writeClaimOrFail(t, s, c)
+			},
+		},
+		{
+			name: "wrong branch",
+			setup: func(t *testing.T, s *Session) {
+				deadClaim(t, s, true, 2*StaleAfter)
+				c, _ := ReadClaim(s.Root, s.Project, s.Run, s.Doc)
+				c.Branch += "-other"
+				writeClaimOrFail(t, s, c)
+			},
+		},
+		{
 			name:  "dead operator session — Ctrl-C'd pulse, rebooted stage pane",
 			setup: func(t *testing.T, s *Session) { deadClaim(t, s, false, 2*StaleAfter) },
 			want:  true,

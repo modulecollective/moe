@@ -1402,12 +1402,9 @@ func TestHeartbeatGCClearsARefWithNoWorktree(t *testing.T) {
 }
 
 // TestHeartbeatGCHoldsALiveClaimOnATerminalRun is the direction where a
-// wrong answer destroys something. `moe <wf> close` has no open-session
-// guard, so an operator sitting in a design pane while close is typed
-// in another produces rule 1's exact shape — terminal status, branch
-// present, claimant alive and beating. Reaping that removes the
-// worktree with --force and takes the uncommitted work with it, which
-// was tolerable for a hand verb and is not for a twenty-minute tick.
+// wrong answer destroys something. Legacy close residue can leave terminal
+// status with a surviving session whose claimant is alive and beating.
+// Reaping that removes the worktree and its uncommitted work.
 func TestHeartbeatGCHoldsALiveClaimOnATerminalRun(t *testing.T) {
 	t.Parallel()
 	root := parallelQuietFixture(t)
@@ -1437,15 +1434,14 @@ func TestHeartbeatGCHoldsALiveClaimOnATerminalRun(t *testing.T) {
 	}
 }
 
-// TestHeartbeatGCReapsATerminalRunWithADeadClaim is the widened edge:
-// rule 1 ignores claims entirely today, and the hold narrows it to
-// *live* ones. A claim that is provably dead on a run that is over
-// still goes — and this one is operator-marked, so the reap above would
-// never touch it.
+// TestHeartbeatGCReapsATerminalRunWithADeadClaim covers run-based GC's
+// distinct contract: a matching dead operator claim permits cleanup on a
+// finished run, although claim-based reap would leave it alone.
 func TestHeartbeatGCReapsATerminalRunWithADeadClaim(t *testing.T) {
 	t.Parallel()
 	root := parallelQuietFixture(t)
 	groomFixture(t, root, "fix-a")
+	g := sweptOnceOverParkedWork(t, root, true)
 	seedRun(t, root, "moe", "merged-and-dead", "sdlc", run.StatusMerged, time.Now().Local(), nil)
 	s, err := session.Open(root, "moe", "merged-and-dead", "code")
 	if err != nil {
@@ -1454,9 +1450,15 @@ func TestHeartbeatGCReapsATerminalRunWithADeadClaim(t *testing.T) {
 	writeDeadClaim(t, s, false /*operator*/)
 
 	var log bytes.Buffer
-	newHeartbeatGate(root).Due(testTick, &log)
+	decisions := g.Due(testTick, &log)
 
 	if git.HasRef(root, "refs/heads/"+s.Branch) {
 		t.Errorf("a dead claim on a finished run kept the branch alive\n%s", log.String())
+	}
+	if !strings.Contains(log.String(), "session gc removed "+s.Branch) {
+		t.Errorf("missing run-based GC report: %s", log.String())
+	}
+	if ids := sweepIDs(decisions); len(ids) != 1 || ids[0] != "moe" {
+		t.Errorf("due = %v, want freed board offered in the same tick", ids)
 	}
 }
