@@ -95,11 +95,12 @@ func newHeartbeatGate(root string) *heartbeatGate {
 // warrants a sweep right now and the gate's own words for why.
 //
 // Read-only and cheap by construction — one run scan, one journal index
-// (memoized on HEAD), one ref listing, and one `git log -1` per project.
+// (memoized on HEAD), one ref listing, and a HEAD read plus two bounded
+// `git log -1` queries per project (path changes and project trailers).
 // Recorded pushed PRs also pay one bounded `gh pr view` per tick, outside
 // the journal lock; a project without them pays no added network read.
 // A project whose tip is machine-authored and younger than one tick pays
-// one more log, scanning the window for a masked operator act; a quiet
+// two more logs, scanning the window for a masked operator act; a quiet
 // board never reaches it. A quiet board therefore costs no agent turn, no
 // run, and no journal noise, which is the whole reason a fixed cadence
 // can be baked rather than tuned.
@@ -803,8 +804,9 @@ func (g *heartbeatGate) gc(log io.Writer) {
 	}
 }
 
-// projectJournalTip reports the newest journal commit touching a
-// project: its sha, its commit time, and whether it was operator-
+// projectJournalTip reports the newest journal commit touching a project
+// path or carrying its exact MoE-Project trailer (including empty advance
+// marks): its sha, its commit time, and whether it was operator-
 // authored. ok is false when the project has no history yet or the read
 // failed.
 //
@@ -814,11 +816,27 @@ func (g *heartbeatGate) gc(log io.Writer) {
 // unknown case is deliberately folded into "operator", because the only
 // thing it buys is one quiet tick of hesitation.
 func projectJournalTip(root, projectID string) (sha string, at time.Time, operator bool, ok bool) {
-	// %x00 is git's own NUL escape, expanded by git rather than passed in
-	// the argv — a literal NUL in an exec argument is rejected outright.
-	out, err := git.Output(root, "log", "-1", "--format=%H%x00%cI%x00%B", "--", "projects/"+projectID)
+	head, err := git.HEAD(root)
 	if err != nil {
 		return "", time.Time{}, false, false
+	}
+	// Pin both reads to one HEAD. The range after the path candidate picks
+	// by journal order, even when a later empty mark shares its timestamp.
+	// %x00 is git's NUL escape; a literal NUL in argv would be rejected.
+	out, err := git.Output(root, "log", head, "-1", "--format=%H%x00%cI%x00%B", "--", "projects/"+projectID)
+	if err != nil {
+		return "", time.Time{}, false, false
+	}
+	rev := head
+	if pathSHA, _, found := strings.Cut(out, "\x00"); found {
+		rev = pathSHA + ".." + head
+	}
+	marked, err := git.Output(root, "log", rev, "-1", "--format=%H%x00%cI%x00%B", "--grep", trailers.GrepPattern("MoE-Project", projectID), "--")
+	if err != nil {
+		return "", time.Time{}, false, false
+	}
+	if strings.TrimSpace(marked) != "" {
+		out = marked
 	}
 	parts := strings.SplitN(strings.TrimSpace(out), "\x00", 3)
 	if len(parts) != 3 || parts[0] == "" {
@@ -831,7 +849,7 @@ func projectJournalTip(root, projectID string) (sha string, at time.Time, operat
 	return parts[0], when, !machineAuthored(parts[2]), true
 }
 
-// operatorActedSince reports whether any journal commit touching the
+// operatorActedSince reports whether any journal commit concerning the
 // project since t is operator-authored. It is the quiet window's real
 // question — the tip alone answers a narrower one, and a machine commit
 // landing on top of a hand-edit is exactly how the two diverge.
@@ -857,9 +875,9 @@ func unseenWorkIn(root, projectID, base, tip string) bool {
 
 // journalActs walks the bodies of the project-scoped commits selected by
 // rev, whatever the caller's way of naming them, and reports both facts
-// its callers between them need. One walk rather than two: Swept wants
-// both answers over the same range, and a sibling log invocation is how
-// the two would drift.
+// its callers need. Path changes and exact project trailers form a union:
+// hand edits need no trailer, and advance marks need no changed file.
+// Duplicate bodies cannot change these boolean answers.
 //
 // Warn-only like every other read in this file, and in the same direction
 // for both callers: an unreadable log reports neither act, which leaves
@@ -871,7 +889,11 @@ func journalActs(root, projectID, rev string) (operator, ride bool) {
 	if err != nil {
 		return false, false
 	}
-	for body := range strings.SplitSeq(out, "\x00") {
+	marked, err := git.Output(root, "log", rev, "--format=%x00%B", "--grep", trailers.GrepPattern("MoE-Project", projectID), "--")
+	if err != nil {
+		return false, false
+	}
+	for body := range strings.SplitSeq(out+marked, "\x00") {
 		if strings.TrimSpace(body) == "" {
 			// The leading empty field before the first commit's %x00, and
 			// the padding git puts between bodies. Neither is a commit, and

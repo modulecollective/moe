@@ -45,7 +45,7 @@ func backdateHead(t *testing.T, root string, ago time.Duration) {
 		"commit", "--amend", "--no-edit", "--date="+when)
 }
 
-// journalCommit stamps an empty commit touching the project's tree, so
+// journalCommit stamps a file-changing commit in the project's tree, so
 // the tip walk has something project-scoped to find. trailers is the
 // block appended verbatim — empty for an operator-authored commit, a
 // MoE-Consent line for a machine one.
