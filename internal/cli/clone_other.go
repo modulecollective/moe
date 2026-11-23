@@ -49,7 +49,13 @@ func ensureRunClone(h *runowner.Handle) (string, error) {
 	return sandbox.EnsureRetained(h.Root, h.Project, h.Run)
 }
 func devEnvSetupOwned(h *runowner.Handle, md *run.Metadata, stdout, stderr io.Writer) (map[string]string, bool, error) {
-	return nil, false, errors.New("owned per-run environments require the verified Linux host view")
+	if h == nil || md.Workspace != "" || !h.Owns(h.Root, md.Project, md.ID) {
+		return nil, false, errors.New("per-run environment requires explicit run ownership")
+	}
+	if err := clonereclaim.CheckRunRecovery(h); err != nil {
+		return nil, false, err
+	}
+	return devEnvSetupEnv(h.Root, sandbox.Path(h.Root, md.Project, md.ID), md, stdout, stderr)
 }
 func execOwnedShell(h *runowner.Handle, md *run.Metadata, path string, extra []string, stderr io.Writer) int {
 	receipt := filepath.Join(h.Root, ".moe", "clone-reclamation", h.Project, h.Run, "unsupported-shell.json")

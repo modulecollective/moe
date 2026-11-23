@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"github.com/modulecollective/moe/internal/clonereclaim"
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runowner"
@@ -44,19 +43,6 @@ func cleanTestClone(t *testing.T, root, p, id string) string {
 	return path
 }
 
-func enrollTestClone(t *testing.T, root, p, id string) {
-	t.Helper()
-	h, err := runowner.Acquire(root, p, id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer h.Release()
-	r, err := clonereclaim.Enroll(h)
-	if err != nil {
-		t.Fatal(err)
-	}
-	r.Close()
-}
 func releaseTestRunWorkspace(t *testing.T, root string, md *run.Metadata) error {
 	t.Helper()
 	h, err := runowner.Acquire(root, md.Project, md.ID)
