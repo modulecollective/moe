@@ -4,6 +4,7 @@ package clonereclaim
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -12,18 +13,17 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"syscall"
+	"time"
 	"unsafe"
 
+	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runowner"
 )
 
 const protocolVersion = 1
 const identityMarker = "clone-identity.json"
-
-var namePattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
 // Identity is one physical clone, never just a reusable pathname. The external
 // enrollment and clone-local marker must agree before any lifecycle mutation.
@@ -176,7 +176,7 @@ func physicalIdentity(h *runowner.Handle, durable bool) (Identity, *os.File, err
 	if h == nil || !h.Owns(h.Root, h.Project, h.Run) {
 		return id, nil, errors.New("clone reclamation requires held run ownership")
 	}
-	if !filepath.IsAbs(h.Root) || filepath.Clean(h.Root) != h.Root || !namePattern.MatchString(h.Project) || !namePattern.MatchString(h.Run) {
+	if !filepath.IsAbs(h.Root) || filepath.Clean(h.Root) != h.Root || !run.ValidID(h.Project) || !run.ValidID(h.Run) {
 		return id, nil, errors.New("invalid canonical run identity")
 	}
 	root, err := openAbsoluteDir(h.Root)
@@ -236,6 +236,12 @@ func physicalIdentity(h *runowner.Handle, durable bool) (Identity, *os.File, err
 	}
 	if gitmount != mount {
 		return id, nil, errors.New("Git directory crosses a mount boundary")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	err = inspectCloneLayout(ctx, filepath.Join(h.Root, ".moe", "clones", h.Project, h.Run))
+	cancel()
+	if err != nil {
+		return id, nil, err
 	}
 	var stat syscall.Stat_t
 	if err := syscall.Fstat(int(parent.Fd()), &stat); err != nil {

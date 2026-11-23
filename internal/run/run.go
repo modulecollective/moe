@@ -272,6 +272,9 @@ type Options struct {
 
 var idPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
+// ValidID reports whether a project or run ID is a single supported path component.
+func ValidID(id string) bool { return idPattern.MatchString(id) }
+
 // Slugify turns a free-form title into an id-shaped slug: lowercase,
 // non-alphanumerics collapsed to single dashes, trimmed. Returns "" if
 // nothing usable remains (e.g. an emoji-only title).
@@ -318,7 +321,7 @@ func Dir(projectID, id string) string {
 // remove its files and index entries. Cleanup failures report both causes;
 // successful cleanup reports "nothing recorded". Unrelated paths are preserved.
 func New(root, projectID string, opts Options) (md *Metadata, err error) {
-	if !idPattern.MatchString(projectID) {
+	if !ValidID(projectID) {
 		return nil, fmt.Errorf("run: project id %q must match %s", projectID, idPattern)
 	}
 	if opts.Workflow == "" {
@@ -340,11 +343,11 @@ func New(root, projectID string, opts Options) (md *Metadata, err error) {
 	switch {
 	case opts.ID != "":
 		id = opts.ID
-		if !idPattern.MatchString(id) {
+		if !ValidID(id) {
 			return nil, fmt.Errorf("run: id %q must match %s", id, idPattern)
 		}
 	case opts.IDBase != "":
-		if !idPattern.MatchString(opts.IDBase) {
+		if !ValidID(opts.IDBase) {
 			return nil, fmt.Errorf("run: id base %q must match %s", opts.IDBase, idPattern)
 		}
 		id = opts.IDBase
@@ -400,7 +403,7 @@ func New(root, projectID string, opts Options) (md *Metadata, err error) {
 	runJSONRel := filepath.Join(runDirRel, "run.json")
 	addPaths := []string{runJSONRel}
 	for docID := range opts.SeedDocs {
-		if !idPattern.MatchString(docID) {
+		if !ValidID(docID) {
 			return nil, fmt.Errorf("run: seed document id %q must match %s", docID, idPattern)
 		}
 		addPaths = append(addPaths, ContentPath(projectID, id, docID))
@@ -599,7 +602,7 @@ func (d *Document) HasSession() bool {
 // Returns the entry and whether md was mutated; the caller decides
 // whether to persist (Save + commit).
 func EnsureDocument(root string, md *Metadata, docID string) (*Document, bool, error) {
-	if !idPattern.MatchString(docID) {
+	if !ValidID(docID) {
 		return nil, false, fmt.Errorf("run: document id %q must match %s", docID, idPattern)
 	}
 	if md.Documents == nil {

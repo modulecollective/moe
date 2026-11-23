@@ -34,6 +34,9 @@ type Preservation struct {
 // objects. It does not fetch, prune, repair, run hooks or write the index.
 func InspectPreservation(ctx context.Context, clone, source string, artifacts map[string]string) (Preservation, error) {
 	var result Preservation
+	if err := inspectCloneLayout(ctx, clone); err != nil {
+		return result, err
+	}
 	read := func(dir string, args ...string) (string, error) {
 		return git.Inspect(ctx, dir, scanOutputLimit, args...)
 	}
@@ -44,6 +47,24 @@ func InspectPreservation(ctx context.Context, clone, source string, artifacts ma
 	}
 	if err := independentObjectStorage(ctx, source, clone); err != nil {
 		return result, err
+	}
+	// Porcelain honors these flags even when tracked bytes have changed.
+	// Refuse them without refreshing or changing the candidate's index.
+	entries, err := read(clone, "ls-files", "-v", "-z")
+	if err != nil {
+		return result, err
+	}
+	for entry := range strings.SplitSeq(entries, "\x00") {
+		if entry == "" {
+			continue
+		}
+		if len(entry) < 3 || entry[1] != ' ' {
+			return result, errors.New("invalid tracked file inventory")
+		}
+		if entry[0] == 'S' || entry[0] >= 'a' && entry[0] <= 'z' {
+			result.Reason = "index_inspection_suppressed"
+			return result, nil
+		}
 	}
 	state, err := read(clone, "status", "--porcelain=v1", "-z", "--untracked-files=no", "--ignore-submodules=none")
 	if err != nil {
@@ -136,6 +157,33 @@ func InspectPreservation(ctx context.Context, clone, source string, artifacts ma
 		return result, errors.New("empty Git object inventory")
 	}
 	return result, nil
+}
+
+// An ordinary .git directory can still redirect Git through core.worktree or
+// commondir. Bind every inspection to the tree and Git storage we admitted.
+func inspectCloneLayout(ctx context.Context, clone string) error {
+	clone, err := filepath.Abs(clone)
+	if err != nil {
+		return err
+	}
+	out, err := git.Inspect(ctx, clone, scanOutputLimit, "rev-parse", "--path-format=absolute", "--show-toplevel", "--absolute-git-dir", "--git-common-dir")
+	if err != nil {
+		return err
+	}
+	paths := strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+	if len(paths) != 3 {
+		return errors.New("ambiguous clone Git layout")
+	}
+	for i, want := range []string{clone, filepath.Join(clone, ".git"), filepath.Join(clone, ".git")} {
+		real, err := filepath.EvalSymlinks(paths[i])
+		if err != nil {
+			return err
+		}
+		if paths[i] != want || real != want {
+			return errors.New("Git worktree or storage redirects outside the admitted clone")
+		}
+	}
+	return nil
 }
 
 func objectID(id string) bool {

@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"regexp"
 	"time"
 
 	"github.com/modulecollective/moe/internal/run"
@@ -25,14 +24,12 @@ type cloneResult struct {
 	Receipt  string                `json:"receipt"`
 }
 
-var cloneRefPart = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
-
 func splitCloneRef(value string) (string, string, error) {
 	p, r, err := splitProjectRun(value)
 	if err != nil {
 		return "", "", err
 	}
-	if !cloneRefPart.MatchString(p) || !cloneRefPart.MatchString(r) {
+	if !run.ValidID(p) || !run.ValidID(r) {
 		return "", "", fmt.Errorf("expected exact project/run names, got %q", value)
 	}
 	return p, r, nil

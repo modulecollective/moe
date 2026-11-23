@@ -4,6 +4,7 @@ package clonereclaim
 
 import (
 	"errors"
+	"github.com/modulecollective/moe/internal/run"
 	"io"
 	"os"
 	"path/filepath"
@@ -40,7 +41,7 @@ func namedShellBase(h *runowner.Handle, create bool) (*os.File, error) {
 
 func namedShellIdentity(h *runowner.Handle, path string) (Identity, error) {
 	id := Identity{Version: protocolVersion, Root: h.Root, Project: h.Project, Run: h.Run, Path: path}
-	if filepath.Dir(path) != filepath.Join(h.Root, ".moe", "named", h.Project) || !namePattern.MatchString(filepath.Base(path)) {
+	if filepath.Dir(path) != filepath.Join(h.Root, ".moe", "named", h.Project) || !run.ValidID(filepath.Base(path)) {
 		return id, errors.New("invalid named shell target")
 	}
 	root, err := openAbsoluteDir(h.Root)

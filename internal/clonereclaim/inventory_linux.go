@@ -4,6 +4,7 @@ package clonereclaim
 
 import (
 	"errors"
+	"github.com/modulecollective/moe/internal/run"
 	"io"
 	"os"
 	"sort"
@@ -44,7 +45,7 @@ func Inventory(root string) ([]string, error) {
 			return nil, errors.New("project inventory limit exceeded")
 		}
 		for _, p := range projects {
-			if !namePattern.MatchString(p.Name()) {
+			if !run.ValidID(p.Name()) {
 				base.Close()
 				return nil, errors.New("invalid project inventory entry")
 			}
@@ -64,7 +65,7 @@ func Inventory(root string) ([]string, error) {
 				return nil, errors.New("run inventory limit exceeded")
 			}
 			for _, r := range runs {
-				if !namePattern.MatchString(r.Name()) {
+				if !run.ValidID(r.Name()) {
 					base.Close()
 					return nil, errors.New("invalid run inventory entry")
 				}
