@@ -567,9 +567,8 @@ Where intents reach the robots:
 - **The pulse.** The pulse is the one consumer whose job includes the intents,
   so its fragment makes the read mandatory: open intents join the survey floor,
   speculative proposals aim at an open intent (`intent: <slug>` in the Why),
-  Pull-next why-now reasons may cite one ("serves `north-star`"), and backlog
-  hygiene may flag an intent that looks satisfied or stale — advisory only, the
-  operator closes intents.
+  and backlog hygiene may flag an intent that looks satisfied or stale — advisory
+  only, the operator closes intents.
 - **The dash.** Open intents render in a standing `INTENTS` section above the
   backlog, on both the CLI dash and `moe serve`. The heading renders even at
   zero: an empty list is itself a signal that the robots are running unaimed.
