@@ -17,12 +17,12 @@ type cloneResult struct {
 	Project  string                `json:"project"`
 	Run      string                `json:"run"`
 	Path     string                `json:"path"`
-	Identity any                   `json:"identity,omitempty"`
-	Terminal *run.TerminalEvidence `json:"terminal,omitempty"`
+	Identity any                   `json:"identity"`
+	Terminal *run.TerminalEvidence `json:"terminal"`
 	Outcome  string                `json:"outcome"`
 	Reason   string                `json:"reason"`
 	Detail   string                `json:"detail,omitempty"`
-	Receipt  string                `json:"receipt,omitempty"`
+	Receipt  string                `json:"receipt"`
 }
 
 var cloneRefPart = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
@@ -44,6 +44,7 @@ type cloneReport struct {
 	Invocation string        `json:"invocation_id"`
 	Apply      bool          `json:"apply"`
 	Candidates []cloneResult `json:"candidates"`
+	Error      string        `json:"error,omitempty"`
 }
 
 func runCloneGC(args []string, stdout, stderr io.Writer) int {
@@ -81,6 +82,12 @@ func runCloneGC(args []string, stdout, stderr io.Writer) int {
 	keys, err := cloneInventory(root)
 	if err != nil {
 		moePrintf(stderr, "clone gc inventory: %v\n", err)
+		if *asJSON {
+			report.Error = "inventory_failed"
+			if err := json.NewEncoder(stdout).Encode(report); err != nil {
+				moePrintf(stderr, "clone gc output: %v\n", err)
+			}
+		}
 		return 1
 	}
 	code := 0

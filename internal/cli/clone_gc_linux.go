@@ -12,55 +12,12 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/clonereclaim"
-	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runowner"
 	"github.com/modulecollective/moe/internal/sandbox"
-	"github.com/modulecollective/moe/internal/session"
 )
 
 func cloneInventory(root string) ([]string, error) { return clonereclaim.Inventory(root) }
-
-func cloneRunState(h *runowner.Handle) (*run.Metadata, error) {
-	if h == nil || !h.Owns(h.Root, h.Project, h.Run) {
-		return nil, errors.New("clone operation requires explicit held ownership")
-	}
-	var md *run.Metadata
-	err := repolock.With(h.Root, repolock.Options{Purpose: "clone-preflight", Run: h.Project + "/" + h.Run}, func() error {
-		var err error
-		md, err = run.Load(h.Root, h.Project, h.Run)
-		if err != nil {
-			return err
-		}
-		if err := session.RequireUnreserved(h.Root, h.Project, h.Run); err != nil {
-			return err
-		}
-		// A pending session close can outlive its branch. Its journal recovery is
-		// independent of clone cleanup and cannot be acknowledged by this command.
-		f, err := os.Open(filepath.Join(h.Root, ".moe", "session-closes", h.Project, h.Run))
-		if err == nil {
-			defer f.Close()
-			entries, e := f.ReadDir(1)
-			if e != nil && e != io.EOF {
-				return e
-			}
-			if len(entries) > 0 {
-				return errors.New("pending session close requires session recovery")
-			}
-		} else if !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		for _, path := range []string{prRecordPendingPath(h.Root, md), mergeRecordPendingPath(h.Root, md)} {
-			if _, err := os.Lstat(path); err == nil {
-				return errors.New("unrecorded shipment requires push record recovery")
-			} else if !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
-		}
-		return nil
-	})
-	return md, err
-}
 
 func collectClone(root, p, id string, apply, retry bool, now time.Time, stdout, stderr io.Writer) cloneResult {
 	result := cloneResult{Project: p, Run: id, Path: sandbox.Path(root, p, id), Outcome: "held", Reason: "owner_busy"}
@@ -175,9 +132,15 @@ func disposeClone(h *runowner.Handle, apply, retry bool, purpose string, now tim
 	}
 	plan, err := r.PlanCleanup(h, purpose, scripts, retry)
 	if err != nil {
+		if _, ok := errors.AsType[*clonereclaim.HoldError](err); !ok {
+			return fail("cleanup_probe_failed", err)
+		}
 		return hold("cleanup_recovery_required", err)
 	}
 	if _, err := r.CheckTree(h, !basis.Expired); err != nil {
+		if _, ok := errors.AsType[*clonereclaim.UnsafeTreeError](err); !ok {
+			return fail("tree_probe_failed", err)
+		}
 		return hold("unsafe_tree", err)
 	}
 	preserve := func() error {

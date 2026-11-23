@@ -183,6 +183,9 @@ func closeRunPreparedOwned(owner *runowner.Handle, root, workflow, subject strin
 	if err := clonereclaim.CheckRunRecovery(owner); err != nil {
 		return err
 	}
+	if _, err := cloneRunState(owner); err != nil {
+		return err
+	}
 	var md *run.Metadata
 	err := repolock.With(root, repolock.Options{
 		Purpose: workflow + "-close",

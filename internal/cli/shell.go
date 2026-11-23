@@ -77,7 +77,7 @@ func shellRunWorkspaceTarget(root, projectID, runID, expectedName string, stdout
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	md, err := run.Load(root, projectID, runID)
+	md, err := cloneRunState(heldRun(root, projectID, runID))
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1

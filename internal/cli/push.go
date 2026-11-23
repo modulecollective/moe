@@ -198,7 +198,7 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 	}
 	defer releaseRun()
 
-	md, err := run.Load(root, projectID, runID)
+	md, err := readOwnedRunState(heldRun(root, projectID, runID), true)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1, nil

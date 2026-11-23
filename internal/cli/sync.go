@@ -294,6 +294,9 @@ func reconcileOnePushedRun(root string, md *run.Metadata, stdout, stderr io.Writ
 	if err := clonereclaim.CheckRunRecovery(owner); err != nil {
 		return false, err
 	}
+	if _, err := cloneRunState(owner); err != nil {
+		return false, err
+	}
 	if err := deleteRemoteBranchForRun(root, md); err != nil {
 		moePrintf(stderr, "warning: %s/%s: %v\n", md.Project, md.ID, err)
 	}
@@ -342,6 +345,9 @@ func finalizePushedRunOwned(owner *runowner.Handle, root, projectID, runID, stat
 			// Someone else finalised it between phase one's read and
 			// this window. Their transition printed the line.
 			return nil
+		}
+		if err := checkRunDebts(root, md, false); err != nil {
+			return err
 		}
 		priorStatus := md.Status
 		paths, err := enterTerminal(root, md, status, true)

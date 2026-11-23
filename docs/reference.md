@@ -532,8 +532,13 @@ bureaucracy:
   sessions, workspace shells, and pre-push scripts. A run that commits a change
   in this directory refreshes its cache before its next stage or real push;
   unrelated hook edits leave the run's cache warm.
-- `dev-env-teardown.d/*` cleans up when a run or workspace closes, and rolls back
-  failed setup using exports collected before the failure.
+- `dev-env-teardown.d/*` defines disposal of its own resources and rolls back
+  failed setup using collected exports. Hooks must tolerate absent or partially
+  cleaned resources and exit zero only when cleanup is complete. Per-run cleanup
+  runs in lexical order from the original worktree, with saved addresses, a
+  five-minute total deadline and bounded output/descendant draining. Terminal
+  preservation holds prevent teardown; named workspace caches remain warm until
+  explicit refresh or removal.
 - `pre-push.d/*` is an invocation-time ship gate; a failing script halts the
   push path and opens a recovery build session.
 

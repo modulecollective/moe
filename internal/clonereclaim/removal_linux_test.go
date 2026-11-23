@@ -3,6 +3,7 @@
 package clonereclaim
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -168,5 +169,84 @@ func TestConfinedRemovalReconcilesMissingFinalReceipt(t *testing.T) {
 	}
 	if err := r.FinishRemoval(h, d.ID, d.Basis); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestConfinedRemovalRejectsSubstitutionAtRename(t *testing.T) {
+	h, r, d := disposalFixture(t, true)
+	rename := renameCloneTree
+	defer func() { renameCloneTree = rename }()
+	renameCloneTree = func(parent *os.File, old string, attempt *os.File, name string) error {
+		if err := os.Rename(r.Identity.Path, r.Identity.Path+"-admitted"); err != nil {
+			return err
+		}
+		writeFixture(t, filepath.Join(r.Identity.Path, "replacement"), "survives")
+		return renameNoReplace(parent, old, attempt, name)
+	}
+	if err := r.FinishRemoval(h, d.ID, d.Basis); err == nil {
+		t.Fatal("substituted tree deleted")
+	}
+	for _, path := range []string{filepath.Join(r.Identity.Path, "replacement"), filepath.Join(r.Identity.Path+"-admitted", "nested", "evidence")} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatal("substitution lost contents:", err)
+		}
+	}
+}
+
+func TestConfinedRemovalResumesParentSyncFailure(t *testing.T) {
+	h, r, d := disposalFixture(t, false)
+	sync := syncRecordFile
+	injected := false
+	syncRecordFile = func(file *os.File) error {
+		if file.Name() == filepath.Dir(r.Identity.Path) && !injected {
+			injected = true
+			return errors.New("quarantine parent sync fault")
+		}
+		return sync(file)
+	}
+	err := r.FinishRemoval(h, d.ID, d.Basis)
+	syncRecordFile = sync
+	if err == nil || !injected {
+		t.Fatal("parent sync fault did not stop removal")
+	}
+	pending, yes, err := r.PendingRemoval()
+	if err != nil || !yes || pending.ID != d.ID {
+		t.Fatalf("pending authorization lost: %v %v", yes, err)
+	}
+	if err := CheckRunRecovery(h); err == nil {
+		t.Fatal("pending removal admitted recreation")
+	}
+	if err := r.FinishRemoval(h, d.ID, d.Basis); err != nil {
+		t.Fatal("private-tree retry:", err)
+	}
+	if err := CheckRunRecovery(h); err != nil {
+		t.Fatal("completed retry did not permit recreation:", err)
+	}
+}
+
+func TestConfinedRemovalRequiresExactAuthorization(t *testing.T) {
+	h, r, d := disposalFixture(t, true)
+	attempt, err := r.disposalDir(d.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer attempt.Close()
+	auth, err := readRecord[removalAuthorization](attempt, "removal-authorized.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth.Identity.Inode++
+	b, err := json.Marshal(auth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(attempt.Name(), "removal-authorized.json"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.FinishRemoval(h, d.ID, d.Basis); err == nil {
+		t.Fatal("foreign authorization deleted tree")
+	}
+	if _, err := os.Stat(filepath.Join(r.Identity.Path, "nested", "evidence")); err != nil {
+		t.Fatal("authorization failure lost contents")
 	}
 }

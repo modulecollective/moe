@@ -336,6 +336,16 @@ var runStageSession = func(projectID, runID, docID string, opts stageSessionOpts
 		return 1
 	}
 	defer releaseRun()
+	if err := repolock.With(root, repolock.Options{Purpose: "stage-ship-preflight", Run: projectID + "/" + runID}, func() error {
+		md, err := run.Load(root, projectID, runID)
+		if err != nil {
+			return err
+		}
+		return requireRecordedShip(root, md)
+	}); err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
 
 	// Materialize the project's submodule before anything else. Every
 	// stage either reads source directly, drives

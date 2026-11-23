@@ -47,6 +47,12 @@ type TreeEntry struct {
 	Digest string `json:"sha256,omitempty"`
 }
 
+// UnsafeTreeError is a known confinement hold, distinct from an incomplete or
+// failed filesystem probe (which the collector reports as an operational error).
+type UnsafeTreeError struct{ Reason string }
+
+func (e *UnsafeTreeError) Error() string { return e.Reason }
+
 type removalAuthorization struct {
 	Disposal  Disposal    `json:"disposal"`
 	Identity  Identity    `json:"identity"`
@@ -115,7 +121,7 @@ func scanTree(root *os.File, mount string, hash bool) ([]TreeEntry, error) {
 			return err
 		}
 		if m != mount {
-			return errors.New("nested mount in clone")
+			return &UnsafeTreeError{Reason: "nested mount in clone"}
 		}
 		entries, err := dir.ReadDir(8193 - len(out))
 		if err != nil && err != io.EOF {
@@ -132,13 +138,13 @@ func scanTree(root *os.File, mount string, hash bool) ([]TreeEntry, error) {
 				names[e.Name()] = true
 			}
 			if names["HEAD"] && names["objects"] && names["refs"] {
-				return errors.New("nested bare repository in clone")
+				return &UnsafeTreeError{Reason: "nested bare repository in clone"}
 			}
 		}
 		for _, e := range entries {
 			path := filepath.Join(rel, e.Name())
 			if e.Name() == ".git" && rel != "" {
-				return errors.New("nested repository in clone")
+				return &UnsafeTreeError{Reason: "nested repository in clone"}
 			}
 			fd, err := syscall.Openat(int(dir.Fd()), e.Name(), 0x200000|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
 			if err != nil {
@@ -156,7 +162,7 @@ func scanTree(root *os.File, mount string, hash bool) ([]TreeEntry, error) {
 				return merr
 			}
 			if entryMount != mount {
-				return errors.New("nested mount in clone")
+				return &UnsafeTreeError{Reason: "nested mount in clone"}
 			}
 			item := TreeEntry{Path: path, Mode: st.Mode, Device: uint64(st.Dev), Inode: st.Ino}
 			switch st.Mode & syscall.S_IFMT {
@@ -209,7 +215,7 @@ func scanTree(root *os.File, mount string, hash bool) ([]TreeEntry, error) {
 					item.Digest = digest([]byte(target))
 				}
 			default:
-				return errors.New("special file in clone")
+				return &UnsafeTreeError{Reason: "special file in clone"}
 			}
 			out = append(out, item)
 		}
@@ -491,7 +497,7 @@ func (r *Registry) FinishRemoval(h *runowner.Handle, id string, basis DisposalBa
 			return err
 		}
 		defer parent.Close()
-		if err := renameNoReplace(parent, filepath.Base(r.Identity.Path), attempt, "tree"); err != nil {
+		if err := renameCloneTree(parent, filepath.Base(r.Identity.Path), attempt, "tree"); err != nil {
 			return err
 		}
 		tree, err = childDir(attempt, "tree", false)
@@ -712,6 +718,10 @@ func renameNoReplace(from *os.File, old string, to *os.File, name string) error 
 	return nil
 }
 
+// Serial tests replace this one rename to substitute the admitted pathname at
+// the boundary. Restoration always uses the raw no-overwrite primitive.
+var renameCloneTree = renameNoReplace
+
 // Registries includes generations with missing live clones, so interrupted
 // private-tree removals remain visible to GC. It never adopts a tree.
 func Registries(h *runowner.Handle) ([]*Registry, error) {
@@ -770,7 +780,19 @@ func Registries(h *runowner.Handle) ([]*Registry, error) {
 		ns, err := os.Readlink("/proc/self/ns/mnt")
 		actual := id
 		actual.Namespace, actual.Mount = ns, m
-		if err != nil || validateView(f, id, actual) != nil {
+		archived := &Registry{Identity: id, dir: f, viewMount: m}
+		viewErr := validateView(f, id, actual)
+		if err == nil && viewErr != nil {
+			done, derr := archived.Removed()
+			if derr != nil {
+				f.Close()
+				return fail(derr)
+			}
+			if done {
+				viewErr = nil
+			}
+		}
+		if err != nil || viewErr != nil {
 			f.Close()
 			return fail(errors.New("generation mount namespace requires host revalidation"))
 		}
