@@ -2049,6 +2049,9 @@ func TestPushSynthesisDispatchesHeadlessStage(t *testing.T) {
 	if capturedOpts.Model != "" {
 		t.Errorf("Model: want empty agent default, got %q", capturedOpts.Model)
 	}
+	if capturedOpts.TaggedFollowupsOnExit || capturedOpts.HarvestOnExit {
+		t.Error("push synthesis must not trigger session-end harvest")
+	}
 }
 
 // TestPromptPushNextStageIgnoresPushCanvas pins the rule that the
