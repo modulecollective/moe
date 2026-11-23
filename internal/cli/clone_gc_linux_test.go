@@ -156,6 +156,9 @@ func TestCloneGCLegacyBusyAndRecovery(t *testing.T) {
 	if _, err := os.Stat(path); err != nil {
 		t.Fatal("recovery deleted clone")
 	}
+	if err := clonereclaim.CheckRunRecovery(h); err != nil {
+		t.Fatalf("recovered legacy clone still held at admission: %v", err)
+	}
 	busy := collectClone(root, "tele", "finish", true, true, time.Now().UTC(), io.Discard, io.Discard)
 	if busy.Reason != "owner_busy" {
 		t.Fatalf("live owner admitted: %+v", busy)

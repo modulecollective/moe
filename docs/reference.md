@@ -751,13 +751,18 @@ deadline, clone-local leftovers may be discarded; lifetime, generation, session,
 resource and path checks still apply. Missing or unprovable journal history
 holds. GC never closes or abandons a run.
 
-New clones enroll under ownership before setup or agent execution. Legacy trees
-hold until host recovery confirms that old binaries, shells, descendants and
-unmanaged writers have stopped. Recovery never deletes a clone or waives its
-retention checks. Changed teardown scripts need a separate approval of their
-exact new digests against the original resource snapshot; missing hooks must be
-restored. Mount-namespace changes require explicit host revalidation. Do not
-enable unattended apply until old binaries and unmanaged use have been drained.
+New clones enroll under ownership before setup or agent execution. After an
+upgrade, a normal stage command can encounter an existing unenrolled clone and
+refuse entry before setup or agent execution. Stop all old MoE binaries, shells,
+descendants and unmanaged users of that clone and its resources, then run
+`moe clone recover <project>/<run>` from an interactive host terminal. Recovery
+inspects and validates enrollment; malformed records, changed identities or
+independent debts may still hold. After successful recovery, rerun the original
+stage command. Recovery never deletes a clone or waives its retention checks.
+Changed teardown scripts need a separate approval of their exact new digests
+against the original resource snapshot; missing hooks must be restored.
+Mount-namespace changes require explicit host revalidation. Do not enable
+unattended apply until old binaries and unmanaged use have been drained.
 
 Per-run setup retains original cache bytes and ordered hook digests outside the
 clone. Terminal status commits before cleanup, so a failed close commit leaves

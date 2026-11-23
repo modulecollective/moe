@@ -4,6 +4,7 @@ package clonereclaim
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -25,7 +26,11 @@ func CheckRunRecovery(h *runowner.Handle) error {
 	if _, err := os.Lstat(path); err == nil {
 		r, err := LoadRegistry(h)
 		if err != nil {
-			return &HoldError{Reason: "clone generation needs host enrollment/recovery", Receipt: registryPath(h.Root, h.Project, h.Run)}
+			return &HoldError{
+				Reason:              fmt.Sprintf("cannot admit clone for %s/%s until host enrollment/recovery: %v; after stopping all old MoE binaries, shells, descendants and unmanaged users of this clone/resources, run `moe clone recover %s/%s` from an interactive host terminal to inspect and validate recovery", h.Project, h.Run, err, h.Project, h.Run),
+				Receipt:             registryPath(h.Root, h.Project, h.Run),
+				recordsLocationOnly: true,
+			}
 		}
 		defer r.Close()
 		if _, pending, err := r.PendingRemoval(); err != nil {

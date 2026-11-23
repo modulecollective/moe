@@ -67,10 +67,17 @@ type cacheCleared struct {
 	Attempt    string `json:"attempt"`
 }
 
-// HoldError names retained evidence, never resource addresses or cache bytes.
-type HoldError struct{ Reason, Receipt string }
+// HoldError names recovery records, never resource addresses or cache bytes.
+type HoldError struct {
+	Reason, Receipt string
+	// Admission cannot establish retained evidence when registry loading fails.
+	recordsLocationOnly bool
+}
 
 func (e *HoldError) Error() string {
+	if e.recordsLocationOnly {
+		return fmt.Sprintf("clone cleanup held: %s; recovery records location: %s", e.Reason, e.Receipt)
+	}
 	return fmt.Sprintf("clone cleanup held: %s; retained evidence: %s", e.Reason, e.Receipt)
 }
 
