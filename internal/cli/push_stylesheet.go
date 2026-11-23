@@ -61,21 +61,16 @@ func applyProposedStylesheet(root string, md *run.Metadata) (string, error) {
 	return stylesheet.FileName, nil
 }
 
-// stylesheetCloseCleanup wraps a close cleanup so a `ship: none` close
-// applies and stages the proposed stylesheet inside the close's lock
+// stylesheetClosePreparation lets a `ship: none` close apply and stage the
+// proposed stylesheet inside the close's lock
 // window — after the dirty-tree gate, which would otherwise refuse the
 // applied file. The returned restore puts the root file back when the
 // close fails: left applied, it would both wedge every later close on
 // the repo-wide dirty gate and steer every turn on the box.
-func stylesheetCloseCleanup(inner closeCleanup) (closeCleanup, func(root string)) {
+func stylesheetClosePreparation() (closeCleanup, func(root string)) {
 	var prior []byte
 	var hadPrior, applied bool
-	cleanup := func(root string, md *run.Metadata) error {
-		if inner != nil {
-			if err := inner(root, md); err != nil {
-				return err
-			}
-		}
+	prepare := func(root string, md *run.Metadata) error {
 		data, err := os.ReadFile(filepath.Join(root, stylesheet.FileName))
 		switch {
 		case err == nil:
@@ -102,5 +97,5 @@ func stylesheetCloseCleanup(inner closeCleanup) (closeCleanup, func(root string)
 			_ = os.Remove(path)
 		}
 	}
-	return cleanup, restore
+	return prepare, restore
 }

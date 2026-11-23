@@ -494,10 +494,12 @@ func closeNoShipRun(root string, md *run.Metadata, pj *project.Metadata, clonePa
 	// honestly at a glance: this close ended a run that shipped nothing,
 	// not one the operator abandoned.
 	subject := reg.subject + " — no ship: no project change"
-	cleanup, restoreStylesheet := stylesheetCloseCleanup(reg.cleanup)
-	if err := closeRunInProcess(root, md.Workflow, subject, cleanup, md.Project, md.ID,
+	prepare, restoreStylesheet := stylesheetClosePreparation()
+	if err := closeRunPrepared(root, md.Workflow, subject, reg.cleanup, prepare, md.Project, md.ID,
 		opts.SkipTerminalEdit, stderr); err != nil {
-		restoreStylesheet(root)
+		if _, cleanupFailed := errors.AsType[*terminalCleanupError](err); !cleanupFailed {
+			restoreStylesheet(root)
+		}
 		moePrintf(stderr, "%v\n", err)
 		return 1, true
 	}

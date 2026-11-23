@@ -202,6 +202,31 @@ func TestPushNoShipCloseFailureRestoresStylesheet(t *testing.T) {
 	f.requireCleanRoot()
 }
 
+func TestPushNoShipCleanupFailureKeepsCommittedStylesheet(t *testing.T) {
+	f := newPushFixture(t)
+	f.rewindBranchToDefault()
+	f.writeTestGate(noShipGate)
+	installCloseResourceHooks(t, f.root, f.projectID)
+	resources := allocateCloseResources(t, f.root, f.projectID, f.runID)
+	path := filepath.Join(f.root, "projects", f.projectID, "hooks", devEnvTeardownDirRel, "10-resources.sh")
+	writeFile(t, path, "#!/bin/sh\nexit 21\n")
+	gittest.Run(t, f.root, "add", path)
+	gittest.Run(t, f.root, "commit", "-m", "test: fail no-ship cleanup")
+	f.proposeStylesheet(proposedSheet)
+	_, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
+	if code != 1 || !strings.Contains(stderr, "is closed; cleanup failed") {
+		t.Fatalf("cleanup outcome exit=%d: %s", code, stderr)
+	}
+	if got := f.sheetAt("HEAD"); got != proposedSheet {
+		t.Fatalf("committed stylesheet lost: %q", got)
+	}
+	if got := f.rootSheet(); got != proposedSheet {
+		t.Fatalf("cleanup error restored committed stylesheet: %q", got)
+	}
+	resources.assertRetained(t)
+	f.requireCleanRoot()
+}
+
 // TestPushPRRecordAppliesProposedStylesheet: the PR route applies at the
 // record commit when the PR opens — the last point moe controls.
 func TestPushPRRecordAppliesProposedStylesheet(t *testing.T) {
