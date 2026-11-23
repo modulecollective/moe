@@ -165,6 +165,7 @@ func harvestRunInProcess(root, workflow, projectID, runID string, skipEdit bool)
 			Run:      runID,
 			Project:  projectID,
 			Workflow: workflow,
+			Consent:  walkConsent(),
 		}.String()
 	return repolock.With(root, repolock.Options{
 		Purpose: workflow + "-harvest",

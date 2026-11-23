@@ -207,9 +207,8 @@ type stageSessionOpts struct {
 	// openChat) and nothing else: their runs never reach a harvesting
 	// terminal — the capture workflows' close deliberately skips harvest,
 	// and chat is perpetual, so its close may be weeks away or never — so
-	// session end is the only harvest point they have. Every other
-	// workflow already harvests at close or merge and must not double up
-	// here.
+	// session end is the only harvest point they have. SDLC uses the
+	// narrower TaggedFollowupsOnExit mode below.
 	//
 	// The harvest is silent (skipEdit): the operator was *in* the
 	// conversation that produced the entries, so the review a close-time
@@ -219,6 +218,9 @@ type stageSessionOpts struct {
 	// an editor). `moe <workflow> harvest` is the reviewing form for
 	// anyone who wants the pop.
 	HarvestOnExit bool
+	// TaggedFollowupsOnExit extracts only licensed followups after a
+	// successful SDLC turn, including a saved blocked canvas.
+	TaggedFollowupsOnExit bool
 }
 
 // stageAgentName resolves the agent backend for a stage turn. It is
@@ -1033,6 +1035,13 @@ func (s *stageSession) settle(code int) int {
 	// which the `- [x]` skip makes free.
 	if opts.HarvestOnExit {
 		if err := harvestRunInProcess(root, md.Workflow, md.Project, md.ID, true); err != nil {
+			moePrintf(stderr, "harvest: %v\n", err)
+			return 1
+		}
+	}
+	// A hygiene fix turn is provisional until the outer turn re-scans it.
+	if opts.TaggedFollowupsOnExit && !opts.projectDocFixTurn {
+		if err := harvestTaggedFollowups(root, md); err != nil {
 			moePrintf(stderr, "harvest: %v\n", err)
 			return 1
 		}

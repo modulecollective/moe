@@ -99,7 +99,11 @@ MoE's memory improves through a few explicit channels:
   project's backlog instead of the current one. Conversational sessions — the
   two `edit --chat` verbs and `moe chat` — harvest at session end instead:
   their runs either never harvest at close (capture workflows) or may never
-  close at all (chat is perpetual).
+  close at all (chat is perpetual). Successful SDLC design, build and review
+  turns also extract workflow-tagged followups, including from blocked
+  canvases. Untagged entries and both feedback files keep their terminal or
+  manual timing. A checked line means extracted, never completed; source
+  gates still require their own evidence before continuation.
 - The idea backlog holds work that is worth remembering but not ready for a
   full run.
 - The digital twin records project intent in `vision`, `architecture`,

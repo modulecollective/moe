@@ -459,8 +459,21 @@ func followupsReferenceSection(root string, md *run.Metadata) string {
 	b.WriteString("slug, em-dash separator) plus an indented body of a sentence or\n")
 	b.WriteString("two — the entry becomes an idea canvas verbatim, so give the\n")
 	b.WriteString("symptom and why it matters, not just a path. The skill has the\n")
-	b.WriteString("full format; a wrong shape is rejected at close, not silently\n")
+	b.WriteString("full format; a wrong shape is rejected at harvest, not silently\n")
 	b.WriteString("dropped.\n")
+	b.WriteString("Decide whether to tag every entry: use (sdlc) only for work that is\n")
+	b.WriteString("mechanical, bounded AND verifiable; leave human decisions untagged.\n")
+	b.WriteString("Example: - [ ] `required-fix` (sdlc) — Implement the decided contract.\n")
+	b.WriteString("Tagged followups are extracted after each successful SDLC design,\n")
+	b.WriteString("build or review turn, even a blocked one; untagged work waits for\n")
+	b.WriteString("terminal or manual harvest. Here, checked means extracted, never done.\n")
+	b.WriteString("For a prerequisite, name the source run and concrete evidence needed\n")
+	b.WriteString("before continuation in the entry body and source canvas. Keep its first\n")
+	b.WriteString("gate blocked until satisfied; another run never resumes it automatically.\n")
+	b.WriteString("Code prerequisites must land on default through the existing merge/PR\n")
+	b.WriteString("route; a pushed PR alone is insufficient. Chains batch independent work.\n")
+	b.WriteString("Reuse a known owner's slug; title/body edits under one source slug do\n")
+	b.WriteString("not request another extraction. A separate request needs a new slug.\n")
 	// Routing, not format. All three channels harvest into ideas now, so
 	// the rule is no longer "this workflow can't make that edit" — it's
 	// that a twin note's harvested idea opens with a provenance line

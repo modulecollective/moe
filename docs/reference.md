@@ -361,8 +361,7 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
 `followups.md`, `feedback/lore.md`, and `feedback/twin.md` harvests — into
 ideas, `lore/`, and twin-edit ideas respectively — without closing it. It picks
 up captures regenerated after the run was already closed, and it is the
-recovery verb for a conversational session whose own session-end harvest
-failed partway.
+recovery verb for a session whose own session-end harvest failed partway.
 
 Conversational sessions (`moe idea edit --chat`, `moe intent edit --chat`,
 `moe chat`) harvest at session end rather than at close: the capture
@@ -370,6 +369,23 @@ workflows' close deliberately skips harvest and a chat run is perpetual, so
 session end is the only harvest point they reliably reach. That pass is
 silent — the operator was in the conversation, so there is no editor review.
 Run the verb above for the reviewing form.
+
+Successful SDLC design, build and review turns silently extract only
+workflow-tagged followups, even with blocked gates. Tag `(sdlc)` only for
+mechanical, bounded and verifiable work. For a prerequisite, name the source
+run and evidence needed before continuation in its body and source canvas.
+Extraction does not unblock or resume that source; a code prerequisite must
+land on default, not merely have a pushed PR. Untagged followups and both
+feedback channels retain terminal/manual timing.
+
+Tagged extraction uses a journal receipt (`MoE-Followup-Key`) keyed by source
+project/run and target project/original slug. Retry reuses the original idea
+after promotion or closure, including a collision-allocated name. Without a
+receipt, one exact or dated live owner is linked without changing its tag or
+contents; multiple owners fail for explicit triage. A checked line means
+extracted, never completed. Title/body edits do not request another
+extraction; use another slug for a separate request. Existing entries become
+eligible on their next successful source turn, or through manual harvest.
 
 ## Codex Setup
 

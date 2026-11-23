@@ -234,8 +234,9 @@ func driveCIRepair(root string, md *run.Metadata, p ownedPRChecks, stdout, stder
 	}
 	kickoff.WriteString("\nInvestigate the linked failures, fix and commit. Record the verification in the build test.md and stamp both build canvases ready. A fresh review turn follows, then this PR is updated. Operator input is delivered through the normal run input channel.\n")
 	if code := runStageSession(md.Project, md.ID, "build", stageSessionOpts{
-		ValidateEntry: sdlcSessionEntry,
-		NeedsSandbox:  true, Headless: true, InitialPrompt: kickoff.String(), NextStageOverride: "review",
+		ValidateEntry:         sdlcSessionEntry,
+		TaggedFollowupsOnExit: true,
+		NeedsSandbox:          true, Headless: true, InitialPrompt: kickoff.String(), NextStageOverride: "review",
 		ExtraStagePaths: stageCommitPathsPresent,
 		AfterAdmission: func(sess *session.Session) error {
 			if _, err := claimCIRepair(root, p, sess); err != nil {

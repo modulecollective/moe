@@ -346,7 +346,7 @@ func TestRepairDriveRunsFreshStagesAndPinsPR(t *testing.T) {
 			priorSession := runStageSession
 			runStageSession = func(projectID, runID, doc string, opts stageSessionOpts, _, _ io.Writer) int {
 				stages = append(stages, doc)
-				if !opts.Headless || opts.NextStageOverride != "review" || !strings.Contains(opts.InitialPrompt, p.PR) {
+				if !opts.Headless || !opts.TaggedFollowupsOnExit || opts.NextStageOverride != "review" || !strings.Contains(opts.InitialPrompt, p.PR) {
 					t.Fatalf("recovery options: %+v", opts)
 				}
 				if doc == stop {

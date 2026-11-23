@@ -21,6 +21,7 @@ func TestBlockCanonicalOrderAllFields(t *testing.T) {
 		Closed:        "c",
 		PromotedTo:    "pt",
 		FromRun:       "fr",
+		FollowupKey:   "p/source/p/fix",
 		Idea:          "i",
 		IdeaMovedFrom: "imf",
 		ReopenOf:      "ro",
@@ -38,6 +39,7 @@ func TestBlockCanonicalOrderAllFields(t *testing.T) {
 		"MoE-Closed: c\n" +
 		"MoE-Promoted-To: pt\n" +
 		"MoE-From-Run: fr\n" +
+		"MoE-Followup-Key: p/source/p/fix\n" +
 		"MoE-Idea: i\n" +
 		"MoE-Idea-Moved-From: imf\n" +
 		"MoE-Reopen-Of: ro\n" +

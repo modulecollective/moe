@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -125,10 +126,12 @@ type scratchItem[T any] struct {
 }
 
 type scratchHarvestSpec[T any] struct {
-	relPath         string
-	header          string
-	parse           func([]byte) ([]string, []scratchItem[T], error)
-	write           func(T) (string, error)
+	relPath string
+	header  string
+	parse   func([]byte) ([]string, []scratchItem[T], error)
+	write   func(T) (string, error)
+	// checkpoint makes selected source links durable before continuing.
+	checkpoint      func(T, []string) error
 	progressSubject string
 	progressPaths   []string
 	// writeErrorLeavesProgress identifies writer errors returned after
@@ -177,7 +180,8 @@ func harvestScratchTyped[T any](root, projectID, runID, workflow string, skipEdi
 			}
 			return fmt.Errorf("%s %s (after harvesting %d): %w", spec.writeErrPrefix, item.slug, hi, werr)
 		}
-		marked, ok := markHarvested(lines[item.lineIdx], item.slug, resolved)
+		lineBeforeMark := lines[item.lineIdx]
+		marked, ok := markHarvested(lineBeforeMark, item.slug, resolved)
 		if !ok {
 			// Unreachable in normal operation: markHarvested rewrites via
 			// the same regex that parsed this line moments ago, and only
@@ -195,6 +199,21 @@ func harvestScratchTyped[T any](root, projectID, runID, workflow string, skipEdi
 			return fmt.Errorf("%s: harvested %q but could not mark line %d %q", spec.relPath, item.slug, item.lineIdx+1, lines[item.lineIdx])
 		}
 		lines[item.lineIdx] = marked
+		if spec.checkpoint != nil {
+			if err := spec.checkpoint(item.entry, lines); err != nil {
+				// The failed link is still unchecked on disk. Retain earlier
+				// creations just as the writer-failure path does above.
+				// Restore this item's original unchecked spelling, including
+				// its original slug rather than the resolved destination.
+				lines[item.lineIdx] = lineBeforeMark
+				if hi > 0 {
+					if perr := commitScratchProgress(root, projectID, runID, workflow, spec, lines); perr != nil && !errors.Is(perr, run.ErrNothingToCommit) {
+						return fmt.Errorf("%w (then progress commit failed: %v)", err, perr)
+					}
+				}
+				return err
+			}
+		}
 	}
 
 	if err := os.WriteFile(absPath, []byte(strings.Join(lines, "\n")), 0o644); err != nil {

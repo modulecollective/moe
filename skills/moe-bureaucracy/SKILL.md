@@ -23,11 +23,13 @@ worth recording for future runs. MoE keeps three places for this:
   scope for the current canvas. The operator triages at close; survivors
   become idea runs.
 
-All three fan out when the run reaches a terminal status — close, merge, or
-push. A conversational session (`moe idea edit --chat`, `moe intent edit
---chat`, `moe chat`) is the exception: its run may never reach one, so they
-harvest at *session end* instead, with no editor review — what you write fans
-out the moment the operator exits. Write accordingly.
+All three fan out when the run reaches a terminal status — close or merge.
+Tagged followups also extract after a successful SDLC design, build or review
+turn, even when its gate stays blocked; untagged followups and both feedback
+channels retain terminal/manual timing. Conversational sessions (`moe idea
+edit --chat`, `moe intent edit --chat`, `moe chat`) harvest all three at
+*session end*: their runs may never terminate. There is no editor review —
+what you write fans out when the operator exits. Write accordingly.
 
 Two more sections at the end cover artifacts you write *as* the work rather
 than as a note about it: **Knowledge** (the project's durable domain
@@ -186,7 +188,7 @@ terse title. Follow it with an indented body of a sentence or two
     the load-bearing assumption. Fix sketch: <one sentence>.
 
 **The body is the seed, not decoration.** An unchecked entry is
-harvested at close into an idea canvas *verbatim* — `# Title` plus
+harvested into an idea canvas *verbatim* — `# Title` plus
 exactly the body you wrote, and nothing else. So a bodyless entry
 becomes a one-line idea, and when it is promoted weeks later the
 design stage has to rediscover what you already knew. Write to the
@@ -213,14 +215,40 @@ look at this", not "I didn't think about it".
 A tagged idea starts on the next dynamic sweep: the harness promotes
 it into a run and the kick rides it, without waiting for the survey to
 name it. That is why the bar above is yours to hold. Tags are validated
-at close against staged, chainable workflows; unknown or non-chainable
+at harvest against staged, chainable workflows; unknown or non-chainable
 tags are rejected rather than silently ignored. A missed tag is
 recoverable — the operator can stamp or clear one later with `moe idea
 tag` / `moe idea untag` — but it strands the work until someone
 notices.
 
+**Prerequisites use the same tag.** Tag only a decided, mechanical, bounded
+and verifiable contract; needing to unblock another run is not a licence
+for an undecided investigation. Name the source run and the concrete evidence
+required before continuation in both the entry body and source canvas:
+
+  - [ ] `baseline-duration-metric` (sdlc) — Add the specified baseline duration metric
+
+    Prerequisite for `example/refutation-study`: the reducer misses
+    suspect-to-alive episodes. Implement the population and censoring
+    rules pinned in that design and validate its synthetic traces. The
+    source stays blocked until the metric lands and the saved baseline
+    results satisfy its admission criteria.
+
+Keep the source's first gate blocked until that evidence exists. Extraction
+creates an idea; a checked line means extracted, never completed. Completion
+never resumes the source automatically. Code prerequisites must land on
+default through the existing merge route or normal PR merge; a pushed PR
+alone does not satisfy them. Chains batch independent work, not dependencies.
+
+Check prior context and reuse a known owner's slug. One source slug identifies
+one extraction even if its title/body changes; a separate request needs a
+new slug. Receipt recovery reuses its original idea even after promotion or
+closure. One exact or dated live owner is linked without changing its tag or
+contents; ambiguous owners fail. After a harvest error, retry a successful
+source turn or run `moe sdlc harvest --no-edit <project>/<run>`.
+
 Content written in any other shape — plain bullets, prose, or a
-hyphen where the em-dash belongs — is **rejected at close**, not
+hyphen where the em-dash belongs — is **rejected at harvest**, not
 silently dropped: the harvest fails loud so you (or the operator)
 can fix the shape and re-run, rather than losing the idea.
 
@@ -243,7 +271,7 @@ project, which must already be registered:
   - [ ] `claudia/inherit-nginx-identity` (sdlc) — Claudia should inherit the nginx identity injection
 
 The line stays in *this* run's `followups.md` and is harvested at
-close like any other; only the destination changes. Provenance
+the same timing as any other; only the destination changes. Provenance
 still records the source run, so the destination project sees where
 the note came from.
 

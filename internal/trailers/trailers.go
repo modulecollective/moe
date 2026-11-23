@@ -58,12 +58,14 @@ type Block struct {
 	TimedOut string
 	PR       string
 	// CIRepair is the JSON claim for a bounded same-PR CI repair.
-	CIRepair      string
-	QuotaRetry    string
-	Merged        string
-	Closed        string
-	PromotedTo    string
-	FromRun       string
+	CIRepair   string
+	QuotaRetry string
+	Merged     string
+	Closed     string
+	PromotedTo string
+	FromRun    string
+	// FollowupKey identifies a tagged extraction across retries.
+	FollowupKey   string
 	Idea          string
 	IdeaMovedFrom string
 	ReopenOf      string
@@ -141,6 +143,7 @@ func (b Block) String() string {
 	write(&sb, "MoE-Closed", b.Closed)
 	write(&sb, "MoE-Promoted-To", b.PromotedTo)
 	write(&sb, "MoE-From-Run", b.FromRun)
+	write(&sb, "MoE-Followup-Key", b.FollowupKey)
 	write(&sb, "MoE-Idea", b.Idea)
 	write(&sb, "MoE-Idea-Moved-From", b.IdeaMovedFrom)
 	write(&sb, "MoE-Reopen-Of", b.ReopenOf)

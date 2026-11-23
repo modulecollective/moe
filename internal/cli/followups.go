@@ -13,8 +13,9 @@ import (
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
-// followups.md is the run-scoped scratch file harvested at close into
-// idea runs. Format (matching designs/follow-up-ideas):
+// followups.md is the run-scoped scratch file harvested into the idea queue,
+// at session end for tagged SDLC work or through the full harvest.
+// Format (matching designs/follow-up-ideas):
 //
 //	# Follow-ups
 //
@@ -40,9 +41,9 @@ import (
 // closing "remove freely" line so the operator can silence it.
 const followupsHeader = `<!--
 followups.md — out-of-scope items captured this run.
-Save this file to spin each unchecked ` + "`- [ ]`" + ` entry into a new idea
-run. Delete the line to skip. Lines marked ` + "`- [x]`" + ` are already
-promoted; leave them alone.
+Save this file to extract each unchecked ` + "`- [ ]`" + ` entry into the idea
+queue. Tagged entries may link an existing owner. Delete the line to skip.
+Lines marked ` + "`- [x]`" + ` are already extracted; leave them alone.
 This header is auto-injected on editor pop; remove it freely.
 -->`
 
@@ -260,12 +261,18 @@ func markHarvested(line, baseSlug, resolvedSlug string) (string, bool) {
 // requireCleanTree on the next attempt is satisfied because the
 // progress commit took the dirty file with it.
 func harvestFollowups(root, projectID, runID, workflow string, skipEdit bool) error {
+	return harvestFollowupsMode(root, projectID, runID, workflow, skipEdit, false)
+}
+
+// Caller holds the repository lock for both resolution and audit writing.
+func harvestFollowupsMode(root, projectID, runID, workflow string, skipEdit, taggedOnly bool) error {
 	relPath := run.FollowupsPath(projectID, runID)
 	// enterTerminal harvests on every close and merge, so these idea
 	// opens land inside a ride's window as often as they land under an
 	// operator's own `moe close`. Same stamp rule as the close commit
 	// they ride beside.
 	openTrailers := trailers.Block{FromRun: projectID + "/" + runID, Consent: walkConsent()}
+	var liveLink bool
 
 	spec := scratchHarvestSpec[parsedFollowup]{
 		relPath:         relPath,
@@ -276,6 +283,9 @@ func harvestFollowups(root, projectID, runID, workflow string, skipEdit bool) er
 			lines, todo, err := parseFollowups(body, projectID)
 			if err != nil {
 				return nil, nil, err
+			}
+			if taggedOnly {
+				todo = slices.DeleteFunc(todo, func(fu parsedFollowup) bool { return fu.promoteTo == "" })
 			}
 			// Validation is upfront and total (the harvest's contract):
 			// reject an unknown target project before any idea is
@@ -312,7 +322,8 @@ func harvestFollowups(root, projectID, runID, workflow string, skipEdit bool) er
 			// Route to the entry's target project (its prefix, else the
 			// current project). openTrailers' MoE-From-Run stays pointed
 			// at the source run — that's where the followup was captured.
-			md, err := createIdea(root, fu.project, fu.slug, canvasBody, fu.promoteTo, openTrailers)
+			md, linked, err := resolveFollowup(root, projectID, runID, fu, canvasBody, openTrailers)
+			liveLink = linked
 			if err != nil {
 				return "", err
 			}
@@ -324,6 +335,12 @@ func harvestFollowups(root, projectID, runID, workflow string, skipEdit bool) er
 				return md.Project + "/" + md.ID, nil
 			}
 			return md.ID, nil
+		},
+		checkpoint: func(fu parsedFollowup, lines []string) error {
+			if !liveLink {
+				return nil
+			}
+			return commitTaggedFollowupAudit(root, projectID, runID, workflow, lines)
 		},
 	}
 	return harvestScratchTyped(root, projectID, runID, workflow, skipEdit, spec)

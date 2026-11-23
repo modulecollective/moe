@@ -328,7 +328,7 @@ func TestFollowupsReferenceSection(t *testing.T) {
 		// the skill still writes a parseable shape, plus the loud-at-close
 		// note so a wrong shape reads as recoverable, not silent.
 		"`- [ ] `slug` — Title`",
-		"rejected at close",
+		"rejected at harvest",
 		// The body floor and its reason: the harvest renders the entry
 		// into an idea canvas verbatim, so a bodyless entry seeds a
 		// bare-title idea that forces design to rediscover the context.
