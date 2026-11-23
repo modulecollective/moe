@@ -159,16 +159,21 @@ func TestSessionGCHoldsUncertainClaims(t *testing.T) {
 					t.Fatal("eligible branch survived")
 				}
 				retained()
-				if rule != 4 {
-					var out, errs bytes.Buffer
-					if code := Run([]string{"session", "list"}, &out, &errs); code != 0 || !strings.Contains(out.String(), s.Branch) {
-						t.Fatalf("held session not reachable in list: exit=%d stdout=%q stderr=%q", code, out.String(), errs.String())
-					}
+				var out, errs bytes.Buffer
+				listedPath := s.WorktreePath
+				if rule == 4 {
+					listedPath = "(no registered worktree)"
 				}
+				if code := Run([]string{"session", "list"}, &out, &errs); code != 0 || out.String() != s.Branch+"\t"+listedPath+"\n" {
+					t.Fatalf("held session not reachable in list: exit=%d stdout=%q stderr=%q", code, out.String(), errs.String())
+				}
+				retained()
+				listedBranch, _, _ := strings.Cut(out.String(), "\t")
 				// The fixtures have no running owner. Explicit discard remains
 				// reachable after inspecting held work, without deleting the claim.
-				var out, errs bytes.Buffer
-				if code := Run([]string{"session", "abandon", s.Branch}, &out, &errs); code != 0 || !strings.Contains(out.String(), "abandoned") {
+				out.Reset()
+				errs.Reset()
+				if code := Run([]string{"session", "abandon", listedBranch}, &out, &errs); code != 0 || !strings.Contains(out.String(), "abandoned") {
 					t.Fatalf("explicit abandon: exit=%d stdout=%q stderr=%q", code, out.String(), errs.String())
 				}
 				if git.HasRef(root, "refs/heads/"+s.Branch) {
@@ -176,6 +181,11 @@ func TestSessionGCHoldsUncertainClaims(t *testing.T) {
 				}
 				if _, err := os.Lstat(session.ClaimPath(root, s.Project, s.Run, s.Doc)); !os.IsNotExist(err) {
 					t.Errorf("explicit abandon retained claim: %v", err)
+				}
+				out.Reset()
+				errs.Reset()
+				if code := Run([]string{"session", "list"}, &out, &errs); code != 0 || out.String() != "no open sessions\n" {
+					t.Fatalf("post-abandon list: exit=%d stdout=%q stderr=%q", code, out.String(), errs.String())
 				}
 				if s.WorktreePath != "" {
 					if _, err := os.Stat(s.WorktreePath); !os.IsNotExist(err) {
@@ -251,6 +261,25 @@ func TestHeartbeatGCHoldsUncertainClaims(t *testing.T) {
 				}
 				if !openSessionProjects(root, time.Now())["moe"] {
 					t.Error("surviving ref did not hold occupancy")
+				}
+				refs := gittest.Output(t, root, "for-each-ref", "--format=%(refname) %(objectname)")
+				registrations := gittest.Output(t, root, "worktree", "list", "--porcelain")
+				t.Setenv("MOE_HOME", root)
+				var out, errs bytes.Buffer
+				withCwd(t, root, func() {
+					path := s.WorktreePath
+					if !registered {
+						path = "(no registered worktree)"
+					}
+					if code := Run([]string{"session", "list"}, &out, &errs); code != 0 || out.String() != s.Branch+"\t"+path+"\n" {
+						t.Fatalf("occupied session not listed: exit=%d stdout=%q stderr=%q", code, out.String(), errs.String())
+					}
+				})
+				if got := gittest.Output(t, root, "for-each-ref", "--format=%(refname) %(objectname)"); got != refs {
+					t.Error("listing changed refs")
+				}
+				if got := gittest.Output(t, root, "worktree", "list", "--porcelain"); got != registrations {
+					t.Error("listing changed registrations")
 				}
 				retained()
 			})

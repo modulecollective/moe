@@ -730,9 +730,13 @@ for registered sessions and worktree-less branches still permit claimless
 cleanup. A present claim holds GC unless it names that exact branch and proves
 its owner dead; malformed JSON, unreadable files and unexpected file types hold
 too. A released claim still needs the same death proof. Held sessions are
-silently skipped by both `moe session gc` and the heartbeat. Registered sessions
-remain visible in `moe session list`; inspect worktree-less refs with
-`git branch --list 'session/*'` before explicit recovery.
+silently skipped by both `moe session gc` and the heartbeat. `moe session list`
+shows all local session branches and registered session worktrees, including
+worktrees outside the managed directory. A branch without a registered worktree
+shows `(no registered worktree)` in the path column. A reported path describes
+Git's registration, not whether the directory is present or readable. Listing
+does not establish owner death or permission to discard work. Unlanded branches
+without a worktree need one restored before `moe session resolve` can land them.
 
 An interrupted close records its validated tip before merging. Retry finishes
 cleanup if that exact tip already landed, even if main has advanced. For older

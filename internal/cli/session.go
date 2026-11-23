@@ -56,7 +56,7 @@ func runSessionList(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return 1
 	}
-	sessions, err := session.List(root)
+	sessions, err := session.ListForRecovery(root)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -69,7 +69,11 @@ func runSessionList(args []string, stdout, stderr io.Writer) int {
 		return sessions[i].Branch < sessions[j].Branch
 	})
 	for _, s := range sessions {
-		moePrintf(stdout, "%s\t%s\n", s.Branch, s.WorktreePath)
+		path := s.WorktreePath
+		if path == "" {
+			path = "(no registered worktree)"
+		}
+		moePrintf(stdout, "%s\t%s\n", s.Branch, path)
 	}
 	return 0
 }

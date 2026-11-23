@@ -64,6 +64,21 @@ func TestSessionListEmpty(t *testing.T) {
 	}
 }
 
+func TestSessionListOrphanOnly(t *testing.T) {
+	root := newSessionTestRoot(t)
+	branch := "session/demo/missing-run/retired-doc"
+	gittest.Run(t, root, "branch", branch)
+	var stdout, stderr bytes.Buffer
+	withCwd(t, root, func() {
+		if code := Run([]string{"session", "list"}, &stdout, &stderr); code != 0 {
+			t.Fatalf("list exit=%d stderr=%q", code, stderr.String())
+		}
+	})
+	if want := branch + "\t(no registered worktree)\n"; stdout.String() != want {
+		t.Fatalf("list = %q, want %q", stdout.String(), want)
+	}
+}
+
 func TestSessionListAndAbandon(t *testing.T) {
 	root := newSessionTestRoot(t)
 	s, err := session.Open(root, "demo", "r1", "design")

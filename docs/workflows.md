@@ -1046,9 +1046,13 @@ and branches without worktrees, remain eligible when their claim is genuinely
 absent. A present claim must name that exact branch and prove its owner dead,
 whether machine or operator. Unreadable, malformed, mismatched or uncertain
 claims hold the session for inspection, even on terminal runs. Release alone
-does not authorize GC. Held registered sessions remain visible in
-`moe session list`; worktree-less refs can be inspected with
-`git branch --list 'session/*'`. `moe session resolve` / `moe session abandon`
+does not authorize GC. `moe session list` shows held branches too, marking those
+without a registered worktree as `(no registered worktree)` in the path column.
+Reported paths describe Git's registrations, not directory health. Inspect and
+preserve unfinished work and stop its owner before explicit recovery; listing
+alone establishes no permission to discard it. `moe session resolve` can clean
+up a landed branch without a worktree, but an unlanded branch needs a worktree
+restored before resolve can land it. `moe session resolve` / `moe session abandon`
 are still yours. See [Cleanup And Recovery](reference.md#cleanup-and-recovery)
 for manual recovery conditions.
 

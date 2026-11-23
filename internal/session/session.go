@@ -580,6 +580,43 @@ func List(root string) ([]*Session, error) {
 	return sessions, nil
 }
 
+// RecoveryEntry describes a session branch and its Git-registered worktree,
+// if any. It conveys no ownership or permission to mutate that worktree.
+type RecoveryEntry struct {
+	Branch       string
+	WorktreePath string
+}
+
+// ListForRecovery inventories local session refs and session worktree
+// registrations, including unmanaged paths and branches ParseBranch cannot
+// decode. Like List, it is a lock-free, read-only snapshot.
+func ListForRecovery(root string) ([]RecoveryEntry, error) {
+	refs, err := git.Output(root, "for-each-ref", "--format=%(refname)", "refs/heads/session/")
+	if err != nil {
+		return nil, fmt.Errorf("session list: git for-each-ref: %w", err)
+	}
+	out, err := git.Output(root, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, fmt.Errorf("session list: git worktree list: %w", err)
+	}
+	paths := make(map[string]string)
+	for ref := range strings.SplitSeq(strings.TrimSpace(refs), "\n") {
+		if ref != "" {
+			paths[strings.TrimPrefix(ref, "refs/heads/")] = ""
+		}
+	}
+	for _, w := range parseWorktreeList(out) {
+		if strings.HasPrefix(w.branch, "session/") {
+			paths[w.branch] = w.path
+		}
+	}
+	entries := make([]RecoveryEntry, 0, len(paths))
+	for branch, path := range paths {
+		entries = append(entries, RecoveryEntry{Branch: branch, WorktreePath: path})
+	}
+	return entries, nil
+}
+
 // FindByBranch returns the session registered for a given branch, or
 // nil if none exists. Useful for `moe session abandon <branch>`.
 func FindByBranch(root, branch string) (*Session, error) {
