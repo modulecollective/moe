@@ -3,9 +3,10 @@
 package cli
 
 import (
+	"testing"
+
 	"github.com/modulecollective/moe/internal/clonereclaim"
 	"github.com/modulecollective/moe/internal/runowner"
-	"testing"
 )
 
 func enrollTestClone(t *testing.T, root, p, id string) {

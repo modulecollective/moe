@@ -4,10 +4,11 @@ package clonereclaim
 
 import (
 	"errors"
-	"github.com/modulecollective/moe/internal/run"
 	"io"
 	"os"
 	"sort"
+
+	"github.com/modulecollective/moe/internal/run"
 )
 
 // Inventory includes both live paths and retained generations. Every parent is

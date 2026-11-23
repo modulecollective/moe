@@ -53,6 +53,12 @@ func TestCloneAdmissionAcceptsCreatedRunIDs(t *testing.T) {
 				if p, r, err := splitCloneRef(md.Project + "/" + id); err != nil || p != md.Project || r != id {
 					t.Fatalf("exact filter: %q %q %v", p, r, err)
 				}
+				if withClone {
+					report, code := gcReport(t, md.Project+"/"+id)
+					if code != 0 || len(report.Candidates) != 1 || report.Candidates[0].Run != id || report.Candidates[0].Reason != "nonterminal" {
+						t.Fatalf("inventory and exact filter: %d %+v", code, report)
+					}
+				}
 				if code := Run([]string{"sdlc", "close", "--no-edit", md.Project + "/" + id}, io.Discard, io.Discard); code != 0 {
 					t.Fatalf("close exit %d", code)
 				}
