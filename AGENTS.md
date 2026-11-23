@@ -36,6 +36,12 @@ you're about to run these two commands first.
 
 ## Running moe itself
 
+Keep cached dev-env paths valid through push. If disk pressure requires
+relocating a Go cache, use the source clone's ignored `.moe/` directory.
+Session worktrees are removed between stages, while pre-push hooks reuse
+the run's cached environment; a cache symlink into a session worktree
+will break after that session closes.
+
 In build stage, it is OK to run `moe` when exercising the change calls for
 an end-to-end CLI path. It's easy to screw up state unless you configure
 things exactly right: use the run's configured dev environment and a
