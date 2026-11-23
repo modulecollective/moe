@@ -127,6 +127,43 @@ func (h *Handle) Owns(root, projectID, runID string) bool {
 	return h != nil && h.f != nil && h.Root == root && h.Project == projectID && h.Run == runID
 }
 
+// SupervisorFile is the narrowly scoped inheritance seam for a dedicated
+// descendant-reaping supervisor. Only that supervisor may receive this file
+// through exec.Cmd.ExtraFiles; agents, user shells and viewers must not. The
+// original descriptor remains close-on-exec and is never globally toggled.
+func (h *Handle) SupervisorFile() (*os.File, error) {
+	if h == nil || h.f == nil {
+		return nil, errors.New("runowner: no held guard to supervise")
+	}
+	return h.f, nil
+}
+
+// AdoptSupervisor accepts the descriptor explicitly inherited by the dedicated
+// supervisor. It verifies the exact persistent guard inode and reasserts the
+// lock on that open file description. The returned descriptor is close-on-exec
+// before any user shell or hook can be launched.
+func AdoptSupervisor(root, projectID, runID string, f *os.File) (*Handle, error) {
+	if f == nil {
+		return nil, errors.New("runowner: missing supervisor guard")
+	}
+	syscall.CloseOnExec(int(f.Fd()))
+	actual, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	expected, err := os.Stat(Path(root, projectID, runID))
+	if err != nil {
+		return nil, err
+	}
+	if !os.SameFile(actual, expected) {
+		return nil, errors.New("runowner: supervisor guard identity mismatch")
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		return nil, fmt.Errorf("runowner: supervisor lock: %w", err)
+	}
+	return &Handle{Root: root, Project: projectID, Run: runID, f: f}, nil
+}
+
 // Busy is the read-side probe planners use to skip a run without trying
 // to start it. A missing guard file is unowned; contention is owned; any
 // other failure is returned, never read as "unowned". The answer is a
