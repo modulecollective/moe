@@ -394,8 +394,8 @@ each position is one of three things:
   harness opens that run and puts it right here. This is how a run you
   are minting *and* ordering is written: once, where it goes.
 - **a question** — an object with a `run` key naming an existing run
-  and a `park` object holding one question for the operator. See
-  "Asking the operator a question" below.
+  and an `ask` string holding one prose question for the operator.
+  See "Asking the operator a question" below.
 
 Three placements, first match wins:
 
