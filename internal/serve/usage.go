@@ -138,7 +138,7 @@ func (s *Server) handleUsage(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	projectID := q.Get("project")
 	if projectID != "" {
-		if !slugRe.MatchString(projectID) {
+		if !project.ValidID(projectID) {
 			http.NotFound(w, r)
 			return
 		}

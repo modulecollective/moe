@@ -218,7 +218,7 @@ type twinDocVM struct {
 // and ?fragment=1 query params.
 func (s *Server) handleProjectHub(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("project")
-	if !slugRe.MatchString(projectID) {
+	if !project.ValidID(projectID) {
 		http.NotFound(w, r)
 		return
 	}
@@ -291,7 +291,7 @@ func (s *Server) handleProjectHub(w http.ResponseWriter, r *http.Request) {
 // nothing and 500s nothing.
 func (s *Server) handleProjectMode(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("project")
-	if !slugRe.MatchString(projectID) {
+	if !project.ValidID(projectID) {
 		http.NotFound(w, r)
 		return
 	}
@@ -319,7 +319,7 @@ func (s *Server) handleProjectMode(w http.ResponseWriter, r *http.Request) {
 // redirects so a double-tap costs nothing.
 func (s *Server) handleProjectShip(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("project")
-	if !slugRe.MatchString(projectID) {
+	if !project.ValidID(projectID) {
 		http.NotFound(w, r)
 		return
 	}
@@ -359,7 +359,7 @@ type topicItemVM struct {
 // orphan a topic.
 func (s *Server) handleKnowledge(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("project")
-	if !slugRe.MatchString(projectID) {
+	if !project.ValidID(projectID) {
 		http.NotFound(w, r)
 		return
 	}
@@ -398,7 +398,7 @@ func (s *Server) handleKnowledge(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleKnowledgeTopic(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("project")
 	topic := r.PathValue("topic")
-	if !slugRe.MatchString(projectID) || !slugRe.MatchString(topic) {
+	if !project.ValidID(projectID) || !slugRe.MatchString(topic) {
 		http.NotFound(w, r)
 		return
 	}
@@ -436,7 +436,7 @@ func (s *Server) handleKnowledgeTopic(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleTwinDoc(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("project")
 	doc := r.PathValue("doc")
-	if !slugRe.MatchString(projectID) || !slugRe.MatchString(doc) {
+	if !project.ValidID(projectID) || !slugRe.MatchString(doc) {
 		http.NotFound(w, r)
 		return
 	}

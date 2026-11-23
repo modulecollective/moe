@@ -93,6 +93,10 @@ func (k captureKind) runNew(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return 1
 	}
+	if err := ensureRootProject(root, projectID); err != nil {
+		moePrintf(stderr, "%s new: %v\n", k.noun, err)
+		return 1
+	}
 	if err := requireProject(root, projectID); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1

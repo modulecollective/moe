@@ -24,7 +24,7 @@ import (
 // "project/" segment. Those chars survive HTML escaping unchanged, so
 // matching after escape is safe: note content can't forge or break the
 // anchor we inject.
-var noteHintRE = regexp.MustCompile(`((?:chained|spawned|promoted) → |chained after )([a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?)`)
+var noteHintRE = regexp.MustCompile(`((?:chained|spawned|promoted) → |chained after )((?:_cabinet/[a-z0-9][a-z0-9-]*)|[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?)`)
 
 // noteHTML escapes note for HTML and wraps the target of each machine
 // lineage hint in a link to its run page. Every producer emits qualified
@@ -588,14 +588,14 @@ func serveEventLine(now time.Time, ev activityEvent) (serveEventVM, bool) {
 // at exit), and every other child's subject already *is* a run id, which
 // needs no channel at all.
 func eventRunURL(ev activityEvent) string {
-	if project := heartbeatProject(ev.Subject); project != "" {
+	if swept := heartbeatProject(ev.Subject); swept != "" {
 		if ev.Run == "" {
 			return ""
 		}
-		return "/run/" + project + "/" + ev.Run
+		return "/run/" + swept + "/" + ev.Run
 	}
-	project, slug, ok := strings.Cut(ev.Subject, "/")
-	if !ok || !slugPattern.MatchString(project) || !slugPattern.MatchString(slug) {
+	projectID, slug, ok := strings.Cut(ev.Subject, "/")
+	if !ok || !project.ValidID(projectID) || !slugPattern.MatchString(slug) {
 		return ""
 	}
 	return "/run/" + ev.Subject

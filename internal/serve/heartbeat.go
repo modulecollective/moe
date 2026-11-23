@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 )
 
@@ -387,7 +388,7 @@ func takeSweepRun(root, projectID string) string {
 // sweep minted, the dashboard to link an event's project row.
 func heartbeatProject(childID string) string {
 	p, ok := strings.CutPrefix(childID, heartbeatChildPrefix)
-	if !ok || !slugPattern.MatchString(p) {
+	if !ok || !project.ValidID(p) {
 		return ""
 	}
 	return p

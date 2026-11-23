@@ -44,7 +44,7 @@ var followupWordRE = regexp.MustCompile(`(?i)follow-?ups?\b`)
 // history that one condition removed five of the six false positives at
 // the cost of a hypothetical single-word followup slug, of which the
 // corpus contains none.
-var canvasSlugRE = regexp.MustCompile("`([a-z0-9][a-z0-9-]*/)?([a-z0-9][a-z0-9-]*-[a-z0-9][a-z0-9-]*)`")
+var canvasSlugRE = regexp.MustCompile("`((?:_cabinet|[a-z0-9][a-z0-9-]*)/)?([a-z0-9][a-z0-9-]*-[a-z0-9][a-z0-9-]*)`")
 
 // pulseFilingItemRE matches a `## New filings` list item: a leading
 // backticked slug, which is the grammar pulse.md teaches for that
@@ -52,7 +52,7 @@ var canvasSlugRE = regexp.MustCompile("`([a-z0-9][a-z0-9-]*/)?([a-z0-9][a-z0-9-]
 // contain the word "followup" — and a pulse report that lists a filing
 // it never made feeds the same refile loop on auto-close, where no
 // editor pop reviews anything.
-var pulseFilingItemRE = regexp.MustCompile("^\\s*-\\s+`([a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?)`")
+var pulseFilingItemRE = regexp.MustCompile("^\\s*-\\s+`((?:_cabinet/[a-z0-9][a-z0-9-]*|[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?))`")
 
 // newFilingsHeadingRE opens the pulse-specific section; any later `##`
 // heading closes it.
@@ -65,7 +65,7 @@ var newFilingsHeadingRE = regexp.MustCompile(`(?i)^##\s+New filings\s*$`)
 // already promoted to an idea. This scan is also lenient where
 // parseFollowups is total — a malformed followups.md must not turn an
 // advisory warning into a close-time error.
-var followupFiledSlugRE = regexp.MustCompile("^\\s*-\\s+\\[[ xX]\\]\\s+`([a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?)`")
+var followupFiledSlugRE = regexp.MustCompile("^\\s*-\\s+\\[[ xX]\\]\\s+`((?:_cabinet/[a-z0-9][a-z0-9-]*|[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?))`")
 
 // followupClaimSlugs returns the followup slugs a canvas claims, in
 // first-appearance order, deduped. Two rules, both cheap:

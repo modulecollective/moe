@@ -171,7 +171,7 @@ func (s *Server) canvasReferenceResolver(currentProject string) func(md.Referenc
 			if qualifiedProject, qualifiedSlug, ok := strings.Cut(ref.Text, "/"); ok {
 				projectID, slug = qualifiedProject, qualifiedSlug
 			}
-			if !slugPattern.MatchString(projectID) || !slugPattern.MatchString(slug) {
+			if !project.ValidID(projectID) || !slugPattern.MatchString(slug) {
 				return ""
 			}
 			id := projectID + "/" + slug

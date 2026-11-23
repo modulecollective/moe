@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/modulecollective/moe/internal/git"
+	projectpkg "github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
@@ -16,10 +17,10 @@ func FollowupDestination(root, key string) (project, id string, err error) {
 	if len(parts) != 4 {
 		return "", "", fmt.Errorf("run: invalid followup key %q: expected four slug components", key)
 	}
-	for _, part := range parts {
-		if !idPattern.MatchString(part) {
-			return "", "", fmt.Errorf("run: invalid followup key %q", key)
-		}
+	// <source project>/<source run>/<destination project>/<slug>
+	if !projectpkg.ValidID(parts[0]) || !idPattern.MatchString(parts[1]) ||
+		!projectpkg.ValidID(parts[2]) || !idPattern.MatchString(parts[3]) {
+		return "", "", fmt.Errorf("run: invalid followup key %q", key)
 	}
 	out, err := git.Output(root, "log", "--format=%B%x00", "--grep="+trailers.GrepPattern("MoE-Followup-Key", key))
 	if err != nil {
@@ -38,7 +39,7 @@ func FollowupDestination(root, key string) (project, id string, err error) {
 				r = v
 			}
 		}
-		if !idPattern.MatchString(p) || !idPattern.MatchString(r) || p != parts[2] {
+		if !projectpkg.ValidID(p) || !idPattern.MatchString(r) || p != parts[2] {
 			return "", "", fmt.Errorf("run: invalid destination %q for followup receipt %q", p+"/"+r, key)
 		}
 		if id != "" && (project != p || id != r) {

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/trailers"
 )
@@ -63,7 +64,7 @@ This header is auto-injected on editor pop; remove it freely.
 // is SHARED with lore via parseChecklist; lore re-narrows it by
 // rejecting any `/` or workflow tag (see parseLore) rather than
 // forking a parser.
-var followupOpenRE = regexp.MustCompile("^(\\s*-\\s+\\[\\s\\]\\s+)`([a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?)`(?:\\s+\\(([a-z0-9][a-z0-9-]*)\\))?\\s+—\\s*(.*?)\\s*$")
+var followupOpenRE = regexp.MustCompile("^(\\s*-\\s+\\[\\s\\]\\s+)`((?:_cabinet/[a-z0-9][a-z0-9-]*|[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?))`(?:\\s+\\(([a-z0-9][a-z0-9-]*)\\))?\\s+—\\s*(.*?)\\s*$")
 
 // followupCheckboxRE detects any list item that looks like a checkbox,
 // open or done. Used to flag malformed unchecked entries that don't
@@ -82,7 +83,7 @@ var followupDoneRE = regexp.MustCompile(`^\s*-\s+\[[xX]\]`)
 // audit trail there — but the run page has to pull the resolved slug
 // back out of them to link each promoted entry to where it landed.
 // Kept beside its sibling so the two stay one grammar.
-var followupDoneCaptureRE = regexp.MustCompile("^(\\s*-\\s+\\[[xX]\\]\\s+)`([a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?)`(?:\\s+\\(([a-z0-9][a-z0-9-]*)\\))?\\s+—\\s*(.*?)\\s*$")
+var followupDoneCaptureRE = regexp.MustCompile("^(\\s*-\\s+\\[[xX]\\]\\s+)`((?:_cabinet/[a-z0-9][a-z0-9-]*|[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?))`(?:\\s+\\(([a-z0-9][a-z0-9-]*)\\))?\\s+—\\s*(.*?)\\s*$")
 
 // followupUncheckedShapeRE detects any line whose shape suggests an
 // unchecked follow-up, malformed or not. The pop-the-editor gate uses
@@ -297,6 +298,11 @@ func harvestFollowupsMode(root, projectID, runID, workflow string, skipEdit, tag
 			for _, fu := range todo {
 				if checked[fu.project] {
 					continue
+				}
+				if fu.project == project.RootID {
+					if err := project.EnsureRootLocked(root, trailers.Block{Consent: walkConsent()}.String()); err != nil {
+						return nil, nil, fmt.Errorf("line %d: %w", fu.lineIdx+1, err)
+					}
 				}
 				if err := requireProject(root, fu.project); err != nil {
 					return nil, nil, fmt.Errorf("line %d: %w", fu.lineIdx+1, err)

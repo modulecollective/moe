@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/git"
+	projectpkg "github.com/modulecollective/moe/internal/project"
 )
 
 // CloneRetention is elapsed time since the latest proven terminal transition.
@@ -45,7 +46,7 @@ func LatestTerminalTransition(ctx context.Context, root string, md *Metadata, no
 	if !IsTerminal(md.Status) {
 		return none, errors.New("run is not terminal")
 	}
-	if !idPattern.MatchString(md.ID) || !idPattern.MatchString(md.Project) {
+	if !idPattern.MatchString(md.ID) || !projectpkg.ValidID(md.Project) {
 		return none, errors.New("invalid terminal run identity")
 	}
 	read := func(args ...string) (string, error) { return git.Inspect(ctx, root, 4<<20, args...) }

@@ -181,7 +181,7 @@ func List(root string) ([]*Metadata, []ListWarning, error) {
 // Used by commands that operate against a registered project (e.g. push)
 // to resolve Remote, DefaultBranch, and Submodule without re-deriving.
 func Load(root, id string) (*Metadata, error) {
-	if !idPattern.MatchString(id) {
+	if !ValidID(id) {
 		return nil, fmt.Errorf("project: id %q must match %s", id, idPattern)
 	}
 	path := filepath.Join(root, Dir(id), "project.json")
@@ -193,7 +193,7 @@ func Load(root, id string) (*Metadata, error) {
 	if err := json.Unmarshal(b, md); err != nil {
 		return nil, fmt.Errorf("project: parse %s: %w", path, err)
 	}
-	if md.Remote == "" {
+	if md.Remote == "" && id != RootID {
 		return nil, fmt.Errorf("project: %s has no remote", path)
 	}
 	return md, nil

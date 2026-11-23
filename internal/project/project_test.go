@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/git/gittest"
 )
 
@@ -393,4 +394,65 @@ func TestListWarnsOnMalformedJSON(t *testing.T) {
 func gitOutput(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	return gittest.Output(t, dir, args...)
+}
+
+func TestLoadAdmitsAMissingRemoteOnlyForTheRoot(t *testing.T) {
+	root := t.TempDir()
+	for _, id := range []string{RootID, "other"} {
+		if err := writeJSON(filepath.Join(root, Dir(id), "project.json"), &Metadata{ID: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := Load(root, RootID); err != nil {
+		t.Fatalf("Load(root project): %v", err)
+	}
+	if _, err := Load(root, "other"); err == nil || !strings.Contains(err.Error(), "no remote") {
+		t.Fatalf("Load(other) = %v, want a no-remote refusal", err)
+	}
+}
+
+func TestEnsureRootCommitsOnceAndLeavesOtherWorkAlone(t *testing.T) {
+	root := t.TempDir()
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "main"},
+		{"config", "user.email", "t@example.com"},
+		{"config", "user.name", "t"},
+		{"commit", "-q", "--allow-empty", "-m", "base"},
+	} {
+		if err := git.Run(root, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	staged := filepath.Join(root, "staged.txt")
+	if err := os.WriteFile(staged, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := git.Run(root, "add", "staged.txt"); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := EnsureRoot(root, "MoE-Consent: dynamic"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err := git.Output(root, "log", "--format=%s", "--", filepath.Join(Dir(RootID), "project.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(strings.TrimSpace(out), "\n") + 1; got != 1 {
+		t.Fatalf("root commits = %d, want 1: %q", got, out)
+	}
+	files, err := git.Output(root, "show", "--name-only", "--format=", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(files, "staged.txt") {
+		t.Fatalf("root commit swept up staged work: %q", files)
+	}
+	if body, _ := git.Output(root, "log", "-1", "--format=%B"); !strings.Contains(body, "MoE-Consent: dynamic") {
+		t.Fatalf("root commit lost its trailer: %q", body)
+	}
+	if md, err := Load(root, RootID); err != nil || md.Remote != "" {
+		t.Fatalf("Load = %+v, %v", md, err)
+	}
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
@@ -471,6 +472,15 @@ func runIdeaReopen(args []string, stdout, stderr io.Writer) int {
 	}
 	moePrintf(stdout, "reopened idea %s/%s\n", projectID, slug)
 	return 0
+}
+
+// ensureRootProject creates the root project when projectID names it and
+// it does not exist yet. Any other id is left to requireProject.
+func ensureRootProject(root, projectID string) error {
+	if projectID != project.RootID {
+		return nil
+	}
+	return project.EnsureRoot(root, trailers.Block{Consent: walkConsent()}.String())
 }
 
 // requireProject errors if projectID has no project.json on disk.

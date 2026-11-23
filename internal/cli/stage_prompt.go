@@ -352,18 +352,45 @@ func intentsReferenceSection(root, projectID string) string {
 	if root == "" || projectID == "" {
 		return ""
 	}
+	var sections []string
+	if projectID != project.RootID {
+		if s := intentsSection(root, project.RootID, "Bureaucracy intents",
+			`The bureaucracy has open intents that span its projects — short,
+operator-authored statements of where the whole of it is going. They are
+inlined below, and aim the discretionary calls the way a project's own do.
+`); s != "" {
+			sections = append(sections, s)
+		}
+	}
+	if s := intentsSection(root, projectID, "Project intents",
+		`This project has open intents — short, operator-authored statements
+of where it's going: a theme, a bet, a direction it's heading. They are
+inlined below. They aim the discretionary calls (what to propose, what
+to prioritise); they don't fence what's allowed.
+`); s != "" {
+		sections = append(sections, s)
+	}
+	if len(sections) == 0 {
+		return ""
+	}
+	return strings.Join(sections, "\n") + `
+Intents are operator-authored — you read them, you never create or edit
+them. If a theme looks missing, name it in a report; the operator
+decides whether to park it.
+`
+}
+
+// intentsSection renders one project's open intents under heading, or ""
+// when it has none.
+func intentsSection(root, projectID, heading, intro string) string {
 	slugs, err := intentKind.scanOpen(root, projectID)
 	if err != nil || len(slugs) == 0 {
 		return ""
 	}
 
 	var b strings.Builder
-	b.WriteString("## Project intents\n\n")
-	b.WriteString(`This project has open intents — short, operator-authored statements
-of where it's going: a theme, a bet, a direction it's heading. They are
-inlined below. They aim the discretionary calls (what to propose, what
-to prioritise); they don't fence what's allowed.
-`)
+	b.WriteString("## " + heading + "\n\n")
+	b.WriteString(intro)
 	for _, slug := range slugs {
 		title := intentTitle(root, projectID, slug)
 		fmt.Fprintf(&b, "\n### `%s` — %s\n", slug, title)
@@ -375,11 +402,6 @@ to prioritise); they don't fence what's allowed.
 			b.WriteString("\n" + body + "\n")
 		}
 	}
-	b.WriteString(`
-Intents are operator-authored — you read them, you never create or edit
-them. If a theme looks missing, name it in a report; the operator
-decides whether to park it.
-`)
 	return b.String()
 }
 

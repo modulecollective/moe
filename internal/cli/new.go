@@ -10,6 +10,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/agent"
 	"github.com/modulecollective/moe/internal/bureaucracy"
+	projectpkg "github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
 )
@@ -136,6 +137,11 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	} else if fs.NArg() != 1 {
 		fs.Usage()
 		return 2
+	}
+	if target := fs.Arg(0) + *fromIdea; strings.HasPrefix(target, projectpkg.RootID+"/") {
+		moePrintf(stderr, "%s new: project %q has no submodule on disk; cannot run %q without code to edit\n",
+			workflowName, projectpkg.RootID, workflowName)
+		return 1
 	}
 	if *workspaceName != "" && workflowName != sdlcWorkflow {
 		moePrintf(stderr, "--workspace: only sdlc accepts --workspace today\n")

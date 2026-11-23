@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/git"
+	projectpkg "github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
@@ -321,7 +322,7 @@ func Dir(projectID, id string) string {
 // remove its files and index entries. Cleanup failures report both causes;
 // successful cleanup reports "nothing recorded". Unrelated paths are preserved.
 func New(root, projectID string, opts Options) (md *Metadata, err error) {
-	if !ValidID(projectID) {
+	if !projectpkg.ValidID(projectID) {
 		return nil, fmt.Errorf("run: project id %q must match %s", projectID, idPattern)
 	}
 	if opts.Workflow == "" {
