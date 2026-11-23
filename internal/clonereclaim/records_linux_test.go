@@ -161,6 +161,39 @@ func TestMissingMarkerDoesNotReplacePartialEnrollment(t *testing.T) {
 	}
 }
 
+func TestEnrollmentPersistsAncestorLinksBeforePublishing(t *testing.T) {
+	h, path := registryFixture(t)
+	original := syncRecordFile
+	defer func() { syncRecordFile = original }()
+	var synced []string
+	syncRecordFile = func(f *os.File) error { synced = append(synced, f.Name()); return f.Sync() }
+	r, err := Enroll(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	for _, required := range []string{h.Root, filepath.Join(h.Root, ".moe"), filepath.Dir(filepath.Dir(path)), filepath.Dir(path), path} {
+		found := false
+		for _, got := range synced {
+			if got == required {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("ancestor directory link not made durable: %s", required)
+		}
+	}
+	synced = nil
+	loaded, err := LoadRegistry(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded.Close()
+	if len(synced) != 0 {
+		t.Fatalf("inspection synced directories: %v", synced)
+	}
+}
+
 func TestEnrollmentRejectsSymlinkedPathsAndGitfiles(t *testing.T) {
 	for _, kind := range []string{"root", "project-parent", "clone", "gitdir", "gitfile", "local-marker-parent", "registry-parent"} {
 		t.Run(kind, func(t *testing.T) {

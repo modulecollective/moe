@@ -57,7 +57,7 @@ func registryPath(root, project, run string) string {
 // or after interactive host recovery has confirmed that legacy use stopped.
 // Calling this is an enrollment act; ordinary inspection never auto-adopts.
 func Enroll(h *runowner.Handle) (*Registry, error) {
-	identity, tree, err := physicalIdentity(h)
+	identity, tree, err := physicalIdentity(h, true)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +108,7 @@ func Enroll(h *runowner.Handle) (*Registry, error) {
 // LoadRegistry refuses legacy, replaced and foreign-namespace trees. It reads
 // only; even a free run guard does not authorize recovery of missing evidence.
 func LoadRegistry(h *runowner.Handle) (*Registry, error) {
-	actual, tree, err := physicalIdentity(h)
+	actual, tree, err := physicalIdentity(h, false)
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +164,7 @@ func (r *Registry) validateOwner(h *runowner.Handle) error {
 	return nil
 }
 
-func physicalIdentity(h *runowner.Handle) (Identity, *os.File, error) {
+func physicalIdentity(h *runowner.Handle, durable bool) (Identity, *os.File, error) {
 	var id Identity
 	if h == nil || !h.Owns(h.Root, h.Project, h.Run) {
 		return id, nil, errors.New("clone reclamation requires held run ownership")
@@ -200,6 +200,17 @@ func physicalIdentity(h *runowner.Handle) (Identity, *os.File, error) {
 		}
 		if m != mount {
 			return id, nil, errors.New("clone path crosses a mount boundary")
+		}
+		// Fresh clone/owner creation predates this protocol and does not
+		// promise parent fsync. Enrollment must persist those links too.
+		// Loading an identity remains strictly read-only.
+		if durable {
+			if err := syncRecordFile(parent); err != nil {
+				return id, nil, err
+			}
+			if err := syncRecordFile(next); err != nil {
+				return id, nil, err
+			}
 		}
 		parent = next
 	}
@@ -318,9 +329,6 @@ func childDir(parent *os.File, name string, create bool) (*os.File, error) {
 		if err := syscall.Mkdirat(int(parent.Fd()), name, 0o700); err != nil && !errors.Is(err, syscall.EEXIST) {
 			return nil, err
 		}
-		if err := syncRecordFile(parent); err != nil {
-			return nil, err
-		}
 		fd, err = syscall.Openat(int(parent.Fd()), name, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
 	}
 	if err != nil {
@@ -328,6 +336,10 @@ func childDir(parent *os.File, name string, create bool) (*os.File, error) {
 	}
 	f := os.NewFile(uintptr(fd), filepath.Join(parent.Name(), name))
 	if create {
+		if err := syncRecordFile(parent); err != nil {
+			f.Close()
+			return nil, err
+		}
 		if err := syncRecordFile(f); err != nil {
 			f.Close()
 			return nil, err
