@@ -13,7 +13,7 @@ import (
 )
 
 func TestUnsupportedCloneApplyRetainsSourceStage(t *testing.T) {
-	root := seedCloseFixture(t, "tele", "fresh-stage", "sdlc", run.StatusInProgress)
+	root := seedCloseFixture(t, "tele", "fresh-stage", "sdlc", run.StatusClosed)
 	seedProjectWithSubmodule(t, root, "tele")
 	path := cleanTestClone(t, root, "tele", "fresh-stage")
 	writeFile(t, filepath.Join(path, "experiment"), "retained work")
