@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/modulecollective/moe/internal/clonereclaim"
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/input"
@@ -476,12 +477,24 @@ func CloseCapture(root, projectID, slug string) error {
 // with a reopen trailer derived from the run's own workflow. The caller
 // owns all the policy — ReopenIdea's workflow/promoted-destination
 // guards, the chat verb's closed-only check — and hands a loaded md
-// here only once the run is known reopenable. md.Status is set in place.
+// here only once the run is known reopenable. The held owner spans this flip
+// and subsequent stage admission. Fresh metadata is reloaded under repolock;
+// caller fields are updated only after a successful commit.
 //
 // Workflow-derived subject ("Reopen idea …", "Reopen chat …"), trailer
 // block, and lock purpose keep each workflow's history greppable while
 // the flip itself lives in exactly one place.
-func Reopen(root string, md *run.Metadata) error {
+func Reopen(root string, md *run.Metadata, owner *runowner.Handle) error {
+	if !owner.Owns(root, md.Project, md.ID) {
+		return errors.New("reopen requires held run ownership")
+	}
+	if err := clonereclaim.CheckRunRecovery(owner); err != nil {
+		return err
+	}
+	expectedStatus, expectedWorkflow := md.Status, md.Workflow
+	if !run.IsTerminal(expectedStatus) {
+		return errors.New("reopen requires expected terminal status")
+	}
 	runJSONRel := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
 	msg := fmt.Sprintf("Reopen %s %s/%s\n\n", md.Workflow, md.Project, md.ID) +
 		trailers.Block{
@@ -493,11 +506,41 @@ func Reopen(root string, md *run.Metadata) error {
 		Purpose: md.Workflow + "-reopen",
 		Run:     md.Project + "/" + md.ID,
 	}, func() error {
-		md.Status = run.StatusInProgress
-		if err := run.Save(root, md); err != nil {
+		fresh, err := run.Load(root, md.Project, md.ID)
+		if err != nil {
 			return err
 		}
-		return run.StageAndCommit(root, msg, runJSONRel)
+		if fresh.Workflow != expectedWorkflow || fresh.Status != expectedStatus {
+			return errors.New("run workflow/status changed before reopen")
+		}
+		if fresh.Workflow == dash.IdeaWorkflow && fresh.Status == run.StatusPromoted {
+			if err := verifyPromotedDestinationClosed(root, fresh.Project, fresh.ID); err != nil {
+				return err
+			}
+		}
+		if err := session.RequireUnreserved(root, fresh.Project, fresh.ID); err != nil {
+			return err
+		}
+		dirty, err := run.WorkingTreeDirty(root)
+		if err != nil {
+			return err
+		}
+		if dirty {
+			return errors.New("working tree has uncommitted changes; commit or stash first")
+		}
+		previous, err := snapFile(root, runJSONRel)
+		if err != nil {
+			return err
+		}
+		fresh.Status = run.StatusInProgress
+		if err := run.Save(root, fresh); err != nil {
+			return previous.restore(root, err)
+		}
+		if err := run.StageAndCommit(root, msg, runJSONRel); err != nil {
+			return previous.restore(root, err)
+		}
+		*md = *fresh
+		return nil
 	})
 }
 
@@ -506,7 +549,12 @@ func Reopen(root string, md *run.Metadata) error {
 // resolve through MoE-Promoted-To and be closed, otherwise reopening
 // would create two live owners of the same intent or resurrect shipped
 // work. The flip itself routes through Reopen.
-func ReopenIdea(root, projectID, slug string) error {
+func ReopenIdea(root, projectID, slug string) (err error) {
+	owner, err := runowner.Acquire(root, projectID, slug)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, owner.Release()) }()
 	md, err := run.Load(root, projectID, slug)
 	if err != nil {
 		return err
@@ -524,7 +572,7 @@ func ReopenIdea(root, projectID, slug string) error {
 	default:
 		return fmt.Errorf("%w: idea %s/%s is %s, not closed or promoted", ErrNotReopenableIdea, projectID, slug, md.Status)
 	}
-	return Reopen(root, md)
+	return Reopen(root, md, owner)
 }
 
 func verifyPromotedDestinationClosed(root, projectID, slug string) error {

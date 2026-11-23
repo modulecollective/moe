@@ -16,6 +16,7 @@ import (
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
+	"github.com/modulecollective/moe/internal/runowner"
 )
 
 // The chat workflow is the bureaucracy's "just think about a project"
@@ -162,7 +163,16 @@ func runChat(args []string, stdout, stderr io.Writer) int {
 // re-entering is the reopen — there is no separate `moe chat reopen`
 // verb.
 func openChat(projectID, runID, agentOverride string, stdout, stderr io.Writer) int {
-	if code := reopenClosedChat(projectID, runID, stdout, stderr); code != 0 {
+	root, err := findRoot(stderr)
+	if err != nil {
+		return 1
+	}
+	release, ok := ownRunForVerb(root, projectID, runID, stderr)
+	if !ok {
+		return 1
+	}
+	defer release()
+	if code := reopenClosedChat(root, projectID, runID, heldRun(root, projectID, runID), stdout, stderr); code != 0 {
 		return code
 	}
 	const kickoff = "The operator just opened a chat session about this project — you are " +
@@ -260,9 +270,9 @@ func promptChatClose(closeCmd *Command, projectID, runID string, stdout, stderr 
 // and open the session". The transcript lives in the bureaucracy and
 // survives close; normal stage setup recreates the read-only clone and
 // dev environment released by close.
-func reopenClosedChat(projectID, runID string, stdout, stderr io.Writer) int {
-	root, err := findRoot(stderr)
-	if err != nil {
+func reopenClosedChat(root, projectID, runID string, owner *runowner.Handle, stdout, stderr io.Writer) int {
+	if !owner.Owns(root, projectID, runID) {
+		moePrintln(stderr, "chat: reopen requires held run ownership")
 		return 1
 	}
 	md, err := run.Load(root, projectID, runID)
@@ -270,11 +280,15 @@ func reopenClosedChat(projectID, runID string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "chat: %v\n", err)
 		return 1
 	}
+	if md.Workflow != chatWorkflow {
+		moePrintf(stderr, "chat: %s/%s is a %s run\n", projectID, runID, md.Workflow)
+		return 1
+	}
 	switch md.Status {
 	case run.StatusInProgress:
 		return 0
 	case run.StatusClosed:
-		if err := runopen.Reopen(root, md); err != nil {
+		if err := runopen.Reopen(root, md, owner); err != nil {
 			moePrintf(stderr, "chat: reopen %s/%s: %v\n", projectID, runID, err)
 			return 1
 		}

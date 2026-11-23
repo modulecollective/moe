@@ -12,6 +12,7 @@ import (
 	moe "github.com/modulecollective/moe"
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/runowner"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
@@ -370,6 +371,56 @@ func TestOpenChatReopensClosedRun(t *testing.T) {
 		if !strings.Contains(msg, want) {
 			t.Errorf("commit message missing %q\n%s", want, msg)
 		}
+	}
+}
+
+func TestOpenChatRefusesOwnedClosedRunBeforeReopen(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedRun(t, root, "moe", "ponder", chatWorkflow, run.StatusClosed)
+	t.Setenv("MOE_HOME", root)
+	owner, err := runowner.Acquire(root, "moe", "ponder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer owner.Release()
+	var opened bool
+	stubStageSession(t, &opened)
+	var out, errb bytes.Buffer
+	if code := openChat("moe", "ponder", "", &out, &errb); code != 1 || opened || !strings.Contains(errb.String(), "owned by another") {
+		t.Fatalf("ownership refusal: code=%d opened=%v %s", code, opened, &errb)
+	}
+	if got := loadRun(t, root, "moe", "ponder").Status; got != run.StatusClosed {
+		t.Fatal("owned run was reopened")
+	}
+}
+
+func TestOpenChatKeepsOwnerAcrossReopenAndStageAdmission(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedRun(t, root, "moe", "ponder", chatWorkflow, run.StatusClosed)
+	t.Setenv("MOE_HOME", root)
+	previous := runStageSession
+	defer func() { runStageSession = previous }()
+	called := false
+	runStageSession = func(projectID, runID, _ string, _ stageSessionOpts, _, _ io.Writer) int {
+		called = true
+		if h := heldRun(root, projectID, runID); h == nil || !h.Owns(root, projectID, runID) {
+			t.Fatal("stage did not inherit owning invocation")
+		}
+		if h, err := runowner.Acquire(root, projectID, runID); !runowner.IsBusy(err) {
+			if h != nil {
+				h.Release()
+			}
+			t.Fatalf("run became unowned at stage entry: %v", err)
+		}
+		return 0
+	}
+	if code := openChat("moe", "ponder", "", io.Discard, io.Discard); code != 0 || !called {
+		t.Fatalf("stage exit=%d called=%v", code, called)
+	}
+	if busy, err := runowner.Busy(root, "moe", "ponder"); err != nil || busy {
+		t.Fatal("chat exit retained guard")
 	}
 }
 
