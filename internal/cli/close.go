@@ -290,12 +290,7 @@ func closeRunPrepared(root, workflow, subject string, cleanup, prepare closeClea
 			return err
 		}
 
-		if prepare != nil {
-			if err := prepare(root, md); err != nil {
-				return err
-			}
-		}
-		paths, err := enterTerminal(root, md, run.StatusClosed, skipEdit)
+		paths, err := enterTerminalPrepared(root, md, run.StatusClosed, skipEdit, prepare)
 		if err != nil {
 			return err
 		}

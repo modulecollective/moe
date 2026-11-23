@@ -227,6 +227,30 @@ func TestPushNoShipCleanupFailureKeepsCommittedStylesheet(t *testing.T) {
 	f.requireCleanRoot()
 }
 
+func TestPushNoShipHarvestCannotPublishStylesheetBeforeFailedClose(t *testing.T) {
+	f := newPushFixture(t)
+	f.rewindBranchToDefault()
+	f.writeTestGate(noShipGate)
+	f.proposeStylesheet(proposedSheet)
+	path := filepath.Join(f.root, run.FollowupsPath(f.projectID, f.runID))
+	writeFile(t, path, "# Follow-ups\n\n- [ ] `sheet-harvest-child` — Keep child capture separate\n  This fixture exercises a child idea commit before the parent close.\n")
+	gittest.Run(t, f.root, "add", path)
+	gittest.Run(t, f.root, "commit", "-m", "test: harvest child before no-ship close")
+	defer failCloseCommits(t, f.root)()
+	if _, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID); code == 0 {
+		t.Fatalf("close unexpectedly succeeded: %s", stderr)
+	}
+	if _, err := run.Load(f.root, f.projectID, "sheet-harvest-child"); err != nil {
+		t.Fatalf("child commit path was not exercised: %v", err)
+	}
+	if got := f.sheetAt("HEAD"); got != liveSheet {
+		t.Fatalf("harvest committed unshipped stylesheet: %q", got)
+	}
+	if got := f.rootSheet(); got != liveSheet {
+		t.Fatalf("failed close changed live stylesheet: %q", got)
+	}
+}
+
 // TestPushPRRecordAppliesProposedStylesheet: the PR route applies at the
 // record commit when the PR opens — the last point moe controls.
 func TestPushPRRecordAppliesProposedStylesheet(t *testing.T) {

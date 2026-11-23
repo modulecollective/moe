@@ -35,12 +35,24 @@ import (
 // the ff-push and flips inside the lock window that commits the flip,
 // so no tracked write sits on disk across the network call.
 func enterTerminal(root string, md *run.Metadata, newStatus string, skipEdit bool) ([]string, error) {
+	return enterTerminalPrepared(root, md, newStatus, skipEdit, nil)
+}
+
+// Harvest may commit child ideas. Stage this run's own journal preparation
+// afterward so a child commit cannot accidentally carry the parent's stamp or
+// proposed stylesheet before its terminal transaction succeeds.
+func enterTerminalPrepared(root string, md *run.Metadata, newStatus string, skipEdit bool, prepare closeCleanup) ([]string, error) {
 	if err := checkTerminalStatus(newStatus); err != nil {
 		return nil, err
 	}
 	paths, err := harvestTerminal(root, md, skipEdit)
 	if err != nil {
 		return nil, err
+	}
+	if prepare != nil {
+		if err := prepare(root, md); err != nil {
+			return nil, err
+		}
 	}
 	runJSON, err := markTerminal(root, md, newStatus)
 	if err != nil {
