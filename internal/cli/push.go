@@ -528,7 +528,7 @@ func init() {
 			if err != nil {
 				return nil, err
 			}
-			devEnv, _, err := devEnvSetupEnv(env.Bureaucracy, env.Sandbox, md, stdout, stderr)
+			devEnv, _, err := setupRunEnvironment(heldRun(env.Bureaucracy, md.Project, md.ID), env.Sandbox, md, stdout, stderr)
 			return devEnv, err
 		},
 	})
@@ -965,7 +965,7 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 		return 1, nil
 	}
 	moePrintf(stdout, "merged %s/%s at %s\n", md.Project, md.ID, git.ShortSHA(tipSHA))
-	if err := releaseRunWorkspace(root, md); err != nil {
+	if err := releaseRunWorkspace(heldRun(root, md.Project, md.ID), md); err != nil {
 		moePrintf(stderr, "%v\n", &terminalCleanupError{Project: md.Project, Run: md.ID, Status: md.Status, Err: err})
 		return 1, nil
 	}
@@ -1060,7 +1060,7 @@ func resumeMergeRecord(root string, md *run.Metadata, pending *pendingMergeRecor
 		return 1
 	}
 	moePrintf(stdout, "merged %s/%s at %s\n", md.Project, md.ID, git.ShortSHA(pending.Tip))
-	if err := releaseRunWorkspace(root, md); err != nil {
+	if err := releaseRunWorkspace(heldRun(root, md.Project, md.ID), md); err != nil {
 		moePrintf(stderr, "%v\n", &terminalCleanupError{Project: md.Project, Run: md.ID, Status: md.Status, Err: err})
 		return 1
 	}

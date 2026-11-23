@@ -5,6 +5,7 @@ import (
 	"io"
 	"sync"
 
+	"github.com/modulecollective/moe/internal/clonereclaim"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runowner"
 	"github.com/modulecollective/moe/internal/runsock"
@@ -46,14 +47,34 @@ func invocationRunKey(root, projectID, runID string) string {
 // address is not allowed to run. A short mutation-only holder (close,
 // resume) serves none.
 func ownRun(root, projectID, runID string, execute bool) (release func() error, err error) {
+	return ownRunAdmission(root, projectID, runID, execute, true)
+}
+
+// Recovery and a retry of a confined rebind need to inspect pending receipts
+// under ownership rather than admitting execution. All workers use ownRun.
+func ownRunAdmission(root, projectID, runID string, execute, admit bool) (release func() error, err error) {
 	key := invocationRunKey(root, projectID, runID)
 	invocationRunsMu.Lock()
 	defer invocationRunsMu.Unlock()
 	if invocationRuns[key] != nil {
+		if admit {
+			if err := clonereclaim.CheckRunRecovery(invocationRuns[key]); err != nil {
+				return nil, err
+			}
+		}
 		return func() error { return nil }, nil
 	}
 	h, err := runowner.Acquire(root, projectID, runID)
 	if err != nil {
+		return nil, err
+	}
+	if err := func() error {
+		if admit {
+			return clonereclaim.CheckRunRecovery(h)
+		}
+		return nil
+	}(); err != nil {
+		h.Release()
 		return nil, err
 	}
 	var srv *runsock.Server

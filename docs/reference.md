@@ -702,7 +702,15 @@ from the session worktree (or use the corresponding diagnostic path).
 
 - `moe session list|abandon|resolve|gc` inspects or cleans leftover stage
   session worktrees and branches.
-- `moe clone list|gc` inspects or removes orphan per-run sandbox clones.
+- `moe clone list` lists per-run sandbox clones.
+- `moe clone gc [--apply] [--json] [<project>/<run>]` inspects reclamation;
+  `--apply` performs eligible cleanup. The optional filter is an exact run,
+  never a path or glob. Holds and an empty inventory exit 0, probe/application
+  failures exit 1, and argument errors exit 2. JSON includes a schema version,
+  invocation ID, physical generation, terminal transition, deadline, outcome,
+  reason and retained receipt path. Hook output goes to stderr in JSON mode.
+- `moe clone recover <project>/<run>` is interactive host recovery for one
+  stopped run's legacy enrollment, shell lifetime or resource cleanup debt.
 - `moe workspace release` clears a stale named-workspace claim.
 - `MOE_GIT_TRACE=1` (strict `=1`) prints one line per git invocation —
   dir, argv, duration, error — to stderr. First tool to reach for when a
@@ -718,8 +726,46 @@ Run ownership is separate from the session reservation. The invocation that
 opens a stage locks `.moe/run-owners/<project>/<run>.lock` until its post-turn
 prompt and the continuation chosen there return. Kicks skip an owned run; other
 invocations' stage verbs, close, advance and push refuse it, and sync defers it.
-Process exit releases the lock, which never overrides a surviving session
-branch. Older moe binaries do not take it.
+Ordinary process exit releases the lock, which never overrides a surviving
+session branch. A run shell, including entry through a claimed named workspace,
+owns it exclusively. Its Linux supervisor retains the guard through background,
+detached and adopted descendants and preserves the shell's exit status. An
+unfinished durable start blocks stages, mutation and collection even when the
+lock is free. Shells publish `shell running` and `waiting for shell jobs`; exiting
+a shell starts no workflow continuation. Older MoE binaries do not take the lock.
+
+Nonterminal runs, including pushed and interrupted runs, remain indefinitely.
+For closed, merged and promoted runs, the latest committed terminal transition
+starts a fixed 168-hour interval. Before its deadline, cleanup requires clean
+local contents and independent canonical retention of every available Git
+object, including reflog-only and unreachable objects. A preservation hold also
+prevents teardown. At the deadline, clone-local leftovers may be discarded;
+lifetime, generation, session, resource and path checks still apply. Missing or
+unprovable journal history holds. GC never closes or abandons a run.
+
+New clones enroll under ownership before setup or agent execution. Legacy trees
+hold until host recovery confirms that old binaries, shells, descendants and
+unmanaged writers have stopped. Recovery never deletes a clone or waives its
+retention checks. Changed teardown scripts need a separate approval of their
+exact new digests against the original resource snapshot; missing hooks must be
+restored. Mount-namespace changes require explicit host revalidation. Do not
+enable unattended apply until old binaries and unmanaged use have been drained.
+
+Per-run setup retains original cache bytes and ordered hook digests outside the
+clone. Terminal status commits before cleanup, so a failed close commit leaves
+its environment intact and a failed teardown cannot undo a completed merge.
+Known nonzero teardown completion can be retried with exact-run
+`moe clone gc --apply <project>/<run>`; interrupted workers need stopped-use
+recovery first. Successful teardown is recorded before clearing its cache; a
+cache-clear retry never reruns hooks. Recovery can repair active refresh debt
+without closing the run. Named workspaces keep their existing warm lifecycle.
+
+Deletion uses verified Linux descriptor/mount checks and an authorized private
+quarantine tree. Interrupted removal stays discoverable even without a live
+clone path, and pending removal blocks recreation. Recovery receipts under
+`.moe/clone-reclamation/` and named-shell lifetime records under `.moe/run-shells/`
+remain permanently. Unsupported platforms hold unattended deletion; there is no
+force option, recursive pathname fallback, Docker cleanup or permission repair.
 
 The first Ctrl-C stops forward work and unwinds through commit and cleanup,
 then releases ownership and exits 130 without cascading. A second Ctrl-C may

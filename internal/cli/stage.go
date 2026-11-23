@@ -526,7 +526,7 @@ func (s *stageSession) prepareWorkspace() error {
 		if _, err := os.Stat(filepath.Join(s.root, project.SubmoduleDir(s.md.Project))); err != nil {
 			return fmt.Errorf("project %q has no submodule on disk; cannot run %q without code to edit", s.md.Project, s.docID)
 		}
-		clonePath, err := attachRunWorkspace(s.root, s.md, branchPrefix+s.md.ID)
+		clonePath, err := attachRunWorkspace(heldRun(s.root, s.md.Project, s.md.ID), s.md, branchPrefix+s.md.ID)
 		if err != nil {
 			return err
 		}
@@ -540,7 +540,7 @@ func (s *stageSession) prepareWorkspace() error {
 		// when one has vanished. Projects with no dev-env.d/
 		// directory get an empty env (the single-driver default) —
 		// no warning, no refusal.
-		env, _, err := devEnvSetupEnv(s.root, s.clonePath, s.md, s.stdout, s.stderr)
+		env, _, err := setupRunEnvironment(heldRun(s.root, s.md.Project, s.md.ID), s.clonePath, s.md, s.stdout, s.stderr)
 		if err != nil {
 			return fmt.Errorf("dev-env: %w", err)
 		}

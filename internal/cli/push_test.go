@@ -95,6 +95,7 @@ func newPushFixture(t *testing.T) *pushFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
+	enrollTestClone(t, root, projectID, runID)
 	branch := branchPrefix + runID
 	if err := sandbox.CheckoutBranch(clonePath, branch); err != nil {
 		t.Fatal(err)
@@ -185,7 +186,7 @@ func TestPushMergeFFAdvancesOriginAndMarksMerged(t *testing.T) {
 		t.Fatalf("expected %s deleted on origin", f.branch)
 	}
 	if sandbox.Exists(f.root, f.projectID, f.runID) {
-		t.Fatalf("expected sandbox removed")
+		t.Fatalf("expected independently preserved sandbox removed")
 	}
 	md := f.reloadRun()
 	if md.Status != run.StatusMerged {
@@ -279,8 +280,8 @@ func TestPushRebasesAndMergesWhenDefaultMovedCleanly(t *testing.T) {
 	if f.originHasRef("refs/heads/" + f.branch) {
 		t.Fatalf("expected %s deleted on origin", f.branch)
 	}
-	if sandbox.Exists(f.root, f.projectID, f.runID) {
-		t.Fatalf("expected sandbox removed")
+	if !sandbox.Exists(f.root, f.projectID, f.runID) {
+		t.Fatalf("rebased clone must retain its old unique objects before expiry")
 	}
 	if md := f.reloadRun(); md.Status != run.StatusMerged {
 		t.Fatalf("status: want %s, got %s", run.StatusMerged, md.Status)
@@ -331,8 +332,8 @@ fi
 	if f.originHasRef("refs/heads/" + f.branch) {
 		t.Fatalf("expected %s deleted on origin after the retry merged", f.branch)
 	}
-	if sandbox.Exists(f.root, f.projectID, f.runID) {
-		t.Fatalf("expected sandbox removed after the retry merged")
+	if !sandbox.Exists(f.root, f.projectID, f.runID) {
+		t.Fatalf("rebased retry must retain its old unique objects before expiry")
 	}
 	// origin/main carries both the divergent commit and the rebased run
 	// commit on top of it.
@@ -2247,6 +2248,7 @@ func TestPushRefreshesDevEnvBeforeProjectHooks(t *testing.T) {
 	if err := os.Chmod(setup, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	writeHookScript(t, f.root, f.projectID, "dev-env-teardown", "10-env.sh", "#!/bin/sh\nexit 0\n")
 	gittest.Run(t, f.root, "add", "-A")
 	gittest.Run(t, f.root, "commit", "-m",
 		"update dev env\n\nMoE-Project: "+f.projectID+"\nMoE-Run: "+f.runID+"\n")

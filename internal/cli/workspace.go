@@ -7,9 +7,11 @@ import (
 	"os"
 	"strings"
 
+	"github.com/modulecollective/moe/internal/clonereclaim"
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/runowner"
 	"github.com/modulecollective/moe/internal/sandbox"
 	"github.com/modulecollective/moe/internal/workspace"
 )
@@ -33,13 +35,20 @@ import (
 //     refuses if the previous occupant left uncommitted changes and
 //     anchors a freshly-created branch to the project's default
 //     branch instead of whatever was previously checked out).
-func attachRunWorkspace(root string, md *run.Metadata, branch string) (string, error) {
+func attachRunWorkspace(h *runowner.Handle, md *run.Metadata, branch string) (string, error) {
+	if h == nil || !h.Owns(h.Root, md.Project, md.ID) {
+		return "", fmt.Errorf("workspace attach requires held run ownership")
+	}
+	root := h.Root
+	if err := clonereclaim.CheckRunRecovery(h); err != nil {
+		return "", err
+	}
 	defaultBranch, err := defaultBranchForProject(root, md.Project)
 	if err != nil {
 		return "", err
 	}
 	if md.Workspace == "" {
-		clonePath, err := sandbox.Ensure(root, md.Project, md.ID)
+		clonePath, err := ensureRunClone(h)
 		if err != nil {
 			return "", err
 		}
@@ -73,6 +82,16 @@ func freshenRunBranch(workTree, branch, defaultBranch string) {
 	}
 }
 
+func setupRunEnvironment(h *runowner.Handle, path string, md *run.Metadata, stdout, stderr io.Writer) (map[string]string, bool, error) {
+	if h == nil || !h.Owns(h.Root, md.Project, md.ID) {
+		return nil, false, fmt.Errorf("environment setup requires held run ownership")
+	}
+	if md.Workspace == "" {
+		return devEnvSetupOwned(h, md, stdout, stderr)
+	}
+	return devEnvSetupEnv(h.Root, path, md, stdout, stderr)
+}
+
 // resolveRunWorkspacePath returns the working-tree path the run is
 // using, without acquiring claims, switching branches, or creating
 // the workspace if it doesn't exist. Used by verbs (push, shell) that
@@ -85,7 +104,7 @@ func resolveRunWorkspacePath(root string, md *run.Metadata) (string, error) {
 			return "", fmt.Errorf("no sandbox clone for %s/%s; run `moe %s build %s/%s` first",
 				md.Project, md.ID, md.Workflow, md.Project, md.ID)
 		}
-		return sandbox.Ensure(root, md.Project, md.ID)
+		return sandbox.Path(root, md.Project, md.ID), nil
 	}
 	if !workspace.Exists(root, md.Project, md.Workspace) {
 		return "", fmt.Errorf("workspace %q for project %q does not exist on disk; run `moe %s build %s/%s` first",
@@ -118,15 +137,16 @@ func resolveRunWorkspacePath(root string, md *run.Metadata) (string, error) {
 // this is called, so any failure is logged and the claim is still
 // released. The operator can recover by hand with `moe workspace
 // shell` and a manual `git checkout <default> && git pull`.
-func releaseRunWorkspace(root string, md *run.Metadata) error {
+func releaseRunWorkspace(h *runowner.Handle, md *run.Metadata) error {
+	if h == nil || !h.Owns(h.Root, md.Project, md.ID) {
+		return fmt.Errorf("workspace release requires held run ownership")
+	}
+	root := h.Root
 	if md.Workspace == "" {
-		if sandbox.Exists(root, md.Project, md.ID) {
-			workTree := sandbox.Path(root, md.Project, md.ID)
-			if err := devEnvRunTeardown(root, workTree, md, os.Stdout, os.Stderr); err != nil {
-				return fmt.Errorf("dev-env teardown for %s/%s; clone/cache retained at %s: %w", md.Project, md.ID, workTree, err)
-			}
-		}
-		return sandbox.Remove(root, md.Project, md.ID)
+		return releasePerRunClone(h, md)
+	}
+	if err := clonereclaim.CheckRunRecovery(h); err != nil {
+		return err
 	}
 	held, err := runHoldsWorkspace(root, md)
 	if err != nil || !held {

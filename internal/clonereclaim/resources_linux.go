@@ -76,6 +76,7 @@ func (e *HoldError) Error() string {
 
 type CleanupPlan struct {
 	Resources        *Resources
+	Scripts          []Script
 	Purpose          string
 	Receipt          string
 	CompletedAttempt string
@@ -246,6 +247,10 @@ func (r *Registry) resources() ([]Resources, error) {
 			return nil, err
 		}
 		snapshot, err := readRecord[Resources](dir, "ownership.json")
+		if errors.Is(err, os.ErrNotExist) && r.unpublishedResolved(dir, entry.Name()) {
+			dir.Close()
+			continue
+		}
 		dir.Close()
 		if err != nil {
 			return nil, fmt.Errorf("resource ownership unresolved at %s: %w", entry.Name(), err)
@@ -277,6 +282,22 @@ func (r *Registry) validateResources(s Resources) error {
 	fields := strings.Fields(string(first))
 	if !ok || len(fields) != 4 || fields[0] != "#" || fields[1] != "moe-dev-env-v1" || fields[2] != r.Identity.Project+"/"+r.Identity.Run || (fields[3] != "none" && !objectID(fields[3])) {
 		return errors.New("resource cache owner/version mismatch")
+	}
+	seen := map[string]bool{}
+	for line := range strings.SplitSeq(string(s.Cache[len(first)+1:]), "\n") {
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, _, ok := strings.Cut(line, "=")
+		if !ok || key == "" || strings.ContainsRune(line, 0) || seen[key] {
+			return errors.New("malformed resource cache exports")
+		}
+		for i, c := range key {
+			if !(c == '_' || c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || i > 0 && c >= '0' && c <= '9') {
+				return errors.New("invalid resource cache key")
+			}
+		}
+		seen[key] = true
 	}
 	if s.ResourceFree && (len(s.Setup) != 0 || len(bytes.TrimSpace(s.Cache[len(first)+1:])) != 0) {
 		return errors.New("nonempty environment lacks a disposal contract")
@@ -416,15 +437,20 @@ func (r *Registry) inspectAttempts(snapshot Resources) (string, bool, error) {
 		}
 		intent, readErr := readRecord[CleanupIntent](attempt, "intent.json")
 		result, resultErr := readRecord[CleanupCompletion](attempt, "teardown-complete.json")
+		resolved := errors.Is(resultErr, os.ErrNotExist) && stopped(attempt, r.Identity.Generation, entry.Name()) == nil
 		path := attempt.Name()
 		attempt.Close()
 		if readErr != nil {
 			return "", false, fmt.Errorf("unreadable cleanup intent at %s: %w", path, readErr)
 		}
-		if intent.Version != protocolVersion || intent.Generation != snapshot.Generation || intent.Resource != snapshot.ID || intent.ID != entry.Name() || intent.CacheDigest != snapshot.Digest || !reflect.DeepEqual(intent.Scripts, snapshot.Teardown) || !cleanupPurpose(intent.Purpose) {
+		if intent.Version != protocolVersion || intent.Generation != snapshot.Generation || intent.Resource != snapshot.ID || intent.ID != entry.Name() || intent.CacheDigest != snapshot.Digest || !r.scriptsApproved(snapshot, intent.Scripts) || !cleanupPurpose(intent.Purpose) {
 			return "", false, errors.New("cleanup intent contradicts resource ownership")
 		}
 		if resultErr != nil {
+			if resolved {
+				failed = true
+				continue
+			}
 			if errors.Is(resultErr, os.ErrNotExist) {
 				return "", false, &HoldError{Reason: "interrupted teardown needs stopped-worker recovery", Receipt: path}
 			}
@@ -478,6 +504,7 @@ func (r *Registry) PlanCleanup(h *runowner.Handle, purpose string, scripts []Scr
 	}
 	snapshot := history[len(history)-1]
 	plan.Resources = &snapshot
+	plan.Scripts = scripts
 	plan.Receipt = r.resourcePath(snapshot.ID)
 	complete, failed, err := r.inspectAttempts(snapshot)
 	if err != nil {
@@ -510,7 +537,7 @@ func (r *Registry) PlanCleanup(h *runowner.Handle, purpose string, scripts []Scr
 	if failed && !retry {
 		return plan, &HoldError{Reason: "failed teardown requires exact-run retry", Receipt: plan.Receipt}
 	}
-	if !reflect.DeepEqual(scripts, snapshot.Teardown) {
+	if !r.scriptsApproved(snapshot, scripts) {
 		return plan, &HoldError{Reason: "teardown scripts missing or changed", Receipt: plan.Receipt}
 	}
 	return plan, nil
@@ -524,14 +551,14 @@ func (r *Registry) beginCleanup(h *runowner.Handle, plan CleanupPlan) (CleanupIn
 	if plan.Resources == nil || plan.CompletedAttempt != "" || plan.CacheCleared {
 		return intent, nil, errors.New("cleanup plan needs no worker")
 	}
-	fresh, err := r.PlanCleanup(h, plan.Purpose, plan.Resources.Teardown, plan.retry)
+	fresh, err := r.PlanCleanup(h, plan.Purpose, plan.Scripts, plan.retry)
 	if err != nil {
 		return intent, nil, err
 	}
 	if !reflect.DeepEqual(plan, fresh) {
 		return intent, nil, errors.New("cleanup plan changed before application")
 	}
-	intent = CleanupIntent{Version: protocolVersion, Generation: r.Identity.Generation, Resource: plan.Resources.ID, Purpose: plan.Purpose, CacheDigest: plan.Resources.Digest, Scripts: plan.Resources.Teardown}
+	intent = CleanupIntent{Version: protocolVersion, Generation: r.Identity.Generation, Resource: plan.Resources.ID, Purpose: plan.Purpose, CacheDigest: plan.Resources.Digest, Scripts: plan.Scripts}
 	intent.ID, err = randomID()
 	if err != nil {
 		return intent, nil, err
@@ -581,6 +608,9 @@ func (r *Registry) ClearCompletedCache(h *runowner.Handle, plan CleanupPlan) err
 	if complete == "" || complete != plan.CompletedAttempt {
 		return errors.New("cache clear lacks proven teardown success")
 	}
+	if err := r.persistCleanup(snapshot, complete); err != nil {
+		return err
+	}
 	_, tree, err := physicalIdentity(h, false)
 	if err != nil {
 		return err
@@ -623,6 +653,65 @@ func (r *Registry) ClearCompletedCache(h *runowner.Handle, plan CleanupPlan) err
 		return err
 	}
 	return publishRecord(dir, "cache-cleared.json", receipt)
+}
+
+func (r *Registry) persistCleanup(snapshot Resources, id string) error {
+	resource, err := r.resourceDir(snapshot.ID, false)
+	if err != nil {
+		return err
+	}
+	defer resource.Close()
+	attempts, err := privateChildDir(resource, "attempts", false)
+	if err != nil {
+		return err
+	}
+	defer attempts.Close()
+	attempt, err := privateChildDir(attempts, id, false)
+	if err != nil {
+		return err
+	}
+	defer attempt.Close()
+	for _, name := range []string{"intent.json", "teardown-complete.json"} {
+		if err := persistRecord(attempt, name); err != nil {
+			return err
+		}
+	}
+	if err := persistRecord(resource, "ownership.json"); err != nil {
+		return err
+	}
+	return syncRecordFile(attempts)
+}
+
+// PersistCleared re-establishes durable prior cleanup before setup can allocate
+// a successor. Readable receipts from a failed fsync are never enough alone.
+func (r *Registry) PersistCleared(h *runowner.Handle) error {
+	if err := r.validateOwner(h); err != nil {
+		return err
+	}
+	history, err := r.resources()
+	if err != nil {
+		return err
+	}
+	if len(history) == 0 {
+		return nil
+	}
+	latest := history[len(history)-1]
+	cleared, err := r.readCleared(latest)
+	if err != nil {
+		return err
+	}
+	if cleared == nil {
+		return nil
+	}
+	if err := r.persistCleanup(latest, cleared.Attempt); err != nil {
+		return err
+	}
+	resource, err := r.resourceDir(latest.ID, false)
+	if err != nil {
+		return err
+	}
+	defer resource.Close()
+	return persistRecord(resource, "cache-cleared.json")
 }
 
 func persistRecord(parent *os.File, name string) error {

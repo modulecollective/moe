@@ -51,6 +51,10 @@ func (r *Registry) CheckShells(h *runowner.Handle) error {
 	if err := r.validateOwner(h); err != nil {
 		return err
 	}
+	return r.checkShellRecords()
+}
+
+func (r *Registry) checkShellRecords() error {
 	shells, err := privateChildDir(r.dir, "shells", false)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -76,11 +80,15 @@ func (r *Registry) CheckShells(h *runowner.Handle) error {
 		}
 		start, readErr := readRecord[shellStart](attempt, "start.json")
 		complete, completeErr := readRecord[shellComplete](attempt, "complete.json")
+		resolved := errors.Is(completeErr, os.ErrNotExist) && stopped(attempt, r.Identity.Generation, entry.Name()) == nil
 		attempt.Close()
 		if readErr != nil {
 			return fmt.Errorf("unreadable shell start %s: %w", entry.Name(), readErr)
 		}
 		if completeErr != nil {
+			if resolved && start.Version == protocolVersion && start.ID == entry.Name() && start.Generation == r.Identity.Generation {
+				continue
+			}
 			return fmt.Errorf("unresolved shell %s; host recovery required: %w", entry.Name(), completeErr)
 		}
 		if start.Version != protocolVersion || complete.Version != protocolVersion || start.ID != entry.Name() || start.Generation != r.Identity.Generation || complete.Generation != start.Generation || complete.Start != start.ID || complete.ExitCode < 0 || complete.ExitCode > 255 {
@@ -227,7 +235,7 @@ func shellSupervisor() int {
 		return 1
 	}
 	defer h.Release()
-	r, err := LoadRegistry(h)
+	r, err := loadShellRegistry(h, cfg.Identity)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1

@@ -74,7 +74,7 @@ func TestAttachRunWorkspaceFreshensCommitFreeBranch(t *testing.T) {
 			markBureaucracy(t, root)
 			seedProjectWithSubmodule(t, root, "tele")
 			md := run.Metadata{Project: "tele", ID: "fix-it", Workspace: tc.workspace}
-			workTree, err := attachRunWorkspace(root, &md, "moe/fix-it")
+			workTree, err := attachTestRunWorkspace(t, root, &md, "moe/fix-it")
 			if err != nil {
 				t.Fatalf("initial attach: %v", err)
 			}
@@ -90,7 +90,7 @@ func TestAttachRunWorkspaceFreshensCommitFreeBranch(t *testing.T) {
 			}
 			savedStdout := os.Stdout
 			os.Stdout = w
-			_, attachErr := attachRunWorkspace(root, &md, "moe/fix-it")
+			_, attachErr := attachTestRunWorkspace(t, root, &md, "moe/fix-it")
 			os.Stdout = savedStdout
 			if err := w.Close(); err != nil {
 				t.Fatal(err)
@@ -120,7 +120,7 @@ func TestAttachRunWorkspaceWarnsAndContinuesOnDirtyFreshen(t *testing.T) {
 	markBureaucracy(t, root)
 	seedProjectWithSubmodule(t, root, "tele")
 	md := run.Metadata{Project: "tele", ID: "fix-it"}
-	workTree, err := attachRunWorkspace(root, &md, "moe/fix-it")
+	workTree, err := attachTestRunWorkspace(t, root, &md, "moe/fix-it")
 	if err != nil {
 		t.Fatalf("initial attach: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestAttachRunWorkspaceWarnsAndContinuesOnDirtyFreshen(t *testing.T) {
 	}
 	savedStderr := os.Stderr
 	os.Stderr = w
-	_, attachErr := attachRunWorkspace(root, &md, "moe/fix-it")
+	_, attachErr := attachTestRunWorkspace(t, root, &md, "moe/fix-it")
 	os.Stderr = savedStderr
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
@@ -274,7 +274,7 @@ func TestShellRunWorkspaceLandsInClonePath(t *testing.T) {
 	if err := json.Unmarshal(body, &md); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := attachRunWorkspace(root, &md, "moe/fix-it"); err != nil {
+	if _, err := attachTestRunWorkspace(t, root, &md, "moe/fix-it"); err != nil {
 		t.Fatalf("attach sandbox: %v", err)
 	}
 	wantPath, err := filepath.EvalSymlinks(filepath.Join(root, ".moe", "clones", "tele", "fix-it"))
@@ -323,7 +323,7 @@ func TestShellRunWorkspaceRefusesStaleDevEnvCache(t *testing.T) {
 	if err := json.Unmarshal(body, &md); err != nil {
 		t.Fatal(err)
 	}
-	wp, err := attachRunWorkspace(root, &md, "moe/fix-it")
+	wp, err := attachTestRunWorkspace(t, root, &md, "moe/fix-it")
 	if err != nil {
 		t.Fatalf("attach sandbox: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestShellRunWorkspaceRefusesStaleDevEnvCache(t *testing.T) {
 	if code := runShell([]string{"tele/fix-it"}, &out, &errb); code == 0 {
 		t.Fatalf("stale shell cache should fail, stdout=%q", out.String())
 	}
-	for _, want := range []string{"MOE_HOME", missing, "reopen a sandbox-backed stage"} {
+	for _, want := range []string{"cache lacks resource ownership"} {
 		if !strings.Contains(errb.String(), want) {
 			t.Errorf("error missing %q: %q", want, errb.String())
 		}
@@ -357,7 +357,7 @@ func TestClaimedShellsRefuseStaleDevEnvHookRevision(t *testing.T) {
 		workspace string
 		want      string
 	}{
-		{name: "run sandbox", want: "reopen a sandbox-backed stage"},
+		{name: "run sandbox", want: "cache lacks resource ownership"},
 		{name: "named workspace", workspace: "dev", want: "moe workspace refresh tele/dev"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -380,7 +380,7 @@ func TestClaimedShellsRefuseStaleDevEnvHookRevision(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			wp, err := attachRunWorkspace(root, md, "moe/fix-it")
+			wp, err := attachTestRunWorkspace(t, root, md, "moe/fix-it")
 			if err != nil {
 				t.Fatal(err)
 			}

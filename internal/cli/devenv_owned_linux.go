@@ -43,6 +43,9 @@ func devEnvSetupOwned(h *runowner.Handle, md *run.Metadata, stdout, stderr io.Wr
 	if err := r.ValidateEnvironment(h); err != nil {
 		return nil, false, err
 	}
+	if err := r.PersistCleared(h); err != nil {
+		return nil, false, err
+	}
 	setup, err := ownedDevEnvScripts(h.Root, md.Project, devEnvDirRel)
 	if err != nil {
 		return nil, false, err

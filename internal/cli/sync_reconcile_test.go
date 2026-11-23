@@ -210,6 +210,7 @@ func newReconcileFixture(t *testing.T, status string) *reconcileFixture {
 	projectID := "tele"
 	runID := "fix-it"
 	prURL := "https://github.com/owner/repo/pull/7"
+	seedSdlcOneShotProject(t, root, projectID)
 
 	// project.json for ghRepoSpec / deleteRemoteBranchForRun.
 	if err := os.MkdirAll(filepath.Join(root, "projects", projectID), 0o755); err != nil {
@@ -239,12 +240,7 @@ func newReconcileFixture(t *testing.T, status string) *reconcileFixture {
 		"MoE-Run: "+runID+"\nMoE-Project: "+projectID+"\nMoE-Document: push\nMoE-PR: "+prURL,
 		time.Now().UTC())
 
-	// Place a fake sandbox so the teardown has something to remove.
-	clonePath := sandbox.Path(root, projectID, runID)
-	if err := os.MkdirAll(clonePath, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, filepath.Join(clonePath, "marker"), "")
+	cleanTestClone(t, root, projectID, runID)
 
 	return &reconcileFixture{t: t, root: root, projectID: projectID, runID: runID, prURL: prURL}
 }

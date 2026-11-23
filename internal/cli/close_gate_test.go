@@ -3,13 +3,11 @@ package cli
 import (
 	"bytes"
 	"io"
-	"os"
 	"strings"
 	"testing"
 
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/sandbox"
 )
 
 // closeGatedCodeCanvas is what a code stage writes when it concludes the
@@ -153,9 +151,7 @@ func TestCascadeCloseNominationReallyCloses(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(sandbox.Path(root, "tele", "already-done"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	cleanTestClone(t, root, "tele", "already-done")
 	// The real close refuses a dirty tree, so the canvas the stage turn
 	// "wrote" has to arrive committed — exactly as a real stage commit
 	// lands it before the cascade reads the gate.

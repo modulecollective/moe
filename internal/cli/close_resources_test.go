@@ -13,6 +13,7 @@ import (
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/runowner"
 	"github.com/modulecollective/moe/internal/sandbox"
 	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
@@ -57,15 +58,22 @@ rm -r -- "$TEST_CLOSE_ROOT"
 
 type closeResources struct{ clone, owned, receipt, sibling string }
 
-// A directory is sufficient for planted leftovers; production allocation is
-// covered separately by the real stage opener and fake Claude below.
+// Use a real enrolled clone and the production ownership path: a directory
+// fixture cannot prove preservation or external-resource cleanup authorization.
 func allocateCloseResources(t *testing.T, root, projectID, runID string) closeResources {
 	t.Helper()
-	clone := sandbox.Path(root, projectID, runID)
-	if err := os.MkdirAll(clone, 0o755); err != nil {
+	cleanTestClone(t, root, projectID, runID)
+	md := loadRun(t, root, projectID, runID)
+	h, err := runowner.Acquire(root, projectID, runID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	env, fresh, err := devEnvSetupEnv(root, clone, loadRun(t, root, projectID, runID), io.Discard, io.Discard)
+	defer h.Release()
+	clone, err := ensureRunClone(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, fresh, err := devEnvSetupOwned(h, md, io.Discard, io.Discard)
 	if err != nil || !fresh {
 		t.Fatalf("setup: fresh=%v err=%v", fresh, err)
 	}
@@ -139,7 +147,25 @@ func TestWorkflowCloseReleasesResources(t *testing.T) {
 					gittest.Run(t, root, "commit", "-m", "test: fail if teardown runs without cache")
 				}
 				var log bytes.Buffer
-				if code := Run([]string{workflow, "close", "--no-edit", "tele/finish"}, &log, &log); code != 0 {
+				code := Run([]string{workflow, "close", "--no-edit", "tele/finish"}, &log, &log)
+				if state == "no-cache" {
+					if code != 1 || !strings.Contains(log.String(), "original owned cache missing") {
+						t.Fatalf("missing allocated cache was not held: %d %s", code, &log)
+					}
+					if loadRun(t, root, "tele", "finish").Status != run.StatusInProgress {
+						t.Fatal("missing ownership admitted close")
+					}
+					for _, path := range []string{resources.clone, resources.owned} {
+						if _, err := os.Stat(path); err != nil {
+							t.Fatal("missing-cache hold lost resource:", err)
+						}
+					}
+					if _, err := os.Stat(filepath.Join(parent, "teardown")); !os.IsNotExist(err) {
+						t.Fatal("missing-cache hold ran teardown")
+					}
+					return
+				}
+				if code != 0 {
 					t.Fatalf("close exit=%d: %s", code, &log)
 				}
 				assertCloseRecorded(t, root, "tele", "finish", workflow)
@@ -531,7 +557,7 @@ func TestWorkflowCloseKeepsNamedWorkspaceWarm(t *testing.T) {
 			}
 			gittest.Run(t, root, "add", run.Dir("tele", "fix-it"))
 			gittest.Run(t, root, "commit", "--allow-empty", "-m", "test: bind workflow to warm workspace")
-			tree, err := attachRunWorkspace(root, md, branchPrefix+md.ID)
+			tree, err := attachTestRunWorkspace(t, root, md, branchPrefix+md.ID)
 			if err != nil {
 				t.Fatal(err)
 			}

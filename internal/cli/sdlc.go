@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/git"
@@ -219,8 +220,34 @@ func persistSDLCStageWorkspace(verb, stage, projectID, runID, name string, stdou
 	if err != nil {
 		return "", 1
 	}
+	resolved, code := resolveSDLCRunSlug(verb, projectID, runID, stdout, stderr)
+	if code != 0 {
+		return "", code
+	}
+	runID = resolved
+	release, err := ownRunAdmission(root, projectID, runID, false, false)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return "", 1
+	}
+	defer release()
+	before, err := run.Load(root, projectID, runID)
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return "", 1
+	}
+	if before.Workspace != name && before.Workspace == "" {
+		result := disposeClone(heldRun(root, projectID, runID), true, false, "rebind", time.Now().UTC(), stdout, stderr)
+		if result.Outcome != "removed" && result.Reason != "already_absent" {
+			moePrintf(stderr, "rebind held: %s: %s; evidence: %s\n", result.Reason, result.Detail, result.Receipt)
+			return "", 1
+		}
+	}
 	var old *run.Metadata
 	resolvedRunID, changed, code := persistSDLCRunField(verb, stage, projectID, runID, "bind-workspace", "bind workspace", func(md *run.Metadata) (string, error) {
+		if md.Status != before.Status || md.Workspace != before.Workspace {
+			return "", fmt.Errorf("run changed during rebind preflight")
+		}
 		if md.Workspace == name {
 			return "", nil
 		}
@@ -246,7 +273,7 @@ func persistSDLCStageWorkspace(verb, stage, projectID, runID, name string, stdou
 	// The binding is durable; a failed release leaves a stale hold that
 	// `moe workspace release` (or removing the clone) clears.
 	if old != nil {
-		if err := releaseRunWorkspace(root, old); err != nil {
+		if err := releaseRunWorkspace(heldRun(root, projectID, runID), old); err != nil {
 			moePrintf(stderr, "warning: release previous working tree: %v\n", err)
 		}
 	}
@@ -269,6 +296,11 @@ func persistSDLCRunField(verb, stage, projectID, runID, purpose, errLabel string
 	if err != nil {
 		return "", false, 1
 	}
+	release, ok := ownRunForMutation(root, projectID, resolvedRunID, stderr)
+	if !ok {
+		return "", false, 1
+	}
+	defer release()
 	runJSON := filepath.Join(run.Dir(projectID, resolvedRunID), "run.json")
 	changed := false
 	err = withSDLCRunFieldLock(root, repolock.Options{

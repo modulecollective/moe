@@ -88,7 +88,6 @@ func TestPushAndSyncCleanupHooksRunOutsideRepositoryLock(t *testing.T) {
 				root, projectID, runID = sf.root, sf.projectID, sf.runID
 			}
 			installCloseResourceHooks(t, root, projectID)
-			resources := allocateCloseResources(t, root, projectID, runID)
 			script := filepath.Join(root, "projects", projectID, "hooks", devEnvTeardownDirRel, "10-resources.sh")
 			body, err := os.ReadFile(script)
 			if err != nil {
@@ -97,6 +96,7 @@ func TestPushAndSyncCleanupHooksRunOutsideRepositoryLock(t *testing.T) {
 			writeFile(t, script, strings.Replace(string(body), "#!/bin/sh\n", "#!/bin/sh\nset -eu\ntest ! -e \"$MOE_BUREAUCRACY/.moe/lock\"\n", 1))
 			gittest.Run(t, root, "add", script)
 			gittest.Run(t, root, "commit", "-m", "test: assert cleanup releases repository lock")
+			resources := allocateCloseResources(t, root, projectID, runID)
 			if pf != nil {
 				if out, errb, code := pf.runInRoot("sdlc", "push", projectID+"/"+runID); code != 0 {
 					t.Fatalf("push exit=%d %s %s", code, out, errb)

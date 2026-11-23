@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/modulecollective/moe/internal/clonereclaim"
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/lore"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
+	"github.com/modulecollective/moe/internal/runowner"
 	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/trailers"
 )
@@ -166,6 +168,21 @@ func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, pro
 
 // prepare contributes journal content (pulse's stamp), never resource cleanup.
 func closeRunPrepared(root, workflow, subject string, cleanup, prepare closeCleanup, projectID, runID string, skipEdit bool, stderr io.Writer, extraTrailers ...trailers.Block) error {
+	release, err := ownRun(root, projectID, runID, false)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return closeRunPreparedOwned(heldRun(root, projectID, runID), root, workflow, subject, cleanup, prepare, projectID, runID, skipEdit, stderr, extraTrailers...)
+}
+
+func closeRunPreparedOwned(owner *runowner.Handle, root, workflow, subject string, cleanup, prepare closeCleanup, projectID, runID string, skipEdit bool, stderr io.Writer, extraTrailers ...trailers.Block) error {
+	if owner == nil || !owner.Owns(root, projectID, runID) {
+		return fmt.Errorf("close requires held run ownership")
+	}
+	if err := clonereclaim.CheckRunRecovery(owner); err != nil {
+		return err
+	}
 	var md *run.Metadata
 	err := repolock.With(root, repolock.Options{
 		Purpose: workflow + "-close",
@@ -329,7 +346,7 @@ func closeRunPrepared(root, workflow, subject string, cleanup, prepare closeClea
 //
 // Used by staged-workflow closes, including automatic pulse disposal.
 func releaseWorkspaceCleanup(root string, md *run.Metadata) error {
-	if err := releaseRunWorkspace(root, md); err != nil {
+	if err := releaseRunWorkspace(heldRun(root, md.Project, md.ID), md); err != nil {
 		return fmt.Errorf("release workspace: %w", err)
 	}
 	return nil

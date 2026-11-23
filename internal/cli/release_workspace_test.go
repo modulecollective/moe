@@ -19,7 +19,7 @@ func foreignHeldWorkspaceFixture(t *testing.T) (root, wp string) {
 	t.Helper()
 	root = stageWorkspaceFixture(t, "--workspace", "tele/dev")
 	other := &run.Metadata{Project: "tele", ID: "other", Workflow: "sdlc", Workspace: "dev"}
-	wp, err := attachRunWorkspace(root, other, branchPrefix+"other")
+	wp, err := attachTestRunWorkspace(t, root, other, branchPrefix+"other")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func claimRun(t *testing.T, root, name string) string {
 func TestReleaseRunWorkspaceLeavesForeignClaim(t *testing.T) {
 	root, wp := foreignHeldWorkspaceFixture(t)
 
-	if err := releaseRunWorkspace(root, loadRun(t, root, "tele", "fix-it")); err != nil {
+	if err := releaseTestRunWorkspace(t, root, loadRun(t, root, "tele", "fix-it")); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 	if got := claimRun(t, root, "dev"); got != "tele/other" {
@@ -88,7 +88,7 @@ func TestReleaseRunWorkspaceLeavesUnclaimedTree(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := releaseRunWorkspace(root, loadRun(t, root, "tele", "fix-it")); err != nil {
+	if err := releaseTestRunWorkspace(t, root, loadRun(t, root, "tele", "fix-it")); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 	if got := currentBranch(t, wp); got != branchPrefix+"other" {
@@ -106,7 +106,7 @@ func TestReleaseRunWorkspaceMalformedClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := releaseRunWorkspace(root, loadRun(t, root, "tele", "fix-it")); err == nil {
+	if err := releaseTestRunWorkspace(t, root, loadRun(t, root, "tele", "fix-it")); err == nil {
 		t.Errorf("release of a malformed claim returned nil")
 	}
 	if _, err := os.Stat(claimPath); err != nil {

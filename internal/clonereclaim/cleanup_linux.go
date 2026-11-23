@@ -121,7 +121,7 @@ func (r *Registry) ExecuteCleanup(ctx context.Context, h *runowner.Handle, plan 
 			return fmt.Errorf("cleanup supervisor failed after completion; retain %s: %w", attempt.Name(), errors.Join(waitErr, bounded.Err()))
 		}
 	}
-	completed, err := r.PlanCleanup(h, plan.Purpose, plan.Resources.Teardown, true)
+	completed, err := r.PlanCleanup(h, plan.Purpose, plan.Scripts, true)
 	if err != nil {
 		return err
 	}
@@ -195,7 +195,7 @@ func cleanupSupervisor() int {
 	}
 	defer attempt.Close()
 	intent, err := readRecord[CleanupIntent](attempt, "intent.json")
-	if err != nil || !reflect.DeepEqual(intent, cfg.Intent) || intent.Version != protocolVersion || intent.Generation != r.Identity.Generation || intent.Resource != snapshot.ID || intent.CacheDigest != snapshot.Digest || !reflect.DeepEqual(intent.Scripts, snapshot.Teardown) || !cleanupPurpose(intent.Purpose) {
+	if err != nil || !reflect.DeepEqual(intent, cfg.Intent) || intent.Version != protocolVersion || intent.Generation != r.Identity.Generation || intent.Resource != snapshot.ID || intent.CacheDigest != snapshot.Digest || !r.scriptsApproved(snapshot, intent.Scripts) || !cleanupPurpose(intent.Purpose) {
 		return 1
 	}
 	pgid, err := syscall.Getpgid(0)

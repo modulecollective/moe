@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/chore"
+	"github.com/modulecollective/moe/internal/clonereclaim"
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
@@ -209,6 +210,9 @@ func serveOptions(root string, stderr io.Writer) serve.Options {
 				return err
 			}
 			defer func() { err = errors.Join(err, h.Release()) }()
+			if err := clonereclaim.CheckRunRecovery(h); err != nil {
+				return err
+			}
 			md, err := run.Load(root, project, runID)
 			if err != nil {
 				return err
@@ -218,8 +222,13 @@ func serveOptions(root string, stderr io.Writer) serve.Options {
 				return &runopen.NotClosableError{Reason: fmt.Sprintf(
 					"workflow %s has no close pipeline", md.Workflow)}
 			}
-			return closeRunInProcess(root, md.Workflow, reg.subject,
-				reg.cleanup, project, runID, true, stderr)
+			return closeRunPreparedOwned(h, root, md.Workflow, reg.subject,
+				func(_ string, md *run.Metadata) error {
+					if reg.cleanup == nil {
+						return nil
+					}
+					return releaseRunWorkspace(h, md)
+				}, nil, project, runID, true, stderr)
 		},
 		// The workflow registries are init-time static, so the serve UI
 		// declarations cross the seam as a lookup plus a precomputed

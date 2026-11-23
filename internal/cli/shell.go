@@ -64,6 +64,15 @@ func runShell(args []string, stdout, stderr io.Writer) int {
 // or the project ships no dev-env.d/); in that case the shell inherits
 // the operator's real env, same as before.
 func shellRunWorkspace(root, projectID, runID string, stdout, stderr io.Writer) int {
+	return shellRunWorkspaceTarget(root, projectID, runID, "", stdout, stderr)
+}
+
+func shellRunWorkspaceTarget(root, projectID, runID, expectedName string, stdout, stderr io.Writer) int {
+	release, ok := ownRunForVerb(root, projectID, runID, stderr)
+	if !ok {
+		return 1
+	}
+	defer release()
 	if err := requireProject(root, projectID); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -72,6 +81,21 @@ func shellRunWorkspace(root, projectID, runID string, stdout, stderr io.Writer) 
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
+	}
+	if md.Status != run.StatusInProgress && md.Status != run.StatusPushed {
+		moePrintln(stderr, "shell: run must be in progress or pushed")
+		return 1
+	}
+	if expectedName != "" && md.Workspace != expectedName {
+		moePrintln(stderr, "shell: workspace claim and run binding disagree")
+		return 1
+	}
+	if md.Workspace != "" {
+		held, err := runHoldsWorkspace(root, md)
+		if err != nil || !held {
+			moePrintln(stderr, "shell: workspace is not held by this run")
+			return 1
+		}
 	}
 	wp, err := resolveRunWorkspacePath(root, md)
 	if err != nil {
@@ -88,11 +112,15 @@ func shellRunWorkspace(root, projectID, runID string, stdout, stderr io.Writer) 
 		return 1
 	}
 	if staleRevision {
+		if md.Workspace != "" {
+			moePrintf(stderr, "dev-env: cached environment predates the holding run's hook revision; run `moe workspace refresh %s/%s`\n", md.Project, md.Workspace)
+			return 1
+		}
 		moePrintln(stderr, "dev-env: cached environment predates this run's hook revision; reopen a sandbox-backed stage to rebuild it")
 		return 1
 	}
 	moePrintf(stdout, "shell in %s (run %s/%s)\n", wp, md.Project, md.ID)
-	return execShell(wp, mapToEnv(extraEnv), stderr)
+	return execOwnedShell(heldRun(root, projectID, runID), md, wp, mapToEnv(extraEnv), stderr)
 }
 
 // shellNamedWorkspace drops into a named workspace without a run. The
@@ -116,12 +144,20 @@ func shellNamedWorkspace(root, projectID, name string, stdout, stderr io.Writer)
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	wp, err := workspace.Ensure(root, projectID, name)
+	holder, err := workspace.ReadClaim(root, projectID, name)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	holder, err := workspace.ReadClaim(root, projectID, name)
+	if holder != nil {
+		p, r, err := splitProjectRun(holder.Run)
+		if err != nil || p != projectID {
+			moePrintln(stderr, "shell: invalid workspace claim")
+			return 1
+		}
+		return shellRunWorkspaceTarget(root, p, r, name, stdout, stderr)
+	}
+	wp, err := workspace.Ensure(root, projectID, name)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1

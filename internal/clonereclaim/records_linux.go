@@ -38,13 +38,17 @@ type Identity struct {
 	Inode      uint64 `json:"inode"`
 	Mount      string `json:"mount"`
 	Namespace  string `json:"mount_namespace"`
+	RootDevice uint64 `json:"root_device"`
+	RootInode  uint64 `json:"root_inode"`
 }
 
 // Registry holds the pinned generation directory outside the disposable tree.
 // Close it after use. Writes still require an explicit live run-owner handle.
 type Registry struct {
-	Identity Identity
-	dir      *os.File
+	Identity  Identity
+	dir       *os.File
+	viewMount string
+	shellOnly bool
 }
 
 func (r *Registry) Close() error { return r.dir.Close() }
@@ -77,12 +81,8 @@ func Enroll(h *runowner.Handle) (*Registry, error) {
 		return nil, err
 	}
 	defer base.Close()
-	entries, err := base.ReadDir(1)
-	if err != nil && err != io.EOF {
+	if err := completedGenerations(h); err != nil {
 		return nil, err
-	}
-	if len(entries) != 0 {
-		return nil, errors.New("missing clone marker with existing recovery evidence; host recovery required")
 	}
 	identity.Generation, err = randomID()
 	if err != nil {
@@ -126,7 +126,7 @@ func LoadRegistry(h *runowner.Handle) (*Registry, error) {
 		return nil, errors.New("invalid clone generation")
 	}
 	actual.Generation = marker.Generation
-	if marker != actual {
+	if !samePhysical(marker, actual) {
 		return nil, errors.New("clone identity or mount namespace changed; host recovery required")
 	}
 	base, err := openRegistry(h, false)
@@ -146,12 +146,19 @@ func LoadRegistry(h *runowner.Handle) (*Registry, error) {
 		}
 		return nil, errors.New("external clone identity disagrees with marker")
 	}
-	return &Registry{Identity: marker, dir: generation}, nil
+	if err := validateView(generation, marker, actual); err != nil {
+		generation.Close()
+		return nil, err
+	}
+	return &Registry{Identity: marker, dir: generation, viewMount: actual.Mount}, nil
 }
 
 func (r *Registry) validateOwner(h *runowner.Handle) error {
 	if !h.Owns(r.Identity.Root, r.Identity.Project, r.Identity.Run) {
 		return errors.New("clone reclamation requires held run ownership")
+	}
+	if r.shellOnly {
+		return r.validateNamedShell(h)
 	}
 	current, err := LoadRegistry(h)
 	if err != nil {
@@ -177,6 +184,10 @@ func physicalIdentity(h *runowner.Handle, durable bool) (Identity, *os.File, err
 		return id, nil, err
 	}
 	defer root.Close()
+	var rootStat syscall.Stat_t
+	if err := syscall.Fstat(int(root.Fd()), &rootStat); err != nil {
+		return id, nil, err
+	}
 	mount, err := mountID(root)
 	if err != nil {
 		return id, nil, err
@@ -246,6 +257,7 @@ func physicalIdentity(h *runowner.Handle, durable bool) (Identity, *os.File, err
 	}
 	syscall.CloseOnExec(fd)
 	id = Identity{Version: protocolVersion, Root: h.Root, Project: h.Project, Run: h.Run, Path: filepath.Join(h.Root, ".moe", "clones", h.Project, h.Run), Device: uint64(stat.Dev), Inode: stat.Ino, Mount: mount, Namespace: namespace}
+	id.RootDevice, id.RootInode = uint64(rootStat.Dev), rootStat.Ino
 	return id, os.NewFile(uintptr(fd), id.Path), nil
 }
 

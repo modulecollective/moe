@@ -73,6 +73,15 @@ func Ensure(root, projectID, runID string) (string, error) {
 // without duplicating the auto-init pre-flight or the git-clone
 // invocation.
 func EnsureAt(root, projectID, dst string) (string, error) {
+	return ensureAt(root, projectID, dst, false)
+}
+
+// EnsureRetained leaves a failed per-run creation held for host inspection.
+func EnsureRetained(root, projectID, runID string) (string, error) {
+	return ensureAt(root, projectID, Path(root, projectID, runID), true)
+}
+
+func ensureAt(root, projectID, dst string, retainPartial bool) (string, error) {
 	src := filepath.Join(root, "projects", projectID, "src")
 
 	if err := project.EnsureMaterialized(root, projectID); err != nil {
@@ -126,7 +135,9 @@ func EnsureAt(root, projectID, dst string) (string, error) {
 		if out, err := git.Combined(absDst, "checkout", "HEAD"); err != nil {
 			// Best-effort cleanup so a half-cloned dir doesn't poison the
 			// next attempt.
-			_ = os.RemoveAll(absDst)
+			if !retainPartial {
+				_ = os.RemoveAll(absDst)
+			}
 			return "", fmt.Errorf("sandbox: git checkout HEAD in %s: %w (%s)", absDst, err, out)
 		}
 	}
@@ -218,13 +229,8 @@ func FreshenBranch(clonePath, branch, defaultBranch string) (int, error) {
 // reference; nuking the clone has no effect on the canonical
 // submodule's object store.
 //
-// A permission denial inside the clone typically means a container
-// running as root wrote files there (rootless docker maps container-
-// root → host `nobody:nogroup`, which the moe process can't unlink).
-// We surface that likely cause and point at `moe clone gc`, the verb
-// that knows how to fall back to a container-driven rm. The wrapped
-// error keeps the path / syscall detail intact for anyone matching on
-// it with errors.Is.
+// This primitive is for hook-fire scratch only. Registered run lifecycles use
+// the guarded reclamation transaction; permission repair is never automatic.
 func Remove(root, projectID, runID string) error {
 	dst := Path(root, projectID, runID)
 	if err := os.RemoveAll(dst); err != nil {
@@ -232,7 +238,7 @@ func Remove(root, projectID, runID string) error {
 			return fmt.Errorf(
 				"sandbox: remove %s: %w (likely a container-written file; "+
 					"the project's dev-env-teardown.d should remove it, "+
-					"or run `moe clone gc`)", dst, err)
+					"inspect with `moe clone gc`; no permission-repair fallback)", dst, err)
 		}
 		return fmt.Errorf("sandbox: remove %s: %w", dst, err)
 	}

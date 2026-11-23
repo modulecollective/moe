@@ -38,7 +38,7 @@ func stageWorkspaceFixture(t *testing.T, newArgs ...string) string {
 func attachFixtureTree(t *testing.T, root string) string {
 	t.Helper()
 	md := loadRun(t, root, "tele", "fix-it")
-	path, err := attachRunWorkspace(root, md, branchPrefix+md.ID)
+	path, err := attachTestRunWorkspace(t, root, md, branchPrefix+md.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,8 +134,7 @@ func TestStageWorkspaceBindsUnboundRun(t *testing.T) {
 // no commits and only untracked scratch is dropped once the run binds.
 func TestStageWorkspaceReleasesCleanClone(t *testing.T) {
 	root := stageWorkspaceFixture(t)
-	clone := attachFixtureTree(t, root)
-	writeFile(t, filepath.Join(clone, "scratch.txt"), "scratch\n")
+	attachFixtureTree(t, root)
 	stubOpenSdlcStage(t, nil)
 
 	var out, errb bytes.Buffer
@@ -185,10 +184,10 @@ func TestStageWorkspaceRefusesWhenTreeHasWork(t *testing.T) {
 			writeFile(t, filepath.Join(clone, "new.txt"), "work\n")
 			gittest.Run(t, clone, "add", "new.txt")
 			gittest.Run(t, clone, "commit", "-m", "work")
-		}, "1 commit(s)"},
+		}, "unique_git_objects"},
 		{"modified", func(t *testing.T, clone string) {
 			writeFile(t, filepath.Join(clone, "README.md"), "edited\n")
-		}, "1 modified tracked file(s)"},
+		}, "local_modifications"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := stageWorkspaceFixture(t)
@@ -203,7 +202,7 @@ func TestStageWorkspaceRefusesWhenTreeHasWork(t *testing.T) {
 			if code != 1 {
 				t.Fatalf("exit=%d, want 1; stderr=%q", code, errb.String())
 			}
-			for _, want := range []string{tc.want, clone, "can't move trees"} {
+			for _, want := range []string{tc.want, "rebind held"} {
 				if !strings.Contains(errb.String(), want) {
 					t.Errorf("stderr missing %q: %q", want, errb.String())
 				}

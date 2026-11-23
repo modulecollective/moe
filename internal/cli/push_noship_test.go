@@ -74,8 +74,8 @@ func TestPushNoShipGateClosesRun(t *testing.T) {
 	if md := f.reloadRun(); md.Status != run.StatusClosed {
 		t.Fatalf("status = %s, want closed", md.Status)
 	}
-	if sandbox.Exists(f.root, f.projectID, f.runID) {
-		t.Error("expected the sandbox clone released by the close cleanup")
+	if !sandbox.Exists(f.root, f.projectID, f.runID) {
+		t.Error("no-ship close discarded reflog-only feature work before retention expired")
 	}
 	if got := f.originHead(); got != originBefore {
 		t.Errorf("origin/main moved to %s; a no-ship close must not touch the target repo", got)

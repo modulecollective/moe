@@ -38,10 +38,7 @@ func TestSDLCCloseRemovesSandboxAndCommits(t *testing.T) {
 
 	// sandbox.Remove tears down the run's worktree directory; we fake
 	// it with a plain dir so the test doesn't need a live submodule.
-	sandboxPath := sandbox.Path(root, "tele", "abandon-me")
-	if err := os.MkdirAll(sandboxPath, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	sandboxPath := cleanTestClone(t, root, "tele", "abandon-me")
 
 	var out, errb bytes.Buffer
 	code := Run([]string{"sdlc", "close", "--no-edit", "tele/abandon-me"}, &out, &errb)

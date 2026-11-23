@@ -4,7 +4,6 @@ package clonereclaim
 
 import (
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 
@@ -18,6 +17,9 @@ func CheckRunRecovery(h *runowner.Handle) error {
 	if h == nil || !h.Owns(h.Root, h.Project, h.Run) || !namePattern.MatchString(h.Project) || !namePattern.MatchString(h.Run) {
 		return errors.New("recovery admission requires exact held run ownership")
 	}
+	if err := CheckNamedShells(h); err != nil {
+		return err
+	}
 	path := filepath.Join(h.Root, ".moe", "clones", h.Project, h.Run)
 	if _, err := os.Lstat(path); err == nil {
 		r, err := LoadRegistry(h)
@@ -25,6 +27,11 @@ func CheckRunRecovery(h *runowner.Handle) error {
 			return &HoldError{Reason: "clone generation needs host enrollment/recovery", Receipt: registryPath(h.Root, h.Project, h.Run)}
 		}
 		defer r.Close()
+		if _, pending, err := r.PendingRemoval(); err != nil {
+			return err
+		} else if pending {
+			return &HoldError{Reason: "authorized clone removal is pending", Receipt: r.Receipt()}
+		}
 		return r.ValidateEnvironment(h)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
@@ -35,20 +42,32 @@ func CheckRunRecovery(h *runowner.Handle) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	records, err := openRegistry(h, false)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
+	return completedGenerations(h)
+}
+
+func completedGenerations(h *runowner.Handle) error {
+	records, err := Registries(h)
 	if err != nil {
 		return err
 	}
-	defer records.Close()
-	entries, err := records.ReadDir(1)
-	if err != nil && err != io.EOF {
-		return err
-	}
-	if len(entries) > 0 {
-		return &HoldError{Reason: "clone absence has no completed removal receipt", Receipt: records.Name()}
+	defer func() {
+		for _, r := range records {
+			r.Close()
+		}
+	}()
+	for _, r := range records {
+		if _, pending, err := r.PendingRemoval(); err != nil {
+			return err
+		} else if pending {
+			return &HoldError{Reason: "clone removal is pending", Receipt: r.Receipt()}
+		}
+		done, err := r.Removed()
+		if err != nil {
+			return err
+		}
+		if !done {
+			return &HoldError{Reason: "clone absence has no completed removal receipt", Receipt: r.Receipt()}
+		}
 	}
 	return nil
 }

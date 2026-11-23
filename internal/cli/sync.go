@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
+	"github.com/modulecollective/moe/internal/clonereclaim"
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/push"
@@ -290,11 +291,14 @@ func reconcileOnePushedRun(root string, md *run.Metadata, stdout, stderr io.Writ
 			moePrintf(stderr, "moe sync: %v\n", err)
 		}
 	}()
+	if err := clonereclaim.CheckRunRecovery(owner); err != nil {
+		return false, err
+	}
 	if err := deleteRemoteBranchForRun(root, md); err != nil {
 		moePrintf(stderr, "warning: %s/%s: %v\n", md.Project, md.ID, err)
 	}
 
-	ok, err := finalizePushedRun(root, md.Project, md.ID, status, extra, stderr)
+	ok, err := finalizePushedRunOwned(owner, root, md.Project, md.ID, status, extra, stderr)
 	if ok {
 		moePrintf(stdout, "%s", line)
 	}
@@ -322,7 +326,7 @@ func reconcileOnePushedRun(root string, md *run.Metadata, stdout, stderr io.Writ
 // `pushed`, prints a one-line warning, and returns (false, nil) so
 // reconcile can continue with other runs and the next `moe sync`
 // retries. Returns (true, nil) when the transition committed.
-func finalizePushedRun(root, projectID, runID, status string, extra trailers.Block, stderr io.Writer) (bool, error) {
+func finalizePushedRunOwned(owner *runowner.Handle, root, projectID, runID, status string, extra trailers.Block, stderr io.Writer) (bool, error) {
 	moved := false
 	var finalized *run.Metadata
 	err := repolock.With(root, repolock.Options{
@@ -362,7 +366,7 @@ func finalizePushedRun(root, projectID, runID, status string, extra trailers.Blo
 		return false, err
 	}
 	if moved {
-		if err := releaseRunWorkspace(root, finalized); err != nil {
+		if err := releaseRunWorkspace(owner, finalized); err != nil {
 			return true, &terminalCleanupError{Project: projectID, Run: runID, Status: status, Err: err}
 		}
 	}

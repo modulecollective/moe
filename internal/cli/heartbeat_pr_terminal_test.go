@@ -164,7 +164,6 @@ func TestHeartbeatTerminalPRDrivesPulseBeforeSurvey(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			f := newReconcileFixture(t, run.StatusPushed)
 			writeFile(t, filepath.Join(f.root, ".gitignore"), ".moe/\n")
-			seedSdlcOneShotProject(t, f.root, f.projectID)
 			writeFile(t, filepath.Join(f.root, "projects", f.projectID, "project.json"),
 				`{"id":"tele","submodule":"projects/tele/src","remote":"https://github.com/owner/repo.git","default_branch":"main","mode":"safe"}`+"\n")
 			t.Setenv("MOE_HOME", f.root)

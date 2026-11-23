@@ -251,6 +251,13 @@ func runWorkspaceRelease(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
+	if prior != nil {
+		release, ok := ownClaimedWorkspace(root, projectID, name, prior, stderr)
+		if !ok {
+			return 1
+		}
+		defer release()
+	}
 	if err := workspace.Release(root, projectID, name); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -473,6 +480,11 @@ func runWorkspaceRefresh(args []string, stdout, stderr io.Writer) int {
 	}
 	md := &run.Metadata{Project: projectID, Workspace: name}
 	if holder != nil {
+		release, ok := ownClaimedWorkspace(root, projectID, name, holder, stderr)
+		if !ok {
+			return 1
+		}
+		defer release()
 		holderProject, holderRun, splitErr := splitProjectRun(holder.Run)
 		if splitErr != nil {
 			moePrintf(stderr, "workspace: invalid claim run %q: %v\n", holder.Run, splitErr)
@@ -500,4 +512,26 @@ func runWorkspaceRefresh(args []string, stdout, stderr io.Writer) int {
 	}
 	moePrintf(stdout, "dev-env refreshed for workspace %s/%s\n", projectID, name)
 	return 0
+}
+
+// Claim release and refresh must not turn an exclusive claimed shell into an
+// unclaimed alias while its descendants still own the run. Unclaimed lifecycle
+// behavior is unchanged.
+func ownClaimedWorkspace(root, p, name string, expected *workspace.Claim, stderr io.Writer) (func(), bool) {
+	hp, hr, err := splitProjectRun(expected.Run)
+	if err != nil || hp != p {
+		moePrintln(stderr, "workspace: invalid claim owner")
+		return nil, false
+	}
+	release, ok := ownRunForMutation(root, hp, hr, stderr)
+	if !ok {
+		return nil, false
+	}
+	current, err := workspace.ReadClaim(root, p, name)
+	if err != nil || current == nil || current.Run != expected.Run {
+		release()
+		moePrintln(stderr, "workspace: claim changed during ownership acquisition")
+		return nil, false
+	}
+	return release, true
 }
