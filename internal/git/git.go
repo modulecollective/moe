@@ -124,6 +124,23 @@ func Output(dir string, args ...string) (string, error) {
 	return string(stdout), nil
 }
 
+// Inspect captures bounded stdout from a read-only Git command. Exhaustion
+// returns no inventory: callers must never interpret a truncated scan as proof
+// that work is disposable. A context deadline is required, so both process
+// lifetime and output size have a bound. Repository-selection environment
+// overrides are removed; the supplied directory owns the inspection.
+func Inspect(ctx context.Context, dir string, limit int, args ...string) (string, error) {
+	if _, bounded := ctx.Deadline(); !bounded || limit <= 0 {
+		return "", errors.New("git inspection requires a context deadline and positive output limit")
+	}
+	args = append([]string{"--no-optional-locks", "--no-replace-objects", "-c", "core.fsmonitor=false", "-c", "core.commitGraph=false", "-c", "diff.external=", "-c", "core.pager=cat"}, args...)
+	out, stderr, err := execGitLimited(ctx, dir, args, false, readRetryCap, limit)
+	if err != nil {
+		return "", fmt.Errorf("git inspect %s: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(string(stderr)))
+	}
+	return string(out), nil
+}
+
 // Combined runs git in dir capturing stdout+stderr in git's own write
 // order, trimmed, and returns the captured output even on error so
 // callers can include it verbatim in diagnostics. Index-lock retry
@@ -192,11 +209,16 @@ func Stream(dir string, stdout, stderr io.Writer, args ...string) error {
 // Hook (if set) fires once per attempt — retries are visible to a
 // tracer, not hidden inside this loop.
 func execGit(ctx context.Context, dir string, args []string, combined bool, retryCap time.Duration) (stdoutBuf, stderrBuf []byte, err error) {
+	return execGitLimited(ctx, dir, args, combined, retryCap, 0)
+}
+
+func execGitLimited(ctx context.Context, dir string, args []string, combined bool, retryCap time.Duration, limit int) (stdoutBuf, stderrBuf []byte, err error) {
 	callStart := time.Now()
 	deadline := callStart.Add(retryCap)
 	for {
 		start := time.Now()
-		cmd := exec.CommandContext(ctx, "git", args...)
+		attemptCtx, cancel := context.WithCancel(ctx)
+		cmd := exec.CommandContext(attemptCtx, "git", args...)
 		if dir != "" {
 			cmd.Dir = dir
 		}
@@ -216,7 +238,18 @@ func execGit(ctx context.Context, dir string, args []string, combined bool, retr
 		} else {
 			cmd.Stderr = &errBuf
 		}
+		var cappedOut, cappedErr *cappedWriter
+		if limit > 0 {
+			cmd.Env = inspectionEnv()
+			cappedOut = &cappedWriter{dst: &outBuf, remaining: limit, cancel: cancel}
+			cappedErr = &cappedWriter{dst: &errBuf, remaining: limit, cancel: cancel}
+			cmd.Stdout, cmd.Stderr = cappedOut, cappedErr
+		}
 		err = cmd.Run()
+		cancel()
+		if limit > 0 && (cappedOut.exceeded || cappedErr.exceeded) {
+			err = errors.New("inspection output limit exceeded")
+		}
 		if Hook != nil {
 			Hook(dir, args, time.Since(start), err)
 		}
@@ -241,6 +274,35 @@ func execGit(ctx context.Context, dir string, args []string, combined bool, retr
 		}
 		return outBuf.Bytes(), errBuf.Bytes(), err
 	}
+}
+
+type cappedWriter struct {
+	dst       *bytes.Buffer
+	remaining int
+	cancel    context.CancelFunc
+	exceeded  bool
+}
+
+func (w *cappedWriter) Write(p []byte) (int, error) {
+	if len(p) > w.remaining {
+		w.exceeded = true
+		w.cancel()
+		return 0, errors.New("inspection output limit exceeded")
+	}
+	w.remaining -= len(p)
+	return w.dst.Write(p)
+}
+
+func inspectionEnv() []string {
+	var env []string
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if strings.HasPrefix(key, "GIT_") && key != "GIT_CONFIG_GLOBAL" && key != "GIT_CONFIG_SYSTEM" && key != "GIT_EXEC_PATH" {
+			continue
+		}
+		env = append(env, entry)
+	}
+	return append(env, "GIT_TERMINAL_PROMPT=0", "GIT_NO_LAZY_FETCH=1")
 }
 
 // contextError renders a finished context as the error the caller
