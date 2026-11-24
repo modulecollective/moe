@@ -19,8 +19,8 @@
 //   - park — ask the current owner to settle and yield once. Nothing is
 //     held; later pickup follows ordinary eligibility.
 //   - finish — at the next boundary, continue this run with `!!`
-//     authority through the existing gates and ship route, then end its
-//     chain ride. Authorises only this run.
+//     authority through the existing gates and ship route. Authorises
+//     only this run.
 //   - resume — recorded by Resume, never accepted through Submit:
 //     releasing a hold is an act of a guard holder, not a queued intent.
 //
@@ -131,8 +131,8 @@ type Request struct {
 	// run that was already pushed then (a CI repair) cannot prove by
 	// its status alone that this finish shipped anything.
 	AppliedStatus string `json:"applied_status,omitempty"`
-	// Boundary names where an owner acted on the request ("stage code",
-	// "push", "chain ride", …).
+	// Boundary names where an owner acted on the request ("stage build",
+	// "push", …).
 	Boundary string `json:"boundary,omitempty"`
 	// Outcome is one human line describing what actually happened.
 	Outcome string `json:"outcome,omitempty"`

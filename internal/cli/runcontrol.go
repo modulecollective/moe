@@ -3,7 +3,7 @@ package cli
 // The owner's side of operator run controls (internal/runcontrol). Every
 // owner consults the run's control record at each boundary — before a
 // stage is admitted or its agent launched, at a next-stage decision,
-// before a gate kickback, a ship attempt, a nominated close or a chain
+// before a gate kickback, a ship attempt, a nominated close or a run
 // ride — and at a quota wait. The record is re-read every time: a
 // sweep's snapshot from before the request is exactly what must not
 // decide.
@@ -397,11 +397,11 @@ func finishGateBlocked(root string, md *run.Metadata, stage string, stderr io.Wr
 // finishWalkStopped completes an open finish whose run's walk just
 // stopped with a failure: that stop is the finish's outcome, recorded as
 // failed, so it can't widen a later invocation. Every walk settles here
-// at its own stop — a kick, the operator's typed cascade, each run a
-// chain ride reaches, a stage entered on its own, and a CI repair. A yield
-// leaves the finish to the hold or park that caused it, a quota deferral
-// to the ride that retries, and a shipped run completed it at the ship
-// seam (finishAtShip). Reports whether it settled one.
+// at its own stop — a run ride, the operator's typed cascade, a stage
+// entered on its own, and a CI repair. A yield leaves the finish to the
+// hold or park that caused it, a quota deferral to the ride that retries,
+// and a shipped run completed it at the ship seam (finishAtShip).
+// Reports whether it settled one.
 func finishWalkStopped(root string, md *run.Metadata, res cascadeResult, code int, stderr io.Writer) bool {
 	if code == 0 || code == exitYielded || code == exitQuotaDeferred || res.shipped {
 		return false
@@ -419,9 +419,9 @@ func finishWalkStopped(root string, md *run.Metadata, res cascadeResult, code in
 	return true
 }
 
-// finishAtShip is the ship seam's half of finish: once this run has
-// shipped, any finish waiting on it is complete and the chain ride it
-// would have started is withheld. Returns whether to withhold the ride.
+// finishAtShip settles open finish requests once this run has shipped.
+// Reports whether it found an open finish request to settle, even if
+// recording the settlement failed.
 func finishAtShip(md *run.Metadata, stderr io.Writer) bool {
 	root, err := findRoot(io.Discard)
 	if err != nil || !operatorCascades(md.Workflow) {

@@ -31,7 +31,7 @@ func init() {
 		{runcontrol.KindPause, "hold a run once its current work settles, until `moe control resume`"},
 		{runcontrol.KindHandoff, "hold a run for a human to pick its conversation up"},
 		{runcontrol.KindPark, "have a run's current owner yield once, holding nothing"},
-		{runcontrol.KindFinish, "ship this run (!! scope) from its next boundary, riding no chain"},
+		{runcontrol.KindFinish, "ship this run (!! scope) from its next boundary"},
 	} {
 		kind := c.kind
 		g.Register(&Command{

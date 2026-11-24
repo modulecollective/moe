@@ -64,7 +64,7 @@ type quotaDeferral struct {
 // cooldownSkipped is the invocation-wide bypass: set by --no-cooldown at
 // launch or by `a` at a waiting prompt, and never reset — "skip checks
 // for the rest of this invocation" means the MoE process, including
-// every stage a cascade or chain ride dispatches after it.
+// every stage a cascade or run ride dispatches after it.
 var cooldownSkipped atomic.Bool
 
 // readStageQuota is the seam the gate reads through. Production asks
