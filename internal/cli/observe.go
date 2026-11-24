@@ -38,6 +38,8 @@ type RunObservation struct {
 	Project, Run string
 	Workflow     string
 	Status       string
+	Progress     WorkflowProgress
+	ProgressErr  error
 	// Control is the durable record; ControlErr means it could not be
 	// read, which refuses motion and must never render as "no hold".
 	Control    runcontrol.File
@@ -66,7 +68,7 @@ func (o RunObservation) key() string { return o.Project + "/" + o.Run }
 // whose guard is held, with bounded concurrency and an overall budget.
 // Callers pass runs already narrowed by their own filters.
 func ObserveRuns(root string, mds []*run.Metadata, now time.Time) map[string]RunObservation {
-	return observeRuns(root, mds, now, nil)
+	return observeRuns(root, mds, now, nil, nil)
 }
 
 // liveLookup supplies an owner snapshot a caller already holds fresh —
@@ -74,11 +76,21 @@ func ObserveRuns(root string, mds []*run.Metadata, now time.Time) map[string]Run
 // observation pass does not poll that endpoint again.
 type liveLookup func(key string) (runsock.Status, bool)
 
-func observeRuns(root string, mds []*run.Metadata, now time.Time, cached liveLookup) map[string]RunObservation {
+func observeRuns(root string, mds []*run.Metadata, now time.Time, cached liveLookup, progress map[string]WorkflowProgress) map[string]RunObservation {
 	out := make(map[string]RunObservation, len(mds))
 	var probe []*run.Metadata
 	for _, md := range mds {
 		o := RunObservation{Project: md.Project, Run: md.ID, Workflow: md.Workflow, Status: md.Status, ObservedAt: now}
+		if progress != nil {
+			o.Progress = progress[o.key()]
+		} else if md.Status == run.StatusInProgress {
+			wf, err := LookupWorkflow(md.Workflow)
+			if err != nil {
+				o.ProgressErr = err
+			} else {
+				o.Progress, o.ProgressErr = wf.ProgressWithIndex(root, md, nil)
+			}
+		}
 		o.Control, o.ControlErr = runcontrol.Load(root, md.Project, md.ID)
 		o.Unrecorded, o.UnrecordedErr = runcontrol.Unrecorded(root, md.Project, md.ID)
 		o.Owned, o.OwnerErr = runowner.Busy(root, md.Project, md.ID)
@@ -131,6 +143,22 @@ func observeRuns(root string, mds []*run.Metadata, now time.Time, cached liveLoo
 	}
 	wg.Wait()
 	return out
+}
+
+// StageBlocked projects the durable gate result against confirmed live work.
+// Unknown ownership and failed contact cannot prove a retry is underway.
+func (o RunObservation) StageBlocked() bool {
+	if o.Status != run.StatusInProgress || o.ProgressErr != nil || len(o.Progress.GateProblems) == 0 {
+		return false
+	}
+	if o.Owned && o.OwnerErr == nil && o.Live != nil && o.LiveErr == nil {
+		switch o.Live.Phase {
+		case runsock.PhaseAdmission, runsock.PhaseQuotaWait, runsock.PhaseRunning,
+			runsock.PhaseSettling, runsock.PhaseBetween, runsock.PhaseShipping:
+			return false
+		}
+	}
+	return true
 }
 
 // Summary is the concise row text: owner, phase, hold and request, in
@@ -340,13 +368,22 @@ func (o RunObservation) Details(now time.Time) []string {
 	default:
 		out = append(out, fmt.Sprintf("owner: held by a moe invocation; live status unavailable (%v)", o.LiveErr))
 	}
+	if o.ProgressErr != nil {
+		out = append(out, "stage progress unavailable: "+o.ProgressErr.Error())
+	} else if o.StageBlocked() {
+		out = append(out, "last authored stage result: "+o.Progress.Stage+" blocked")
+		for _, problem := range o.Progress.GateProblems {
+			out = append(out, "  "+problem)
+		}
+		out = append(out, fmt.Sprintf("canvas: moe %s cat %s %s", o.Workflow, o.key(), o.Progress.Stage))
+	}
 	out = append(out, "observed: "+o.ObservedAt.Local().Format("15:04:05"))
 	return out
 }
 
 // observeRows fills each active row's Control text from one observation
 // pass over the live runs behind those rows.
-func observeRows(root string, rows []dash.Row, mds []*run.Metadata, now time.Time, cached liveLookup) map[string]RunObservation {
+func observeRows(root string, rows []dash.Row, mds []*run.Metadata, now time.Time, cached liveLookup, progress map[string]WorkflowProgress) map[string]RunObservation {
 	byKey := make(map[string]*run.Metadata, len(mds))
 	for _, md := range mds {
 		byKey[md.Project+"/"+md.ID] = md
@@ -365,13 +402,14 @@ func observeRows(root string, rows []dash.Row, mds []*run.Metadata, now time.Tim
 		seen[key] = true
 		live = append(live, md)
 	}
-	obs := observeRuns(root, live, now, cached)
+	obs := observeRuns(root, live, now, cached, progress)
 	for i := range rows {
 		if rows[i].Bucket == dash.BucketChores {
 			continue
 		}
 		if o, ok := obs[rows[i].Project+"/"+rows[i].Run]; ok {
 			rows[i].Control = o.Summary(now)
+			rows[i].StageBlocked = o.StageBlocked()
 		}
 	}
 	return obs

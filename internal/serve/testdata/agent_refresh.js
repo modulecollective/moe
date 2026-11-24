@@ -9,7 +9,11 @@ const error = {textContent: ''};
 const revision = {value: '0'};
 const button = {};
 const cluster = {textContent: 'serve browse-only · up 0m'};
-const row = {dataset: {key: 'p/r'}, textContent: ''};
+const rows = [...page.matchAll(/<span class="note run-status" data-key="([^"]+)">([^<]*)<\/span>/g)]
+  .map(m => ({dataset: {key: m[1]}, textContent: m[2]}));
+const badges = [...page.matchAll(/<span class="badge blocked" data-blocked-key="([^"]+)"( hidden)?>blocked<\/span>/g)]
+  .map(m => ({dataset: {blockedKey: m[1]}, hidden: !!m[2]}));
+assert.equal(rows.length, badges.length);
 const form = {querySelector: s => ({
   '[data-agent-summary]': summary,
   '[data-agent-error]': error,
@@ -20,7 +24,10 @@ const document = {
   hidden: false, activeElement: button,
   getElementById: id => { assert.equal(id, 'agent-default'); return page.includes('id="agent-default"') ? form : null; },
   querySelector: s => { assert.equal(s, '[data-serve-cluster]'); return cluster; },
-  querySelectorAll: () => [row],
+  querySelectorAll: s => {
+    if (s === '.run-status[data-key]') return rows;
+    assert.equal(s, '[data-blocked-key]'); return badges;
+  },
   addEventListener: (name, cb) => { assert.equal(name, 'visibilitychange'); visibility = cb; }
 };
 new Function('document', 'fetch', 'setInterval', 'clearInterval', scripts[0])(
@@ -33,11 +40,11 @@ new Function('document', 'fetch', 'setInterval', 'clearInterval', scripts[0])(
   () => { timer = null; }
 );
 const flush = () => new Promise(setImmediate);
-async function refresh(text, rev, err = '', status = 'serve armed · up 4m · 3 unpushed') {
+async function refresh(text, rev, err = '', status = 'serve armed · up 4m · 3 unpushed', blocked = true, present = true) {
   timer();
   reply({ok: true, json: async () => ({
     __agent_summary: text, __agent_revision: String(rev), __agent_error: err,
-    __serve_cluster: status, 'p/r': 'working'
+    __serve_cluster: status, ...(present ? Object.fromEntries(rows.map(row => [row.dataset.key, {summary: '<working>', stage_blocked: blocked}])) : {})
   })});
   await flush();
   if (page.includes('id="agent-default"')) {
@@ -46,15 +53,17 @@ async function refresh(text, rev, err = '', status = 'serve armed · up 4m · 3 
     assert.equal(error.textContent, err);
   }
   assert.equal(cluster.textContent, status);
-  assert.equal(row.textContent, 'working');
+  rows.forEach(row => assert.equal(row.textContent, present ? '<working>' : ''));
+  badges.forEach(badge => assert.equal(badge.hidden, !(present && blocked)));
   assert.equal(document.activeElement, button, 'focused control was replaced');
 }
 (async () => {
   assert.equal(starts, 1);
   await refresh('Default: Codex until tomorrow', 1);
-  await refresh('Default: stylesheet', 1); // expiry has no new revision
+  await refresh('Default: stylesheet', 1, '', undefined, false); // expiry has no new revision
   await refresh('Default: unavailable', 0, 'malformed record', 'serve armed · up 4m · push failing 12m · 3 unpushed');
-  await refresh('Default: Claude until tomorrow', 2, '', 'serve armed · up 4m');
+  await refresh('Default: Claude until tomorrow', 2, '', 'serve armed · up 4m', true);
+  await refresh('Default: Claude until tomorrow', 2, '', 'serve armed · up 4m', true, false);
   timer(); reply({ok: false}); await flush();
   assert.equal(cluster.textContent, 'serve armed · up 4m', 'failure erased last good status');
   timer(); // A response arriving after the tab hides must not paint.

@@ -26,7 +26,7 @@
       <li class="row">
         <a class="slug" href="/run/{{.Project}}/{{.Run}}">{{.Project}}/{{.Run}}</a>
         <span class="when">{{.When}}</span>
-        <span class="note">{{.Note}}</span>
+        <span class="note">{{.Note}} <span class="badge blocked" data-blocked-key="{{.Project}}/{{.Run}}"{{if not .StageBlocked}} hidden{{end}}>blocked</span></span>
         <span class="note run-status" data-key="{{.Project}}/{{.Run}}">{{.Control}}</span>
         {{if .Agent}}<span class="badge agent" title="{{.AgentTitle}}">agent</span>{{end}}
       </li>

@@ -22,6 +22,7 @@ import (
 	"github.com/modulecollective/moe/internal/runsock"
 	"github.com/modulecollective/moe/internal/serve"
 	"github.com/modulecollective/moe/internal/trailers"
+	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 	"github.com/modulecollective/moe/internal/ui"
 )
 
@@ -97,7 +98,7 @@ func TestUIBoardIndexesDashRows(t *testing.T) {
 // no gather in between; a gather does not poll the watched endpoint.
 func TestUIWatchPushesWithoutGather(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
-	root, md := controlFixture(t)
+	root, md := blockedBoardFixture(t)
 	ownForTest(t, root)
 	s := newUISource(root, DashFilter{}, os.Stdout)
 	var gathers atomic.Int32
@@ -117,6 +118,7 @@ func TestUIWatchPushesWithoutGather(t *testing.T) {
 	go func() { s.run(ctx); close(done) }()
 	t.Cleanup(func() { cancel(); <-done })
 
+	head := gittest.HeadSHA(t, root)
 	gen := ownerGeneration(root, "moe", "change-auth")
 	waitBoard := func(want func(ui.Item) bool) ui.Item {
 		t.Helper()
@@ -144,6 +146,31 @@ func TestUIWatchPushesWithoutGather(t *testing.T) {
 		t.Fatalf("%d gathers; the watch should have repainted alone", n)
 	}
 
+	publishPhase(root, md, runsock.PhaseDeciding, "design", "next stage")
+	it = waitBoard(func(it ui.Item) bool {
+		return strings.Contains(strings.Join(it.Detail, "\n"), "last authored stage result: design blocked")
+	})
+	s.mu.Lock()
+	rows, _ := s.overlay(time.Now())
+	s.mu.Unlock()
+	if !rowFor(t, DashSnapshot{Rows: rows}, "moe/change-auth").StageBlocked {
+		t.Fatal("watch decision did not restore badge")
+	}
+	publishPhase(root, md, runsock.PhaseRunning, "design", "")
+	waitBoard(func(it ui.Item) bool {
+		return strings.Contains(strings.Join(it.Detail, "\n"), "phase: agent running (stage design)") &&
+			!strings.Contains(strings.Join(it.Detail, "\n"), "last authored stage result:")
+	})
+	s.mu.Lock()
+	rows, _ = s.overlay(time.Now())
+	s.mu.Unlock()
+	if rowFor(t, DashSnapshot{Rows: rows}, "moe/change-auth").StageBlocked {
+		t.Fatal("watch retry did not suppress badge")
+	}
+	if gathers.Load() != 1 || gittest.HeadSHA(t, root) != head {
+		t.Fatal("watch projection required a gather or journal commit")
+	}
+
 	// A gather while the watch is healthy reads the cached snapshot
 	// instead of polling.
 	var probed atomic.Int32
@@ -154,6 +181,19 @@ func TestUIWatchPushesWithoutGather(t *testing.T) {
 	if err != nil || probed.Load() == 0 || snap.Observations["moe/change-auth"].Live == nil {
 		t.Fatalf("cached gather: probed=%d err=%v", probed.Load(), err)
 	}
+	writeReadyDesign(t, root, md)
+	gittest.Run(t, root, "add", "-A")
+	trailerstest.CommitWorkTurnAt(t, root, "moe", md.ID, "sdlc", "design", time.Now().Add(time.Second))
+	if err := s.refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	o := s.snap.Observations["moe/change-auth"]
+	s.mu.Unlock()
+	if len(o.Progress.GateProblems) != 0 {
+		t.Fatal("durable refresh retained old gate")
+	}
+
 }
 
 // An owner closing its endpoint — the end of every stage session — is a
@@ -162,7 +202,7 @@ func TestUIWatchPushesWithoutGather(t *testing.T) {
 // silent owner is still an issue.
 func TestUIOwnerEndpointClosedIsNotAnIssue(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
-	root, md := controlFixture(t)
+	root, md := blockedBoardFixture(t)
 	ownForTest(t, root)
 	s := newUISource(root, DashFilter{}, os.Stdout)
 	prev := uiDiscovery
@@ -209,11 +249,11 @@ func TestUIOwnerEndpointClosedIsNotAnIssue(t *testing.T) {
 			t.Fatalf("closed endpoint raised an issue: %q", issue)
 		}
 	}
-	if line := b.Lines[it.Line]; !strings.Contains(line, "owned · no live status") {
+	if line := b.Lines[it.Line]; !strings.Contains(line, "owned · no live status") || !strings.Contains(line, "[blocked]") {
 		t.Fatalf("row = %q", line)
 	}
 	d := strings.Join(it.Detail, "\n")
-	if !strings.Contains(d, "last known below is stale") || !strings.Contains(d, "phase: agent running (stage code)") || strings.Contains(d, "EOF") {
+	if !strings.Contains(d, "last authored stage result: design blocked") || !strings.Contains(d, "last known below is stale") || !strings.Contains(d, "phase: agent running (stage code)") || strings.Contains(d, "EOF") {
 		t.Fatalf("detail:\n%s", d)
 	}
 

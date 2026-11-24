@@ -29,8 +29,8 @@ func controlServer(t *testing.T, view RunControlView, submitErr error) (*Server,
 			reads++
 			return view, true, nil
 		},
-		RunStatuses: func(project string) (map[string]string, error) {
-			return map[string]string{"alpha/fix-it": "held · waiting for operator"}, nil
+		RunStatuses: func(project string) (map[string]RunRowStatus, error) {
+			return map[string]RunRowStatus{"alpha/fix-it": {Summary: "held · waiting for operator"}}, nil
 		},
 		SubmitControl: func(project, run, action, id string, revision int) (string, error) {
 			calls = append(calls, controlCall{project, run, action, id, revision})
@@ -45,7 +45,7 @@ func controlServer(t *testing.T, view RunControlView, submitErr error) (*Server,
 // the render's request id and hold revision.
 func TestRunPageRendersStatusAndControls(t *testing.T) {
 	view := RunControlView{
-		Summary: "handed off", Lines: []string{"owner: none", "hold: handoff c-1 — held, ready to resume"},
+		StageBlocked: true, Summary: "handed off", Lines: []string{"owner: none", "hold: handoff c-1 — held, ready to resume", "test<script>.md: missing"},
 		Revision: 3, Actions: []string{"resume"}, Conversation: "moe sdlc code alpha/fix-it --agent codex",
 		Requests: []string{"Nov 12 08:00 handoff c-1 — completed"},
 	}
@@ -56,7 +56,7 @@ func TestRunPageRendersStatusAndControls(t *testing.T) {
 		"hold: handoff c-1", "moe sdlc code alpha/fix-it --agent codex",
 		`action="/run/alpha/fix-it/control"`, `name="action" value="resume"`,
 		`name="id" value="web-fixed"`, `name="revision" value="3"`,
-		"control requests",
+		"control requests", `class="badge blocked">blocked</span>`, "test&lt;script&gt;.md: missing",
 	)
 	if strings.Contains(body.Body.String(), `value="pause"`) {
 		t.Fatal("an action the view did not offer was rendered")
@@ -97,8 +97,8 @@ func TestStatusReadsAreReadOnly(t *testing.T) {
 	s, calls, reads := controlServer(t, RunControlView{Summary: "agent running code 3m"}, nil)
 	get(t, s, "/run/alpha/fix-it/status")
 	body := get(t, s, "/run-status").Body.String()
-	var m map[string]string
-	if err := json.Unmarshal([]byte(body), &m); err != nil || m["alpha/fix-it"] != "held · waiting for operator" {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(body), &m); err != nil || !strings.Contains(string(m["alpha/fix-it"]), `"summary":"held · waiting for operator"`) {
 		t.Fatalf("run-status = %q, %v", body, err)
 	}
 	if len(*calls) != 0 || *reads != 1 {

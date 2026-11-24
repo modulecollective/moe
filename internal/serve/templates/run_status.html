@@ -1,6 +1,6 @@
 <section class="run-status" id="run-status" data-refresh="{{.StatusURL}}">
   {{with .Control}}
-  <h2>status</h2>
+  <h2>status {{if .StageBlocked}}<span class="badge blocked">blocked</span>{{end}}</h2>
   {{if .Summary}}<p class="meta"><span class="note">{{.Summary}}</span></p>{{end}}
   {{if .Lines}}<ul>{{range .Lines}}<li>{{.}}</li>{{end}}</ul>{{end}}
   {{if .Conversation}}<p class="meta">continue the conversation at a terminal: <code>{{.Conversation}}</code></p>{{end}}

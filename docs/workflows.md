@@ -210,6 +210,15 @@ returns to the last stage that ran. A reply proves the owner is alive, not
 that the agent is making progress, and an owner that does not answer is shown
 as unreachable — never as idle, and never as leave to start a replacement.
 
+The shared board shows `blocked` beside a stage after an authored turn leaves
+its gate unready. Fresh templates and ready stages parked before their
+successor stay quiet. The badge describes automatic advancement, not who must
+act; explicit stage commands and controls keep their usual behavior. A
+confirmed live retry hides the previous badge until the owner returns to its
+next-stage decision or exits. An unreachable owner preserves the last authored
+result. UI/web run details and `moe control show` name the stage, gate problems
+and the canvas command for the explanation.
+
 Four controls steer a stageful run (SDLC today), from the terminal or the
 run's web page:
 

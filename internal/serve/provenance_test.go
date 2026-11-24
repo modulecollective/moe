@@ -146,7 +146,7 @@ func TestDashBadgesAgentRows(t *testing.T) {
 	now := time.Now().UTC()
 	gather := func(string) ([]dash.Row, int, int, []int, error) {
 		return []dash.Row{
-			{Project: "p", Run: "spawned", Bucket: dash.BucketActiveRuns, When: now, Agent: true},
+			{Project: "p", Run: "spawned", Bucket: dash.BucketActiveRuns, When: now, Agent: true, StageBlocked: true},
 			{Project: "p", Run: "by-hand", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Hour)},
 		}, 1, 1, nil, nil
 	}
@@ -162,6 +162,7 @@ func TestDashBadgesAgentRows(t *testing.T) {
 	}
 	for _, want := range []string{
 		`title="opened by the machine"`,
+		`data-blocked-key="p/spawned">blocked</span>`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("dash missing %q", want)

@@ -165,6 +165,9 @@ func runControlShow(args []string, stdout, stderr io.Writer) int {
 	for _, line := range o.Details(now) {
 		moePrintf(stdout, "  %s\n", line)
 	}
+	if o.ProgressErr != nil {
+		return 1
+	}
 	if o.ControlErr != nil {
 		// Never "not held": an unreadable record refuses motion.
 		moePrintf(stdout, "  control: unreadable — %v\n", o.ControlErr)

@@ -154,6 +154,8 @@ type Row struct {
 	// observed when the row was gathered. Empty when there is nothing
 	// beyond the journal row to say.
 	Control string
+	// StageBlocked is supplied by workflow observation, after live suppression.
+	StageBlocked bool
 }
 
 // NextDecision is the per-run "what's next" decision the caller
@@ -1003,6 +1005,9 @@ func RenderIndexedRows(w io.Writer, now time.Time, rows []Row, projectCount, act
 // Keep the control before the note so a narrow watch viewport preserves
 // the operator's hold before clipping the workflow detail.
 func noteWithControl(r Row) string {
+	if r.StageBlocked {
+		r.Note += " [blocked]"
+	}
 	if r.Control == "" {
 		return r.Note
 	}

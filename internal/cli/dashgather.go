@@ -87,6 +87,7 @@ func gatherDashSnapshot(root string, now time.Time, filter DashFilter, cached li
 		}
 	}
 
+	progressByRun := make(map[string]WorkflowProgress, len(mds))
 	nextByRun := make(map[string]dash.NextDecision, len(mds))
 	for _, md := range mds {
 		// Idea and intent are single-stage capture workflows with no
@@ -105,16 +106,17 @@ func gatherDashSnapshot(root string, now time.Time, filter DashFilter, cached li
 		if err != nil {
 			return DashSnapshot{}, err
 		}
-		next, kind, err := wf.NextWithIndex(root, md, idx)
+		progress, err := wf.ProgressWithIndex(root, md, idx)
 		if err != nil {
 			return DashSnapshot{}, err
 		}
 		dec := dash.NextDecision{
-			Done:      kind == NextKindDone,
+			Done:      progress.Kind == NextKindDone,
 			Perpetual: wf.Perpetual(),
 		}
-		if next != "" {
-			dec.Stage = next
+		progressByRun[md.Project+"/"+md.ID] = progress
+		if progress.Stage != "" {
+			dec.Stage = progress.Stage
 		} else if dec.Done && dec.Perpetual {
 			stages := wf.Stages()
 			if len(stages) > 0 {
@@ -200,7 +202,7 @@ func gatherDashSnapshot(root string, now time.Time, filter DashFilter, cached li
 		return DashSnapshot{}, err
 	}
 
-	observations := observeRows(root, rows, mds, now, cached)
+	observations := observeRows(root, rows, mds, now, cached, progressByRun)
 
 	projectCount, err := dash.CountProjects(root)
 	if err != nil {

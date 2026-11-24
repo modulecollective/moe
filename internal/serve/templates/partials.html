@@ -304,7 +304,12 @@ document.getElementById('theme-toggle').addEventListener('click', function () {
           agent.querySelector('[name="revision"]').value = m.__agent_revision;
         }
         document.querySelectorAll('.run-status[data-key]').forEach(function (el) {
-          el.textContent = m[el.dataset.key] || '';
+          var status = m[el.dataset.key];
+          el.textContent = status ? status.summary : '';
+        });
+        document.querySelectorAll('[data-blocked-key]').forEach(function (el) {
+          var status = m[el.dataset.blockedKey];
+          el.hidden = !(status && status.stage_blocked);
         });
       })
       .catch(function () {});

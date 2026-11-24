@@ -328,20 +328,35 @@ func (w *Workflow) Next(root string, md *run.Metadata) (string, NextKind, error)
 // that don't keep an index in scope. Same satisfaction rule either
 // way: see stageSatisfied.
 func (w *Workflow) NextWithIndex(root string, md *run.Metadata, idx *run.JournalIndex) (string, NextKind, error) {
+	p, err := w.ProgressWithIndex(root, md, idx)
+	return p.Stage, p.Kind, err
+}
+
+// WorkflowProgress retains why the satisfaction walk stopped. GateProblems
+// exists only after an authored work-turn; a fresh template is not blocked.
+type WorkflowProgress struct {
+	Stage        string
+	Kind         NextKind
+	GateProblems []string
+}
+
+// ProgressWithIndex resolves progression and gate diagnostics in one pass.
+// A nil index uses the single-run journal path, as Next does.
+func (w *Workflow) ProgressWithIndex(root string, md *run.Metadata, idx *run.JournalIndex) (WorkflowProgress, error) {
 	switch md.Status {
 	case run.StatusPushed, run.StatusMerged, run.StatusClosed, run.StatusPromoted:
-		return "", NextKindDone, nil
+		return WorkflowProgress{Kind: NextKindDone}, nil
 	}
 	for _, stage := range w.stageOrder {
-		satisfied, err := w.stageSatisfied(root, md, stage, idx)
+		satisfied, problems, err := w.stageProgress(root, md, stage, idx)
 		if err != nil {
-			return "", 0, err
+			return WorkflowProgress{}, err
 		}
 		if !satisfied {
-			return stage, NextKindStage, nil
+			return WorkflowProgress{Stage: stage, Kind: NextKindStage, GateProblems: problems}, nil
 		}
 	}
-	return "", NextKindDone, nil
+	return WorkflowProgress{Kind: NextKindDone}, nil
 }
 
 // AdvancedTo reports the stage md is waiting at *because the operator
@@ -408,12 +423,17 @@ func (w *Workflow) AdvancedTo(root string, md *run.Metadata, idx *run.JournalInd
 }
 
 func (w *Workflow) stageSatisfied(root string, md *run.Metadata, stage string, idx *run.JournalIndex) (bool, error) {
+	satisfied, _, err := w.stageProgress(root, md, stage, idx)
+	return satisfied, err
+}
+
+func (w *Workflow) stageProgress(root string, md *run.Metadata, stage string, idx *run.JournalIndex) (bool, []string, error) {
 	stageWhen, err := workTurnTime(root, md.Project, md.ID, stage, idx)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	if stageWhen.IsZero() {
-		return false, nil
+		return false, nil, nil
 	}
 	// Stage gates run as an AND with the work-turn rule, but only when
 	// a turn has already landed — a gate that read an empty canvas
@@ -422,12 +442,12 @@ func (w *Workflow) stageSatisfied(root string, md *run.Metadata, stage string, i
 	// the gate honest: it speaks to the *quality* of a committed turn,
 	// not its existence.
 	if w.HasStageGate(stage) {
-		ok, err := w.CheckStageGate(root, md, stage)
+		problems, err := w.StageGateProblems(root, md, stage)
 		if err != nil {
-			return false, err
+			return false, nil, err
 		}
-		if !ok {
-			return false, nil
+		if len(problems) > 0 {
+			return false, problems, nil
 		}
 	}
 	// An advance marker at least as recent as the stage's own latest
@@ -442,19 +462,19 @@ func (w *Workflow) stageSatisfied(root string, md *run.Metadata, stage string, i
 	// click-advanced past an unfilled canvas.
 	advWhen, err := advanceTime(root, md.Project, md.ID, stage, idx)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	if !advWhen.IsZero() && !advWhen.Before(stageWhen) {
-		return true, nil
+		return true, nil, nil
 	}
 	succs := w.successors[stage]
 	if len(succs) == 0 {
-		return true, nil
+		return true, nil, nil
 	}
 	for _, succ := range w.successorEvidence(succs) {
 		succWhen, err := workTurnTime(root, md.Project, md.ID, succ, idx)
 		if err != nil {
-			return false, err
+			return false, nil, err
 		}
 		// Forward progression counts when the successor's turn is at
 		// least as recent as the stage's. Strict After would flake on
@@ -467,10 +487,10 @@ func (w *Workflow) stageSatisfied(root string, md *run.Metadata, stage string, i
 		// detection — that path requires a strictly later timestamp
 		// either way, which a human-driven re-open always produces.
 		if !succWhen.IsZero() && !succWhen.Before(stageWhen) {
-			return true, nil
+			return true, nil, nil
 		}
 	}
-	return false, nil
+	return false, nil, nil
 }
 
 // workTurnTime returns the committer time of (project, run, doc)'s

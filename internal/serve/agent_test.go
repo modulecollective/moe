@@ -84,7 +84,9 @@ func TestAgentDashboardRefreshKeepsFocusedControls(t *testing.T) {
 		t.Skip("node is needed to exercise served JavaScript")
 	}
 	root := gittest.InitSeeded(t)
-	s := newTestServer(t, Options{Root: root, GatherDash: func(string) ([]dash.Row, int, int, []int, error) { return nil, 0, 0, nil, nil }})
+	s := newTestServer(t, Options{Root: root, GatherDash: func(string) ([]dash.Row, int, int, []int, error) {
+		return []dash.Row{{Project: "p", Run: "r", Note: "sdlc:design", StageBlocked: true, Bucket: dash.BucketActiveRuns}}, 1, 1, nil, nil
+	}})
 	cmd := exec.Command(node, "testdata/agent_refresh.js")
 	cmd.Stdin = strings.NewReader(getBody(t, s, "/"))
 	if output, err := cmd.CombinedOutput(); err != nil {

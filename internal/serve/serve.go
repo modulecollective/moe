@@ -145,13 +145,13 @@ type Options struct {
 	GatherRunRow func(project, run string) (row dash.Row, ok bool, err error)
 
 	// RunControl builds a run's live status block and the controls valid
-	// on it now; ok is false for a run that has none (terminal, capture,
-	// machine-paced). RunStatuses is the dash's compact row status for
+	// on it now; ok is false for a terminal run. Unsupported workflows
+	// carry status without control actions. RunStatuses is the dash's compact row status for
 	// one observation pass, keyed by project/run. SubmitControl records a
 	// control or releases a hold — it never starts an agent — and wraps
 	// refusals in ErrControlRefused.
 	RunControl    func(project, run string) (view RunControlView, ok bool, err error)
-	RunStatuses   func(project string) (map[string]string, error)
+	RunStatuses   func(project string) (map[string]RunRowStatus, error)
 	SubmitControl func(project, run, action, id string, revision int) (string, error)
 
 	// RunProvenance returns the per-run page's provenance section: how

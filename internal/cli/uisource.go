@@ -346,6 +346,7 @@ func (s *uiSource) overlay(now time.Time) ([]dash.Row, map[string]RunObservation
 		}
 		if o, ok := obs[rows[i].Project+"/"+rows[i].Run]; ok {
 			rows[i].Control = o.Summary(now)
+			rows[i].StageBlocked = o.StageBlocked()
 		}
 	}
 	return rows, obs
@@ -614,11 +615,11 @@ func (s *uiSource) runDetail(md *run.Metadata, row dash.Row, o RunObservation, o
 		case l.stale && ownerGone(l.err):
 			st := *l.status
 			out = append(out, fmt.Sprintf("live: owner endpoint closed; last heard %s ago, last known below is stale", dash.HumanDuration(now.Sub(l.heard))))
-			o.Live, o.LiveErr = &st, nil
+			o.Live, o.LiveErr = &st, l.err
 		case l.stale:
 			st := *l.status
 			out = append(out, fmt.Sprintf("live: contact lost %s ago (%v); last known below is stale", dash.HumanDuration(now.Sub(l.heard)), l.err))
-			o.Live, o.LiveErr = &st, nil
+			o.Live, o.LiveErr = &st, l.err
 		default:
 			out = append(out, "live: "+l.mode+", heard "+dash.HumanAgo(now, l.heard))
 		}

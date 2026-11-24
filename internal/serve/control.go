@@ -14,17 +14,23 @@ package serve
 import (
 	"encoding/json"
 	"errors"
-	"maps"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 )
 
+// RunRowStatus is the typed per-run payload in the compact refresh.
+type RunRowStatus struct {
+	Summary      string `json:"summary"`
+	StageBlocked bool   `json:"stage_blocked"`
+}
+
 // RunControlView is one run's status block.
 type RunControlView struct {
 	// Summary is the same concise text the dash row shows.
-	Summary string
+	Summary      string
+	StageBlocked bool
 	// Lines are labelled facts: owner, phase, waiting, origin, hold.
 	Lines []string
 	// Revision is the hold revision a resume form carries, so a stale
@@ -115,7 +121,7 @@ func (s *Server) handleRunControl(w http.ResponseWriter, r *http.Request) {
 // handleRunStatuses is the dash's compact status refresh: one
 // observation pass, keyed by project/run.
 func (s *Server) handleRunStatuses(w http.ResponseWriter, r *http.Request) {
-	out := map[string]string{}
+	out := map[string]any{}
 	if s.opts.RunStatuses != nil {
 		statuses, err := s.opts.RunStatuses(r.URL.Query().Get("project"))
 		if err != nil {
@@ -123,7 +129,9 @@ func (s *Server) handleRunStatuses(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		maps.Copy(out, statuses)
+		for key, status := range statuses {
+			out[key] = status
+		}
 	}
 	now := time.Now()
 	view := defaultAgentView(s.opts.Root, now)

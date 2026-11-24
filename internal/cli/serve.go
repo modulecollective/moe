@@ -164,7 +164,7 @@ func serveOptions(root string, stderr io.Writer) serve.Options {
 		RunControl: func(project, runID string) (serve.RunControlView, bool, error) {
 			return serveRunControl(root, project, runID)
 		},
-		RunStatuses: func(project string) (map[string]string, error) {
+		RunStatuses: func(project string) (map[string]serve.RunRowStatus, error) {
 			return serveRunStatuses(root, project)
 		},
 		SubmitControl: func(project, runID, action, id string, revision int) (string, error) {

@@ -22,12 +22,15 @@ func serveRunControl(root, projectID, runID string) (serve.RunControlView, bool,
 	if err != nil {
 		return serve.RunControlView{}, false, err
 	}
-	if controlPolicy(md) != nil || (md.Status != run.StatusInProgress && md.Status != run.StatusPushed) {
+	if md.Status != run.StatusInProgress && md.Status != run.StatusPushed {
 		return serve.RunControlView{}, false, nil
 	}
 	now := time.Now()
 	o := ObserveRuns(root, []*run.Metadata{md}, now)[projectID+"/"+runID]
-	v := serve.RunControlView{Summary: o.Summary(now), Lines: o.Details(now), Revision: o.Control.Revision}
+	if o.ProgressErr != nil {
+		return serve.RunControlView{}, false, o.ProgressErr
+	}
+	v := serve.RunControlView{StageBlocked: o.StageBlocked(), Summary: o.Summary(now), Lines: o.Details(now), Revision: o.Control.Revision}
 	if o.ControlErr != nil {
 		v.Lines = append(v.Lines, "control record unreadable: "+o.ControlErr.Error())
 		return v, true, nil
@@ -46,7 +49,9 @@ func serveRunControl(root, projectID, runID string) (serve.RunControlView, bool,
 	}
 	v.Lines = append(v.Lines, o.localLines()...)
 	v.Conversation = conversationCommand(md, stage, agent)
-	v.Actions = controlActions(md, o)
+	if controlPolicy(md) == nil {
+		v.Actions = controlActions(md, o)
+	}
 	for _, r := range f.Requests {
 		v.Requests = append(v.Requests, fmt.Sprintf("%s %s %s — %s", r.AcceptedAt.Local().Format("Jan 2 15:04"), r.Kind, r.ID, o.describe(r)))
 	}
@@ -79,7 +84,7 @@ func controlActions(md *run.Metadata, o RunObservation) []string {
 
 // serveRunStatuses is the dash's compact row status: one bounded
 // observation pass over the live runs, optionally in one project.
-func serveRunStatuses(root, projectID string) (map[string]string, error) {
+func serveRunStatuses(root, projectID string) (map[string]serve.RunRowStatus, error) {
 	mds, err := run.Scan(root)
 	if err != nil {
 		return nil, err
@@ -92,11 +97,25 @@ func serveRunStatuses(root, projectID string) (map[string]string, error) {
 		}
 	}
 	now := time.Now()
-	out := map[string]string{}
-	for key, o := range ObserveRuns(root, live, now) {
-		if s := o.Summary(now); s != "" {
-			out[key] = s
+	idx, err := run.BuildJournalIndex(root)
+	if err != nil {
+		return nil, err
+	}
+	progress := make(map[string]WorkflowProgress, len(live))
+	for _, md := range live {
+		wf, err := LookupWorkflow(md.Workflow)
+		if err != nil {
+			return nil, err
 		}
+		p, err := wf.ProgressWithIndex(root, md, idx)
+		if err != nil {
+			return nil, err
+		}
+		progress[md.Project+"/"+md.ID] = p
+	}
+	out := map[string]serve.RunRowStatus{}
+	for key, o := range observeRuns(root, live, now, nil, progress) {
+		out[key] = serve.RunRowStatus{Summary: o.Summary(now), StageBlocked: o.StageBlocked()}
 	}
 	return out, nil
 }
