@@ -83,6 +83,9 @@ type Art struct {
 // Board is one complete board: its painted lines and the items on them,
 // ordered by Line.
 type Board struct {
+	AgentSummary  string
+	AgentRevision int
+	AgentError    string
 	// Banner and Overview are trusted renderer output, separate from scrolling lines.
 	Banner   string
 	Overview []string
@@ -119,13 +122,16 @@ const (
 	ActChoreEdit
 	ActChoreDelete
 	ActChoreOpen
+	ActAgent
 )
 
 // Action is one mutation, bound to the identity it was captured against
 // when the operator committed to it. The console never retargets it.
 type Action struct {
-	Kind         ActionKind
-	Project, Run string
+	Agent         string
+	AgentRevision int
+	Kind          ActionKind
+	Project, Run  string
 	// Text is a note, answer or capture body.
 	Text string
 	// QuestionID binds an answer to the question it answers.
@@ -208,6 +214,8 @@ func (a Action) describe() string {
 		return "delete chore " + target
 	case ActChoreOpen:
 		return "open a run for chore " + target
+	case ActAgent:
+		return "set global default agent: " + a.Agent
 	}
 	return target
 }

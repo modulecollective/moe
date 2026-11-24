@@ -1034,6 +1034,8 @@ func commandHint(line string, target *Item) string {
 		return "→ " + target.Label()
 	}
 	switch verb[0] {
+	case "agent":
+		return "global default for 24h; flags and run bindings still win"
 	case "finish":
 		if target != nil {
 			return "→ " + target.Label() + ": ships this run with !! from its next boundary"
@@ -1095,6 +1097,24 @@ func (m *model) runCommand(line string, target *Item) effect {
 		return ok
 	}
 	switch verb := f[0]; verb {
+	case "agent":
+		if !need(len(f) <= 2, "usage: :agent [codex|claude|reset]") {
+			return effNone
+		}
+		if len(f) == 1 {
+			m.say(m.board.AgentSummary)
+			if m.board.AgentError != "" {
+				m.say(m.board.AgentError)
+			}
+			return effNone
+		}
+		if !need(f[1] == "codex" || f[1] == "claude" || f[1] == "reset", "usage: :agent [codex|claude|reset]") {
+			return effNone
+		}
+		if !need(m.board.AgentError == "", m.board.AgentError) {
+			return effNone
+		}
+		m.start(job{label: "set global default agent: " + f[1], steps: []Action{{Kind: ActAgent, Agent: f[1], AgentRevision: m.board.AgentRevision}}})
 	case "help":
 		if !need(len(f) == 1, "takes no arguments") {
 			return effNone

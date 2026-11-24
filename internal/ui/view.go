@@ -48,6 +48,7 @@ Editor
   Alt-Left/Right or Alt-b/f move by a word
 
 Commands (:)
+  agent [codex|claude|reset]                  global default for 24h; no argument shows status
   Tab / Shift-Tab complete command names, cycle forward / backward
   Type a space before arguments; Enter submits
   pause | handoff | park | finish | resume    the selected run

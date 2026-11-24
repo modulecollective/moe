@@ -11,7 +11,7 @@ func TestCommandCompletionVocabularyAndCycles(t *testing.T) {
 		line  string
 		words []string
 	}{
-		{"", []string{"close", "delete", "edit", "finish", "handoff", "help", "new-chore", "new-idea", "new-intent", "open", "park", "pause", "quit", "resume", "tag-design", "tag-sdlc", "terminal", "untag"}},
+		{"", []string{"agent", "close", "delete", "edit", "finish", "handoff", "help", "new-chore", "new-idea", "new-intent", "open", "park", "pause", "quit", "resume", "tag-design", "tag-sdlc", "terminal", "untag"}},
 		{"p", []string{"park", "pause"}},
 		{"new-i", []string{"new-idea", "new-intent"}},
 		{"tag-", []string{"tag-design", "tag-sdlc"}},
@@ -89,7 +89,7 @@ func TestCommandCompletionResetAndPaste(t *testing.T) {
 		{"a\t", "parka"}, // the edited prefix has no match
 		{"\x7f\t", "park"},
 		{"\x1b[D\t", "park"},
-		{"\x1b[H\t", "close"},
+		{"\x1b[H\t", "agent"},
 		{"\x1b[F\t", "park"},
 		{"\x1b[3~\t", "park"},
 		{"\x1b[200~\x1b[201~\t", "park"},

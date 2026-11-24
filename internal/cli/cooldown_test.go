@@ -380,7 +380,7 @@ func TestCooldownRefreshesSelectionAndPromptFromMain(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code %d stderr %s", code, &out)
 	}
-	if strings.Join(reads, ",") != "quota-before/old-model,quota-before/old-model,quota-after/new-model" {
+	if strings.Join(reads, ",") != "quota-before/old-model,quota-after/new-model" {
 		t.Fatalf("reads %v", reads)
 	}
 	if len(fake.execCalls) != 1 || fake.execCalls[0].model != "new-model" {

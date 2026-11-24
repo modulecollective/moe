@@ -14,6 +14,7 @@ package serve
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"strconv"
 	"strings"
@@ -116,13 +117,17 @@ func (s *Server) handleRunControl(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRunStatuses(w http.ResponseWriter, r *http.Request) {
 	out := map[string]string{}
 	if s.opts.RunStatuses != nil {
-		var err error
-		if out, err = s.opts.RunStatuses(r.URL.Query().Get("project")); err != nil {
+		statuses, err := s.opts.RunStatuses(r.URL.Query().Get("project"))
+		if err != nil {
 			s.logf("run statuses: %v", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		maps.Copy(out, statuses)
 	}
+	view := defaultAgentView(s.opts.Root, time.Now())
+	out["__agent_summary"], out["__agent_error"] = view.Summary, view.Error
+	out["__agent_revision"] = strconv.Itoa(view.Revision)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	json.NewEncoder(w).Encode(out)

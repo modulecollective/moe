@@ -581,6 +581,7 @@ type dashVM struct {
 	// header links the queue only when this is non-zero — a count where
 	// there is something to count, not a permanent landmark.
 	InputCount int
+	Agent      agentVM
 }
 
 // rowURL is where a dash row's slug links. Only a chore row differs: it

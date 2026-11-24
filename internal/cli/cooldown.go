@@ -119,6 +119,7 @@ const (
 	cooldownStop
 	// cooldownHeld: an operator control stopped the wait before admission.
 	cooldownHeld
+	cooldownChanged
 )
 
 // cooldownGate is the wait policy for one stage. One gate per stage, so
@@ -139,7 +140,10 @@ type cooldownGate struct {
 	openHold func() (<-chan struct{}, func())
 	// onWait, when set, hears each new reason the gate is waiting.
 	onWait func(status string)
-	stderr io.Writer
+	// selection observes configuration only, never provider quota. It allows
+	// a long provider reset sleep to yield to a newly selected plan.
+	selection func() (string, string, time.Time, error)
+	stderr    io.Writer
 	// resume is the ordinary invocation that re-runs this stage, printed
 	// when the gate stops it.
 	resume string
@@ -223,6 +227,11 @@ func (g *cooldownGate) check(ctx context.Context, agentName, model string) (outc
 				return g.stop(err.Error()), waited
 			}
 			if len(blocking) == 0 && !q.Denied {
+				if changed, _, err := g.selectionChanged(agentName, model); err != nil {
+					return g.stop(err.Error()), waited
+				} else if changed {
+					return cooldownChanged, true
+				}
 				if waited {
 					moePrintf(g.stderr, "cooldown: %s quota recovered; starting\n", agentName)
 				}
@@ -260,18 +269,45 @@ func (g *cooldownGate) check(ctx context.Context, agentName, model string) (outc
 			lastStatus = status
 		}
 		waited = true
-		select {
-		case <-ctx.Done():
-			return cooldownCancel, false
-		case ctl := <-controls:
-			return g.control(ctl), waited
-		case <-held:
-			moePrintf(g.stderr, "cooldown: stopped waiting — operator control\n")
-			return cooldownHeld, waited
-		case <-g.after(pause):
-			waited = true
+		// Preserve the provider deadline while checking local selection at
+		// minute boundaries and at temporary expiry. Unchanged configuration
+		// never causes an extra provider call.
+		deadline := g.now().Add(pause)
+		for g.now().Before(deadline) {
+			changed, expiry, err := g.selectionChanged(agentName, model)
+			if err != nil {
+				return g.stop(err.Error()), waited
+			}
+			if changed {
+				return cooldownChanged, waited
+			}
+			d := deadline.Sub(g.now())
+			if g.selection != nil {
+				d = min(d, cooldownPollInterval)
+				if expiry.After(g.now()) {
+					d = min(d, expiry.Sub(g.now()))
+				}
+			}
+			select {
+			case <-ctx.Done():
+				return cooldownCancel, false
+			case ctl := <-controls:
+				return g.control(ctl), waited
+			case <-held:
+				moePrintf(g.stderr, "cooldown: stopped waiting — operator control\n")
+				return cooldownHeld, waited
+			case <-g.after(d):
+			}
 		}
 	}
+}
+
+func (g *cooldownGate) selectionChanged(name, model string) (bool, time.Time, error) {
+	if g.selection == nil {
+		return false, time.Time{}, nil
+	}
+	n, m, expiry, err := g.selection()
+	return n != name || m != model, expiry, err
 }
 
 // yield reads once without opening controls or entering the wait budget.
@@ -463,7 +499,7 @@ func stageCooldown(g *cooldownGate, agentName, model *string, resolve func(*run.
 			moePrintf(stderr, "not started: %v\n", err)
 			return exitNotStarted
 		}
-		if nextAgent == *agentName && nextModel == *model && !g.refreshChanged {
+		if outcome != cooldownChanged && nextAgent == *agentName && nextModel == *model && !g.refreshChanged {
 			return 0
 		}
 		if nextAgent == *agentName && nextModel == *model {

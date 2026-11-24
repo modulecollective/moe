@@ -28,6 +28,7 @@ import (
 	"github.com/modulecollective/moe/internal/agent"
 	_ "github.com/modulecollective/moe/internal/agent/claude"
 	_ "github.com/modulecollective/moe/internal/agent/codex"
+	"github.com/modulecollective/moe/internal/agentdefault"
 	"github.com/modulecollective/moe/internal/banner"
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/git"
@@ -256,13 +257,12 @@ func stylesheetVocab() stylesheet.Vocab {
 // resolveAgentName picks the backend for this turn. Precedence:
 // $MOE_FORCE_AGENT (global override) → explicit per-call override
 // (--agent flag on this verb) → run-level persisted default
-// (run.json.Agent) → model stylesheet → "claude". Keep
+// (run.json.Agent) → fallback supplied by selectStageAgent → "claude". Keep
 // this helper as the single source for the operator-facing ladder;
 // stage call sites should go through stageAgentName.
 //
-// The stylesheet rung sits below the operator's explicit bindings
-// (--agent, run.json.Agent) and above the hard default. This is the moe
-// analog of fabro's "direct node attributes beat the stylesheet".
+// selectStageAgent supplies the active temporary default or stylesheet
+// agent as fallback, below all explicit bindings.
 //
 // $MOE_FORCE_AGENT wins over everything, including an explicit --agent
 // flag, so an operator can flip every stage of every run in the process
@@ -507,8 +507,11 @@ func (s *stageSession) enter(freshOwner bool, acquired time.Time) int {
 		return 1
 	}
 	s.explicitModel = s.opts.Model
-	s.agentName = stageAgentName(s.opts, s.md, sheet.Agent(s.md.Workflow, s.docID))
-	s.opts.Model = cmp.Or(s.opts.Model, sheet.ModelForAgent(s.md.Workflow, s.docID, s.agentName))
+	s.agentName, s.opts.Model, _, err = selectStageAgent(s.root, sheet, s.opts, s.md, s.docID, s.explicitModel, agentDefaultNow())
+	if err != nil {
+		moePrintf(s.stderr, "%v\n", err)
+		return 1
+	}
 	// A project-doc fix turn runs *inside* an outer stage's banner pair, so
 	// framing it as a stage of its own reads as two stages having run.
 	// The gate already announces it on one line; that line is the whole
@@ -590,10 +593,45 @@ func (s *stageSession) resolveSelection(workRoot string, fresh *run.Metadata) (s
 	if err := currentSheet.Validate(stylesheetVocab()); err != nil {
 		return "", "", err
 	}
-	name := stageAgentName(s.opts, fresh, currentSheet.Agent(fresh.Workflow, s.docID))
-	model := cmp.Or(s.explicitModel, currentSheet.ModelForAgent(fresh.Workflow, s.docID, name))
+	name, model, _, err := selectStageAgent(s.root, currentSheet, s.opts, fresh, s.docID, s.explicitModel, agentDefaultNow())
+	if err != nil {
+		return "", "", err
+	}
 	*s.md = *fresh
 	return name, model, nil
+}
+
+var agentDefaultNow = time.Now
+
+// selectStageAgent is shared by admission, occupied waits and clock retry
+// comparisons. Temporary state always comes from the canonical root, even
+// when model policy is read from an existing reserved session.
+func selectStageAgent(root string, sheet *stylesheet.Sheet, opts stageSessionOpts, md *run.Metadata, stage, explicitModel string, now time.Time) (string, string, time.Time, error) {
+	state, err := agentdefault.Read(root)
+	if err != nil {
+		return "", "", time.Time{}, err
+	}
+	defaultAgent := cmp.Or(state.Active(now), sheet.Agent(md.Workflow, stage))
+	name := stageAgentName(opts, md, defaultAgent)
+	if _, err := agent.Get(name); err != nil {
+		return "", "", time.Time{}, err
+	}
+	return name, cmp.Or(explicitModel, sheet.ModelForAgent(md.Workflow, stage, name)), state.ExpiresAt, nil
+}
+
+func (s *stageSession) canonicalSelection(now time.Time) (string, string, time.Time, error) {
+	fresh, err := run.Load(s.root, s.projectID, s.runID)
+	if err != nil {
+		return "", "", time.Time{}, err
+	}
+	sheet, err := stylesheet.Load(s.root)
+	if err == nil {
+		err = sheet.Validate(stylesheetVocab())
+	}
+	if err != nil {
+		return "", "", time.Time{}, err
+	}
+	return selectStageAgent(s.root, sheet, s.opts, fresh, s.docID, s.explicitModel, now)
 }
 
 // turnInputs is what runStageTurn drives: this session's identity, plus
@@ -916,6 +954,14 @@ func (s *stageSession) commitStager(workRoot string, runErr error) error {
 // and wait out quota.
 func (s *stageSession) admit(sess *session.Session) int {
 	root, md, docID, stderr := s.root, s.md, s.docID, s.stderr
+	// Capture canonical configuration before resolving the reservation. A
+	// recovered session may deliberately differ from main; only a subsequent
+	// canonical change asks it to reconcile, never that pre-existing difference.
+	observedName, observedModel, _, err := s.canonicalSelection(agentDefaultNow())
+	if err != nil {
+		moePrintf(stderr, "%v\n", err)
+		return 1
+	}
 	fresh, err := run.Load(sess.WorktreePath, s.projectID, s.runID)
 	if err == nil {
 		s.agentName, s.opts.Model, err = s.resolveSelection(sess.WorktreePath, fresh)
@@ -942,6 +988,17 @@ func (s *stageSession) admit(sess *session.Session) int {
 	g.onWait = func(status string) { publishPhase(root, md, runsock.PhaseQuotaWait, docID, status) }
 	g.read = func(ctx context.Context, name, model string) (agent.Quota, error) {
 		return readStageQuota(ctx, name, model, mapToEnv(s.devEnv))
+	}
+	g.selection = func() (string, string, time.Time, error) {
+		name, model, expiry, err := s.canonicalSelection(g.now())
+		if err != nil {
+			return "", "", time.Time{}, err
+		}
+		if name != observedName || model != observedModel {
+			observedName, observedModel = name, model
+			return name, model, expiry, nil
+		}
+		return s.agentName, s.opts.Model, expiry, nil
 	}
 	code := stageCooldown(g, &s.agentName, &s.opts.Model,
 		func(fresh *run.Metadata) (string, string, error) {

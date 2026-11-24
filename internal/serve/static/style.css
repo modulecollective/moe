@@ -813,3 +813,5 @@ form.new-run button:hover, form.new-run button:focus {
   border-color: var(--accent);
   outline: none;
 }
+.agent-default { display: flex; flex-wrap: wrap; gap: .4rem 1rem; align-items: center; margin-top: .75rem; }
+.agent-default form { display: flex; flex-wrap: wrap; gap: .4rem; }

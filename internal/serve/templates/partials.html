@@ -294,6 +294,12 @@ document.getElementById('theme-toggle').addEventListener('click', function () {
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (m) {
         if (!m) return;
+        var agent = document.getElementById('agent-default');
+        if (agent) {
+          agent.querySelector('[data-agent-summary]').textContent = m.__agent_summary;
+          agent.querySelector('[data-agent-error]').textContent = m.__agent_error;
+          agent.querySelector('[name="revision"]').value = m.__agent_revision;
+        }
         document.querySelectorAll('.run-status[data-key]').forEach(function (el) {
           el.textContent = m[el.dataset.key] || '';
         });

@@ -1,0 +1,10 @@
+<section id="agent-default" class="agent-default" aria-label="Global default agent">
+  <span data-agent-summary>{{.Summary}}</span>
+  <span data-agent-error role="status">{{.Error}}</span>
+  <form method="post" action="/agent">
+    <input type="hidden" name="revision" value="{{.Revision}}">
+    <button name="agent" value="codex">Use Codex for 24h</button>
+    <button name="agent" value="claude">Use Claude for 24h</button>
+    <button name="agent" value="reset">Return to stylesheet</button>
+  </form>
+</section>

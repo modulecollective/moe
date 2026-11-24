@@ -24,7 +24,9 @@ func commandMatches(e *editor) *commandCompletion {
 	var words []string
 	before := strings.Fields(string(e.text[:start]))
 	if len(before) == 0 {
-		words = []string{"close", "delete", "edit", "finish", "handoff", "help", "new-chore", "new-idea", "new-intent", "open", "park", "pause", "quit", "resume", "tag-design", "tag-sdlc", "terminal", "untag"}
+		words = []string{"agent", "close", "delete", "edit", "finish", "handoff", "help", "new-chore", "new-idea", "new-intent", "open", "park", "pause", "quit", "resume", "tag-design", "tag-sdlc", "terminal", "untag"}
+	} else if len(before) == 1 && before[0] == "agent" {
+		words = []string{"codex", "claude", "reset"}
 	}
 	c := &commandCompletion{start: start, end: end, index: -1}
 	prefix := string(e.text[start:e.cur])

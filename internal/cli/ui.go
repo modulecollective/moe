@@ -18,7 +18,9 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
+	"github.com/modulecollective/moe/internal/agentdefault"
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/chore"
 	"github.com/modulecollective/moe/internal/cliout"
@@ -116,6 +118,21 @@ func runUI(args []string, stdout, stderr io.Writer) int {
 // the console's single worker.
 func uiDo(ctx context.Context, root string, a ui.Action) ui.Result {
 	switch a.Kind {
+	case ui.ActAgent:
+		desired := a.Agent
+		if desired == "reset" {
+			desired = ""
+		}
+		s, err := agentdefault.Set(root, desired, &a.AgentRevision, time.Now)
+		if err != nil {
+			current, readErr := agentdefault.Read(root)
+			lines := []string{}
+			if readErr == nil {
+				lines = append(lines, current.Summary(time.Now()))
+			}
+			return ui.Result{Uncertain: errors.Is(err, agentdefault.ErrRollback), Message: err.Error(), Lines: lines}
+		}
+		return ui.Result{OK: true, Message: s.Summary(time.Now())}
 	case ui.ActNote:
 		return uiNote(root, a)
 	case ui.ActAnswer:

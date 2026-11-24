@@ -523,6 +523,7 @@ func (s *Server) registerRoutes() {
 	s.router.HandleFunc("GET /run/{project}/{slug}/status", s.handleRunStatus)
 	s.router.HandleFunc("POST /run/{project}/{slug}/control", s.handleRunControl)
 	s.router.HandleFunc("GET /run-status", s.handleRunStatuses)
+	s.router.HandleFunc("POST /agent", s.handleAgent)
 	// Chore pages. A chore isn't a run, so it has its own /chore
 	// namespace. The page edits and deletes the definition and can open
 	// its run now; none of it starts an agent. Create hangs off the
@@ -642,6 +643,7 @@ func (s *Server) handleDash(w http.ResponseWriter, r *http.Request) {
 	// round trip through its own snapshot would only add a beat of lag.
 	vm.Serve = s.activity.panel(now)
 	vm.InputCount = s.openPingCount("")
+	vm.Agent = defaultAgentView(s.opts.Root, now)
 	s.render(w, r, "dash.html", vm)
 }
 

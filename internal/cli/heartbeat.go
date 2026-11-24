@@ -19,6 +19,7 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/serve"
 	"github.com/modulecollective/moe/internal/session"
+	"github.com/modulecollective/moe/internal/stylesheet"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
@@ -417,6 +418,14 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 	moved := known && seen != tip
 	retryAt := sc.idx.NextQuotaRetry(projectID)
 	retryDue := !retryAt.IsZero() && !retryAt.After(now)
+	retryChanged := false
+	if !retryAt.IsZero() && !retryDue {
+		var err error
+		retryChanged, err = quotaSelectionChanged(g.root, sc, projectID, now)
+		if err != nil {
+			fmt.Fprintf(log, "quota retry selection %s: %v\n", projectID, err)
+		}
+	}
 	unswept := false
 	parked := ""
 	choreReason := ""
@@ -433,7 +442,7 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 		// the sweep kicks passes safe on its own terms.
 		choreReason = choreClockReason(sc, projectID, now)
 	}
-	if !moved && choreReason == "" && !prChanged && !prFinished && !retryDue {
+	if !moved && choreReason == "" && !prChanged && !prFinished && !retryDue && !retryChanged {
 		// A clean sweep already surveyed this exact board. Whatever is
 		// parked on it, the survey saw and left parked on purpose, so
 		// offering it again is re-asking a question the machine has
@@ -560,6 +569,9 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 	if retryDue {
 		return true, false, "quota retry is due — survey the current board"
 	}
+	if retryChanged {
+		return true, false, "quota selection changed — survey the current board"
+	}
 	if md := sc.byKey[parked]; md != nil && md.Workflow == dash.IdeaWorkflow {
 		// Display only, like every reason here — but this is the operator's
 		// whole trace of why a tick moved, and a tagged idea is not settled
@@ -567,6 +579,54 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 		return true, false, "a tagged idea is parked at " + parked
 	}
 	return true, false, "settled work is parked at " + parked
+}
+
+// A retry is evidence about the backend/model it checked, not a hold on all
+// future selections. Read configuration only; the new survey owns quota reads
+// and resolution/replacement of this journal evidence.
+func quotaSelectionChanged(root string, sc *pulseScan, projectID string, now time.Time) (bool, error) {
+	sheet, err := stylesheet.Load(root)
+	if err == nil {
+		err = sheet.Validate(stylesheetVocab())
+	}
+	if err != nil {
+		return false, err
+	}
+	changed := false
+	for _, retry := range sc.idx.QuotaRetries {
+		if retry.Project != projectID {
+			continue
+		}
+		for _, target := range retry.Targets {
+			md := sc.byKey[target.Project+"/"+target.Run]
+			if md == nil {
+				continue
+			}
+			if md.Workflow == pulseWorkflow && target.Stage == pulseDoc {
+				// The skipped survey is closed and may have had a binding;
+				// the next heartbeat starts a new, unbound survey.
+				md = &run.Metadata{Workflow: pulseWorkflow}
+			} else {
+				w := workflows[md.Workflow]
+				if w == nil {
+					continue
+				}
+				stage, kind, err := w.NextWithIndex(root, md, sc.idx)
+				if err != nil {
+					return false, err
+				}
+				if kind != NextKindStage || stage != target.Stage {
+					continue
+				}
+			}
+			name, model, _, err := selectStageAgent(root, sheet, stageSessionOpts{}, md, target.Stage, "", now)
+			if err != nil {
+				return false, err
+			}
+			changed = changed || name != target.Backend || model != target.Model
+		}
+	}
+	return changed, nil
 }
 
 // choreClockReason is the two chore legs of the gate, in one read: does this

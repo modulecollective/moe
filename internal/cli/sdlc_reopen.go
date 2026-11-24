@@ -51,7 +51,7 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 	workspaceName := addWorkspaceFlag(fs, "When omitted, the prior run's workspace is inherited")
 	noWorkspace := fs.Bool("no-workspace", false, "give the new run a fresh per-run sandbox instead of inheriting the prior's named workspace. Mutually exclusive with --workspace.")
 	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). When omitted, the prior run's agent is inherited.")
-	noAgent := fs.Bool("no-agent", false, "clear the inherited agent so stage-time selection uses $MOE_FORCE_AGENT, then the stylesheet, then claude. Mutually exclusive with --agent.")
+	noAgent := fs.Bool("no-agent", false, "clear the inherited agent so stage-time selection uses $MOE_FORCE_AGENT, then the active temporary default, then the stylesheet, then claude. Mutually exclusive with --agent.")
 	park := fs.Bool("park", false, "open the run and stop: print the next-stage hint instead of prompting to run it")
 	// The consent ladder, same pair the stage verbs and `new` carry
 	// (`!!` / `!!!`). A reopened run mints seeded at design; the

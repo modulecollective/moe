@@ -237,6 +237,13 @@ separators have a blank row on each side, and the console keeps six message
 rows even on short terminals. The minimum size is 40 columns by 20 rows.
 Moving to the first board item reveals the headings above it.
 
+The pinned overview shows the global default agent and its local expiry.
+`:agent codex` or `:agent claude` chooses that backend for 24 hours;
+`:agent reset` returns to the current stylesheet, and `:agent` shows status.
+These work without a selected row, serve or Rex. Flags and run bindings still
+win. Status refreshes with the normal three-second discovery pass. The web
+dashboard offers the same control, including when serve is unarmed.
+
 The UI board carries no service rows. Service exceptions are logged to the
 Console instead; for routine sweep status, use `moe dash` or the web `/serve`
 page. See [Re-Entry And Supervision](reference.md#re-entry-and-supervision).
@@ -1022,7 +1029,11 @@ model turn. At 95% used, operator-invoked stages and rides wait for all
 applicable blocking windows to reset, then read usage again. The wait has a
 six-hour total budget per stage; a reset beyond that budget stops immediately.
 Unsupported quota interfaces and malformed readings stop clearly. Transport
-errors retry twice, one minute apart. No backend or billing setting changes.
+errors retry twice, one minute apart. While waiting, configuration is checked
+once a minute and at temporary-default expiry. An effective backend or model
+change reconciles the session and checks the new selection's quota under the
+original budget. This does not increase provider polling. Explicit choices
+that mask a default change keep their selection; executing agents stay put.
 
 Heartbeat-invoked stages instead read once and yield immediately when blocked.
 The pulse journals the earliest retry among its deferred roots, using each
@@ -1031,7 +1042,11 @@ missing or past, the next ordinary tick can retry. Weekly resets may defer
 for days without retaining a process. Unavailable quota, including unresolved
 high model scope, refuses without transport sleeps and uses failure backoff.
 Every later stage admission reads fresh quota; a retry date never admits work
-on its own. Typed dynamic pulses keep the ordinary wait policy.
+on its own. A different effective backend/model on a deferred target offers a
+fresh survey on the next otherwise eligible tick, including after restart;
+mode, occupancy, quiet-window and backoff guards still apply. Configuration
+errors preserve the obligation rather than claiming a changed choice. Typed
+dynamic pulses keep the ordinary wait policy.
 
 At an interactive stage's attached terminal, `c` + Enter continues that
 stage now, `a` + Enter skips checks for the rest of this invocation, and

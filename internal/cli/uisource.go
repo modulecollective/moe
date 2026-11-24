@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/modulecollective/moe/internal/agentdefault"
 	"github.com/modulecollective/moe/internal/banner"
 	"github.com/modulecollective/moe/internal/chore"
 	"github.com/modulecollective/moe/internal/cliout"
@@ -402,6 +403,13 @@ func (s *uiSource) buildBoard(now time.Time) (ui.Board, []cliout.ProgramStatus) 
 	artStart := dash.RenderOverview(buf, histogram, s.artFrames[0])
 	b.Art = ui.Art{Start: artStart, Height: len(s.artFrames[0]), Frames: s.artFrames}
 	b.Overview = strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n")
+	defaultState, err := agentdefault.Read(s.root)
+	b.AgentSummary, b.AgentRevision = defaultState.Summary(now), defaultState.Revision
+	if err != nil {
+		b.AgentSummary, b.AgentError = "Default: unavailable", err.Error()
+		b.Issues = append(b.Issues, "agent default: "+err.Error())
+	}
+	b.Overview = append(b.Overview, ui.SafeText(b.AgentSummary))
 	buf.Reset()
 	// Escape external labels before the renderer adds its own trusted SGR.
 	paintRows := slices.Clone(rows)

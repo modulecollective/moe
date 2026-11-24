@@ -24,6 +24,13 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   are waiting (read from git, so it shows with or without a serve), or
   `pushed 2m ago` once serve's pusher has landed one. A push origin is
   refusing earns a row of its own with git's reason.
+- `moe agent [codex|claude|reset]` reports or sets the global default backend
+  for 24 hours. Flags, persisted run bindings and `MOE_FORCE_AGENT` still win.
+  Re-selecting an active backend keeps its expiry; choosing the other starts
+  a fresh window. Reset returns to the current stylesheet. The web dashboard
+  offers the same control, and `moe ui` accepts `:agent codex`, `:agent claude`,
+  `:agent reset` and `:agent` for status, even on an empty or filtered board.
+  The status describes defaults; stage banners identify executing backends.
 - `moe ui [--project <id>] [--workflow <name>]` is the dashboard as a console:
   the whole board, every completed run included, above the selected item's
   details and a console of recent outcomes. Arrows or `j`/`k` select; `Tab` /
@@ -106,8 +113,9 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   In the command prompt, Tab completes command names and cycles matches in
   lexical order; Shift-Tab cycles backward. Type a space before arguments;
   Enter submits. `new-i` matches `new-idea|new-intent` and `tag-` matches
-  `tag-design|tag-sdlc`. Other values are typed in full. Completion preserves
-  surrounding text and starts no work.
+  `tag-design|tag-sdlc`. `agent` completes `codex`, `claude` and `reset`;
+  other values are typed in full. Completion preserves surrounding text and
+  starts no work.
 
   Closed ideas and intents remain selectable with their full capture text
   scrollable in the details. Closed intents appear under `COMPLETED` like any
@@ -470,18 +478,31 @@ A selector naming a retired stage — sdlc's `code` or `test`, both replaced by
 silently selects build, because the two retired stages' settings may have
 differed.
 
-**Precedence.** The stylesheet sits below your explicit per-run bindings and
-above the background defaults, mirroring "explicit beats the stylesheet":
+**Precedence.** Explicit choices beat defaults. A temporary default overrides
+stylesheet agent declarations at every selector specificity:
 
-- Agent: `$MOE_FORCE_AGENT` → `--agent` flag → `run.json` agent → **stylesheet**
-  → `claude`.
+- Agent: `$MOE_FORCE_AGENT` → `--agent` flag → `run.json` agent → active
+  **temporary default** → **stylesheet** → `claude`.
 - Model, after resolving the agent: internal explicit model →
   **`model-<resolved-agent>`** → backend CLI default. There is no public
   `--model` flag or `$MOE_MODEL`; internal curation callers may supply an
   explicit model.
 
 Steer a run with `--agent`, the whole process with `$MOE_FORCE_AGENT`, or the
-ambient default with a broad stylesheet `agent:` rule.
+permanent default with a stylesheet `agent:` rule. `moe agent codex` temporarily
+changes defaults across this bureaucracy without writing a run binding or
+changing model IDs. The tracked root `agent-default.json` records `revision`,
+`agent` and UTC `expires_at`; clear records retain only the revision. Missing
+means stylesheet. Malformed records refuse selection and show observation
+errors. Web and terminal controls refuse stale revisions; duplicate requests
+make no commit and do not extend expiry.
+
+Expiry is checked on read, with no cleanup commit. Reset and expiry expose the
+current stylesheet, including changes made during the window. Commit hand
+edits to the root stylesheet so session worktrees receive them. Subsequent
+turns, including cascades and heartbeat children, read fresh policy without a
+serve restart; executing agents keep their admitted backend and model. A
+locally known `MOE_FORCE_AGENT` is labelled for that process only.
 
 With the example file above, `MOE_FORCE_AGENT=claude moe sdlc design moe/<run>`
 uses `fable`, and the same command with `MOE_FORCE_AGENT=codex` uses

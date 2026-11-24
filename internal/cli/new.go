@@ -64,7 +64,7 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	// parses on every workflow's shared `new` facade and we reject it for
 	// the other workflows below before doing any work.
 	workspaceName := addWorkspaceFlag(fs, "sdlc only")
-	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). Explicit values persist to run.json; omitted values resolve at stage time via the model stylesheet, then claude. $MOE_FORCE_AGENT overrides backend selection")
+	agentOverride := fs.String("agent", "", "agent backend for this run (claude/codex). Explicit values persist to run.json; omitted values resolve at stage time via the active temporary default, the model stylesheet, then claude. $MOE_FORCE_AGENT overrides backend selection")
 	// --park, --seed, and the cascade ladder are workflow-generic (they
 	// live on the shared new facade, so every workflow gets them).
 	// --park opens the run and prints the next-stage hint instead of
