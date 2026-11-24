@@ -87,6 +87,9 @@ type runVM struct {
 	// follow-ups, lore, and twin notes — each landed one linked to
 	// what it became. Zero value renders no sections.
 	Traces runTracesVM
+	// Work is the work linked to an intent, grouped by state. Empty on
+	// every other run, and on an intent nothing serves yet.
+	Work []intentWorkGroupVM
 	// Reaped is the heartbeat reap's tombstone, rendered. Nil for nearly
 	// every run: it is set only between an unfinished turn's reap and the next
 	// session start on the run clearing it.
@@ -399,20 +402,30 @@ func (s *Server) closeWorkflowRun(w http.ResponseWriter, r *http.Request, projec
 	http.Redirect(w, r, "/run/"+projectID+"/"+slug, http.StatusSeeOther)
 }
 
-func (s *Server) handleIdeaReopen(w http.ResponseWriter, r *http.Request) {
+// handleCaptureReopen reopens a closed idea or intent, dispatching on
+// the run's own workflow so each keeps its CLI verb's guards.
+func (s *Server) handleCaptureReopen(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("project")
 	slug := r.PathValue("slug")
 	id := projectID + "/" + slug
 
-	if err := runopen.ReopenIdea(s.opts.Root, projectID, slug); err != nil {
+	md, ok := s.loadRunOr404(w, projectID, slug, "reopen")
+	if !ok {
+		return
+	}
+	reopen, noun := runopen.ReopenIdea, "idea"
+	if md.Workflow == dash.IntentWorkflow {
+		reopen, noun = runopen.ReopenIntent, "intent"
+	}
+	if err := reopen(s.opts.Root, projectID, slug); err != nil {
 		switch {
 		case errors.Is(err, run.ErrRunNotFound):
 			http.Error(w, "no such run: "+id, http.StatusNotFound)
-		case errors.Is(err, runopen.ErrNotReopenableIdea):
-			http.Error(w, "reopen idea: "+err.Error(), http.StatusConflict)
+		case errors.Is(err, runopen.ErrNotReopenableIdea), errors.Is(err, runopen.ErrNotReopenableIntent):
+			http.Error(w, "reopen "+noun+": "+err.Error(), http.StatusConflict)
 		default:
-			s.logf("reopen idea %s: %v", id, err)
-			http.Error(w, "reopen idea: "+err.Error(), http.StatusInternalServerError)
+			s.logf("reopen %s %s: %v", noun, id, err)
+			http.Error(w, "reopen "+noun+": "+err.Error(), http.StatusInternalServerError)
 		}
 		return
 	}
@@ -639,7 +652,58 @@ func (s *Server) buildRunVM(projectID, slug, id string) (runVM, error) {
 	vm.Provenance = s.gatherProvenance(projectID, slug)
 	vm.Actions = s.composeRunActions(projectID, slug, vm.NextStage, md)
 	vm.RunStatus = s.runStatusVM(projectID, slug)
+	if md.Workflow == dash.IntentWorkflow {
+		vm.Work = s.intentWork(id)
+	}
 	return vm, nil
+}
+
+// intentWorkGroupVM is one state's slice of an intent's linked work.
+type intentWorkGroupVM struct {
+	Name string
+	Runs []intentWorkVM
+}
+
+type intentWorkVM struct {
+	ID, URL, Workflow, Status string
+}
+
+// intentWork lists the runs whose run.json links them to the intent key,
+// live first, then landed, then the rest. A scan failure logs and
+// renders no list: the page is still worth showing.
+func (s *Server) intentWork(key string) []intentWorkGroupVM {
+	mds, err := run.Scan(s.opts.Root)
+	if err != nil {
+		s.logf("intent work %s: %v", key, err)
+		return nil
+	}
+	groups := []intentWorkGroupVM{{Name: "live"}, {Name: "landed"}, {Name: "other"}}
+	for _, md := range mds {
+		if md.Intent != key {
+			continue
+		}
+		g := 2
+		switch md.Status {
+		case run.StatusInProgress, run.StatusPushed:
+			g = 0
+		case run.StatusMerged:
+			g = 1
+		}
+		groups[g].Runs = append(groups[g].Runs, intentWorkVM{
+			ID:       md.Project + "/" + md.ID,
+			URL:      "/run/" + md.Project + "/" + md.ID,
+			Workflow: md.Workflow,
+			Status:   md.Status,
+		})
+	}
+	var out []intentWorkGroupVM
+	for _, g := range groups {
+		if len(g.Runs) > 0 {
+			slices.SortFunc(g.Runs, func(a, b intentWorkVM) int { return strings.Compare(a.ID, b.ID) })
+			out = append(out, g)
+		}
+	}
+	return out
 }
 
 // composeRunActions returns the peer-affordances list for the per-run
@@ -675,12 +739,12 @@ func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Me
 			}
 			return append(out, runAction{Label: "close " + md.Workflow, Href: base + "/close", Method: "POST", Title: closeCaptureTip})
 		case run.StatusClosed:
-			// Reopen stays idea-only: the intent verb set has no reopen
-			// (cli/intent.go), and the web must not exceed the CLI's.
-			if md.Workflow == dash.IdeaWorkflow {
-				return []runAction{
-					{Label: "reopen idea", Href: base + "/reopen", Method: "POST", Title: reopenIdeaTip},
-				}
+			tip := reopenIdeaTip
+			if md.Workflow == dash.IntentWorkflow {
+				tip = reopenIntentTip
+			}
+			return []runAction{
+				{Label: "reopen " + md.Workflow, Href: base + "/reopen", Method: "POST", Title: tip},
 			}
 		}
 		return nil

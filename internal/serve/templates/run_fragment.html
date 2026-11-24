@@ -79,6 +79,19 @@
   </section>
   {{end}}
 
+  {{if .Work}}
+  <section class="intent-work">
+    <h2>work</h2>
+    {{range .Work}}
+    <h3>{{.Name}}</h3>
+    <ul>
+      {{range .Runs}}<li><a class="slug" href="{{.URL}}">{{.ID}}</a> <span class="badge">{{.Workflow}}</span> <span class="badge">{{.Status}}</span></li>
+      {{end}}
+    </ul>
+    {{end}}
+  </section>
+  {{end}}
+
   {{if .Provenance}}
   <section class="provenance">
     <h2>provenance</h2>

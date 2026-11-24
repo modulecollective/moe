@@ -55,20 +55,77 @@ func TestIntentPageRendersEditAndCloseChips(t *testing.T) {
 	}
 }
 
-// TestClosedIntentPageHasNoChips: reopen is idea-only — `moe intent`
-// has no reopen verb, and the web must not exceed the CLI's verb set.
-func TestClosedIntentPageHasNoChips(t *testing.T) {
+// TestClosedIntentPageOffersReopen: a closed intent gets exactly one
+// chip, reopen — the web face of `moe intent reopen`, which is how the
+// operator undoes a pulse's close. An open intent gets no reopen chip.
+func TestClosedIntentPageOffersReopen(t *testing.T) {
 	root := t.TempDir()
 	seedRun(t, root, "alpha", "ship-faster", dash.IntentWorkflow)
-	setStatus(t, root, "alpha", "ship-faster", run.StatusClosed)
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+	if strings.Contains(get(t, s, "/run/alpha/ship-faster").Body.String(), `/reopen"`) {
+		t.Error("an open intent must not offer reopen")
+	}
+	setStatus(t, root, "alpha", "ship-faster", run.StatusClosed)
 
 	rr := get(t, s, "/run/alpha/ship-faster")
-	if rr.Code != http.StatusOK {
-		t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+	mustContain(t, rr, `action="/run/alpha/ship-faster/reopen"`, `>reopen intent<`)
+	for _, deny := range []string{`>edit intent<`, `>close intent<`} {
+		if strings.Contains(rr.Body.String(), deny) {
+			t.Errorf("closed intent offers %s", deny)
+		}
 	}
-	if strings.Contains(rr.Body.String(), `<section class="actions">`) {
-		t.Errorf("closed intent must render no action chips\n%s", rr.Body.String())
+}
+
+// TestIntentReopenRouteKeepsLinksAndMark: POST reopen flips a pulse-closed
+// intent back, leaving closed_by (the one-try mark) and the work linked to
+// it, which the page lists grouped by state.
+func TestIntentReopenRouteKeepsLinksAndMark(t *testing.T) {
+	root := newGitServeRoot(t)
+	seedRun(t, root, "alpha", "ship-faster", dash.IntentWorkflow)
+	md, err := run.Load(root, "alpha", "ship-faster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	md.Status, md.ClosedBy = run.StatusClosed, "_cabinet/pulse-1"
+	if err := run.Save(root, md); err != nil {
+		t.Fatal(err)
+	}
+	for _, w := range []struct{ id, status string }{{"fix-a", run.StatusMerged}, {"fix-b", run.StatusInProgress}, {"unrelated", run.StatusInProgress}} {
+		seedRun(t, root, "alpha", w.id, "sdlc")
+		wm, _ := run.Load(root, "alpha", w.id)
+		wm.Status = w.status
+		if w.id != "unrelated" {
+			wm.Intent = "alpha/ship-faster"
+		}
+		if err := run.Save(root, wm); err != nil {
+			t.Fatal(err)
+		}
+	}
+	gittest.Commit(t, root, "seed closed intent")
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
+
+	req := httptest.NewRequest("POST", "/run/alpha/ship-faster/reopen", strings.NewReader(""))
+	rr := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rr, req)
+	if rr.Code != http.StatusSeeOther {
+		t.Fatalf("want 303, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	md, err = run.Load(root, "alpha", "ship-faster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if md.Status != run.StatusInProgress || md.ClosedBy != "_cabinet/pulse-1" {
+		t.Fatalf("reopened = %+v", md)
+	}
+	page := get(t, s, "/run/alpha/ship-faster")
+	mustContain(t, page, `<section class="intent-work">`, `<h3>live</h3>`, `<h3>landed</h3>`,
+		`href="/run/alpha/fix-a"`, `href="/run/alpha/fix-b"`)
+	if strings.Contains(page.Body.String(), `href="/run/alpha/unrelated"`) {
+		t.Error("unlinked run listed as the intent's work")
+	}
+	body := page.Body.String()
+	if strings.Index(body, `href="/run/alpha/fix-b"`) > strings.Index(body, `href="/run/alpha/fix-a"`) {
+		t.Error("live work should list before landed work")
 	}
 }
 

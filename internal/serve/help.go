@@ -48,6 +48,7 @@ const (
 	closeRunTip      = "Close without shipping: release the workspace, harvest followups and feedback, mark the run closed."
 	closeCaptureTip  = "Close this capture; it leaves the board. Starts nothing."
 	reopenIdeaTip    = "Put this closed idea back on the board."
+	reopenIntentTip  = "Put this closed intent back. Its linked work stays linked, and a pulse will not close it again."
 	editTip          = "Edit the text."
 	untagTip         = "Withdraw the licence; the idea waits for you."
 	tagDesignOnlyTip = "License one design turn, then hold the run for you."

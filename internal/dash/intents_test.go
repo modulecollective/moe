@@ -99,3 +99,44 @@ func TestRenderIntentsSectionAlwaysPresent(t *testing.T) {
 		t.Fatalf("expected slug + title in INTENTS section:\n%s", out2)
 	}
 }
+
+// TestIntentRowCarriesMarkAndCounts: a pulse-opened intent says so, and
+// linked work shows as open and landed counts. No work renders no counts.
+func TestIntentRowCarriesMarkAndCounts(t *testing.T) {
+	rows := buildIntentRows(t, []IntentInput{
+		{Project: "moe", Slug: "a", Title: "Goal", Pulse: true, Open: 2, Landed: 9},
+		{Project: "moe", Slug: "b", Title: "Direction"},
+	}, "")
+	if rows[0].Note != "Goal · pulse  (2 open · 9 landed)" || rows[1].Note != "Direction" {
+		t.Fatalf("notes = %q, %q", rows[0].Note, rows[1].Note)
+	}
+}
+
+// TestClosedIntentIsCompletedHistory: a closed intent is a finished goal
+// and gets a COMPLETED row, noted when a pulse closed it. An open one
+// stays off the run board (INTENTS carries it).
+func TestClosedIntentIsCompletedHistory(t *testing.T) {
+	now := time.Now().UTC()
+	idx := &run.JournalIndex{LastActivity: map[string]time.Time{}}
+	mds := []*run.Metadata{
+		{ID: "by-hand", Project: "moe", Workflow: IntentWorkflow, Status: run.StatusClosed},
+		{ID: "by-pulse", Project: "moe", Workflow: IntentWorkflow, Status: run.StatusClosed, ClosedBy: "_cabinet/pulse-1"},
+		{ID: "open", Project: "moe", Workflow: IntentWorkflow, Status: run.StatusInProgress},
+	}
+	rows, err := BuildRows(Inputs{Now: now, Runs: mds, Index: idx})
+	if err != nil {
+		t.Fatal(err)
+	}
+	notes := map[string]string{}
+	for _, r := range rows {
+		if r.Bucket == BucketCompletedRuns {
+			notes[r.Run] = r.Note
+		}
+	}
+	if notes["by-hand"] != "intent:closed" || notes["by-pulse"] != "intent:closed by pulse" {
+		t.Fatalf("completed notes = %v", notes)
+	}
+	if _, ok := notes["open"]; ok {
+		t.Fatal("an open intent is not history")
+	}
+}

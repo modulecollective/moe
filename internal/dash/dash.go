@@ -248,6 +248,24 @@ type IntentInput struct {
 	Project string
 	Slug    string
 	Title   string
+	// Pulse marks an intent a pulse opened (its run carries spawned_by).
+	Pulse bool
+	// Open and Landed count the work linked to the intent: live runs
+	// and ideas, and merged runs. Both zero renders no counts.
+	Open, Landed int
+}
+
+// intentNote is an INTENTS row's note: the title, the pulse mark, and
+// the linked-work counts.
+func intentNote(it IntentInput) string {
+	note := it.Title
+	if it.Pulse {
+		note += " · pulse"
+	}
+	if it.Open > 0 || it.Landed > 0 {
+		note += fmt.Sprintf("  (%d open · %d landed)", it.Open, it.Landed)
+	}
+	return note
 }
 
 // BuildRows maps scanned metadata to dashboard rows. Per-run journal
@@ -343,7 +361,7 @@ func BuildRows(in Inputs) ([]Row, error) {
 		intentRows = append(intentRows, Row{
 			Project: it.Project,
 			Run:     it.Slug,
-			Note:    it.Title,
+			Note:    intentNote(it),
 			Bucket:  BucketIntents,
 		})
 	}
@@ -672,10 +690,17 @@ func classify(md *run.Metadata, byRunKey map[string]*run.Metadata, idx *run.Jour
 	runKey := md.Project + "/" + md.ID
 	prefix := md.Workflow + ":"
 	if md.Workflow == IntentWorkflow {
-		// Intents never join the run board. Open ones render in the
-		// INTENTS section (fed from Inputs.Intents); closed ones drop out
-		// entirely — an intent is standing direction, not run traffic, so
-		// a retired intent is not history worth a COMPLETED row.
+		// Open intents render in the INTENTS section (fed from
+		// Inputs.Intents), not here. A closed one is a finished goal,
+		// and that is history: it gets a COMPLETED row, which is also
+		// where the operator finds a pulse's close to undo it.
+		if md.Status == run.StatusClosed {
+			note := prefix + "closed"
+			if md.ClosedBy != "" {
+				note += " by pulse"
+			}
+			return BucketCompletedRuns, note, "", ""
+		}
 		return BucketNone, "", "", ""
 	}
 	if md.Workflow == IdeaWorkflow {

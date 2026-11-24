@@ -728,21 +728,16 @@ func TestUIClosedIntentsInspectable(t *testing.T) {
 		if it.Body != body || it.Editable || it.Notes || it.Controls || it.Terminal || it.Question != nil || !strings.Contains(strings.Join(it.Detail, "\n"), "closed") {
 			t.Fatalf("closed intent = %+v", it)
 		}
-		other := uiItem(t, b, "moe", "b-goal", ui.ItemIntent)
-		if it.Line >= other.Line || !strings.Contains(b.Lines[it.Line], it.Label()) || !strings.Contains(strings.Join(b.Lines[:it.Line], "\n"), "CLOSED INTENTS") {
+		// A closed intent is a finished goal, so it is a COMPLETED row
+		// like any other history, not a console-only section.
+		if !strings.Contains(b.Lines[it.Line], it.Label()) || !strings.Contains(strings.Join(b.Lines[:it.Line], "\n"), "COMPLETED") || !strings.Contains(b.Lines[it.Line], "intent:closed") {
 			t.Fatalf("closed intent lines = %v", b.Lines)
 		}
 		if idea := uiItem(t, b, "moe", "an-idea", ui.ItemIdea); idea.Editable {
 			t.Fatalf("closed idea = %+v", idea)
 		}
-		for _, row := range source.snap.Rows {
-			if row.Run == "a-goal" || row.Run == "b-goal" {
-				t.Fatalf("UI history changed dash membership: %+v", row)
-			}
-		}
 	}
-	// The scan includes every project/workflow; the UI-only section must
-	// apply the same filters as the ordinary dashboard rows.
+	// Closed intents follow the dashboard's own filters.
 	for _, filter := range []DashFilter{{ProjectFilter: "elsewhere"}, {WorkflowFilter: "idea"}, {WorkflowFilter: "intent"}} {
 		source := newUISource(root, filter, os.Stdout)
 		if err := source.refresh(context.Background()); err != nil {
@@ -755,6 +750,7 @@ func TestUIClosedIntentsInspectable(t *testing.T) {
 				intents = append(intents, it.Run)
 			}
 		}
+		slices.Sort(intents)
 		want := []string(nil)
 		if filter.WorkflowFilter == "intent" {
 			want = []string{"a-goal", "b-goal"}

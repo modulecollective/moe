@@ -507,7 +507,7 @@ func (s *Server) registerRoutes() {
 	s.router.HandleFunc("GET /run/{project}/{slug}/edit", s.handleCaptureEditForm)
 	s.router.HandleFunc("POST /run/{project}/{slug}/edit", s.handleCaptureEditSubmit)
 	s.router.HandleFunc("POST /run/{project}/{slug}/close", s.handleClose)
-	s.router.HandleFunc("POST /run/{project}/{slug}/reopen", s.handleIdeaReopen)
+	s.router.HandleFunc("POST /run/{project}/{slug}/reopen", s.handleCaptureReopen)
 	s.router.HandleFunc("POST /run/{project}/{slug}/tag", s.handleIdeaTag)
 	s.router.HandleFunc("POST /run/{project}/{slug}/untag", s.handleIdeaUntag)
 	// The advance mark: the operator read the stage's canvas and approves,
