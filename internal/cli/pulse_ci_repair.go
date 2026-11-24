@@ -175,7 +175,8 @@ func kickCIRepair(root, key string, prChecks []ownedPRChecks, stdout, stderr io.
 	case exitYielded:
 		moePrintf(stderr, "pulse: CI repair %s yielded to operator control\n", key)
 	case exitParked:
-		// rideParked already named the gate it parked at.
+		// rideParked already named the gate it parked at, or a
+		// nothing-to-ship stop printed its own line.
 	case 0:
 		moePrintf(stderr, "pulse: CI repair %s updated existing PR %s\n", key, observed.PR)
 	default:
@@ -196,6 +197,11 @@ func driveCIRepair(root string, md *run.Metadata, p ownedPRChecks, stdout, stder
 	// gateStop marks a stop at a gate after a stage turn that ran cleanly:
 	// the repair parked on its canvas, nothing failed.
 	gateStop := false
+	// nothingToShip marks a stop after every turn ran cleanly and found
+	// nothing to push: no repair commit, or a nominated close. Clean for
+	// the backoff like a gate stop; the spent attempt and the gate's prSeen
+	// acknowledgement keep the head from being re-picked.
+	nothingToShip := false
 	wf, _ := LookupWorkflow(md.Workflow)
 	if clockQuota != nil {
 		previous := clockQuota.repairClaimed
@@ -213,6 +219,9 @@ func driveCIRepair(root string, md *run.Metadata, p ownedPRChecks, stdout, stder
 		// the stop as exit 1: only the sweep's backoff reads it as parked.
 		if gateStop {
 			code = rideParked(root, wf, md, cascadeResult{ran: []cascadeStepResult{{stage: stopped}}}, code, stderr)
+		}
+		if nothingToShip {
+			code = exitParked
 		}
 	}()
 	clone, err := sandboxClonePath(root, md)
@@ -253,7 +262,12 @@ func driveCIRepair(root string, md *run.Metadata, p ownedPRChecks, stdout, stder
 		return code
 	}
 	after, err := git.RevParse(clone, "refs/heads/"+branchPrefix+md.ID)
-	if err != nil || before == after || stageNominatedClose(root, md, "build") {
+	if err != nil {
+		moePrintf(stderr, "CI repair: %v\n", err)
+		return 1
+	}
+	if before == after || stageNominatedClose(root, md, "build") {
+		nothingToShip = true
 		moePrintln(stderr, "CI repair: build produced no repair commit or nominated close; keeping the pushed run and spent attempt")
 		return 1
 	}
@@ -272,6 +286,7 @@ func driveCIRepair(root string, md *run.Metadata, p ownedPRChecks, stdout, stder
 			return code
 		}
 		if stageNominatedClose(root, md, stage) {
+			nothingToShip = true
 			moePrintln(stderr, "CI repair: stage nominated close; keeping the existing PR")
 			return 1
 		}

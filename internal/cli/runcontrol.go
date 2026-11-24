@@ -44,6 +44,8 @@ const exitYielded = 77
 // exitParked is the code of a ride (rideRun, or a CI repair) that
 // stopped because a stage it ran cleanly left its gate unsatisfied: the
 // turn ran and committed, and the run waits on what its canvas says.
+// It also covers a CI repair whose turns ran cleanly and found nothing
+// to ship (no repair commit, or a nominated close).
 // Like a yield it is no failure, so the sweep's exit (and the
 // heartbeat's shared backoff) ignores it. It never leaves the process:
 // combinePulseExit folds it.

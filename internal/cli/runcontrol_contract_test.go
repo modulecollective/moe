@@ -437,6 +437,7 @@ func TestFinishDuringFailedCIRepairSettles(t *testing.T) {
 		stage string
 	}{
 		{"build fails", 1, "build"},
+		{"build no change", 0, "build"},
 		{"review gate blocks", 0, "review"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -462,7 +463,7 @@ func TestFinishDuringFailedCIRepairSettles(t *testing.T) {
 				if _, err := runcontrol.Submit(f.root, p, r, runcontrol.Request{ID: "during-repair", Kind: runcontrol.KindFinish}); err != nil {
 					t.Fatal(err)
 				}
-				if tc.code == 0 {
+				if tc.code == 0 && tc.name != "build no change" {
 					gittest.Run(t, f.clonePath, "commit", "--allow-empty", "-m", "repair")
 					writeStampedBuild(t, f.root, md)
 				}
@@ -473,10 +474,11 @@ func TestFinishDuringFailedCIRepairSettles(t *testing.T) {
 			t.Cleanup(func() { checkCascadeStageGate = priorGate })
 			checkCascadeStageGate = func(_ *Workflow, _ *run.Metadata, stage string, _ io.Writer) (bool, int) { return stage != "review", 1 }
 			push := stubPushFromCascade(t, 0, nil)
-			// A review that blocks parks the repair, but the finish
-			// settles on the real stop (exit 1), not on the park.
+			// A review that blocks, or a build that finds nothing to
+			// ship, parks the repair, but the finish settles on the real
+			// stop (exit 1), not on the park.
 			want := 1
-			if tc.stage == "review" {
+			if tc.code == 0 {
 				want = exitParked
 			}
 			if code := driveCIRepair(f.root, md, redPR(md.Project+"/"+md.ID, "observed-head"), io.Discard, io.Discard); code != want {

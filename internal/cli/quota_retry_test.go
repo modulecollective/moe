@@ -368,7 +368,7 @@ type quotaTestAgent struct {
 func (a *quotaTestAgent) ExecuteOneShot(r agent.OneShotRequest) (string, error) { return a.exec(r) }
 
 func TestCIRepairClaimsAfterQuotaAdmission(t *testing.T) {
-	for _, scenario := range []string{"blocked", "review blocked", "build unstamped", "occupied", "moved"} {
+	for _, scenario := range []string{"blocked", "review blocked", "build unstamped", "no change", "occupied", "moved"} {
 		t.Run(scenario, func(t *testing.T) {
 			realStageSession := runStageSession
 			f := newPushFixture(t)
@@ -435,7 +435,10 @@ func TestCIRepairClaimsAfterQuotaAdmission(t *testing.T) {
 				if err := repolock.With(f.root, repolock.Options{Purpose: "test-outside-lock", Budget: time.Millisecond}, func() error { return nil }); err != nil {
 					t.Fatal(err)
 				}
-				gittest.Run(t, f.clonePath, "commit", "--allow-empty", "-m", "repair CI")
+				// A turn that finds nothing to repair commits nothing.
+				if scenario != "no change" {
+					gittest.Run(t, f.clonePath, "commit", "--allow-empty", "-m", "repair CI")
+				}
 				if scenario == "build unstamped" {
 					// The turn wrote its canvas but left the gate blocked.
 					writeBuildCanvas(t, r.Root, md, "code.md", strings.Replace(stampedBuildCanvas, "ready", "blocked", 1))
@@ -465,13 +468,21 @@ func TestCIRepairClaimsAfterQuotaAdmission(t *testing.T) {
 			if scenario == "build unstamped" {
 				wantCode, wantClaims, wantExec = exitParked, 1, 1
 			}
+			// A claimed repair that finds nothing to ship is clean the
+			// same way, and still cannot be re-picked for this head.
+			if scenario == "no change" {
+				wantCode, wantClaims, wantExec = exitParked, 1, 1
+			}
 			if code != wantCode || len(idx.CIRepairAttempts[p.Run]) != wantClaims || executions != wantExec || reads != wantReads || len(idx.QuotaRetries) != wantRetries {
 				t.Fatalf("code=%d claims=%v executions=%d reads=%d retries=%v: %s", code, idx.CIRepairAttempts[p.Run], executions, reads, idx.QuotaRetries, &log)
 			}
 			if scenario == "build unstamped" && !strings.Contains(log.String(), "parked at its build gate") {
 				t.Fatal(log.String())
 			}
-			if scenario == "review blocked" || scenario == "build unstamped" {
+			if scenario == "no change" && !strings.Contains(log.String(), "no repair commit or nominated close") {
+				t.Fatal(log.String())
+			}
+			if scenario == "review blocked" || scenario == "build unstamped" || scenario == "no change" {
 				if !strings.Contains(log.String(), "attempt remains spent") {
 					t.Fatal(log.String())
 				}

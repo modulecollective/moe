@@ -253,10 +253,51 @@ func TestHeartbeatWakesOnlyForNewOfferedPRFailures(t *testing.T) {
 	}
 }
 
+// The operator's criterion for a repair that found nothing to ship: no
+// run of dead pulses, decided by the agent-free gate. A clean sweep
+// acknowledges the offered failure; the repair's claim commit (ride work
+// inside the sweep's window) costs at most one follow-up survey; then the
+// spent, unchanged red PR stays quiet.
+func TestHeartbeatQuietAfterSpentRepair(t *testing.T) {
+	defer withClockInvoked()()
+	defer withRideMode(rideDynamic)()
+	root, p := pushedRepairFixture(t)
+	t.Setenv("MOE_HOME", root)
+	gate := newHeartbeatGate(root)
+	gate.Swept("moe", true)
+	decisions := dueDecisions(t, gate, 0)
+	if len(sweepIDs(decisions)) != 1 || decisions[0].PRChecks == "" {
+		t.Fatalf("red PR not offered: %+v", decisions)
+	}
+	if _, err := claimCIRepair(root, p); err != nil {
+		t.Fatal(err)
+	}
+	gate.Swept("moe", true)
+	wakes := 0
+	for range 3 {
+		if got := dueProjectsPastTheWindow(t, gate); len(got) != 0 {
+			wakes++
+			gate.Swept("moe", true)
+		}
+	}
+	if wakes > 1 {
+		t.Fatalf("spent repair woke %d follow-up surveys, want at most one", wakes)
+	}
+	if _, err := claimCIRepair(root, p); err == nil {
+		t.Fatal("spent repair re-admitted")
+	}
+	for range 2 {
+		if got := dueProjectsPastTheWindow(t, gate); len(got) != 0 {
+			t.Fatalf("unchanged red PR with a spent attempt woke: %v", got)
+		}
+	}
+}
+
 func TestRepairDriveRunsFreshStagesAndPinsPR(t *testing.T) {
 	// A clean turn that stops at its gate parks (exitParked, folded to a
-	// clean sweep by pulseRide); a failed turn keeps its own code even
-	// when its gate would also report problems.
+	// clean sweep by pulseRide), and so does a walk whose turns ran
+	// cleanly and found nothing to ship; a failed turn keeps its own code
+	// even when its gate would also report problems.
 	for _, tc := range []struct {
 		stop string
 		code int
@@ -267,7 +308,10 @@ func TestRepairDriveRunsFreshStagesAndPinsPR(t *testing.T) {
 		{"unstamped", exitParked, "build"},
 		{"review", 8, ""},
 		{"blocked review", exitParked, "review"},
-		{"no change", 1, ""},
+		{"no change", exitParked, ""},
+		{"build close", exitParked, ""},
+		{"review close", exitParked, ""},
+		{"lost branch", 1, ""},
 		{"deferred push", 1, ""},
 	} {
 		stop := tc.stop
@@ -296,8 +340,19 @@ func TestRepairDriveRunsFreshStagesAndPinsPR(t *testing.T) {
 				}
 				// A repair that leaves build unstamped must stop before
 				// review: the derived gate is checked on this exit too.
-				if stop != "unstamped" {
+				switch stop {
+				case "unstamped":
+				case "build close":
+					for _, name := range []string{"code.md", "test.md"} {
+						writeBuildCanvas(t, f.root, md, name, strings.Replace(stampedBuildCanvas, "ready", "close", 1))
+					}
+				default:
 					writeStampedBuild(t, f.root, md)
+				}
+				// An unreadable run branch after the turn is a real
+				// error, not a nothing-to-ship stop.
+				if stop == "lost branch" {
+					gittest.Run(t, f.clonePath, "update-ref", "-d", "refs/heads/"+branchPrefix+md.ID)
 				}
 				return 0
 			}
@@ -310,6 +365,9 @@ func TestRepairDriveRunsFreshStagesAndPinsPR(t *testing.T) {
 				}
 				if stop == "review" || stop == "blocked review" {
 					writeStageCanvas(t, f.root, md, "review", escalatedReviewCanvas)
+				}
+				if stop == "review close" {
+					writeStageCanvas(t, f.root, md, "review", closedReviewCanvas)
 				}
 				if stage == stop {
 					return 8
@@ -341,10 +399,25 @@ func TestRepairDriveRunsFreshStagesAndPinsPR(t *testing.T) {
 				if !slices.Equal(stages, []string{"build"}) {
 					t.Fatalf("unstamped build ran past its gate: %v", stages)
 				}
-			case "blocked review":
+			case "blocked review", "review close":
 				if !slices.Equal(stages, []string{"build", "review"}) {
-					t.Fatalf("blocked review stages: %v", stages)
+					t.Fatalf("%s stages: %v", stop, stages)
 				}
+			case "no change", "build close", "lost branch":
+				if !slices.Equal(stages, []string{"build"}) {
+					t.Fatalf("%s ran past build: %v", stop, stages)
+				}
+			}
+			nothingLine := map[string]string{
+				"no change":    "no repair commit or nominated close",
+				"build close":  "no repair commit or nominated close",
+				"review close": "stage nominated close",
+			}[stop]
+			if nothingLine != "" && !strings.Contains(log.String(), nothingLine) {
+				t.Fatalf("%s: stop line %q missing: %s", stop, nothingLine, log.String())
+			}
+			if stop == "lost branch" && strings.Contains(log.String(), "no repair commit") {
+				t.Fatalf("lost branch read as nothing to ship: %s", log.String())
 			}
 			if stop == "" {
 				if code != 0 || !slices.Equal(stages, []string{"build", "review"}) || len(*pushes) != 1 {
@@ -363,6 +436,8 @@ func TestRepairDriveRunsFreshStagesAndPinsPR(t *testing.T) {
 		})
 	}
 }
+
+const closedReviewCanvas = "# Review\n\n## Gate\n\n```json\n{\"status\":\"close\"}\n```\n\n## Findings\n\nThe repair already landed on default.\n"
 
 // A repair that parks at a gate reaches the sweep as a clean exit: the
 // kick says nothing past rideParked's line, and pulseRide's fold makes
@@ -394,6 +469,38 @@ func TestKickCIRepairParkedIsClean(t *testing.T) {
 	}
 	if len(*pushes) != 0 {
 		t.Fatalf("parked repair shipped: %v", *pushes)
+	}
+}
+
+// A repair whose build finds nothing to ship reaches the sweep as a clean
+// exit too, with no "exited" line past the stop's own.
+func TestKickCIRepairNothingToShipIsClean(t *testing.T) {
+	f := newPushFixture(t)
+	t.Chdir(f.root)
+	t.Setenv("MOE_HOME", f.root)
+	md, _ := run.Load(f.root, f.projectID, f.runID)
+	md.Status = run.StatusPushed
+	if err := run.Save(f.root, md); err != nil {
+		t.Fatal(err)
+	}
+	prior := runStageSession
+	runStageSession = func(_, _, _ string, _ stageSessionOpts, _, _ io.Writer) int {
+		writeStampedBuild(t, f.root, md)
+		return 0 // no repair commit
+	}
+	t.Cleanup(func() { runStageSession = prior })
+	pushes := stubPushFromCascade(t, 0, nil)
+	key := md.Project + "/" + md.ID
+	var log bytes.Buffer
+	code := kickCIRepair(f.root, key, []ownedPRChecks{redPR(key, "observed-head")}, io.Discard, &log)
+	if code != exitParked || combinePulseExit(0, code) != 0 {
+		t.Fatalf("kick exit %d (folded %d), want exitParked folding to 0: %s", code, combinePulseExit(0, code), log.String())
+	}
+	if strings.Contains(log.String(), "exited ") || !strings.Contains(log.String(), "no repair commit or nominated close") {
+		t.Fatalf("nothing-to-ship kick log: %s", log.String())
+	}
+	if len(*pushes) != 0 {
+		t.Fatalf("nothing-to-ship repair shipped: %v", *pushes)
 	}
 }
 
