@@ -242,6 +242,14 @@ func (s *Server) heartbeatTick() {
 	// operator can act on: the running sweep's own row says why nothing
 	// else is moving, so the wait counts as quiet.
 	if s.children.sweepActive() {
+		// The root project's record backs the live sweep's own row, which
+		// renders its reason; that row must not say it waits on itself.
+		// Clearing Sweep keeps the ring from announcing a second sweep.
+		for i := range decisions {
+			if decisions[i].Project == project.RootID {
+				decisions[i].Sweep = false
+			}
+		}
 		holdDue(decisions, "waiting on the running sweep", false)
 		record()
 		return

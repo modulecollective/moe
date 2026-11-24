@@ -361,6 +361,46 @@ func TestHeartbeatSlotHeldTickIsQuiet(t *testing.T) {
 	}
 }
 
+// TestHeartbeatSlotHeldRootKeepsItsReason: the running sweep's own
+// commits move the root project's journal, so the gate offers the root
+// mid-sweep. That tick must not announce a sweep, and the root's record —
+// which the live sweep row renders — must not read as waiting on itself.
+func TestHeartbeatSlotHeldRootKeepsItsReason(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "slow-moe")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nsleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gate := &fakeHeartbeat{due: []string{"alpha"}}
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: bin, Heartbeat: gate, Logger: io.Discard,
+	})
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		s.children.shutdown(ctx, io.Discard)
+	})
+
+	s.heartbeatTick()
+	gate.mu.Lock()
+	gate.due = []string{project.RootID}
+	gate.mu.Unlock()
+	s.heartbeatTick()
+
+	for _, line := range tickLines(s) {
+		if strings.Contains(line, project.RootID+" sweeping —") {
+			t.Errorf("tick line %q announces a sweep the slot held", line)
+		}
+	}
+	p := snapshotProject(t, s, project.RootID)
+	if p.Sweep || !p.Sweeping() {
+		t.Errorf("%s = %+v, want a live sweep the tick did not start", project.RootID, p)
+	}
+	if p.Decision != "the journal moved" {
+		t.Errorf("%s decision = %q, want the gate's reason, not a wait on itself", project.RootID, p.Decision)
+	}
+}
+
 // tickLines is the text of every tick line /serve's activity list shows,
 // oldest first.
 func tickLines(s *Server) []string {
