@@ -317,7 +317,11 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 	// of a hand-edit — a ride merging and closing while the operator
 	// stages loose runs — would otherwise mask the act it landed on and
 	// hand the half-arranged board straight to a sweep.
-	if now.Sub(tipAt) < tick && (operatorTip || operatorActedSince(g.root, projectID, now.Add(-tick))) {
+	//
+	// A note on parked work lifts this for the sweep. The ride floor still
+	// holds every run in the project except the one carrying the note.
+	if now.Sub(tipAt) < tick && (operatorTip || operatorActedSince(g.root, projectID, now.Add(-tick))) &&
+		!noteWaitingOnParkedWork(sc, projectID) {
 		return false, true, "an operator commit landed within the last tick"
 	}
 

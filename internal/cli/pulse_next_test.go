@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/input"
@@ -497,5 +498,44 @@ func TestKickoffPutsARunWithAnOperatorNoteFirst(t *testing.T) {
 	}
 	if strings.Contains(got, "`beta/"+plain+"` (sdlc) — operator note waiting") {
 		t.Errorf("run with no note was marked:\n%s", got)
+	}
+}
+
+func TestOperatorNoteLiftsTheQuietWindowForItsRunAlone(t *testing.T) {
+	defer withRideMode(rideDynamic)()
+	defer withClockInvoked()()
+	root, stages := nextFixture(t)
+	noted := mintIn(t, root, "beta", "noted-work")
+	plain := mintIn(t, root, "beta", "plain-work")
+	other := mintIn(t, root, "moe", "other-work")
+	if _, err := input.Add(root, "beta", noted, "Do this one next."); err != nil {
+		t.Fatal(err)
+	}
+
+	sc, ok := newPulseScan(root)
+	if !ok {
+		t.Fatal("scan failed")
+	}
+	g := newHeartbeatGate(root)
+	for id, wantSweep := range map[string]bool{"beta": true, "moe": false} {
+		p, err := project.Load(root, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sweep, held, why := g.projectDue(sc, p, map[string]bool{}, pulseQuietWindow, time.Now())
+		if sweep != wantSweep || held == wantSweep {
+			t.Errorf("%s: sweep=%v held=%v (%s), want sweep=%v", id, sweep, held, why, wantSweep)
+		}
+	}
+
+	for _, id := range []string{plain} {
+		code, stderr := sweepWithGate(t, root, `{"status":"ok","next":{"run":"beta/`+id+`","why":"try"}}`)
+		if code != 0 || len(*stages) != 0 || !strings.Contains(stderr, "within the last tick") {
+			t.Fatalf("unnoted sibling: exit=%d stages=%+v stderr=%s", code, *stages, stderr)
+		}
+	}
+	code, stderr := sweepWithGate(t, root, `{"status":"ok","next":{"run":"beta/`+noted+`","why":"the operator pushed it"}}`)
+	if code != 0 || len(*stages) == 0 || (*stages)[0].runID != noted {
+		t.Fatalf("noted run did not ride: exit=%d stages=%+v stderr=%s (other %s)", code, *stages, stderr, other)
 	}
 }

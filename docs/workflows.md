@@ -767,7 +767,8 @@ That is the stuck-run loop: from the terminal or from the web's `/input` queue
 on a phone, write a sentence, and the next turn on that run acts on it. The
 note starts nothing — it writes one journal commit, so an armed serve's next
 heartbeat offers the board to a pulse, and the survey is told to pick a parked
-run with a waiting note first unless the floor holds it. `moe pulse new
+run with a waiting note first unless the floor holds it. The note also lifts the
+one-tick quiet window for that run alone, so it can start on the next tick. `moe pulse new
 --dynamic` is the expedite path. A note can steer further work on an open PR or
 accompany an idea into its eventual run. A pending note counts as an operator
 mark under `safe` mode, so eligible work can continue on a project that
