@@ -1,7 +1,7 @@
 // Package input owns the run-local human-input record: prose the
-// operator pushes at a run, and prose a pulse — or the harness, at a
-// spent review park — asks the operator for. Both reach the run's next
-// agent turn through its stage prompt.
+// operator pushes at a run, and prose the harness asks the operator for
+// when a run parks at a spent review. Both reach the run's next agent
+// turn through its stage prompt.
 //
 // The record is projects/<project>/runs/<run>/inputs.json, sibling of
 // run.json. It exists only for runs that have received something, so
@@ -10,16 +10,16 @@
 // One entry grammar carries both directions:
 //
 //   - text, no question — an operator note, pending until delivered.
-//   - question, no text — an open ping: a pulse's question awaiting the
+//   - question, no text — an open ping: the run's question awaiting the
 //     operator. It delivers nothing, and is what the queue surfaces as
 //     needing a human.
 //   - question and text — an answered ping, which is a pending note with
 //     its context attached, delivered as the pair.
 //
 // Nothing here holds anything. An open ping does not stop a stage turn
-// or a kick; stillness is the pulse's park to write, re-stated per
-// sweep. The record's job is to make the question durable and
-// answerable, not to enforce quiet.
+// or a kick; a spent review's hold is reviewLoopHold's, read from the
+// review canvas, not from the ping. The record's job is to make the
+// question durable and answerable, not to enforce quiet.
 //
 // A run may carry at most one open ping — that is what lets a reply
 // address the run rather than an id. Notes are unlimited.
@@ -84,8 +84,8 @@ type Entry struct {
 	// n-1. Ids are per-run, so an entry's address is <project>/<run>#<id>.
 	ID int `json:"id"`
 	// AskedBy is the qualified "<project>/<run>" of the run that asked —
-	// a survey's pulse, or the run itself at a spent review park —
-	// set on pings and empty on operator notes.
+	// the run itself, at a spent review park — set on pings and empty on
+	// operator notes.
 	AskedBy string `json:"asked_by,omitempty"`
 	// Question is the asker's prose question, empty on an operator note.
 	Question string `json:"question,omitempty"`
@@ -98,7 +98,8 @@ type Entry struct {
 	DeliveredTo string `json:"delivered_to,omitempty"`
 }
 
-// IsPing reports whether a pulse asked this entry, answered or not.
+// IsPing reports whether this entry is a question put to the operator,
+// answered or not.
 func (e Entry) IsPing() bool { return e.Question != "" }
 
 // Open reports whether this is a ping still awaiting the operator.
@@ -253,7 +254,7 @@ func Add(root, projectID, runID, text string) (Entry, error) {
 // Refuses a run that isn't in progress (ErrNotLive), an empty question
 // (ErrEmpty), and a run that already has one open (ErrOpenPing). All
 // three are the caller's cue to warn and carry on rather than fail the
-// sweep.
+// park.
 func Ask(root, projectID, runID, askedBy, question, consent string) (Entry, error) {
 	question = strings.TrimSpace(question)
 	if question == "" {

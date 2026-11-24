@@ -95,13 +95,14 @@ type Block struct {
 	Chore   string
 	// InputAdded / InputAsked / InputAnswered / InputDelivered carry
 	// "<project>/<run>#<id>" on the four commits of a human-input
-	// entry's life: the operator's own note (InputAdded), a pulse's ping
-	// (InputAsked, which also carries that sweep's Consent — the ask is
-	// a machine act), the operator's reply to one (InputAnswered), and
-	// the post-turn stamp saying a stage consumed it (InputDelivered,
-	// whose value is "<project>/<run>#<ids> <doc>" — ids comma-joined
-	// because one turn may consume several entries). Never two on one
-	// commit: they are separate events, one commit each.
+	// entry's life: the operator's own note (InputAdded), the harness's
+	// ping at a spent review park (InputAsked, which also carries the
+	// walk's Consent when a machine walk made the ask), the operator's
+	// reply to one (InputAnswered), and the post-turn stamp saying a
+	// stage consumed it (InputDelivered, whose value is
+	// "<project>/<run>#<ids> <doc>" — ids comma-joined because one turn
+	// may consume several entries). Never two on one commit: they are
+	// separate events, one commit each.
 	InputAdded     string
 	InputAsked     string
 	InputAnswered  string

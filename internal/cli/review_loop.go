@@ -58,10 +58,10 @@ func reviewLoopSpent(root string, md *run.Metadata, canvas string) string {
 // line. An answer is a pending note, which reviewLoopHold releases on:
 // the reply is the release.
 //
-// Warn-only, like askThreadEntry: a refused ask is one stderr line and
-// changes nothing about the park or its exit code. ErrOpenPing is the
-// expected refusal — the run already has a question in front of the
-// operator, and one open ping per run stays the rule.
+// Warn-only: a refused ask is one stderr line and changes nothing about
+// the park or its exit code. ErrOpenPing is the expected refusal — the
+// run already has a question in front of the operator, and one open
+// ping per run stays the rule.
 func askSpentReview(root string, md *run.Metadata, reason string, stderr io.Writer) {
 	question := "Review is blocked and the loop has stopped: " + reason + ".\n" +
 		"Reply with direction and review gets one more turn with your answer; or kick it back by hand, or close the run."

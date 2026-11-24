@@ -200,10 +200,10 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   next *successful* agent turn receives it verbatim in its prompt, once, and
   then it lives on the run page as history — the canvas that turn writes is
   where durable direction persists. `moe input answer <project>/<run>
-  [text ...]` fills the run's open question, whether asked by a dynamic survey
-  or a stopped review loop (one open per run, so the run is the address).
-  `moe input list [project]` shows both halves, oldest first: what has asked
-  you, then what you have given and no turn has picked up.
+  [text ...]` fills the run's open question, asked by a stopped review loop
+  (one open per run, so the run is the address). `moe input list [project]`
+  shows both halves, oldest first: what has asked you, then what you have
+  given and no turn has picked up.
 
   A question itself holds nothing. A stopped review loop's hold is separate;
   an answer or any note releases it for one more review turn. See [Blocked

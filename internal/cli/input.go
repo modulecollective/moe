@@ -1,8 +1,8 @@
 // Package cli — the operator's input channel to a run.
 //
 // One noun: the entry. The operator pushes prose at a run with
-// `moe input add`, a dynamic pulse asks for prose with a gate `ask`
-// entry, and `moe input answer` fills it in. `moe input list` shows both
+// `moe input add`, a run parked at a spent review asks for prose, and
+// `moe input answer` fills it in. `moe input list` shows both
 // halves of what is still in flight. The record and its grammar live in
 // internal/input; this file is the operator's door to it, plus the
 // prompt section that delivers entries and the kickoff block that tells
