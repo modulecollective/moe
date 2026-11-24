@@ -195,7 +195,7 @@ func judgedChoresBlock(sc *pulseScan, projectID string) string {
 		if !st.LastCompleted.IsZero() {
 			last = st.LastCompleted.UTC().Format("2006-01-02 15:04Z")
 		}
-		lines = append(lines, fmt.Sprintf("- `%s` — due when: %s (last completed: %s)", d.Name, d.When, last))
+		lines = append(lines, fmt.Sprintf("- `%s` — due when: %s (last completed: %s)", d.Key(), d.When, last))
 	}
 	if len(lines) == 0 {
 		return ""
@@ -203,7 +203,7 @@ func judgedChoresBlock(sc *pulseScan, projectID string) string {
 	return "Judged chores: registrations the operator authored whose due-ness is a judgment, not a glob or a clock. " +
 		"For each, ask only whether what landed since the last pulse meets the condition as written — the work itself is " +
 		"already authored, so this is not the spawn bar. When it does, nominate it in the gate with " +
-		"`{\"chore\": \"<name>\", \"why\": \"<the landed change that met it>\"}`, in `loose` or at a thread position. " +
+		"`{\"chore\": \"<project>/<name>\", \"why\": \"<the landed change that met it>\"}` in `loose`. " +
 		"Quiet is normal.\n" + strings.Join(lines, "\n")
 }
 

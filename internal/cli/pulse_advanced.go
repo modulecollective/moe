@@ -124,12 +124,10 @@ func advancedRunsBlock(sc *pulseScan, projectID string) string {
 		fmt.Fprintf(&sb, "- `%s` (%s) — waiting at **%s**, advanced %s — %s\n",
 			r.id, r.wf, r.stage, dash.HumanAgo(now, r.marked), r.title)
 	}
-	sb.WriteString("\nEach of these reached a chain prompt and the operator chose \"advance, don't run now\". " +
-		"That marker is consent to carry the run forward, which is more than a machine-spawned fix run has: " +
-		"an advanced run clears the lane bar's ordering question on its own, so grooming one onto a thread " +
-		"(a `threads` entry, `onto` an existing lane or self-rooted as its own group) is the normal move, " +
-		"not a stretch. Nothing here has a session yet — it is waiting for someone to kick it. Outside a " +
-		"dynamic sweep grooming one is not kicking it; under one a thread rooted at one of these starts " +
-		"like any other, and the marker is the consent that admits it.")
+	sb.WriteString("\nEach of these reached a stage prompt and the operator chose \"advance, don't run now\". " +
+		"That marker is consent to carry the run forward, which is more than a machine-spawned fix run has. " +
+		"Nothing here has a session yet, and nothing else will pick it up: naming one as `next` is the " +
+		"normal move, not a stretch. Outside a dynamic sweep a `next` is advice and starts nothing; under " +
+		"one the marker is the consent that admits the pick.")
 	return sb.String()
 }
