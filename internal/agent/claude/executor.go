@@ -219,6 +219,12 @@ func (Agent) Execute(r agent.Request) (string, error) {
 		return r.SessionID, fmt.Errorf("claude: CLI not found on PATH: %w", err)
 	}
 
+	// Only the interactive launch shows the add-dir trust dialog; a
+	// failure here costs that one dialog, so it never blocks the turn.
+	if err := seedTrust(r.Root, append([]string{r.ClonePath}, r.AddDirs...)); err != nil && r.Stderr != nil {
+		fmt.Fprintf(r.Stderr, "claude trust: %v\n", err)
+	}
+
 	args := executeArgs(r)
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = pickCwd(r.SessionCwd, r.Root)
