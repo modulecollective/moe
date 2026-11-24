@@ -13,6 +13,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/git/gittest"
+	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/serve"
 	"github.com/modulecollective/moe/internal/session"
@@ -292,6 +293,7 @@ func sweptOverAMidSweepOperatorCommit(t *testing.T, root string, clean bool) *he
 	if got := dueProjects(t, g); len(got) != 1 || got[0] != "moe" {
 		t.Fatalf("due = %v, want the delta sweep", got)
 	}
+	g.Dispatching()
 
 	journalCommit(t, root, "moe", "chain: edit", "" /*operator*/)
 	journalCommit(t, root, "moe", "open: pulse-1", "MoE-Consent: dynamic")
@@ -314,6 +316,7 @@ func TestHeartbeatSweepsACommitThatLandedMidSweep(t *testing.T) {
 	if got := dueProjectsPastTheWindow(t, g); len(got) != 1 || got[0] != "moe" {
 		t.Fatalf("due = %v, want [moe] — a commit no survey saw must still get a sweep", got)
 	}
+	g.Dispatching()
 
 	// The follow-up sweep's own range holds only its own commits, so it
 	// advances both cursors and the board goes quiet. Convergence is the
@@ -362,6 +365,7 @@ func sweptOverARideItKicked(t *testing.T, root string, clean bool) *heartbeatGat
 	if got := dueProjects(t, g); len(got) != 1 || got[0] != "moe" {
 		t.Fatalf("due = %v, want the delta sweep", got)
 	}
+	g.Dispatching()
 
 	journalCommit(t, root, "moe", "open: pulse-1", "MoE-Consent: dynamic")
 	journalCommit(t, root, "moe", "work: update code", "MoE-Workflow: sdlc\nMoE-Consent: dynamic")
@@ -385,6 +389,7 @@ func TestHeartbeatSweepsWorkARideLandedMidSweep(t *testing.T) {
 	if got := dueProjectsPastTheWindow(t, g); len(got) != 1 || got[0] != "moe" {
 		t.Fatalf("due = %v, want [moe] — work a sweep's own ride landed must still get a survey", got)
 	}
+	g.Dispatching()
 
 	// Generation 2: the follow-up sweep kicks nothing, so its window holds
 	// only its own commits and the walk ends here. Convergence is the half
@@ -409,6 +414,68 @@ func TestHeartbeatSweepsWorkARideLandedMidFailedSweep(t *testing.T) {
 
 	if got := dueProjectsPastTheWindow(t, g); len(got) != 1 || got[0] != "moe" {
 		t.Errorf("due = %v after a sweep died over a ride it kicked, want [moe]", got)
+	}
+}
+
+// TestHeartbeatHeldTickPinsNoBase: a sweep verdict the ticker holds —
+// here on the slot, while another project's sweep rides — must not pin
+// a dispatch base. If it did, the riding sweep's exit would consume it
+// as its own and stamp as surveyed a board no survey read, and the
+// project would read quiet until its journal moved again.
+func TestHeartbeatHeldTickPinsNoBase(t *testing.T) {
+	t.Parallel()
+	root := parallelQuietFixture(t)
+	g := newHeartbeatGate(root)
+	if got := dueProjectsPastTheWindow(t, g); len(got) != 0 {
+		t.Fatalf("due = %v on a fresh quiet board, want none", got)
+	}
+
+	// A root sweep is riding and moe holds no base for it.
+	journalCommit(t, root, "moe", "chain: edit", "" /*operator*/)
+	if got := dueProjectsPastTheWindow(t, g); len(got) != 1 || got[0] != "moe" {
+		t.Fatalf("due = %v, want [moe] once the journal moved", got)
+	}
+	// The ticker holds on the slot: no Dispatching.
+	if len(g.dispatched) != 0 {
+		t.Fatalf("dispatched = %v after a held tick, want empty", g.dispatched)
+	}
+
+	g.Swept(project.RootID, true) // the riding sweep exits clean
+
+	if got := dueProjectsPastTheWindow(t, g); len(got) != 1 || got[0] != "moe" {
+		t.Errorf("due = %v after another sweep exited, want [moe] — no survey read this board", got)
+	}
+}
+
+// TestHeartbeatHeldTickLeavesNoStaleBase: a cool-off or host failure
+// holds a sweep verdict with no sweep running. The base the spawning
+// tick pins must be that tick's tip, not the first held tick's, or the
+// exit walks a range holding commits the survey did read and refuses.
+func TestHeartbeatHeldTickLeavesNoStaleBase(t *testing.T) {
+	t.Parallel()
+	root := parallelQuietFixture(t)
+	g := newHeartbeatGate(root)
+	dueProjectsPastTheWindow(t, g) // seeds the cursor
+
+	journalCommit(t, root, "moe", "machine: a merge", "MoE-Consent: dynamic")
+	if got := dueProjectsPastTheWindow(t, g); len(got) != 1 {
+		t.Fatalf("due = %v, want the delta sweep", got)
+	}
+	// Held by the backoff: no Dispatching. The operator works meanwhile.
+	journalCommit(t, root, "moe", "chain: edit", "" /*operator*/)
+	if got := dueProjectsPastTheWindow(t, g); len(got) != 1 {
+		t.Fatalf("due = %v, want the delta sweep", got)
+	}
+	g.Dispatching()
+	journalCommit(t, root, "moe", "close: pulse-1", "MoE-Workflow: pulse\nMoE-Consent: dynamic")
+	g.Swept(project.RootID, true)
+
+	tip, _, _, _ := projectJournalTip(root, "moe")
+	if g.tips["moe"] != tip || g.surveyed["moe"] != tip {
+		t.Errorf("cursors = %q/%q, want both at %q — the survey saw the operator commit", g.tips["moe"], g.surveyed["moe"], tip)
+	}
+	if got := dueProjectsPastTheWindow(t, g); len(got) != 0 {
+		t.Errorf("due = %v after a sweep that saw everything, want none", got)
 	}
 }
 

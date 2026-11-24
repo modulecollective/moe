@@ -83,6 +83,7 @@ func TestHeartbeatHTTPAdvanceWakesSurveyedBoard(t *testing.T) {
 	if got := dueProjectsPastTheWindow(t, g); len(got) != 1 {
 		t.Fatalf("empty advance did not wake surveyed board: %v", got)
 	}
+	g.Dispatching()
 	if g.dispatched["moe"] != mark {
 		t.Fatalf("dispatched %q, want advance %s", g.dispatched["moe"], mark)
 	}
@@ -110,6 +111,7 @@ func TestHeartbeatHTTPAdvanceDuringSweep(t *testing.T) {
 			if got := dueProjectsPastTheWindow(t, g); len(got) != 1 {
 				t.Fatalf("dispatch = %v", got)
 			}
+			g.Dispatching()
 			postHeartbeatAdvance(t, root, h)
 			journalCommit(t, root, "moe", "close: pulse-mid", "MoE-Workflow: pulse\nMoE-Consent: dynamic")
 			g.Swept("moe", clean)
@@ -119,6 +121,7 @@ func TestHeartbeatHTTPAdvanceDuringSweep(t *testing.T) {
 			if got := dueProjectsPastTheWindow(t, g); len(got) != 1 {
 				t.Fatalf("unseen advance not reoffered: %v", got)
 			}
+			g.Dispatching()
 			journalCommit(t, root, "moe", "close: pulse-followup", "MoE-Workflow: pulse\nMoE-Consent: dynamic")
 			g.Swept("moe", true)
 			if got := dueProjectsPastTheWindow(t, g); len(got) != 0 {

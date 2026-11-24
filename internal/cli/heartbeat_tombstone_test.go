@@ -273,6 +273,7 @@ func TestReapTombstoneMidSweepRefusesTheCursorsAndConverges(t *testing.T) {
 	if got := dueProjects(t, g); len(got) != 1 {
 		t.Fatalf("due = %v, want the delta sweep that puts a child in flight", got)
 	}
+	g.Dispatching()
 
 	// Mid-sweep: a ride the survey saw as occupied dies, and the next
 	// tick's reap tombstones it inside the in-flight sweep's window.
@@ -283,6 +284,7 @@ func TestReapTombstoneMidSweepRefusesTheCursorsAndConverges(t *testing.T) {
 	if got := dueProjectsPastTheWindow(t, g); len(got) != 1 || got[0] != "moe" {
 		t.Fatalf("due = %v after a reap landed mid-sweep, want [moe]", got)
 	}
+	g.Dispatching()
 
 	// Generation 2 kicks nothing, so its window holds only its own
 	// commits and the walk ends.

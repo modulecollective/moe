@@ -220,6 +220,7 @@ func TestHeartbeatWakesOnlyForNewOfferedPRFailures(t *testing.T) {
 	if len(sweepIDs(decisions)) != 1 || decisions[0].PRChecks == "" {
 		t.Fatalf("new failure did not wake: %+v", decisions)
 	}
+	gate.Dispatching()
 	var offered []ownedPRChecks
 	if err := json.Unmarshal([]byte(decisions[0].PRChecks), &offered); err != nil || !offered[0].actionable() {
 		t.Fatalf("missing offered observation: %+v %v", offered, err)
@@ -232,6 +233,7 @@ func TestHeartbeatWakesOnlyForNewOfferedPRFailures(t *testing.T) {
 	if got := dueProjectsPastTheWindow(t, gate); len(got) != 1 {
 		t.Fatalf("mid-survey failure swallowed: %v", got)
 	}
+	gate.Dispatching()
 	gate.Swept("moe", true)
 	if got := dueProjectsPastTheWindow(t, gate); len(got) != 0 {
 		t.Fatalf("unchanged red resurveyed: %v", got)
@@ -269,6 +271,7 @@ func TestHeartbeatQuietAfterSpentRepair(t *testing.T) {
 	if len(sweepIDs(decisions)) != 1 || decisions[0].PRChecks == "" {
 		t.Fatalf("red PR not offered: %+v", decisions)
 	}
+	gate.Dispatching()
 	if _, err := claimCIRepair(root, p); err != nil {
 		t.Fatal(err)
 	}
@@ -277,6 +280,7 @@ func TestHeartbeatQuietAfterSpentRepair(t *testing.T) {
 	for range 3 {
 		if got := dueProjectsPastTheWindow(t, gate); len(got) != 0 {
 			wakes++
+			gate.Dispatching()
 			gate.Swept("moe", true)
 		}
 	}

@@ -62,9 +62,13 @@ import (
 // untouched.
 //
 // Alongside them, one scratch entry per in-flight sweep: dispatched
-// holds where the journal stood when the gate decided to sweep. It is
+// holds where the journal stood when the ticker started the sweep. It is
 // not a cursor — Swept consumes it — and it exists so the exit can tell
 // its own commits from an operator's landing mid-turn. See Swept.
+// Due only stages those bases in pending; Dispatching pins them, because
+// only the ticker knows whether a sweep verdict actually spawns. A base
+// pinned on a held tick would be consumed by whatever sweep exits next,
+// stamping as surveyed a board no survey read.
 // PR observations are separate from both journal cursors: prSeen holds
 // acknowledged failures per run; prOffered pins the evidence passed to
 // each child. Neither failed fetches nor a re-read at exit can move it.
@@ -77,8 +81,10 @@ type heartbeatGate struct {
 	tips       map[string]string
 	surveyed   map[string]string
 	dispatched map[string]string
-	prSeen     map[string]string
-	prOffered  map[string][]ownedPRChecks
+	// pending is this tick's would-be dispatched set, reset by every Due.
+	pending   map[string]string
+	prSeen    map[string]string
+	prOffered map[string][]ownedPRChecks
 	// tickPRs is this tick's observation per project, so a project with
 	// nothing due still shows the one sweep its PR state.
 	tickPRs map[string][]ownedPRChecks
@@ -91,6 +97,7 @@ func newHeartbeatGate(root string) *heartbeatGate {
 		tips:       map[string]string{},
 		surveyed:   map[string]string{},
 		dispatched: map[string]string{},
+		pending:    map[string]string{},
 		prSeen:     map[string]string{},
 		prOffered:  map[string][]ownedPRChecks{},
 		tickPRs:    map[string][]ownedPRChecks{},
@@ -117,6 +124,9 @@ func newHeartbeatGate(root string) *heartbeatGate {
 // next one is a few minutes away and re-derives everything.
 func (g *heartbeatGate) Due(tick time.Duration, log io.Writer) []serve.HeartbeatDecision {
 	g.log = log
+	g.mu.Lock()
+	g.pending = map[string]string{}
+	g.mu.Unlock()
 	g.reap(log)
 	g.gc(log)
 
@@ -152,19 +162,17 @@ func (g *heartbeatGate) Due(tick time.Duration, log io.Writer) []serve.Heartbeat
 	if !anySweep {
 		return decisions
 	}
-	// One sweep surveys every project, so each one it will see records a
-	// base now. A held or paused project does not: its cursors must not
-	// move past work the sweep may not start.
+	// One sweep surveys every project, so each one it will see stages a
+	// base now, pinned only if the ticker dispatches (Dispatching). A held
+	// or paused project does not: its cursors must not move past work the
+	// sweep may not start.
 	for _, d := range decisions {
 		if d.Sweep || d.Held || d.Reason == "paused" {
 			continue
 		}
 		if tip, _, _, ok := projectJournalTip(g.root, d.Project); ok {
 			g.mu.Lock()
-			if _, inflight := g.dispatched[d.Project]; !inflight {
-				g.dispatched[d.Project] = tip
-				g.prOffered[d.Project] = g.tickPRs[d.Project]
-			}
+			g.pending[d.Project] = tip
 			g.mu.Unlock()
 		}
 	}
@@ -238,6 +246,24 @@ func (g *heartbeatGate) Swept(projectID string, clean bool) {
 	}
 }
 
+// Dispatching pins the bases the last Due staged: the ticker is about to
+// spawn the sweep that tick asked for. It replaces rather than merges.
+// A sweep spawns only when no other holds the slot, so anything still in
+// dispatched is debris — a spawn that errored, an exit that skipped
+// Swept — and dropping it here is why a failed spawn needs no unwind.
+// prOffered is rebuilt from tickPRs, which holds exactly what this tick
+// observed for every project that staged a base.
+func (g *heartbeatGate) Dispatching() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.dispatched = g.pending
+	g.pending = map[string]string{}
+	g.prOffered = map[string][]ownedPRChecks{}
+	for id := range g.dispatched {
+		g.prOffered[id] = g.tickPRs[id]
+	}
+}
+
 // sweptProject moves one project's cursors; see Swept.
 func (g *heartbeatGate) sweptProject(projectID string, clean bool) {
 	tip, _, _, ok := projectJournalTip(g.root, projectID)
@@ -261,8 +287,9 @@ func (g *heartbeatGate) sweptProject(projectID string, clean bool) {
 	g.mu.Unlock()
 
 	// No dispatched entry is unreachable through serve — every Swept
-	// follows a Due that recorded one — so falling through to the advance
-	// keeps a direct-call test fixture honest rather than silently wedged.
+	// follows a Dispatching that pinned one — so falling through to the
+	// advance keeps a direct-call test fixture honest rather than silently
+	// wedged.
 	if dispatched && base != tip && unseenWorkIn(g.root, projectID, base, tip) {
 		return
 	}
@@ -502,19 +529,17 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 		return false, true, "somebody is already inside the project"
 	}
 
-	// This tick is going to sweep, so record where the journal stands now:
-	// it is the base of the range Swept walks to tell the survey's own
-	// commits from an operator's landing mid-turn. The dispatch tip, not
-	// the tips cursor — tips holds where the journal stood at the
-	// *previous* sweep's exit, and the commits between it and here are
-	// what triggered this sweep, which the survey does see. Walking from
-	// there would find the triggering operator commit, refuse, re-offer
-	// and re-sweep forever.
+	// This tick wants to sweep, so stage where the journal stands now
+	// (pinned only if the ticker dispatches — see Dispatching): it is the
+	// base of the range Swept walks to tell the survey's own commits from
+	// an operator's landing mid-turn. The dispatch tip, not the tips
+	// cursor — tips holds where the journal stood at the *previous*
+	// sweep's exit, and the commits between it and here are what
+	// triggered this sweep, which the survey does see. Walking from there
+	// would find the triggering operator commit, refuse, re-offer and
+	// re-sweep forever.
 	g.mu.Lock()
-	if _, inflight := g.dispatched[projectID]; !inflight {
-		g.dispatched[projectID] = tip
-		g.prOffered[projectID] = prs
-	}
+	g.pending[projectID] = tip
 	g.mu.Unlock()
 
 	if prFinished {
@@ -1127,16 +1152,17 @@ func allProjectsOccupied(root string) map[string]bool {
 var _ serve.Heartbeat = (*heartbeatGate)(nil)
 
 // offeredPRJSON is the exact PR observation this tick hands the sweep,
-// across every project it recorded a base for.
+// across every project it staged a base for. Dispatching pins the same
+// set into prOffered, so the child is handed what Swept acknowledges.
 func (g *heartbeatGate) offeredPRJSON() string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if len(g.prOffered) == 0 {
+	if len(g.pending) == 0 {
 		return ""
 	}
 	prs := []ownedPRChecks{}
-	for _, id := range slices.Sorted(maps.Keys(g.prOffered)) {
-		prs = append(prs, g.prOffered[id]...)
+	for _, id := range slices.Sorted(maps.Keys(g.pending)) {
+		prs = append(prs, g.tickPRs[id]...)
 	}
 	b, _ := json.Marshal(prs)
 	return string(b)

@@ -98,14 +98,22 @@ type HeartbeatDecision struct {
 type Heartbeat interface {
 	// Due returns one decision per project the gate looked at, given the
 	// tick length (the one-quiet-tick rule needs it). It also runs the
-	// reap of dead machine sessions. Read-only otherwise, and warn-only:
-	// a failed read drops a project rather than the tick.
+	// reap of dead machine sessions. Otherwise it only decides: it pins
+	// nothing for a sweep the ticker may still hold (see Dispatching).
+	// Warn-only: a failed read drops a project rather than the tick.
 	//
 	// Every project's verdict crosses the seam, not just the ones to
 	// sweep. "Serve owns the clock, cli owns the judgement" is unchanged
 	// — the verdicts already crossed here; now they cross with their
 	// reasons attached instead of losing them to stderr.
 	Due(tick time.Duration, log io.Writer) []HeartbeatDecision
+	// Dispatching tells the gate that the sweep the last Due asked for is
+	// about to spawn, so it pins the dispatch bases that tick offered.
+	// Only the ticker knows whether a sweep verdict survives the slot,
+	// the backoff and the host; a held tick never calls this, which is
+	// what keeps a held project's cursors still. Called before the spawn,
+	// because Swept runs on the child's watcher and consumes those bases.
+	Dispatching()
 	// Swept records that a project's heartbeat sweep has finished, so
 	// the sweep's own journal commits don't read as a delta worth
 	// sweeping again. clean reports whether the child exited zero, which
@@ -266,6 +274,7 @@ func (s *Server) heartbeatTick() {
 		args = append(args, "--pr-checks", prChecks)
 	}
 	id := heartbeatChildPrefix + project.RootID
+	s.opts.Heartbeat.Dispatching()
 	if _, err := s.children.spawn(id, s.opts.MoeBin, args, s.opts.Root, s.opts.Logger); err != nil {
 		s.logf("heartbeat: spawn sweep: %v", err)
 		return

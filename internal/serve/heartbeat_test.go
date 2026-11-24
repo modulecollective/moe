@@ -28,6 +28,10 @@ type fakeHeartbeat struct {
 	cleans   []bool
 	passes   int
 	prChecks string
+	// dispatching counts Dispatching calls; dispatchingAtSwept is the
+	// count each Swept saw, so a test can assert the pin preceded it.
+	dispatching        int
+	dispatchingAtSwept []int
 }
 
 func (f *fakeHeartbeat) Due(tick time.Duration, log io.Writer) []HeartbeatDecision {
@@ -49,6 +53,19 @@ func (f *fakeHeartbeat) Swept(projectID string, clean bool) {
 	defer f.mu.Unlock()
 	f.swept = append(f.swept, projectID)
 	f.cleans = append(f.cleans, clean)
+	f.dispatchingAtSwept = append(f.dispatchingAtSwept, f.dispatching)
+}
+
+func (f *fakeHeartbeat) Dispatching() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.dispatching++
+}
+
+func (f *fakeHeartbeat) dispatchingCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.dispatching
 }
 
 func (f *fakeHeartbeat) sweptList() []string {
@@ -562,6 +579,8 @@ func (b *blockingHeartbeat) Due(tick time.Duration, log io.Writer) []HeartbeatDe
 }
 
 func (b *blockingHeartbeat) Swept(projectID string, clean bool) {}
+
+func (b *blockingHeartbeat) Dispatching() {}
 
 // TestArmedServeJoinsTheHeartbeat: shutdown waits for a tick in flight
 // rather than walking out on it. Two things ride on the join — a tick
@@ -1100,4 +1119,73 @@ func TestHeartbeatPassesExactPRObservation(t *testing.T) {
 	if !strings.Contains(string(body), "<--pr-checks>\n<"+snapshot+">\n") {
 		t.Fatalf("observation changed or split across arguments: %s", body)
 	}
+}
+
+// reconcileFailHost is a job host whose reconcile fails, so the tick
+// holds on the host error before it ever reaches a spawn.
+type reconcileFailHost struct{}
+
+func (reconcileFailHost) reconcile() error { return errors.New("host unavailable") }
+func (reconcileFailHost) spawn(string, string, []string, string, io.Writer) (*child, error) {
+	panic("unexpected spawn")
+}
+func (reconcileFailHost) shutdown(context.Context, io.Writer) {}
+
+// TestHeartbeatPinsDispatchOnlyOnSpawn: the gate stages a dispatch base
+// on every sweep verdict, and only the ticker knows whether that verdict
+// spawns. A held tick — host error, cool-off, occupied slot — must not
+// tell the gate to pin, or the next sweep to exit would consume a base
+// for a board it never read. A spawning tick pins exactly once, before
+// the child can exit and call Swept.
+func TestHeartbeatPinsDispatchOnlyOnSpawn(t *testing.T) {
+	t.Run("host error", func(t *testing.T) {
+		gate := &fakeHeartbeat{due: []string{"alpha"}}
+		s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: "/bin/true", Heartbeat: gate})
+		s.children.host = reconcileFailHost{}
+		s.heartbeatTick()
+		if got := gate.dispatchingCount(); got != 0 {
+			t.Errorf("Dispatching called %d times on a host-held tick, want 0", got)
+		}
+	})
+	t.Run("cooling", func(t *testing.T) {
+		bin, argv := argvRecorder(t, 0)
+		gate := &fakeHeartbeat{due: []string{"alpha"}}
+		s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: bin, Heartbeat: gate})
+		s.heartbeat.record(project.RootID, true)
+		s.heartbeatTick()
+		if got := gate.dispatchingCount(); got != 0 || argv() != "" {
+			t.Errorf("Dispatching called %d times on a cooling tick (argv %q), want 0 and no spawn", got, argv())
+		}
+	})
+	t.Run("slot held", func(t *testing.T) {
+		dir := t.TempDir()
+		bin := filepath.Join(dir, "slow-moe")
+		if err := os.WriteFile(bin, []byte("#!/bin/sh\nsleep 30\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		gate := &fakeHeartbeat{due: []string{"alpha"}}
+		s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: bin, Heartbeat: gate})
+		t.Cleanup(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			s.children.shutdown(ctx, io.Discard)
+		})
+		s.heartbeatTick()
+		s.heartbeatTick()
+		if got := gate.dispatchingCount(); got != 1 {
+			t.Errorf("Dispatching called %d times across a spawning and a slot-held tick, want 1", got)
+		}
+	})
+	t.Run("spawn", func(t *testing.T) {
+		bin, _ := argvRecorder(t, 0)
+		gate := &fakeHeartbeat{due: []string{"alpha"}}
+		s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: bin, Heartbeat: gate})
+		s.heartbeatTick()
+		waitFor(t, "the sweep to be recorded", func() bool { return len(gate.sweptList()) == 1 })
+		gate.mu.Lock()
+		defer gate.mu.Unlock()
+		if gate.dispatching != 1 || gate.dispatchingAtSwept[0] != 1 {
+			t.Errorf("Dispatching = %d, seen by Swept = %v; want one call, made before the child's Swept", gate.dispatching, gate.dispatchingAtSwept)
+		}
+	})
 }
