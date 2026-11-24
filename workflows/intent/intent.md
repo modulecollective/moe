@@ -31,9 +31,9 @@ notice.
 - **Padding.** Don't add a bullet because the section looks thin.
 - **Planning.** No milestones, no sequencing, no implementation notes.
   Intents aim the discretionary calls; they don't schedule the work.
-- **The `## Status` section.** The pulse keeps it, rewriting it whole
-  each time where the intent stands changes. Leave it alone unless the
-  operator asks you to change it.
+- **Status.** The canvas is the operator's whole. Where the intent
+  stands lives in `status.md` beside it, and the pulse keeps that file;
+  it is not yours to write.
 
 ## How to work
 

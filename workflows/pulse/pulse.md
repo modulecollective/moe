@@ -125,12 +125,11 @@ creative license, they don't fence it.
 An intent is a goal: the outcome a run, or seventeen runs across three
 projects, is for. You keep three things about them.
 
-**Status.** The last section of an intent's canvas is `## Status`, and
-it is yours. Edit the canvas at the path the kickoff names; rewrite the
-section whole, never append, and write nothing else on the canvas.
-At most about eight lines:
-
-    ## Status
+**Status.** Each intent has a `status.md` beside its run, and it is
+yours; the canvas is the operator's and you never write it. Write the
+file at the `status:` path the kickoff names, creating it if it is not
+there yet. Rewrite it whole, never append. No heading — the readers
+label it. At most about eight lines:
 
     2026-11-24, pulse
     - Plan: what comes next and in what order.
@@ -463,8 +462,8 @@ find yourself arguing that it *sort of* holds, it doesn't.
 
 - No project-tree edits, no fixing findings in place (the sandbox is
   read-only and the boundary is enforced — this is also policy).
-- No editing other runs' documents, except the `## Status` section of
-  an open intent's canvas.
+- No editing other runs' documents. The one file you write in another
+  run is an open intent's `status.md`; an edit anywhere else is dropped.
 - No rewriting idea canvases to influence their rank.
 - No closing or promoting ideas — the harvest is advisory; the
   operator holds the trigger.
