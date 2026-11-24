@@ -226,9 +226,12 @@ func devEnvInspectCache(root, workTree string, md *run.Metadata) (map[string]str
 //
 // A missing cache, missing teardown directory, or empty directory is
 // a no-op — same shape as pre-push's "no scripts on disk" case.
-// Returns the first non-zero exit as an error so callers can log it;
-// callers must decide whether to halt or continue (sandbox-run close
-// continues; refresh halts).
+// Returns the first non-zero exit as an error. Every caller halts on
+// it, before clearing the cache or removing the work tree: the cached
+// env is the only record of the resources teardown addresses, so
+// continuing would leak them. Callers are workspace remove, workspace
+// refresh and the stale-cache rebuild; per-run terminal cleanup goes
+// through devEnvTeardownOwned.
 func devEnvRunTeardown(root, workTree string, md *run.Metadata, stdout, stderr io.Writer) error {
 	env, ok, err := devEnvLoadCache(workTree)
 	if err != nil {

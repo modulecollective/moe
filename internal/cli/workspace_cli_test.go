@@ -185,6 +185,56 @@ func TestWorkspaceRemoveDeletesAndRunsTeardown(t *testing.T) {
 	}
 }
 
+// TestWorkspaceRemoveTeardownFailureLeavesWorkspace pins the halt: a
+// failing dev-env-teardown.d/* script exits 1 before workspace.Remove,
+// so the directory and the cached env naming the still-live resources
+// survive for a retry.
+func TestWorkspaceRemoveTeardownFailureLeavesWorkspace(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProjectWithSubmodule(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	if _, err := workspace.Ensure(root, "tele", "dev"); err != nil {
+		t.Fatal(err)
+	}
+	wp := workspace.Path(root, "tele", "dev")
+	cache := filepath.Join(wp, devEnvCacheRel)
+	if err := writeDevEnvCacheRevision(cache,
+		map[string]string{"DATABASE_URL": "postgres://localhost/x"}, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	teardownDir := filepath.Join(root, project.Dir("tele"), "hooks", devEnvTeardownDirRel)
+	if err := os.MkdirAll(teardownDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(teardownDir, "10-fail.sh"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if code := Run([]string{"workspace", "remove", "tele/dev"}, &out, &errb); code != 1 {
+		t.Fatalf("remove: exit=%d, want 1; stderr=%q", code, errb.String())
+	}
+	if !workspace.Exists(root, "tele", "dev") {
+		t.Fatal("workspace dir should survive a failed teardown")
+	}
+	env, ok, err := readDevEnvCache(cache)
+	if err != nil || !ok {
+		t.Fatalf("cache after failed teardown: ok=%v err=%v", ok, err)
+	}
+	if env["DATABASE_URL"] != "postgres://localhost/x" {
+		t.Fatalf("cached DATABASE_URL = %q, want postgres://localhost/x", env["DATABASE_URL"])
+	}
+	if !strings.Contains(errb.String(), "workspace left in place") {
+		t.Fatalf("stderr = %q, want retry hint", errb.String())
+	}
+	if strings.Contains(out.String(), "removed workspace") {
+		t.Fatalf("stdout = %q, should not report removal", out.String())
+	}
+}
+
 // TestWorkspaceRemoveMissingIsNoop: a missing workspace prints a
 // short note and exits 0 — same idempotent shape as sandbox.Remove.
 func TestWorkspaceRemoveMissingIsNoop(t *testing.T) {
