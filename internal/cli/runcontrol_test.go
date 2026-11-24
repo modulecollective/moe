@@ -145,8 +145,15 @@ func TestFinishWidensKickToBangBang(t *testing.T) {
 		t.Fatalf("pushes = %d, want 1", len(*push))
 	}
 	f1, _ := controlRecord(t, root).Find("f1")
-	if f1.State != runcontrol.StateCompleted {
-		t.Fatalf("finish = %+v", f1)
+	if f1.State != runcontrol.StateCompleted || f1.Boundary != "push" || f1.Outcome != "shipped" {
+		t.Errorf("finish = %+v, want completed at push with outcome shipped", f1)
+	}
+	code, out, errs := runControl(t, "show", "moe/change-auth")
+	if code != 0 {
+		t.Fatalf("show exit = %d; stderr:\n%s", code, errs)
+	}
+	if !strings.Contains(out, "finish f1 — completed at push — shipped\n") {
+		t.Errorf("show missing exact shipped finish receipt:\n%s", out)
 	}
 	log := gittest.Output(t, root, "log", "--format=%s%n%b", "-12")
 	if !strings.Contains(log, "control: applied f1") || !strings.Contains(log, "MoE-Consent: dynamic") {

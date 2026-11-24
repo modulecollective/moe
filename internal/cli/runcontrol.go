@@ -434,7 +434,7 @@ func finishAtShip(md *run.Metadata, stderr io.Writer) bool {
 	withheld := false
 	for _, r := range f.Open(runcontrol.KindFinish) {
 		settleControl(root, md, r.ID, runcontrol.Settlement{
-			State: runcontrol.StateCompleted, Boundary: "push", Outcome: "shipped; chain continuation withheld",
+			State: runcontrol.StateCompleted, Boundary: "push", Outcome: "shipped",
 		}, stderr)
 		withheld = true
 	}
