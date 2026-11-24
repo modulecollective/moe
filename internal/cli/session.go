@@ -164,7 +164,8 @@ func printSessionRecovery(s *session.Session, stderr io.Writer) {
 // Rules 1–3 reap via `session.Abandon`. Rule 4 also runs through
 // `session.Abandon` (FindByBranch returns a synthetic session whose
 // Abandon tolerates the missing worktree). Rule 5 removes the directory
-// with `os.RemoveAll`. All three passes run under a single repo lock so
+// with `os.RemoveAll`; on a permission error the residue's projects'
+// session-cleanup.d hooks get one chance to make it removable. All three passes run under a single repo lock so
 // the reap is consistent against parallel `moe session open` /
 // `session abandon` calls.
 //
@@ -188,7 +189,7 @@ func runSessionGC(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	reaped, reapErrs, err := sessionGCPass(root, repolock.Options{Purpose: "session-gc"})
+	reaped, reapErrs, err := sessionGCPass(root, repolock.Options{Purpose: "session-gc"}, stderr)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -253,9 +254,10 @@ func collectSessionOrphans(root string, now time.Time) (sessionOrphans, error) {
 	return o, nil
 }
 
-// reapSessionOrphans acts on a candidate set, returning what went and
-// the per-orphan failures. Caller holds the lock.
-func reapSessionOrphans(root string, o sessionOrphans) (reaped []reapedSession, reapErrs []string) {
+// reapSessionOrphans acts on a candidate set, returning what went, the
+// per-orphan failures, and the rule-5 directories a permission error
+// left for project hooks. Caller holds the lock.
+func reapSessionOrphans(root string, o sessionOrphans) (reaped []reapedSession, reapErrs []string, blocked []blockedSessionDir) {
 	for _, s := range o.sessions {
 		if err := session.Abandon(s); err != nil {
 			reapErrs = append(reapErrs, fmt.Sprintf("%s: %v", s.Branch, err))
@@ -281,12 +283,20 @@ func reapSessionOrphans(root string, o sessionOrphans) (reaped []reapedSession, 
 	}
 	for _, dir := range o.dirs {
 		if err := os.RemoveAll(dir); err != nil {
+			if errors.Is(err, os.ErrPermission) {
+				blocked = append(blocked, blockedSessionDir{dir: dir, err: err})
+				continue
+			}
 			reapErrs = append(reapErrs, fmt.Sprintf("worktree dir %s: %v", dir, err))
 			continue
 		}
-		reaped = append(reaped, reapedSession{label: "worktree dir " + filepath.Base(dir)})
+		reaped = append(reaped, reapedWorktreeDir(dir))
 	}
-	return reaped, reapErrs
+	return reaped, reapErrs, blocked
+}
+
+func reapedWorktreeDir(dir string) reapedSession {
+	return reapedSession{label: "worktree dir " + filepath.Base(dir)}
 }
 
 // sessionGCPass is the whole gc act: take the lock, collect under it,
@@ -298,15 +308,60 @@ func reapSessionOrphans(root string, o sessionOrphans) (reaped []reapedSession, 
 // scan first to decide whether the lock is worth taking — the heartbeat
 // does, so a clean board never locks — but that scan races `session
 // open` and `session close`, so nothing is reaped on its word.
-func sessionGCPass(root string, opts repolock.Options) ([]reapedSession, []string, error) {
+//
+// A rule-5 directory that refuses removal with a permission error gets
+// its residue projects' session-cleanup.d hooks (hookOut takes their
+// output), then one more removal. The hooks run between two lock
+// holds, not inside one: a container pull can outlive the lock's
+// stale threshold. The second hold re-checks that git still doesn't
+// know the directory before removing it.
+func sessionGCPass(root string, opts repolock.Options, hookOut io.Writer) ([]reapedSession, []string, error) {
 	var reaped []reapedSession
 	var reapErrs []string
+	var blocked []blockedSessionDir
 	err := repolock.With(root, opts, func() error {
 		o, err := collectSessionOrphans(root, time.Now())
 		if err != nil {
 			return err
 		}
-		reaped, reapErrs = reapSessionOrphans(root, o)
+		reaped, reapErrs, blocked = reapSessionOrphans(root, o)
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var retry []blockedSessionDir
+	for _, b := range blocked {
+		ran, hookErr := runSessionCleanupHooks(root, b.dir, hookOut)
+		switch {
+		case hookErr != nil:
+			reapErrs = append(reapErrs, fmt.Sprintf("worktree dir %s: %v; session-cleanup hook: %v", b.dir, b.err, hookErr))
+		case !ran:
+			reapErrs = append(reapErrs, fmt.Sprintf("worktree dir %s: %v (no project %s hook claims it)", b.dir, b.err, sessionCleanupDirRel))
+		default:
+			retry = append(retry, b)
+		}
+	}
+	if len(retry) == 0 {
+		return reaped, reapErrs, nil
+	}
+	err = repolock.With(root, opts, func() error {
+		known, err := worktreePaths(root)
+		if err != nil {
+			return err
+		}
+		for _, b := range retry {
+			if isKnownWorktreePath(b.dir, known) {
+				reapErrs = append(reapErrs, fmt.Sprintf("worktree dir %s: registered with git during cleanup; left in place", b.dir))
+				continue
+			}
+			if err := os.RemoveAll(b.dir); err != nil {
+				reapErrs = append(reapErrs, fmt.Sprintf("worktree dir %s: %v (after %s hooks)", b.dir, err, sessionCleanupDirRel))
+				continue
+			}
+			reaped = append(reaped, reapedWorktreeDir(b.dir))
+		}
 		return nil
 	})
 	if err != nil {

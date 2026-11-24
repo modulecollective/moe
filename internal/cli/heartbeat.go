@@ -820,7 +820,7 @@ func (g *heartbeatGate) gc(log io.Writer) {
 		// A pass with many candidates can outlive the stale threshold,
 		// and a lock read as crashed is a lock somebody takes over.
 		Heartbeat: true,
-	})
+	}, log)
 	if err != nil {
 		fmt.Fprintf(log, "heartbeat: session gc: %v\n", err)
 		return

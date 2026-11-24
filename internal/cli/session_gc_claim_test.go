@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -215,7 +216,7 @@ func TestSessionGCRevalidatesClaims(t *testing.T) {
 				}
 				uncertainGCClaim(t, s, replacement)
 				retained := assertGCSessionRetained(t, s)
-				removed, errs, err := sessionGCPass(root, repolock.Options{Purpose: "test-gc-revalidate"})
+				removed, errs, err := sessionGCPass(root, repolock.Options{Purpose: "test-gc-revalidate"}, io.Discard)
 				if err != nil || len(errs) != 0 || len(removed) != 0 {
 					t.Fatalf("locked pass: removed=%v errors=%v err=%v", removed, errs, err)
 				}
