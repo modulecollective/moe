@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -161,6 +162,36 @@ func commitTurn(root string, md *run.Metadata, docID, backend string, timedOut t
 	// ErrNothingToCommit cleanly.
 	allPaths = append(allPaths, stageableFeedback(root, md)...)
 	return run.StageAndCommit(root, msg, allPaths...)
+}
+
+// dropStrayEdits resets the session worktree to HEAD when a tracked
+// file is still modified after the turn's commit, and names each path
+// it dropped. Such an edit is outside the turn's write set by
+// definition: left in place it refuses the close's rebase and wedges
+// the turn. Untracked files are left alone; they never block a rebase
+// and die with the pruned worktree. The turn's transcript, committed
+// with the canvas, still holds the dropped edit.
+func dropStrayEdits(workRoot string, stderr io.Writer) error {
+	entries, err := git.Status(workRoot)
+	if err != nil {
+		return fmt.Errorf("drop stray edits: %w", err)
+	}
+	var stray []string
+	for _, e := range entries {
+		if !e.Untracked() {
+			stray = append(stray, e.Path)
+		}
+	}
+	if len(stray) == 0 {
+		return nil
+	}
+	if err := git.Run(workRoot, "reset", "-q", "--hard", "HEAD"); err != nil {
+		return fmt.Errorf("drop stray edits: %w", err)
+	}
+	for _, p := range stray {
+		moePrintf(stderr, "dropped edit outside this turn's write set: %s\n", p)
+	}
+	return nil
 }
 
 // stageableFollowups returns the run's followups.md path (relative to

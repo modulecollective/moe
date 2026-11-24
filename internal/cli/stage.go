@@ -890,7 +890,18 @@ func (s *stageSession) commitStager(workRoot string, runErr error) error {
 			return err
 		}
 	}
-	if err := commitTurn(workRoot, md, s.docID, s.agentName, timedOut, extras...); err != nil {
+	err := commitTurn(workRoot, md, s.docID, s.agentName, timedOut, extras...)
+	if err != nil && !errors.Is(err, run.ErrNothingToCommit) {
+		return err
+	}
+	// Past a clean commit, any tracked edit left in the worktree is
+	// outside what this turn may write, and it would refuse the close's
+	// rebase. Drop it here, as an untracked stray already is. A refused
+	// commit returned above and keeps its dirt as evidence.
+	if dropErr := dropStrayEdits(workRoot, s.stderr); dropErr != nil {
+		return errors.Join(err, dropErr)
+	}
+	if err != nil {
 		return err
 	}
 	// HEAD is this turn's commit and the worktree is still
