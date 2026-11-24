@@ -61,8 +61,10 @@ func claudeConfigFile() string {
 //
 // Claude rewrites the file under a `<file>.lock` directory lock
 // (proper-lockfile), re-reading under it; seedTrust takes the same lock
-// so neither writer loses the other's update. A lock held past
-// lockWait is skipped with an error: the cost is one dialog.
+// and re-reads under it too. That narrows the lost-update race without
+// closing it: Claude has save paths that write without the lock. A
+// lost update costs one dialog or one of Claude's counters. A lock
+// held past lockWait is skipped with an error: the cost is one dialog.
 func seedTrust(root string, dirs []string) error {
 	path := claudeConfigFile()
 	if path == "" {
