@@ -281,7 +281,8 @@ func (g *heartbeatGate) sweptProject(projectID string, clean bool) {
 //
 // The stand-down reasons are display strings — they cross the seam in
 // the decision and land on both dashes. They are not parsed anywhere,
-// and nothing branches on them. Which of them is worth a reader's
+// and one thing branches on them: Due reads "paused" to keep a paused
+// project's cursors still. Which of them is worth a reader's
 // attention is the held bit's job instead: the two stand-downs that name
 // something outside the machine (an operator commit in the quiet window,
 // somebody inside the project) are held; the rest are "nothing to do"
