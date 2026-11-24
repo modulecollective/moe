@@ -102,40 +102,20 @@ const ChainWorkflow = "chain"
 // archive.
 const CompletedCap = 5
 
-// CompletedStep is how many more top-level completed runs each "show
+// CompletedStep is how many more completed runs each "show
 // more" click on the web dash asks for. Fixed rather than doubling:
 // the operator knows what the next click costs. It lives here beside
 // the cap it extends even though only the web dash pages — the two
 // numbers are one decision.
 const CompletedStep = 25
 
-// CompletedCutoff returns how many leading completed rows to render so
-// that the newest topCap top-level rows are shown, each dragging its
-// nested descendants (spawned runs) along for free. Nested rows never
-// count against the cap, so a parent and its subtree are admitted or
-// evicted as a unit. A negative topCap means unlimited; n comes back
-// unchanged there and whenever the top-level count already fits.
-//
-// Shared by the CLI Render and the serve dash view so the terminal and
-// the web page cap identically — the completed slice each holds is
-// parent-then-descendants contiguous (BuildRows nests them), so counting
-// top-level rows is the same walk on both. isNested reports whether
-// row i renders under a parent.
-func CompletedCutoff(n, topCap int, isNested func(i int) bool) int {
-	if topCap < 0 {
+// CompletedCutoff returns the number of leading completed rows to render.
+// A negative cap means unlimited. CLI and web share the same row count.
+func CompletedCutoff(n, cap int) int {
+	if cap < 0 {
 		return n
 	}
-	tops := 0
-	for i := range n {
-		if isNested(i) {
-			continue
-		}
-		if tops == topCap {
-			return i
-		}
-		tops++
-	}
-	return n
+	return min(n, cap)
 }
 
 // Bucket labels a row's section. Active runs (next stage to run) and
@@ -166,18 +146,8 @@ type Row struct {
 	RunningDoc string    // doc with an open session that "wins" the liveness slot; "" when no session is open. The factory art reads this to decide whether the station smokes and which doc's glyph to draw.
 	When       time.Time // sort key within the section; most recent first.
 	Bucket     Bucket
-	// Depth is how many levels the row renders nested under a parent —
-	// 0 for a top-level row, 1 for a completed spawned run (a tailed
-	// pulse) re-attached under its spawner, 2+ for deeper spawn lineage
-	// (a reflect under a pulse under its sdlc run). The renderer indents
-	// by Depth and draws a "↳" connector for Depth ≥ 1.
-	Depth int
 	// Agent is true when the run was machine-opened — it carries a
-	// MoE-Spawned-By edge. Independent of Depth: nesting disappears when
-	// the spawner is off-board (pruned, capped out of COMPLETED), but the
-	// run was still the machine's doing, and the operator's headline
-	// question is "what did the agent add". Historically sound from day
-	// one, because only machine verbs have ever written spawned_by.
+	// MoE-Spawned-By edge, even when the spawner is off the board.
 	Agent bool
 	// Control is the live and control overlay for a run row: owner phase,
 	// hold and pending request ("handed off · waiting for operator"),
@@ -347,8 +317,7 @@ func BuildRows(in Inputs) ([]Row, error) {
 		}
 		return rows[i].When.After(rows[j].When)
 	})
-	rows = nestSpawnedRuns(rows, in.Index)
-	rows = nestPromotedIdeas(rows, in.Index)
+	annotateSpawnLineage(rows, in.Index)
 	// Intents ride in from Inputs (not classify — they carry a title read
 	// off-disk and never join the run board). Splice them after the ACTIVE
 	// prefix so INTENTS sits above chores and backlog, sorted by project
@@ -415,229 +384,31 @@ func BuildRows(in Inputs) ([]Row, error) {
 	return rows, nil
 }
 
-func nestSpawnedRuns(rows []Row, idx *run.JournalIndex) []Row {
-	if idx == nil || len(idx.SpawnedBy) == 0 {
-		return rows
-	}
+// annotateSpawnLineage keeps lineage in notes without changing row order or
+// buckets. Completed children name their origin even when it is off-board;
+// open children are hinted on their visible spawner, newest first.
+func annotateSpawnLineage(rows []Row, idx *run.JournalIndex) {
 	rowIdx := make(map[string]int, len(rows))
 	for i := range rows {
-		rowIdx[rows[i].Project+"/"+rows[i].Run] = i
+		key := rows[i].Project + "/" + rows[i].Run
+		rowIdx[key] = i
+		if spawner := idx.SpawnedBy[key]; spawner != "" && rows[i].Bucket == BucketCompletedRuns {
+			rows[i].Note += " · from " + spawner
+		}
 	}
-	// spawnerIdx returns the row index of row i's direct spawner, or -1 if
-	// it has no SpawnedBy edge or that edge isn't on the board.
-	spawnerIdx := func(i int) int {
-		// SpawnedBy values are always qualified "<project>/<slug>" (the index
-		// builder normalizes legacy bare values), so the spawner can live in a
-		// different project than its child — look it up by the qualified key
-		// directly rather than re-qualifying with the child's project.
-		spawner := idx.SpawnedBy[rows[i].Project+"/"+rows[i].Run]
+	for i := range rows {
+		key := rows[i].Project + "/" + rows[i].Run
+		spawner := idx.SpawnedBy[key]
 		if spawner == "" {
-			return -1
+			continue
 		}
-		if j, ok := rowIdx[spawner]; ok {
-			return j
-		}
-		return -1
-	}
-	// folds reports whether row i is pulled under an ancestor: it is
-	// completed, has an on-board direct spawner, and its upward SpawnedBy
-	// walk is acyclic (so it terminates at a top-level ancestor). A cycle
-	// in the journal-derived edges degrades to a top-level row, never a
-	// hang or a dropped row.
-	folds := func(i int) bool {
-		if rows[i].Bucket != BucketCompletedRuns {
-			return false
-		}
-		p := spawnerIdx(i)
-		if p < 0 {
-			return false
-		}
-		visited := map[int]bool{i: true}
-		for p >= 0 {
-			if visited[p] {
-				return false // cycle — treat i as unresolved, top-level
-			}
-			visited[p] = true
-			if rows[p].Bucket != BucketCompletedRuns {
-				return true // reached a top-level ancestor, no cycle
-			}
-			p = spawnerIdx(p)
-		}
-		return true // chain ran off the board — top-level ancestor reached
-	}
-	// directChildren maps a spawner's row index to its folding children,
-	// in incoming row order (recency-sorted, so newest-first).
-	directChildren := make(map[int][]int)
-	child := make([]bool, len(rows))
-	for i := range rows {
-		if folds(i) {
-			child[i] = true
-			directChildren[spawnerIdx(i)] = append(directChildren[spawnerIdx(i)], i)
-		}
-	}
-	// openKids maps a spawner's row index to its open (non-completed)
-	// children, in incoming row order (recency-sorted, so newest-first).
-	// These rows never move — they are hinted on the spawner, not folded —
-	// so this is a direct-edge lookup with no upward walk and no cycle
-	// concern.
-	openKids := make(map[int][]int)
-	for i := range rows {
 		if rows[i].Bucket == BucketCompletedRuns {
 			continue
 		}
-		if p := spawnerIdx(i); p >= 0 {
-			openKids[p] = append(openKids[p], i)
+		if p, ok := rowIdx[spawner]; ok {
+			rows[p].Note += " · spawned → " + key
 		}
 	}
-	// openHints is the note suffix row i carries for its open children.
-	openHints := func(i int) string {
-		var b strings.Builder
-		for _, ci := range openKids[i] {
-			b.WriteString(" · spawned → ")
-			b.WriteString(rows[ci].Project)
-			b.WriteString("/")
-			b.WriteString(rows[ci].Run)
-		}
-		return b.String()
-	}
-	if len(directChildren) == 0 && len(openKids) == 0 {
-		return rows
-	}
-	out := make([]Row, 0, len(rows))
-	var emitSubtree func(i int, bucket Bucket, depth int)
-	emitSubtree = func(i int, bucket Bucket, depth int) {
-		for _, ci := range directChildren[i] {
-			m := rows[ci]
-			m.Depth = depth
-			m.Bucket = bucket
-			m.Note += openHints(ci)
-			out = append(out, m)
-			emitSubtree(ci, bucket, depth+1)
-		}
-	}
-	for i := range rows {
-		if child[i] {
-			continue // emitted under its ancestor below
-		}
-		parent := rows[i]
-		parent.Note += openHints(i)
-		out = append(out, parent)
-		emitSubtree(i, parent.Bucket, 1) // no-op when there are no folding children
-	}
-	return out
-}
-
-// nestPromotedIdeas folds a settled promotion edge into the same
-// two-rung ladder spawn and chain lineage already render: the idea on
-// top, the run it was promoted to nested beneath it as a "↳" row,
-// instead of two unrelated flat COMPLETED rows with the relationship
-// squeezed into the idea's "idea:promoted → x/y" note.
-//
-// The idea goes on top because that is what "↳" means everywhere else
-// on the board — the ancestor above, later work beneath. The idea is
-// the origin; the run is the continuation.
-//
-// The pair is anchored at the *successor's* recency slot, not the
-// idea's. This is the one deliberate deviation from nestSpawnedRuns,
-// and it is load-bearing: COMPLETED shows only the newest CompletedCap
-// top-level rows, and an idea's last activity is its promote commit, so
-// folding at the idea's slot would bury a run that merged weeks after
-// promotion below the cap — the fresh merge would vanish from the
-// default dash, a regression against the flat rendering. A spawner's
-// activity tracks its children's, so spawn doesn't have this problem;
-// promotion does, because the parent is prehistory rather than an
-// ongoing story. The idea row keeps its own (older) When — the pair
-// moves, the ages stay honest.
-//
-// Only a pair with both ends completed and top-level folds. A reopened
-// idea is back in BACKLOG, and folding there would drag its dead
-// destination run out of COMPLETED and into the backlog; the
-// both-completed gate handles that without a workflow special case. An
-// open successor keeps today's rendering — a top-level ACTIVE row, with
-// the inline "idea:promoted → x/y" hint left on the idea, matching the
-// spawn open-hint convention. An off-board successor keeps the bare
-// "idea:promoted" fallback.
-//
-// Running after nestSpawnedRuns means an already-attached spawn subtree
-// rides along: an idea → run → tailed-pulse lineage composes into a
-// three-rung ladder for free, because the successor moves as a block —
-// its own row plus the nested tail already hanging off it. The idea
-// side needs no such handling: only pulse, reflect and chain runs ever
-// write SpawnedBy, so nothing nests under an idea.
-func nestPromotedIdeas(rows []Row, idx *run.JournalIndex) []Row {
-	if idx == nil || len(idx.PromotedTo) == 0 {
-		return rows
-	}
-	rowIdx := make(map[string]int, len(rows))
-	for i := range rows {
-		rowIdx[rows[i].Project+"/"+rows[i].Run] = i
-	}
-	// blockEnd returns one past the last row of top-level row i's block:
-	// i itself plus the contiguous run of nested rows nestSpawnedRuns
-	// attached beneath it.
-	blockEnd := func(i int) int {
-		e := i + 1
-		for e < len(rows) && rows[e].Depth > 0 {
-			e++
-		}
-		return e
-	}
-	// ideaOf maps a successor's row index to its promoting idea's row
-	// index. Built by walking rows in order rather than ranging over the
-	// PromotedTo map so a destination claimed by two ideas resolves to
-	// the same one every render.
-	ideaOf := make(map[int]int)
-	claimed := make(map[int]bool)
-	for i := range rows {
-		if rows[i].Bucket != BucketCompletedRuns || rows[i].Depth != 0 {
-			continue
-		}
-		dest := idx.PromotedTo[rows[i].Project+"/"+rows[i].Run]
-		if dest == "" {
-			continue
-		}
-		d, ok := rowIdx[dest]
-		if !ok || d == i || claimed[d] {
-			continue
-		}
-		if rows[d].Bucket != BucketCompletedRuns || rows[d].Depth != 0 {
-			continue
-		}
-		ideaOf[d] = i
-		claimed[d] = true
-	}
-	if len(ideaOf) == 0 {
-		return rows
-	}
-	// moved marks each idea row skipped at its natural slot, because the
-	// successor's slot re-emits it above the successor.
-	moved := make([]bool, len(rows))
-	for _, i := range ideaOf {
-		moved[i] = true
-	}
-	out := make([]Row, 0, len(rows))
-	for i := 0; i < len(rows); i++ {
-		if moved[i] {
-			continue
-		}
-		if ideaIdx, ok := ideaOf[i]; ok {
-			idea := rows[ideaIdx]
-			// The destination is a row of its own now, so the note's
-			// " → <key>" suffix would say it twice.
-			idea.Note = strings.TrimSuffix(idea.Note, " → "+rows[i].Project+"/"+rows[i].Run)
-			out = append(out, idea)
-			end := blockEnd(i)
-			for k := i; k < end; k++ {
-				m := rows[k]
-				m.Depth++
-				out = append(out, m)
-			}
-			i = end - 1
-			continue
-		}
-		out = append(out, rows[i])
-	}
-	return out
 }
 
 // captureSessionRow emits the extra ACTIVE row a capture run earns
@@ -1075,22 +846,6 @@ func FactoryStateFromRows(rows []Row) FactoryState {
 	return state
 }
 
-// nestPrefix is the indent a row of the given Depth carries in front of
-// its slug: nothing at top level, then a connector per level, each
-// generation two columns further right so a reflect under a pulse under
-// its sdlc run reads as a ladder rather than a flat list.
-func nestPrefix(depth int) string {
-	if depth < 1 {
-		return ""
-	}
-	return strings.Repeat("  ", depth-1) + "↳ "
-}
-
-// rowPrefix is what a row carries in front of its slug: the lineage ladder.
-func rowPrefix(r Row) string {
-	return nestPrefix(r.Depth)
-}
-
 // Render prints the full dashboard: factory art, board sections
 // (ACTIVE, INTENTS, CHORES, BACKLOG, COMPLETED), and the footer. tabwriter aligns
 // columns per section so a long idea title doesn't widen the run
@@ -1202,7 +957,7 @@ func RenderIndexedRows(w io.Writer, now time.Time, rows []Row, projectCount, act
 		place(activeAt)
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, r := range active {
-			slug := rowPrefix(r) + r.Project + "/" + r.Run
+			slug := r.Project + "/" + r.Run
 			fmt.Fprintf(tw, "  %s\t%s\t%s\n", slug, HumanAgo(now, r.When), noteWithControl(r))
 		}
 		tw.Flush()
@@ -1258,7 +1013,7 @@ func RenderIndexedRows(w io.Writer, now time.Time, rows []Row, projectCount, act
 	if showAll {
 		topCap = -1
 	}
-	shown := completed[:CompletedCutoff(len(completed), topCap, func(i int) bool { return completed[i].Depth > 0 })]
+	shown := completed[:CompletedCutoff(len(completed), topCap)]
 	if len(shown) < len(completed) {
 		cliout.Printf(w, "COMPLETED (%d of %d)\n", len(shown), len(completed))
 	} else {
@@ -1270,7 +1025,7 @@ func RenderIndexedRows(w io.Writer, now time.Time, rows []Row, projectCount, act
 		place(completedAt[:len(shown)])
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, r := range shown {
-			slug := rowPrefix(r) + r.Project + "/" + r.Run
+			slug := r.Project + "/" + r.Run
 			fmt.Fprintf(tw, "  %s\t%s\t%s\n", slug, HumanAgo(now, r.When), noteWithControl(r))
 		}
 		tw.Flush()

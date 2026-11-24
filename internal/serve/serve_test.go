@@ -340,34 +340,6 @@ func TestDashCompletedCapIgnoresJunk(t *testing.T) {
 	}
 }
 
-// TestDashCompletedCapCountsTopLevelOnly: a spawned child rides in with
-// its parent, so a cap of N admits N parents plus however many
-// descendants they drag along.
-func TestDashCompletedCapCountsTopLevelOnly(t *testing.T) {
-	now := time.Now().UTC()
-	var rows []dash.Row
-	for i := range 8 {
-		rows = append(rows,
-			dash.Row{Project: "p", Run: fmt.Sprintf("r%d", i), Bucket: dash.BucketCompletedRuns, When: now},
-			dash.Row{Project: "p", Run: fmt.Sprintf("r%d-child", i), Bucket: dash.BucketCompletedRuns, When: now, Depth: 1},
-		)
-	}
-	s := serverWithRows(t, rows)
-
-	body := getOK(t, s, "/?completed=3")
-	if n := countRows(body); n != 6 {
-		t.Errorf("row count = %d, want 6 (3 parents + 3 children)", n)
-	}
-	// The header counts rendered rows against all rows, children included.
-	if want := fmt.Sprintf("(6 of %d)", len(rows)); !strings.Contains(body, want) {
-		t.Errorf("header missing %q\n%s", want, body)
-	}
-	// Next cap steps the top-level count, not the rendered row count.
-	if want := fmt.Sprintf(`href="?completed=%d#completed"`, 3+dash.CompletedStep); !strings.Contains(body, want) {
-		t.Errorf("next link missing %s\n%s", want, body)
-	}
-}
-
 // TestCompletedFragmentIsRowsOnly: ?fragment=1 returns the chunk the
 // show-more JS swaps in — the rows and the metadata it rewrites the
 // link from — with none of the page around them.
@@ -424,28 +396,6 @@ func TestProjectHubCompletedIsCapped(t *testing.T) {
 	// The link is relative, so it resolves against /projects/p.
 	if n := countRows(getOK(t, s, "/projects/p?completed=12")); n != 12 {
 		t.Errorf("hub stepped row count = %d, want 12", n)
-	}
-}
-
-func TestNewDashVMCarriesRowDepth(t *testing.T) {
-	now := time.Now().UTC()
-	rows := []dash.Row{
-		{Project: "p", Run: "head", Bucket: dash.BucketActiveRuns, When: now},
-		{Project: "p", Run: "child", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Hour), Depth: 1},
-		{Project: "p", Run: "grandchild", Bucket: dash.BucketActiveRuns, When: now.Add(-90 * time.Minute), Depth: 2},
-		{Project: "p", Run: "solo", Bucket: dash.BucketActiveRuns, When: now.Add(-2 * time.Hour)},
-	}
-	vm := newDashVM(now, rows, 1, 1, nil, dash.CompletedCap)
-	if len(vm.Active) != 4 {
-		t.Fatalf("active len = %d, want 4", len(vm.Active))
-	}
-	for i, want := range []struct {
-		run   string
-		depth int
-	}{{"head", 0}, {"child", 1}, {"grandchild", 2}, {"solo", 0}} {
-		if vm.Active[i].Run != want.run || vm.Active[i].Depth != want.depth {
-			t.Errorf("row %d = {run:%s depth:%d}, want {run:%s depth:%d}", i, vm.Active[i].Run, vm.Active[i].Depth, want.run, want.depth)
-		}
 	}
 }
 
@@ -611,30 +561,6 @@ func TestDashRendersHistogram(t *testing.T) {
 	}
 	if !strings.Contains(artText(rr.Body.String()), "activity · last 60 days") {
 		t.Fatalf("dash body missing histogram caption\n%s", rr.Body.String())
-	}
-}
-
-func TestDashRendersConnectorClasses(t *testing.T) {
-	now := time.Now().UTC()
-	gather := func(string) ([]dash.Row, int, int, []int, error) {
-		return []dash.Row{
-			{Project: "p", Run: "head", Bucket: dash.BucketActiveRuns, When: now},
-			{Project: "p", Run: "next", Bucket: dash.BucketActiveRuns, When: now.Add(-30 * time.Minute)},
-			{Project: "p", Run: "child", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Hour), Depth: 1},
-			{Project: "p", Run: "grandchild", Bucket: dash.BucketActiveRuns, When: now.Add(-90 * time.Minute), Depth: 2},
-		}, 1, 1, nil, nil
-	}
-	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), GatherDash: gather})
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/", nil))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
-	}
-	if got := strings.Count(rr.Body.String(), `class="row nested depth1"`); got != 1 {
-		t.Errorf("want one depth-1 nested row, got %d\n%s", got, rr.Body.String())
-	}
-	if got := strings.Count(rr.Body.String(), `class="row nested depth2"`); got != 1 {
-		t.Errorf("want one depth-2 nested row, got %d\n%s", got, rr.Body.String())
 	}
 }
 

@@ -151,7 +151,7 @@
 
 {{define "completedrows"}}
   {{range .}}
-  <li class="row{{if .Depth}} nested depth{{.Depth}}{{end}}">
+  <li class="row">
     <a class="slug" href="/run/{{.Project}}/{{.Run}}">{{.Project}}/{{.Run}}</a>
     <span class="when">{{.When}}</span>
     <span class="note">{{.Note}}</span>

@@ -62,16 +62,8 @@ type dashRowVM struct {
 	// /run/; a chore registration goes to /chore/. Shared row templates
 	// use this rather than building the path themselves.
 	URL string
-	// Depth is how many levels the row renders nested under a parent —
-	// 0 top-level, 1 for a completed spawned run (a tailed pulse), 2+ for
-	// deeper spawn lineage. The template draws a "↳" connector for
-	// Depth ≥ 1 and indents further per level.
-	Depth int
-	// Agent marks a machine-opened run. Deliberately independent of
-	// Depth: a spawned run whose spawner isn't on the board renders
-	// top-level, and the operator still needs to see that the machine put
-	// it there. AgentTitle is the hover text, which names the ride level
-	// when the journal recorded one.
+	// Agent marks a machine-opened run, even when its spawner is off-board.
+	// AgentTitle names the ride level when the journal recorded one.
 	Agent      bool
 	AgentTitle string
 	// Control is the row's live and control overlay (dash.Row.Control).
@@ -199,16 +191,12 @@ type completedVM struct {
 	Next int
 }
 
-// newCompletedVM caps rows at the newest topCap top-level runs (nested
-// descendants ride in with their parent — dash.CompletedCutoff owns that
-// rule) and works out what the next click should ask for.
+// newCompletedVM caps rows at the newest topCap runs and works out what
+// the next click should ask for.
 func newCompletedVM(rows []dashRowVM, topCap int) completedVM {
-	cut := dash.CompletedCutoff(len(rows), topCap, func(i int) bool { return rows[i].Depth > 0 })
+	cut := dash.CompletedCutoff(len(rows), topCap)
 	vm := completedVM{Rows: rows[:cut], Total: len(rows)}
 	if cut < len(rows) {
-		// A short cut means the walk stopped on the (topCap+1)th
-		// top-level row, so exactly topCap of them are on screen — no
-		// need to recount before stepping.
 		vm.Next = topCap + dash.CompletedStep
 	}
 	return vm
@@ -238,7 +226,6 @@ func newRowBuckets(now time.Time, rows []dash.Row, topCap int) rowBuckets {
 			Note:    noteHTML(r.Project, r.Note),
 			When:    dash.HumanAgo(now, r.When),
 			URL:     rowURL(r),
-			Depth:   r.Depth,
 			Control: r.Control,
 		}
 		row.Agent, row.AgentTitle = agentMark(r)
