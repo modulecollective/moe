@@ -87,15 +87,16 @@ push. `review` is a senior-engineer pass with bounded latitude to fix in place;
 own hook scripts. Nothing merges that didn't walk all five.
 
 And then the lever that made the whole thing pay: the bang. At the end of every
-stage MoE prints a chain prompt, and what you type there decides how far the
-run travels without you. `!` runs the next stage and parks. `!<stage>` runs to
-a named gate. `!!` ships this run. `!!!` ships it and rides on into the next
-chained run. Same vocabulary as flags on the stage verbs, for the same reason.
+stage MoE prints a chain prompt, and what you type there decides how far the run
+travels without you. `!` runs the next stage and parks. `!<stage>` runs to a
+named gate. `!!` ships this run. The former three-bang rung shipped it and rode
+on into the next chained run. Stage flags mirrored that vocabulary.
 
 That is where the economics turned. Shape a few runs during the day, chain them
-into a sequence, fire `!!!` once on your way out. The chain codes, reviews,
-tests, and ships overnight on capacity a flat-rate subscription already pays
-for, and each run is still gated, journaled, and revertible in the morning.
+into a sequence, invoke the three-bang rung once on your way out. The chain
+codes, reviews, tests, and ships overnight on capacity a flat-rate subscription
+already pays for, and each run is still gated, journaled, and revertible in the
+morning.
 
 Which brings you to step 2's bottleneck, exactly as advertised: reviewing the
 output, and — the part the table doesn't say out loud — deciding what should
@@ -189,12 +190,12 @@ And then the last door: a sweep's final act can be to kick the thread it just
 groomed. Work can now find itself, order itself, and start itself.
 
 That is a real change in kind, and it needed a consent surface that wasn't a
-review screen — a gate that needs a human doesn't survive contact with a
-cascade nobody is watching. The answer was a fourth bang. `!!!` rides a chain
-**statically**: the machine may not grow the ride, and groom placements landing
-inside the ridden unit get redirected out. `!!!!` rides **dynamically**, and
-that is the sole license for the machine to extend a ride mid-flight and for a
-tail pulse to kick its own thread.
+review screen — a gate that needs a human doesn't survive contact with a cascade
+nobody is watching. The answer was a fourth bang. The three-bang rung rode a
+chain **statically**: the machine could not grow the ride, and groom placements
+landing inside the ridden unit got redirected out. The four-bang rung rode
+**dynamically**, granting the sole license for the machine to extend a ride
+mid-flight and for a tail pulse to kick its own thread.
 
 It is a consent notch, not a distance notch — the two set the same ride flag
 and differ only in the mode the invocation carries. The reasoning was blunt:
@@ -207,7 +208,7 @@ Three structural guards sit on the self-kick, and each is
 impossible-by-construction rather than restraint-by-good-manners:
 
 The ride must be **dynamic** — a fourth bang a human typed upstream. A plain
-push and `!!` fire no pulse; a `!!!` tail may groom but cannot kick. The
+push and `!!` fire no pulse; a three-bang tail may groom but cannot kick. The
 surprise ride is not a thing the machine promises to avoid; it's a thing it
 cannot do.
 
@@ -279,12 +280,13 @@ firing a sweep in-process, the kick loop is the only walker, so a sweep's
 picture of the board stays the board it walks and every "kicking" line
 announces a start that happens.
 
-The fourth bang went with them. `!!!!` existed to say "tail pulses may groom
-onto this ride and kick"; with no tail pulses it changed nothing, and a consent
-rung that changes nothing teaches a false distinction. `!!!` is the top typed
-rung: ship and ride the chain as it stands. The dynamic rung survives where it
-still means something — `moe pulse new --dynamic`, the verb the clock calls,
-which `moe serve --dynamic` stands behind.
+The fourth bang went with them. The four-bang rung existed to say "tail pulses
+may groom onto this ride and kick"; with no tail pulses it changed nothing, and
+a consent rung that changes nothing teaches a false distinction. The three-bang
+rung then became the top typed rung: ship and ride the chain as it stands. The
+dynamic rung survives where it still means something —
+`moe pulse new --dynamic`, the verb the clock calls, which `moe serve --dynamic`
+stands behind.
 
 What that trades is recursion for cadence. A generation's follow-on work used
 to start the moment its ride's tail groomed it; now it waits for the next tick

@@ -117,8 +117,6 @@ Every cascade is headless — the axis is *how far*, not *how*:
 - `!<stage>` runs headlessly up to that named gate, without shipping.
 - `!!` runs every remaining stage headlessly and ships **this run** (or
   auto-closes, for workflows without a push gate), then stops.
-- `!!!` is a synonym for `!!`, kept so old muscle memory ships instead of
-  declining.
 
 The cascade mode flags on `design`/`build`/`review` mirror the chain
 prompt's bang vocabulary at the CLI: `--once` (= `!`) dispatches one stage
@@ -144,17 +142,17 @@ run back rather than parking. Interactively the chain prompt becomes a kickback
 offer `[Y/n/d/x]`: `Y` (default) reopens `build` seeded with the blocking
 canvas, `d` kicks back to `design`, `n` parks, and `x` scuttles the run; after
 the fix, MoE re-offers the gate that blocked instead of walking forward.
-Headless ship cascades (`!!` / `!!!`, and serve's ship) kick back to `build`
-headlessly with the blocking canvas, re-dispatch review, and repeat until
-review passes, the reviewer writes `{"status":"blocked","escalate":true}`
-(another build round won't help), or the run's journal holds ten review turns;
-then it parks and asks you a question on the run, which shows wherever open
-questions do: `moe input list`, serve's input page, the dash and Rex. A sweep
-won't re-ride a run parked that way until you answer it (or push any note),
-kick it back by hand (uncapped), or close it; an answer buys one more review
-turn with your reply in its prompt. `!` and `!<stage>` take no recovery turn of
-their own: they stop at the blocked gate and fall through to that same chain
-prompt (headless, a back-pointing `kick back to fix` nudge prints instead).
+Headless ship cascades (`!!`, and serve's ship) kick back to `build` headlessly
+with the blocking canvas, re-dispatch review, and repeat until review passes,
+the reviewer writes `{"status":"blocked","escalate":true}` (another build round
+won't help), or the run's journal holds ten review turns; then it parks and asks
+you a question on the run, which shows wherever open questions do:
+`moe input list`, serve's input page, the dash and Rex. A sweep won't re-ride a
+run parked that way until you answer it (or push any note), kick it back by hand
+(uncapped), or close it; an answer buys one more review turn with your reply in
+its prompt. `!` and `!<stage>` take no recovery turn of their own: they stop at
+the blocked gate and fall through to that same chain prompt (headless, a
+back-pointing `kick back to fix` nudge prints instead).
 
 Design starts with Problem, Decision, Scope, Verification and Open questions
 headings, plus a fenced JSON gate initially `blocked`. The headings guide
@@ -198,17 +196,17 @@ dirty tree — warns and leaves the run open. sdlc only.
 ### Seeing and steering a running run
 
 Every invocation that runs workflow work — a stage, the next-stage prompt, a
-kick, a CI repair, a push — serves a small live endpoint for its run while
-it owns it. `moe dash` appends what that owner reports to the run's row, in
+kick, a CI repair, a push — serves a small live endpoint for its run while it
+owns it. `moe dash` appends what that owner reports to the run's row, in
 brackets: `[agent running build 4m]`, `[waiting for operator]`,
 `[pause pending]`, `[handed off]`, `[owned · no live status]`.
 `moe control show <project>/<run>` prints the long form: owner and generation,
-phase and since when, why it is waiting, its continuation (`prompt`, `!`, `!!`,
-`!!!`), where it came from (a terminal, serve's local pty, Rex; the parent
-sweep), its Rex block, any hold, the request log, and the exact command that
-returns to the last stage that ran. A reply proves the owner is alive, not
-that the agent is making progress, and an owner that does not answer is shown
-as unreachable — never as idle, and never as leave to start a replacement.
+phase and since when, why it is waiting, its continuation (`prompt`, `!`, `!!`),
+where it came from (a terminal, serve's local pty, Rex; the parent sweep), its
+Rex block, any hold, the request log, and the exact command that returns to the
+last stage that ran. A reply proves the owner is alive, not that the agent is
+making progress, and an owner that does not answer is shown as unreachable —
+never as idle, and never as leave to start a replacement.
 
 The shared board shows `blocked` beside a stage after an authored turn leaves
 its gate unready. Fresh templates and ready stages parked before their

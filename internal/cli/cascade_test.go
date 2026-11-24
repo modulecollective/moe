@@ -812,48 +812,55 @@ func TestPromptStageNextStageNoCascadeLegendWithoutDispatcher(t *testing.T) {
 // gate ships through the typed cascade path, so terminal harvest can
 // skip the editor while manual `m` stays interactive.
 func TestPromptPushNextStageBangBangShips(t *testing.T) {
-	var ran bool
-	next := &Command{
-		Name: "push",
-		Run: func(args []string, _, _ io.Writer) int {
-			ran = true
-			return 0
-		},
-	}
-	pushCaptured := stubPushFromCascade(t, 0, nil)
-	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
+	for _, answer := range []string{"!!", "!!!"} {
+		t.Run(answer, func(t *testing.T) {
+			var ran bool
+			next := &Command{
+				Name: "push",
+				Run: func(args []string, _, _ io.Writer) int {
+					ran = true
+					return 0
+				},
+			}
+			pushCaptured := stubPushFromCascade(t, 0, nil)
+			md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-	if _, err := io.WriteString(w, "!!\n"); err != nil {
-		t.Fatal(err)
-	}
-	w.Close()
-	oldStdin := os.Stdin
-	os.Stdin = r
-	t.Cleanup(func() { os.Stdin = oldStdin })
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer r.Close()
+			if _, err := io.WriteString(w, answer+"\n"); err != nil {
+				t.Fatal(err)
+			}
+			w.Close()
+			oldStdin := os.Stdin
+			os.Stdin = r
+			t.Cleanup(func() { os.Stdin = oldStdin })
 
-	var stdout, stderr bytes.Buffer
-	if code := promptPushNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
-		t.Fatalf("push prompt exit=%d", code)
-	}
-	if ran {
-		t.Fatalf("!! at push gate must not dispatch through Command.Run")
-	}
-	if len(*pushCaptured) != 1 {
-		t.Fatalf("pushFromCascade dispatched %d times, want 1: %+v", len(*pushCaptured), *pushCaptured)
-	}
-	if got, want := strings.Join((*pushCaptured)[0].args, " "), "tele/fix-it"; got != want {
-		t.Fatalf("push args = %q, want %q (merge path, no flags)", got, want)
-	}
-	if !(*pushCaptured)[0].options.HeadlessRecovery {
-		t.Fatalf("push HeadlessRecovery = false, want true")
-	}
-	if !(*pushCaptured)[0].options.SkipTerminalEdit {
-		t.Fatalf("push SkipTerminalEdit = false, want true")
+			var stdout, stderr bytes.Buffer
+			if code := promptPushNextStage(next, nil, nil, t.TempDir(), md, "moe sdlc push tele fix-it", &stdout, &stderr); code != 0 {
+				t.Fatalf("push prompt exit=%d", code)
+			}
+			if ran {
+				t.Fatalf("!! at push gate must not dispatch through Command.Run")
+			}
+			if len(*pushCaptured) != 1 {
+				t.Fatalf("pushFromCascade dispatched %d times, want 1: %+v", len(*pushCaptured), *pushCaptured)
+			}
+			if got, want := strings.Join((*pushCaptured)[0].args, " "), "tele/fix-it"; got != want {
+				t.Fatalf("push args = %q, want %q (merge path, no flags)", got, want)
+			}
+			if !(*pushCaptured)[0].options.HeadlessRecovery {
+				t.Fatalf("push HeadlessRecovery = false, want true")
+			}
+			if !(*pushCaptured)[0].options.SkipTerminalEdit {
+				t.Fatalf("push SkipTerminalEdit = false, want true")
+			}
+			if strings.Contains(stdout.String()+stderr.String(), "!!!") {
+				t.Fatalf("push prompt must not advertise the legacy alias: stdout=%q stderr=%q", stdout.String(), stderr.String())
+			}
+		})
 	}
 }
 

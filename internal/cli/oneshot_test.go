@@ -142,6 +142,9 @@ exit 0
 		t.Fatalf("argv dump missing: %v", err)
 	}
 	args := string(dump)
+	if !strings.Contains(args, "the `!` / `!<stage>` / `!!` cascade driver") || strings.Contains(args, "!!!") {
+		t.Fatalf("headless prompt must advertise the current cascade vocabulary, got argv:\n%s", args)
+	}
 	// Run slug is the user prompt under -p; the interactive kickoff
 	// must not leak in.
 	if !strings.Contains(args, "per-stage-design") {
