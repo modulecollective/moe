@@ -233,8 +233,12 @@ func lockClaudeConfig(path string) (func(), error) {
 			return nil, err
 		}
 		if info, serr := os.Stat(lock); serr == nil && time.Since(info.ModTime()) > configLockStale {
-			_ = os.Remove(lock)
-			continue
+			// Retry at once only if the takeover removed it. A stale
+			// lock that will not go (a read-only home) must still run
+			// into the deadline below, not spin here.
+			if rerr := os.Remove(lock); rerr == nil || errors.Is(rerr, fs.ErrNotExist) {
+				continue
+			}
 		}
 		if time.Now().After(deadline) {
 			return nil, fmt.Errorf("%s held by another writer", lock)

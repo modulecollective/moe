@@ -235,6 +235,46 @@ func TestSeedTrustHonoursConfigLock(t *testing.T) {
 	}
 }
 
+// A stale lock the takeover cannot remove must end in the held-lock
+// error once lockWait passes, never a spin: the launch waits on this.
+func TestSeedTrustGivesUpOnUnremovableStaleLock(t *testing.T) {
+	root := t.TempDir()
+	body := configWith(map[string]map[string]any{root: {"hasTrustDialogAccepted": true}}, nil)
+	path := writeClaudeConfig(t, body)
+	prev := lockWait
+	lockWait = 100 * time.Millisecond
+	t.Cleanup(func() { lockWait = prev })
+
+	// A non-empty directory is what os.Remove refuses without needing
+	// a read-only filesystem.
+	lock := path + ".lock"
+	if err := os.Mkdir(lock, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(lock, "pinned"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stale := time.Now().Add(-time.Minute)
+	if err := os.Chtimes(lock, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- seedTrust(root, []string{"/clone/run"}) }()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "held by another writer") {
+			t.Fatalf("err = %v, want held-lock error", err)
+		}
+	case <-time.After(10 * time.Second):
+		// The spinning goroutine outlives the test; nothing can stop it.
+		t.Fatal("seedTrust still retrying 10s past a 100ms lockWait")
+	}
+	if got, _ := os.ReadFile(path); string(got) != body {
+		t.Errorf("config rewritten:\n%s", got)
+	}
+}
+
 func assertUntouched(t *testing.T, path, body string, mtime time.Time) {
 	t.Helper()
 	got, err := os.ReadFile(path)
