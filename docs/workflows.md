@@ -640,7 +640,7 @@ bureaucracy. Each sweep picks one run, that run rides, and the next sweep picks
 again, so order is recomputed every time and never stored. A dependency between
 runs is prose on the blocked run's canvas, and the survey is its reader. What
 that costs is throughput and latency: a survey before every run, and up to a
-twenty-minute tick between them. What it buys is that nothing has to be
+five-minute tick between them. What it buys is that nothing has to be
 hand-sequenced, and a run that was waiting on another project becomes visible
 the moment that project's work lands.
 
@@ -816,7 +816,7 @@ answering it — "not relevant, proceed" is prose the next turn can read.
 ### The heartbeat
 
 `moe serve --dynamic` is the standing consent rung, and it licenses exactly one
-thing: a resident heartbeat that looks at each project's board every twenty
+thing: a resident heartbeat that looks at each project's board every five
 minutes and runs one `moe pulse new --dynamic` when any of them has something
 worth looking at. While a sweep or the ride it started is running, no other
 starts. That heartbeat is the only automatic pulse there is, and the
@@ -887,7 +887,7 @@ costs no agent turn, run or journal line. Recorded pushed PRs are polled at this
 cadence outside the journal lock. A merged or closed owned PR wakes a pulse to
 reconcile its still-pushed run before the survey reads the board. It keeps
 waking eligible ticks until reconciliation succeeds, including after a restart.
-This follows the twenty-minute cadence and existing holds and failure backoff;
+This follows the five-minute cadence and existing holds and failure backoff;
 it is not an immediate refresh. Run `moe sync` for immediate reconciliation. A
 new actionable failure can also wake a survey even when the journal has not
 moved. Stable failure observations are acknowledged only after a successful

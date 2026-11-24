@@ -225,7 +225,7 @@ a survey adds nothing. Ctrl-C is the operator's brake on one already in flight.
 
 Underneath those, nothing that made step 2 safe was traded away. A clock did
 arrive since: an armed `moe serve --dynamic` carries a resident heartbeat that
-looks at each project's board every twenty minutes. It only wakes the machine to
+looks at each project's board every five minutes. It only wakes the machine to
 look, and every guard that follows applies to the sweep it fires exactly as it
 applies to a typed one. The survey sandbox is read-only; the agent proposes JSON
 and the harness stamps it. Every ridden run still walks test and review. Every
@@ -288,7 +288,7 @@ which `moe serve --dynamic` stands behind.
 
 What that trades is recursion for cadence. A generation's follow-on work used
 to start the moment its ride's tail groomed it; now it waits for the next tick
-(≤20 minutes) or a hand-run pulse. The open-ended machine walk survives — each
+(≤5 minutes) or a hand-run pulse. The open-ended machine walk survives — each
 sweep's kick loop rides the whole board, each ride's commits re-arm the moved
 leg — but the clock owns the pacing. That is the point, not the cost: the
 direction is that more and more happens automatically, and the clock is where
