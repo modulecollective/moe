@@ -1048,12 +1048,11 @@ mode, occupancy, quiet-window and backoff guards still apply. Configuration
 errors preserve the obligation rather than claiming a changed choice. Typed
 dynamic pulses keep the ordinary wait policy.
 
-At an interactive stage's attached terminal, `c` + Enter continues that
-stage now, `a` + Enter skips checks for the rest of this invocation, and
-`q` + Enter or Ctrl-C cancels. Headless and serve-hosted stages read no
-terminal input. Add `--no-cooldown` anywhere before `--` in the launch
-command to skip checks for the entire invocation, including its cascade
-and chain ride. For example:
+At an interactive stage's attached terminal, `c` + Enter continues that stage
+now, `a` + Enter skips checks for the rest of this invocation, and `q` + Enter
+or Ctrl-C cancels. Headless and serve-hosted stages read no terminal input. Add
+`--no-cooldown` anywhere before `--` in the launch command to skip checks for
+the entire invocation, including its cascade and rides. For example:
 
 ```sh
 moe sdlc build --no-cooldown --ship myproject/my-run

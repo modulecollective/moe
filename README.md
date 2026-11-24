@@ -65,16 +65,15 @@ tag the ideas you want done, and step away. It then works through them one at a
 time on capacity your flat-rate dev subscription already pays for while you
 sleep — each run still gated, journaled, and revertible in the morning.
 
-The standing rung removes even that keystroke. Leave `moe serve --dynamic`
-running and its heartbeat finds ready work across each project's board, opens
-it, and carries it through the same gates and journal, no `!!!` required.
-Stopping serve stops new sweeps; to cancel an existing Rex-hosted sweep and its
-ride, press Ctrl-C in its Rex block. Local sweeps stop with serve; see the
-[heartbeat guide](docs/workflows.md#the-heartbeat) for hosting details. When a
-run needs your judgment, push it a sentence — `moe input add` from the
-terminal, or the web's `/input` queue from a phone — and the next turn on that
-run acts on it. A sweep can ask you something the same way, and you answer it
-in prose.
+That is the standing rung: leave `moe serve --dynamic` running and its heartbeat
+finds ready work across each project's board, opens it, and carries it through
+the same gates and journal with no bang typed. Stopping serve stops new sweeps;
+to cancel an existing Rex-hosted sweep and its ride, press Ctrl-C in its Rex
+block. Local sweeps stop with serve; see the [heartbeat
+guide](docs/workflows.md#the-heartbeat) for hosting details. When a run needs
+your judgment, push it a sentence — `moe input add` from the terminal, or the
+web's `/input` queue from a phone — and the next turn on that run acts on it. A
+sweep can ask you something the same way, and you answer it in prose.
 
 ## You Might Want MoE If
 
