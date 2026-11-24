@@ -181,7 +181,7 @@ func TestIntentsReferenceSection(t *testing.T) {
 	for _, want := range []string{
 		"## Project intents",
 		"### `north-star` — Be the fastest dash\n\nThe bet body.\n\n#### Done when\n\n```sh\n# not a heading\n```\n#hashtag\n",
-		"never create or edit",
+		"the pulse keeps each one's `## Status`",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("intents section missing %q in:\n%s", want, got)

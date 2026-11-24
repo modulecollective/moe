@@ -352,49 +352,80 @@ func intentsReferenceSection(root, projectID string) string {
 	if root == "" || projectID == "" {
 		return ""
 	}
+	mds, err := run.Scan(root)
+	if err != nil {
+		return ""
+	}
+	open := map[string][]*run.Metadata{}
+	var projects []string
+	for _, md := range mds {
+		if md.Workflow != dash.IntentWorkflow || md.Status != run.StatusInProgress {
+			continue
+		}
+		if len(open[md.Project]) == 0 {
+			projects = append(projects, md.Project)
+		}
+		open[md.Project] = append(open[md.Project], md)
+	}
+	sort.Strings(projects)
 	var sections []string
-	if projectID != project.RootID {
-		if s := intentsSection(root, project.RootID, "Bureaucracy intents",
-			`The bureaucracy has open intents that span its projects — short,
-operator-authored statements of where the whole of it is going. They are
-inlined below, and aim the discretionary calls the way a project's own do.
-`); s != "" {
+	add := func(s string) {
+		if s != "" {
 			sections = append(sections, s)
 		}
 	}
-	if s := intentsSection(root, projectID, "Project intents",
-		`This project has open intents — short, operator-authored statements
+	add(intentsSection(root, open[project.RootID], "Bureaucracy intents",
+		`The bureaucracy has open intents that span its projects — short,
+operator-authored statements of where the whole of it is going. They are
+inlined below, and aim the discretionary calls the way a project's own do.
+`))
+	if projectID == project.RootID {
+		// The pulse lives here and keeps every project's intents, so it
+		// reads all of them, each project under its own heading.
+		for _, p := range projects {
+			if p != project.RootID {
+				add(intentsSection(root, open[p], "Intents of `"+p+"`", ""))
+			}
+		}
+	} else {
+		add(intentsSection(root, open[projectID], "Project intents",
+			`This project has open intents — short, operator-authored statements
 of where it's going: a theme, a bet, a direction it's heading. They are
 inlined below. They aim the discretionary calls (what to propose, what
 to prioritise); they don't fence what's allowed.
-`); s != "" {
-		sections = append(sections, s)
+`))
 	}
 	if len(sections) == 0 {
 		return ""
 	}
-	return strings.Join(sections, "\n") + `
-Intents are operator-authored — you read them, you never create or edit
-them. If a theme looks missing, name it in a report; the operator
-decides whether to park it.
+	closing := `
+You read intents; the pulse keeps each one's ` + "`## Status`" + ` and the links
+from runs to the intent they serve. If your work changes where an intent
+stands, say so on your canvas, and the next pulse will carry it.
 `
+	if projectID == project.RootID {
+		closing = `
+Every open intent in the bureaucracy is above. The stage guidance says how
+the pulse keeps them.
+`
+	}
+	return strings.Join(sections, "\n") + closing
 }
 
 // intentsSection renders one project's open intents under heading, or ""
-// when it has none.
-func intentsSection(root, projectID, heading, intro string) string {
-	slugs, err := intentKind.scanOpen(root, projectID)
-	if err != nil || len(slugs) == 0 {
+// when it has none. An intent a pulse opened says so beside its title.
+func intentsSection(root string, intents []*run.Metadata, heading, intro string) string {
+	if len(intents) == 0 {
 		return ""
 	}
-
+	sort.Slice(intents, func(i, j int) bool { return intents[i].ID < intents[j].ID })
 	var b strings.Builder
 	b.WriteString("## " + heading + "\n\n")
 	b.WriteString(intro)
-	for _, slug := range slugs {
-		title := intentTitle(root, projectID, slug)
-		fmt.Fprintf(&b, "\n### `%s` — %s\n", slug, title)
-		content, err := os.ReadFile(filepath.Join(root, run.ContentPath(projectID, slug, dash.IntentDocID)))
+	for _, md := range intents {
+		title := intentTitle(root, md.Project, md.ID)
+		fmt.Fprintf(&b, "\n### `%s` — %s%s\n", md.ID, title, intentMarks(md))
+		content, err := os.ReadFile(filepath.Join(root, run.ContentPath(md.Project, md.ID, dash.IntentDocID)))
 		if err != nil {
 			continue
 		}
@@ -403,6 +434,23 @@ func intentsSection(root, projectID, heading, intro string) string {
 		}
 	}
 	return b.String()
+}
+
+// intentMarks is the provenance note beside an intent's title: who
+// opened it when a pulse did, and an operator reopen after a pulse
+// close. Both read fields the harness already writes.
+func intentMarks(md *run.Metadata) string {
+	var marks []string
+	if md.SpawnedBy != "" {
+		marks = append(marks, "opened by pulse")
+	}
+	if md.ClosedBy != "" && md.Status == run.StatusInProgress {
+		marks = append(marks, "reopened by the operator")
+	}
+	if len(marks) == 0 {
+		return ""
+	}
+	return " (" + strings.Join(marks, ", ") + ")"
 }
 
 // intentPromptBody returns an intent canvas ready to sit under its

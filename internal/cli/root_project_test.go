@@ -74,11 +74,11 @@ func TestBureaucracyIntentsReachEveryProjectsPrompt(t *testing.T) {
 	if top < 0 || own < top || !strings.Contains(got, "`ship-less`") || !strings.Contains(got, "`faster-everything`") {
 		t.Fatalf("section:\n%s", got)
 	}
-	if n := strings.Count(got, "you never create or edit"); n != 1 {
-		t.Fatalf("authorship rule rendered %d times", n)
+	if n := strings.Count(got, "the pulse keeps each one's"); n != 1 {
+		t.Fatalf("keeper rule rendered %d times", n)
 	}
 	inRoot := intentsReferenceSection(root, project.RootID)
-	if strings.Contains(inRoot, "## Bureaucracy intents") || strings.Count(inRoot, "`ship-less`") != 1 {
+	if strings.Count(inRoot, "## Bureaucracy intents") != 1 || strings.Count(inRoot, "`ship-less`") != 1 || !strings.Contains(inRoot, "`faster-everything`") {
 		t.Fatalf("root section repeats itself:\n%s", inRoot)
 	}
 }

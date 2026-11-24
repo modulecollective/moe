@@ -22,6 +22,30 @@ type pulseGate struct {
 	Loose []pulseRunSpec `json:"loose"`
 	// Next is the one run to ride when this sweep is dynamic.
 	Next *pulseNext `json:"next"`
+	// Serves links runs and ideas to the intent each serves.
+	Serves []pulseServes `json:"serves"`
+	// Intents opens or closes intents, one entry per act.
+	Intents []pulseIntentAct `json:"intents"`
+}
+
+// pulseServes is one link the survey writes: Run (a sdlc run or idea,
+// live or settled, or a slug this gate's `loose` opens) serves Intent.
+// An empty Intent clears the link. Both are `<project>/<slug>`.
+type pulseServes struct {
+	Run    string `json:"run"`
+	Intent string `json:"intent"`
+}
+
+// pulseIntentAct is one intent the survey opens or closes. Exactly one
+// of Open and Close is set; the bars each is held to live in the stage
+// fragment, not here — the harness cannot read a done condition out of
+// markdown, so it checks shape and the one-try rule only.
+type pulseIntentAct struct {
+	Open  string `json:"open"`
+	Close string `json:"close"`
+	Title string `json:"title"`
+	Body  string `json:"body"`
+	Why   string `json:"why"`
 }
 
 // pulseNext names the one run to ride: a live parked run or a tagged idea,
@@ -135,5 +159,43 @@ func readPulseGate(root, projectID, runID string) (pulseGate, error) {
 			return pulseGate{}, errors.New(`next: repair must be "ci"`)
 		}
 	}
+	for i, sv := range g.Serves {
+		if _, _, err := splitProjectRun(sv.Run); err != nil {
+			return pulseGate{}, fmt.Errorf("serves[%d]: run: %w", i, err)
+		}
+		if sv.Intent != "" {
+			if _, _, err := splitProjectRun(sv.Intent); err != nil {
+				return pulseGate{}, fmt.Errorf("serves[%d]: intent: %w", i, err)
+			}
+		}
+	}
+	for i, act := range g.Intents {
+		if err := act.validate(); err != nil {
+			return pulseGate{}, fmt.Errorf("intents[%d]: %w", i, err)
+		}
+	}
 	return g, nil
+}
+
+// validate checks one intent act's grammar: exactly one of open and
+// close, a qualified slug, and the fields that act needs.
+func (a pulseIntentAct) validate() error {
+	if (a.Open == "") == (a.Close == "") {
+		return errors.New(`exactly one of "open" and "close" is required`)
+	}
+	target := a.Open + a.Close
+	if _, _, err := splitProjectRun(target); err != nil {
+		return err
+	}
+	if strings.TrimSpace(a.Why) == "" {
+		return errors.New(`"why" is required`)
+	}
+	if a.Open != "" {
+		if strings.TrimSpace(a.Title) == "" || strings.TrimSpace(a.Body) == "" {
+			return errors.New(`open: "title" and "body" are required`)
+		}
+	} else if a.Title != "" || a.Body != "" {
+		return errors.New(`close: "title" and "body" belong to open`)
+	}
+	return nil
 }

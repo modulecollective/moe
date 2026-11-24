@@ -61,9 +61,13 @@ const pulseCanvasSkeleton = `# Pulse
 
 (agent fills: stale/duplicate flags, advisory only. Empty is fine.)
 
+## Intents
+
+(agent fills: one line per intent whose Status, links or open/closed state changed. "None" is valid.)
+
 ## Gate
 
-(agent fills: a fenced json block — set "status" once the survey concluded, and optionally "loose": [...] and "next": {...}. This placeholder has no fence, so a no-op turn leaves the gate detectably unfilled.)
+(agent fills: a fenced json block — set "status" once the survey concluded, and optionally "loose": [...], "serves": [...], "intents": [...] and "next": {...}. This placeholder has no fence, so a no-op turn leaves the gate detectably unfilled.)
 `
 
 func init() {
@@ -620,6 +624,10 @@ var openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt,
 				return prompt, nil
 			},
 			CanvasSkeleton: pulseCanvasSkeleton,
+			// The pulse keeps each intent's Status as a peer edit on the
+			// intent canvas. Only those canvases are staged beside the
+			// report; an edit to any other run's document still is not.
+			ExtraStagePaths: openIntentCanvasPaths,
 		}, stdout, stderr)
 	return out
 }

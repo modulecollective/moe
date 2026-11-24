@@ -13,17 +13,31 @@ import (
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
-// applyPulseGate opens the runs the gate's `loose` list describes, each in
-// the project its slug names, and returns the ids it minted keyed by the
-// slug the survey wrote, so `next` can name a run this same gate opened.
+// applyPulseGate applies everything the gate asks for but `next`, in
+// order: open intents, mint `loose`, write `serves` links, close
+// intents. Opening first lets a `serves` link name an intent this gate
+// opened; minting before linking lets it name a run this gate opened;
+// closing last means a close never strands a link written in the same
+// gate. It returns the ids it minted keyed by the slug the survey wrote,
+// so `serves` and `next` can name a run this same gate opened.
 //
-// Warn-only throughout: a spec that can't be minted drops with a stderr
-// line, and the report and filings are already durable.
+// Warn-only throughout: an entry that can't be applied drops with a
+// stderr line, and the report and filings are already durable.
 func applyPulseGate(root, pulseSlug string, gate pulseGate, stdout, stderr io.Writer) map[string]string {
+	spawnedBy := project.RootID + "/" + pulseSlug
+	openPulseIntents(root, spawnedBy, gate.Intents, stderr)
+	minted := mintPulseLoose(root, spawnedBy, gate.Loose, stdout, stderr)
+	applyPulseServes(root, spawnedBy, gate.Serves, minted, stderr)
+	closePulseIntents(root, spawnedBy, gate.Intents, stderr)
+	return minted
+}
+
+// mintPulseLoose opens the runs the gate's `loose` list describes, each
+// in the project its slug names.
+func mintPulseLoose(root, spawnedBy string, loose []pulseRunSpec, stdout, stderr io.Writer) map[string]string {
 	minted := map[string]string{}
 	minters := map[string]*pulseMinter{}
-	spawnedBy := project.RootID + "/" + pulseSlug
-	for _, spec := range gate.Loose {
+	for _, spec := range loose {
 		target := spec.Slug
 		if strings.TrimSpace(spec.Chore) != "" {
 			target = spec.Chore

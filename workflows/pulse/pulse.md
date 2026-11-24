@@ -66,11 +66,12 @@ project, so the delta is normally small. Start from it:
   advanced-runs block: runs where the operator chose "advance, don't run
   now". They are stalled mid-workflow, and nothing else will pick them
   up. An advanced run already has the operator's consent to continue.
-- **The backlog itself** — the open ideas, the open **intents** (the
-  operator's standing direction, both bureaucracy-wide and per project),
-  and the previous pulse report. The intents are not optional reading
-  here: steering the sweep by them is the pulse's job in a way it is no
-  other stage's.
+- **The backlog itself** — the open ideas, the open **intents** (every
+  project's, inlined in your system prompt, with the work linked to each
+  in the kickoff's **Open intents** block), and the previous pulse
+  report. The intents are not optional reading here: steering the sweep
+  by them, and keeping where each one stands, is the pulse's job in a
+  way it is no other stage's.
 
 This turn recurs on every pulse. It is a sweep, not an investigation.
 Anything that needs deep digging becomes a followup *naming the
@@ -119,6 +120,66 @@ serve one, and its Why names it (`intent: <slug>`). Unaimed novelty
 stays legal, at the same higher conviction bar — intents steer the
 creative license, they don't fence it.
 
+## Intents — keep where each one stands
+
+An intent is a goal: the outcome a run, or seventeen runs across three
+projects, is for. You keep three things about them.
+
+**Status.** The last section of an intent's canvas is `## Status`, and
+it is yours. Edit the canvas at the path the kickoff names; rewrite the
+section whole, never append, and write nothing else on the canvas.
+At most about eight lines:
+
+    ## Status
+
+    2026-11-24, pulse
+    - Plan: what comes next and in what order.
+    - Landed: what is done, in outcomes.
+    - Blocked: what is stuck and on what.
+    - Needs you: the decision only the operator can make.
+
+Leave out empty lines. The date is when the status last changed, not
+when you read it: an intent where nothing moved gets no edit at all. Do
+not list runs — the links are the list. If the direction or the done
+condition has gone false, say so under "Needs you"; the operator's
+words stay as they wrote them. An intent with no linked work and no
+done condition is pure direction and gets no Status.
+
+**Links.** The kickoff's **Unmapped** block lists runs and ideas opened
+since the last pulse that serve no intent. Link the ones that do in the
+gate's `serves` list, one intent per run (the one it serves most). Leave
+tidying and unrelated work unlinked; that is a judgement, not an
+omission. You may correct a link you see is wrong. Do not go looking
+for old runs to link.
+
+    "serves": [{"run": "moe/fix-x", "intent": "moe/level-up-level-4"}]
+
+**Opening one.** The bar: at least two pieces of work serve one outcome
+that no open intent names, the outcome has a done condition someone
+could check, and without an intent nobody could answer "are we done?"
+— an incident spread across runs and projects is the shape. A theme or
+a bet about where a project is going stays the operator's to write.
+Zero is the normal number.
+
+    "intents": [{"open": "_cabinet/disk-exhaustion", "title": "…",
+                 "body": "<a paragraph, then a Done when>", "why": "…"}]
+
+Link the work in the same gate's `serves`.
+
+**Closing one.** Any intent, whoever wrote it, but the bar is high:
+
+- it states a done condition in its own words;
+- every clause of it is met, and you can name the run or commit that
+  met each one;
+- the Status you write in this same sweep says so.
+
+    "intents": [{"close": "moe/level-up-level-4", "why": "<the evidence>"}]
+
+An intent with no done condition is standing direction: never close
+it. Nor one that merely looks stale — say that under "Needs you". The
+harness refuses a close on an intent a pulse already closed once: the
+operator reopened it, which means you were wrong about it.
+
 ## Filing — use the skills, don't restate them
 
 The `moe-bureaucracy` skill owns the filing idioms: the followups
@@ -137,9 +198,9 @@ The canvas is skimmed at prune time, so keep it tight:
   backlog).
 - **New filings** — one line per followup filed. "None" is valid.
 - **Backlog hygiene** — stale/duplicate flags, advisory prose only. You
-  flag; the operator acts. Never close an idea. This extends to
-  intents: flag one that looks satisfied or gone stale, advisory only —
-  the operator closes intents, you never do.
+  flag; the operator acts. Never close an idea.
+- **Intents** — one line per intent whose Status, links, or open/closed
+  state you changed this sweep. "None" is valid.
 - **Gate** — always last. A machine-readable verdict the harness reads
   after your turn; see below.
 
@@ -167,6 +228,9 @@ harness parses once your turn exits.
   when nothing clears the bar, which is the common case.
 - **`next`** — the one run to ride after this sweep. See "Picking what
   is next". Omit it when nothing should start.
+- **`serves`** and **`intents`** — links from work to intents, and
+  intents to open or close. See "Intents". The harness applies them in
+  order: open intents, open `loose`, write links, close intents.
 
 The grammar is closed: any other key refuses the whole gate.
 
@@ -398,11 +462,11 @@ find yourself arguing that it *sort of* holds, it doesn't.
 
 - No project-tree edits, no fixing findings in place (the sandbox is
   read-only and the boundary is enforced — this is also policy).
-- No editing other runs' documents.
+- No editing other runs' documents, except the `## Status` section of
+  an open intent's canvas.
 - No rewriting idea canvases to influence their rank.
 - No closing or promoting ideas — the harvest is advisory; the
   operator holds the trigger.
-- No minting or editing intents. If a theme looks missing, name it in
-  the report; the operator decides whether to park it. Intents are
-  operator-authored — the harvester files followups into ideas, never
-  intents.
+- No editing an intent's direction or done condition, and no opening
+  one for a theme or a bet — those are the operator's. The harvester
+  files followups into ideas, never intents.

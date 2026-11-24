@@ -31,6 +31,9 @@ notice.
 - **Padding.** Don't add a bullet because the section looks thin.
 - **Planning.** No milestones, no sequencing, no implementation notes.
   Intents aim the discretionary calls; they don't schedule the work.
+- **The `## Status` section.** The pulse keeps it, rewriting it whole
+  each time where the intent stands changes. Leave it alone unless the
+  operator asks you to change it.
 
 ## How to work
 

@@ -23,7 +23,7 @@ const pulseKickoff = "Run the pulse for this bureaucracy: a delta-first, read-on
 	"never manufacture findings.\n\n" +
 	"Close the canvas with the `## Gate` section (a ```json fence). Set \"status\" to a short word (e.g. \"ok\") once the " +
 	"survey actually ran and concluded — that is what tells the harness this was a real sweep, not a crashed no-op. " +
-	"The gate says two things: what to open and what is next.\n\n" +
+	"The gate says what to open, what is next, and what changed about intents.\n\n" +
 	"A `\"loose\"` list holds runs to open. Each entry is an object: `{\"slug\": \"<project>/<slug>\", \"title\": ..., " +
 	"\"why\": ..., \"design\": ...}`, defaulting to a `sdlc` fix run — the bar is mechanical, bounded, and verifiable, all " +
 	"three, and the stage guidance holds it. An entry may instead set `\"design_only\": true`, which opens the run for one " +
@@ -35,7 +35,12 @@ const pulseKickoff = "Run the pulse for this bureaucracy: a delta-first, read-on
 	"is waiting on, across projects, and pick the first thing that can actually move. Omit `next` when nothing should " +
 	"start. For failed checks on an owned pushed PR, name its existing run with `\"repair\": \"ci\"` added. The harness " +
 	"rechecks evidence and consent, claims a bounded attempt, then runs code, fresh test and review, and updates that PR. " +
-	"See the stage guidance."
+	"See the stage guidance.\n\n" +
+	"`\"serves\"` links work to the intent it serves: `[{\"run\": \"<project>/<slug>\", \"intent\": \"<project>/<slug>\"}]`, " +
+	"one intent per run, an empty intent clearing the link. `\"intents\"` opens or closes intents: " +
+	"`{\"open\": \"<project>/<slug>\", \"title\": ..., \"body\": \"<markdown with a Done when>\", \"why\": ...}` or " +
+	"`{\"close\": \"<project>/<slug>\", \"why\": ...}`. Both bars are high and zero is the normal number; the stage " +
+	"guidance holds them."
 
 // pulseKickoffFromScan appends the harness-computed context to the static
 // kickoff: where each project's source lives, then one section per project
@@ -80,6 +85,12 @@ func pulseKickoffFromScan(sc *pulseScan, canonicalRoot, runID string, stderr io.
 	}
 	if len(quiet) > 0 {
 		blocks = append(blocks, "No change since the last pulse and no live work: "+strings.Join(quiet, ", ")+".")
+	}
+	if b := openIntentsBlock(sc); b != "" {
+		blocks = append(blocks, b)
+	}
+	if b := unmappedBlock(sc, last, runID); b != "" {
+		blocks = append(blocks, b)
 	}
 	blocks = append(blocks, sections...)
 	if ride := rideModeContextLine(); ride != "" {
