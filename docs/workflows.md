@@ -446,11 +446,11 @@ narrowing, and `untag` clears both. The idea page carries a chip for each rung.
 
 ## Intents
 
-An **intent** is a short, operator-authored statement of where a project is
-going — a theme, a bet, a "we're heading here" — parked on the project while
-it's relevant and closed when it stops being so. It is not a task: an intent is
-never promoted, never executed, never handed to an agent to advance. Agents
-*read* intents; the direction is the operator's.
+An **intent** is a goal: a short statement of where a project is going — a
+theme, a bet, a "we're heading here" — or of an outcome larger than one run,
+parked while it's relevant and closed when it's done. It is not a task: an
+intent is never promoted, never executed, never handed to an agent to advance.
+The operator writes the direction; the pulse keeps where each one stands.
 
 ```sh
 moe intent new <project>/<slug>            # park a new intent in $EDITOR
@@ -458,7 +458,9 @@ moe intent edit [--chat] <project>/<slug>  # sharpen it — intents are living d
 moe intent list <project>                  # the open intents
 moe intent cat <project>/<slug>            # dump one to stdout
 moe intent log <project>/<slug>            # read back a --chat session
+moe intent runs <project>/<slug>           # the work linked to it, by state
 moe intent close <project>/<slug>          # satisfied or abandoned (status -> closed)
+moe intent reopen <project>/<slug>         # undo a close; links stay
 ```
 
 Intents are just runs in a single-stage `intent` workflow, the same shape as
@@ -468,10 +470,8 @@ phone or browser: it writes the intent and returns without starting an agent.
 `intent edit --chat` opens the same document-only session `idea edit --chat`
 does, with one difference that is all prose: the agent is a scribe there. It
 types what the conversation converges on and asks the question that tightens
-the bet; it never originates direction. An operator driving a session is still
-the operator authoring — what stays banned is an *autonomous* agent writing
-where a project is headed. The canvas body is freeform markdown: no fields, no
-priority, no until-date. Parked = open.
+the bet; it never originates direction. The canvas body is freeform markdown:
+no fields, no priority, no until-date. Parked = open.
 
 Where intents reach the robots:
 
@@ -480,20 +480,31 @@ Where intents reach the robots:
   under a `slug — title` heading, framed as where the project is going. They
   aim the discretionary calls (what to propose, what to prioritise); they don't
   fence what's allowed. Intents are short by design; one too long to inline is
-  a reason to shorten it.
-- **The pulse.** The pulse is the one consumer whose job includes the intents,
-  so its fragment makes the read mandatory: open intents join the survey floor,
-  speculative proposals aim at an open intent (`intent: <slug>` in the Why),
-  and backlog hygiene may flag an intent that looks satisfied or stale — advisory
-  only, the operator closes intents.
+  a reason to shorten it. The pulse, in the `_cabinet` root project, gets every
+  project's open intents, each project under its own heading.
+- **The pulse.** The pulse keeps three things about intents. It rewrites the
+  `## Status` section at the foot of each canvas (plan, landed, blocked, needs
+  you; a few lines, dated when it last changed) as a peer edit; that canvas is
+  the only other run document its turn commits. It links runs and ideas to the
+  intent each serves through its gate's `serves` key, which writes `intent` on
+  `run.json`; the kickoff lists the work opened since the last pulse with no
+  link, so mapping is cheap and nothing is backfilled. And through the gate's
+  `intents` key it may open an intent for an outcome several runs serve that
+  nobody named, or close one whose done condition it can show met, clause by
+  clause. Both bars are high and held in its stage guidance. A pulse never
+  closes the same intent twice: after `moe intent reopen`, only the operator
+  closes it again.
 - **The dash.** Open intents render in a standing `INTENTS` section above the
-  backlog, on both the CLI dash and `moe serve`. The heading renders even at
-  zero: an empty list is itself a signal that the robots are running unaimed.
+  backlog, on both the CLI dash and `moe serve`, with the counts of linked work
+  open and landed and a `pulse` mark on one a pulse opened. The heading renders
+  even at zero: an empty list is itself a signal that the robots are running
+  unaimed. A closed intent is a finished goal and gets a `COMPLETED` row, noted
+  `closed by pulse` when it was; the web intent page lists its linked work and
+  offers reopen once it is closed.
 
-No autonomous agent mints or edits intents. If a theme looks missing, an agent
-names it in a report; the operator decides whether to park it. Deliberately no
-`move`, no `reopen`, and no run↔intent linkage in v1 — an intent's effect shows
-up in what gets filed and ranked, not in an edge table.
+A link follows its work when an idea is promoted and to an `sdlc reopen`
+successor. Followups harvested from a linked run start unlinked: some serve the
+goal and some are tidying, and the next pulse judges each.
 
 ## Chores
 

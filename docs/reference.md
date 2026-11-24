@@ -110,9 +110,9 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   surrounding text and starts no work.
 
   Closed ideas and intents remain selectable with their full capture text
-  scrollable in the details. Retired intents appear under `CLOSED INTENTS`,
-  ordered by project/run; inspection remains available after discarding a
-  draft or restarting the console. Closed captures accept no new edits.
+  scrollable in the details. Closed intents appear under `COMPLETED` like any
+  other finished work; inspection remains available after discarding a draft
+  or restarting the console. Closed captures accept no new edits.
 
   Saved input appears in the selected run or idea's details: notes, open
   questions and answered pairs. Notes and answered pairs are labelled `pending`
@@ -313,8 +313,9 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   backlog notes. `tag` stamps the workflow tag that licenses a pulse to start
   the idea (`untag` clears it), and `tag --design-only` narrows that licence to
   one design turn before the run holds; untagged ideas are operator-only.
-- `moe intent new|edit|close|list|cat|log|harvest` manages operator-authored
-  standing direction.
+- `moe intent new|edit|close|reopen|runs|list|cat|log|harvest` manages
+  intents: standing direction and goals. `runs` lists the work linked to one,
+  and `reopen` undoes a close, the pulse's included, with links intact.
 - `moe pulse new|close|cat|log` runs and inspects the bureaucracy's one survey.
   It lives in the `_cabinet` root project and takes no project argument. The
   survey is read-only; opening due chore runs does not execute their stages.

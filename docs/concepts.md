@@ -130,8 +130,8 @@ inputs are plain markdown:
   chain prompt will offer next.
 - Project digital-twin documents point the agent at recorded intent, each by
   absolute path and line count.
-- Open project intents supply operator-authored standing direction, inlined in
-  full.
+- Open project intents supply standing direction and goals, inlined in full;
+  the pulse gets every project's.
 - The project's knowledge index, when one exists, is named by path and size.
 - Operator input — prose pushed at the run, or a question and your answer — is
   delivered to that run's next stage prompt.
