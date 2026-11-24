@@ -345,6 +345,70 @@ func TestWorkspaceRefreshRebuildsCacheEagerly(t *testing.T) {
 	}
 }
 
+// TestWorkspaceRefreshTeardownFailureLeavesCache pins refresh's halt: a
+// failing dev-env-teardown.d/* script exits 1 before the cache is
+// cleared or setup re-runs, so the cached env naming the still-live
+// resources survives byte-for-byte for a retry.
+func TestWorkspaceRefreshTeardownFailureLeavesCache(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedProjectWithSubmodule(t, root, "tele")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+
+	if _, err := workspace.Ensure(root, "tele", "dev"); err != nil {
+		t.Fatal(err)
+	}
+	wp := workspace.Path(root, "tele", "dev")
+	cache := filepath.Join(wp, devEnvCacheRel)
+	// Without a cache, teardown is a no-op and the failing hook never runs.
+	if err := writeDevEnvCacheRevision(cache,
+		map[string]string{"DATABASE_URL": "postgres://localhost/x"}, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hooks := filepath.Join(root, project.Dir("tele"), "hooks")
+	teardownDir := filepath.Join(hooks, devEnvTeardownDirRel)
+	setupDir := filepath.Join(hooks, devEnvDirRel)
+	for _, d := range []string{teardownDir, setupDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(teardownDir, "10-fail.sh"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	receipt := filepath.Join(t.TempDir(), "setup.log")
+	setup := "#!/bin/sh\n" +
+		"echo REFRESHED=yes\n" +
+		"printf 'setup\\n' >> " + receipt + "\n"
+	if err := os.WriteFile(filepath.Join(setupDir, "10-emit.sh"), []byte(setup), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if code := Run([]string{"workspace", "refresh", "tele/dev"}, &out, &errb); code != 1 {
+		t.Fatalf("refresh: exit=%d, want 1; stderr=%q", code, errb.String())
+	}
+	after, err := os.ReadFile(cache)
+	if err != nil {
+		t.Fatalf("cache after failed teardown: %v", err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatalf("cache changed after failed teardown:\nbefore=%q\nafter=%q", before, after)
+	}
+	if _, err := os.Stat(receipt); !os.IsNotExist(err) {
+		t.Fatalf("setup ran after failed teardown (receipt stat err=%v)", err)
+	}
+	if !strings.Contains(errb.String(), "cache left in place") {
+		t.Fatalf("stderr = %q, want retry hint", errb.String())
+	}
+}
+
 func TestWorkspaceRefreshUnclaimedPublishesAdoptableCache(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
