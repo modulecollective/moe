@@ -341,9 +341,9 @@ stage's per-turn commit lands them, no push involved.
 
 ### Hooks
 
-Scripts under `projects/<project>/hooks/<event>.d/*`. Three events ship:
-`dev-env`, `dev-env-teardown`, `pre-push`. Scripts run lex-sorted, so two-digit
-prefixes (`10-`, `20-`, …) leave room for inserts.
+Scripts under `projects/<project>/hooks/<event>.d/*`. Four events ship:
+`dev-env`, `dev-env-teardown`, `pre-push`, `session-cleanup`. Scripts run
+lex-sorted, so two-digit prefixes (`10-`, `20-`, …) leave room for inserts.
 
 - Shebang first line; the file must be executable (`chmod +x`).
 - `set -euo pipefail` (or `set -eu` for `sh`). A hook that swallows a failure
@@ -356,6 +356,11 @@ prefixes (`10-`, `20-`, …) leave room for inserts.
 - `pre-push.d/*` also runs with the tree's dev-env, under the `MOE_*` vars: a
   tool `dev-env.d` put on `PATH` is already there, so don't source
   `.moe/dev-env.env` from the script.
+- `session-cleanup.d/*` runs outside any run, when session GC can't delete a
+  leftover session directory the project left files in. It gets only
+  `MOE_PROJECT`, `MOE_BUREAUCRACY` and `MOE_SESSION_DIR` (also its cwd), and a
+  two-minute deadline. Repair ownership or permissions under
+  `$MOE_SESSION_DIR` and stop there; moe does the deletion.
 - `dev-env.d/*` must not mutate tracked files in `$MOE_SANDBOX`. Setup work
   writes to a path the script owns and emits (e.g. `MOE_DEV_TMPDIR=…`); the
   design stage's sandbox-boundary check would false-positive on a dirty tree.
