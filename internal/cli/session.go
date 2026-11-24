@@ -165,9 +165,11 @@ func printSessionRecovery(s *session.Session, stderr io.Writer) {
 // `session.Abandon` (FindByBranch returns a synthetic session whose
 // Abandon tolerates the missing worktree). Rule 5 removes the directory
 // with `os.RemoveAll`; on a permission error the residue's projects'
-// session-cleanup.d hooks get one chance to make it removable. All three passes run under a single repo lock so
-// the reap is consistent against parallel `moe session open` /
-// `session abandon` calls.
+// session-cleanup.d hooks get one chance to make it removable. All
+// three passes run under a single repo lock so the reap is consistent
+// against parallel `moe session open` / `session abandon` calls; the
+// hooks run after that lock is released, and the retry takes it again
+// (see sessionGCPass).
 //
 // Rules 1–4 hold unless the claim is absent or matching and provably dead
 // — see session.GCClaimHeld. Rule 5 has no run or claim concept.
