@@ -298,8 +298,8 @@ func indentContinuation(text string) string {
 
 // pendingInputBlock is the pulse kickoff's view of the record: what the
 // operator has pushed at runs on this project's board and no turn has
-// picked up yet, what those runs have asked and the operator hasn't
-// answered, and the bar for asking.
+// picked up yet, and what those runs have asked and the operator hasn't
+// answered.
 //
 // The pending list deliberately carries only each entry's first line.
 // The run's own turn receives the entry in full; the survey needs to
@@ -327,9 +327,9 @@ func pendingInputBlock(sc *pulseScan, projectID string) string {
 		}
 	}
 	if len(open) > 0 {
-		b.WriteString("\nAsked and unanswered — do not ask these again, and do not ask a second " +
-			"question on the same run. An unanswered question stops nothing: if the answer " +
-			"has to precede the work, do not pick that run as `next`.\n")
+		b.WriteString("\nAsked and unanswered — a run parked at a spent review asked these, " +
+			"and the operator has not answered. An unanswered question stops nothing: if the " +
+			"answer has to precede the work, do not pick that run as `next`.\n")
 		for _, w := range open {
 			fmt.Fprintf(&b, "- `%s/%s` — %s\n", w.Project, w.Run, w.Entry.Question)
 		}

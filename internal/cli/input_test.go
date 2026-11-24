@@ -263,8 +263,8 @@ func TestInputAddReadsStdin(t *testing.T) {
 	}
 }
 
-// The kickoff block is two lists and a bar: what the operator pushed,
-// what the board asked, and the entry shape for asking.
+// The kickoff block is two lists: what the operator pushed and what the
+// board asked.
 func TestPendingInputBlock(t *testing.T) {
 	root := spawnFixture(t)
 	seedParkedRun(t, root, "pushed")
@@ -278,6 +278,7 @@ func TestPendingInputBlock(t *testing.T) {
 		"`moe/asked` — Which compatibility policy?",
 		"don't treat one as waiting on input",
 		"stops nothing",
+		"a run parked at a spent review asked",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("block missing %q:\n%s", want, got)
@@ -287,6 +288,13 @@ func TestPendingInputBlock(t *testing.T) {
 	// the rest.
 	if strings.Contains(got, "already benchmarked") {
 		t.Fatalf("block relays the whole note:\n%s", got)
+	}
+	// The survey has no ask form; the block reports questions, it must
+	// not coach the survey on asking them.
+	for _, coach := range []string{"do not ask", "second question"} {
+		if strings.Contains(got, coach) {
+			t.Fatalf("block coaches asking (%q):\n%s", coach, got)
+		}
 	}
 }
 
