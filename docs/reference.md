@@ -337,7 +337,8 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   `pulse-*` slug. It also passes its exact owned-PR observation through the
   internal `--pr-checks` argument, so a successful sweep acknowledges what its
   survey saw. New actionable failures on recorded pushed PRs can wake a sweep
-  without a journal change. A survey may pick same-run CI repair with
+  without a journal change, unless that head's repair attempt is spent and no
+  fresh note is waiting. A survey may pick same-run CI repair with
   `{"run":"<project>/<slug>","why":"…","repair":"ci"}`. Dynamic consent and
   safe-mode operator marks still apply; a fresh run note licenses retry after
   the one-attempt-per-head journal claim is spent.

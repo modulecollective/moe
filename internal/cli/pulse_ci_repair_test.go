@@ -293,6 +293,112 @@ func TestHeartbeatQuietAfterSpentRepair(t *testing.T) {
 	}
 }
 
+const prWakeReason = "new failing checks on an owned PR"
+
+// spentQuietGate drives a red PR through one acknowledged wake, claims
+// its repair attempt, and drains the claim's follow-up survey. The
+// returned check state is what the gh stub serves; mutate it in place.
+func spentQuietGate(t *testing.T) (string, *heartbeatGate, *ownedPRChecks) {
+	t.Helper()
+	root, p := pushedRepairFixture(t)
+	t.Setenv("MOE_HOME", root)
+	current := p
+	current.Checks = slices.Clone(p.Checks)
+	stubPRChecks(t, &current)
+	gate := newHeartbeatGate(root)
+	gate.Swept("moe", true)
+	if got := reasonFor(dueDecisions(t, gate, 0), "moe"); got != prWakeReason {
+		t.Fatalf("red PR first wake: %q", got)
+	}
+	gate.Swept("moe", true)
+	// Control: on an unspent head a re-run's new failure wakes.
+	current.Checks[0].URL = "https://example.com/job/2"
+	if got := reasonFor(dueDecisions(t, gate, 0), "moe"); got != prWakeReason {
+		t.Fatalf("unspent head re-run did not wake: %q", got)
+	}
+	gate.Swept("moe", true)
+	if _, err := claimCIRepair(root, current); err != nil {
+		t.Fatal(err)
+	}
+	wakes := 0
+	for range 3 {
+		if len(dueProjectsPastTheWindow(t, gate)) == 0 {
+			break
+		}
+		wakes++
+		gate.Swept("moe", true)
+	}
+	if wakes > 1 {
+		t.Fatalf("claim drained in %d sweeps, want at most one", wakes)
+	}
+	return root, gate, &current
+}
+
+// The operator's criterion: no dead pulses. A spent head's changed
+// failures cannot be repaired until a note lands, so the gate stays
+// quiet for them — across a serve restart too — and the fingerprint it
+// declined to acknowledge is still pending when the note arrives.
+func TestHeartbeatSpentHeadStaysQuiet(t *testing.T) {
+	defer withClockInvoked()()
+	defer withRideMode(rideDynamic)()
+	root, gate, current := spentQuietGate(t)
+	current.Checks[0].URL = "https://example.com/job/3"
+	for range 2 {
+		if got := dueProjectsPastTheWindow(t, gate); len(got) != 0 {
+			t.Fatalf("re-run on a spent head woke: %v", got)
+		}
+	}
+	current.Checks = append(current.Checks, prCheck{Name: "CI / lint", Verdict: "FAILURE", URL: "https://example.com/job/4"})
+	for range 2 {
+		if got := dueProjectsPastTheWindow(t, gate); len(got) != 0 {
+			t.Fatalf("new failing check on a spent head woke: %v", got)
+		}
+	}
+	// prSeen is in-memory; a restart must not re-survey the spent head.
+	g2 := newHeartbeatGate(root)
+	g2.Swept("moe", true)
+	if got := dueProjectsPastTheWindow(t, g2); len(got) != 0 {
+		t.Fatalf("restart re-surveyed a spent head: %v", got)
+	}
+	if _, err := input.Add(root, "moe", "fix-ci", "Retry after I fixed the runner"); err != nil {
+		t.Fatal(err)
+	}
+	// The PR reason outranks "the journal moved", so this proves the
+	// suppressed fingerprint stayed pending and the fresh note lifted it.
+	if got := reasonFor(dueDecisions(t, g2, 0), "moe"); got != prWakeReason {
+		t.Fatalf("fresh note on a spent head: %q, want %q", got, prWakeReason)
+	}
+}
+
+// Attempts are keyed on (PR, head): a push lands a new, unspent head.
+func TestHeartbeatSpentPRNewHeadWakes(t *testing.T) {
+	defer withClockInvoked()()
+	defer withRideMode(rideDynamic)()
+	_, gate, current := spentQuietGate(t)
+	current.Head = "head-two"
+	if got := reasonFor(dueDecisions(t, gate, 0), "moe"); got != prWakeReason {
+		t.Fatalf("new head on a spent PR: %q", got)
+	}
+}
+
+// Only the spent hold suppresses. Safe mode with no mark is durable too,
+// but a first failure is news the survey's report delivers.
+func TestHeartbeatSafeModeRedPRStillWakes(t *testing.T) {
+	defer withClockInvoked()()
+	defer withRideMode(rideDynamic)()
+	root, p := pushedRepairFixture(t)
+	t.Setenv("MOE_HOME", root)
+	setMode(t, root, "moe", project.ModeSafe)
+	if _, hold := ciRepairEligibility(mustPulseScan(t, root), p); !strings.Contains(hold, "safe mode") {
+		t.Fatalf("fixture not held by safe mode: %q", hold)
+	}
+	gate := newHeartbeatGate(root)
+	gate.Swept("moe", true)
+	if got := reasonFor(dueDecisions(t, gate, 0), "moe"); got != prWakeReason {
+		t.Fatalf("safe-mode red PR: %q, want %q", got, prWakeReason)
+	}
+}
+
 func TestRepairDriveRunsFreshStagesAndPinsPR(t *testing.T) {
 	// A clean turn that stops at its gate parks (exitParked, folded to a
 	// clean sweep by pulseRide), and so does a walk whose turns ran

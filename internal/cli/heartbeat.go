@@ -104,7 +104,8 @@ func newHeartbeatGate(root string) *heartbeatGate {
 // (memoized on HEAD), one ref listing, and a HEAD read plus two bounded
 // `git log -1` queries per project (path changes and project trailers).
 // Recorded pushed PRs also pay one bounded `gh pr view` per tick, outside
-// the journal lock; a project without them pays no added network read.
+// the journal lock, and a red one reads its run's input file; a project
+// without them pays no added network read.
 // A project whose tip is machine-authored and younger than one tick pays
 // two more logs, scanning the window for a masked operator act; a quiet
 // board never reaches it. A quiet board therefore costs no agent turn, no
@@ -344,6 +345,26 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 	if !occupied[projectID] {
 		prs = gatherOwnedPRChecks(sc, projectID, log)
 	}
+	// A red head whose one repair attempt is spent, with no fresh note on
+	// the run, does not wake: the survey could only read its own repair
+	// hold and pick nothing. Only this durable hold suppresses; transient
+	// ones (session, owner, control) lift without a journal commit, so
+	// suppressing on them could swallow a wake for good. prSeen is left
+	// unwritten so the fingerprint stays pending: the note's commit, or a
+	// new head, wakes with the PR reason. Asking the journal each tick,
+	// rather than acknowledging, is what keeps a serve restart (prSeen is
+	// in-memory) from re-surveying every spent red PR. Read before the
+	// lock, because it loads the run's input file.
+	spentHead := map[string]bool{}
+	for _, p := range prs {
+		md := sc.byKey[p.Run]
+		if p.Error != "" || md == nil || prFailureSnapshot([]ownedPRChecks{p}) == "" {
+			continue
+		}
+		if _, spent, err := ciRepairSpent(sc, md, p); err == nil && spent {
+			spentHead[p.Run] = true
+		}
+	}
 	g.mu.Lock()
 	g.tickPRs[projectID] = prs
 	prChanged := false
@@ -361,7 +382,7 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 		snapshot := prFailureSnapshot([]ownedPRChecks{p})
 		if snapshot == "" {
 			g.prSeen[p.Run] = ""
-		} else if snapshot != g.prSeen[p.Run] {
+		} else if snapshot != g.prSeen[p.Run] && !spentHead[p.Run] {
 			prChanged = true
 		}
 	}
