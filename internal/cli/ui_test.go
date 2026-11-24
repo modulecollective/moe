@@ -94,6 +94,110 @@ func TestUIBoardIndexesDashRows(t *testing.T) {
 	}
 }
 
+func TestUIConversationGuidance(t *testing.T) {
+	for _, workflow := range []string{"pulse", "sdlc", "chat"} {
+		for _, settled := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/settled=%v", workflow, settled), func(t *testing.T) {
+				t.Setenv("NO_COLOR", "1")
+				root, md := controlFixture(t)
+				md.Workflow = workflow
+				recordedStage, liveStage := workflow, workflow
+				if workflow == "sdlc" {
+					recordedStage, liveStage = "design", "review"
+				}
+				if settled {
+					md.LastTurn = &run.Turn{Stage: recordedStage, Agent: "claude"}
+				}
+				if err := run.Save(root, md); err != nil {
+					t.Fatal(err)
+				}
+				gittest.Run(t, root, "add", "-A")
+				gittest.Commit(t, root, "record conversation")
+				head := gittest.HeadSHA(t, root)
+				s := newUISource(root, DashFilter{}, os.Stdout)
+				ctx, cancel := context.WithCancel(context.Background())
+				defer func() { cancel(); s.wg.Wait() }()
+				for _, live := range []bool{false, true} {
+					stage, backend := recordedStage, "claude"
+					if live {
+						ownForTest(t, root)
+						publishRun(root, md.Project, md.ID, func(st *runsock.Status) {
+							st.Phase, st.Stage, st.Agent = runsock.PhaseRunning, liveStage, "codex"
+							st.Terminal = &runsock.Terminal{Session: "session", Block: "block"}
+						})
+						stage, backend = liveStage, "codex"
+					}
+					if err := s.refresh(ctx); err != nil {
+						t.Fatal(err)
+					}
+					b := takeBoard(t, s)
+					it := uiItem(t, b, md.Project, md.ID, ui.ItemRun)
+					detail := strings.Join(it.Detail, "\n")
+					want := ""
+					if workflow != "pulse" && (live || settled) {
+						want = fmt.Sprintf("conversation: moe %s %s moe/change-auth --agent %s", workflow, stage, backend)
+					}
+					if want == "" {
+						if strings.Contains(detail, "conversation:") {
+							t.Errorf("live=%v: unexpected guidance:\n%s", live, detail)
+						}
+					} else if !slices.Contains(it.Detail, want) {
+						t.Errorf("live=%v: missing %q:\n%s", live, want, detail)
+					}
+					if !it.Notes || it.Controls != (workflow == "sdlc") || it.Terminal != live {
+						t.Errorf("live=%v: actions = %+v", live, it)
+					}
+					if live {
+						if !strings.Contains(detail, "owner: pid ") || !strings.Contains(detail, "phase: agent running (stage "+liveStage+")") {
+							t.Errorf("live diagnostics missing:\n%s", detail)
+						}
+					} else if !strings.Contains(detail, "owner: none") {
+						t.Errorf("recorded diagnostics missing:\n%s", detail)
+					}
+				}
+				if gittest.HeadSHA(t, root) != head || strings.TrimSpace(gittest.Output(t, root, "status", "--porcelain")) != "" {
+					t.Fatal("UI reads mutated the journal")
+				}
+			})
+		}
+	}
+}
+
+func TestUICaptureConversationGuidance(t *testing.T) {
+	for _, workflow := range []string{"idea", "intent"} {
+		t.Run(workflow, func(t *testing.T) {
+			root, md := controlFixture(t)
+			md.Workflow = workflow
+			md.LastTurn = &run.Turn{Stage: workflow, Agent: "codex"}
+			if _, _, err := run.EnsureDocument(root, md, workflow); err != nil {
+				t.Fatal(err)
+			}
+			if err := run.Save(root, md); err != nil {
+				t.Fatal(err)
+			}
+			gittest.Run(t, root, "add", "-A")
+			gittest.Commit(t, root, "record capture conversation")
+			head := gittest.HeadSHA(t, root)
+			s := newUISource(root, DashFilter{}, os.Stdout)
+			if err := s.refresh(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			kind := ui.ItemIdea
+			if workflow == "intent" {
+				kind = ui.ItemIntent
+			}
+			it := uiItem(t, takeBoard(t, s), md.Project, md.ID, kind)
+			detail := strings.Join(it.Detail, "\n")
+			if !it.Editable || it.Controls || !strings.Contains(detail, "e edit") || strings.Contains(detail, "conversation:") {
+				t.Fatalf("capture actions or guidance changed: %+v", it)
+			}
+			if gittest.HeadSHA(t, root) != head || strings.TrimSpace(gittest.Output(t, root, "status", "--porcelain")) != "" {
+				t.Fatal("capture reads mutated the journal")
+			}
+		})
+	}
+}
+
 // A published owner update reaches the console as a pushed board, with
 // no gather in between; a gather does not poll the watched endpoint.
 func TestUIWatchPushesWithoutGather(t *testing.T) {

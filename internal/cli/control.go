@@ -369,8 +369,8 @@ func stageAgent(md *run.Metadata, stage string) string {
 }
 
 // conversationCommand is the stage verb that resumes a conversation
-// interactively, or "" when the run has none to resume. stage == ""
-// derives the address from the run.
+// interactively, or "" when the run has no conversation or registered
+// stage command to resume it. stage == "" derives the address from the run.
 func conversationCommand(md *run.Metadata, stage, agent string) string {
 	if md.Status != run.StatusInProgress {
 		return ""
@@ -379,6 +379,10 @@ func conversationCommand(md *run.Metadata, stage, agent string) string {
 		stage, agent = conversationAddress(md, nil)
 	}
 	if stage == "" {
+		return ""
+	}
+	g, err := LookupGroup(md.Workflow)
+	if err != nil || g.Lookup(stage) == nil {
 		return ""
 	}
 	cmd := fmt.Sprintf("moe %s %s %s/%s", md.Workflow, stage, md.Project, md.ID)

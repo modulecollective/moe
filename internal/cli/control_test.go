@@ -25,6 +25,56 @@ func runControl(t *testing.T, kind string, args ...string) (int, string, string)
 	return code, out.String(), errb.String()
 }
 
+func TestConversationCommandRegisteredStage(t *testing.T) {
+	for _, tt := range []struct {
+		workflow, stage, want string
+	}{
+		{"idea", "idea", ""},
+		{"intent", "intent", ""},
+		{"pulse", "pulse", ""},
+		{"unknown", "design", ""},
+		{"sdlc", "missing", ""},
+		{"sdlc", "design", "moe sdlc design p/r"},
+		{"sdlc", "build", "moe sdlc build p/r"},
+		{"sdlc", "review", "moe sdlc review p/r"},
+		{"chat", "chat", "moe chat chat p/r"},
+	} {
+		t.Run(tt.workflow+"/"+tt.stage, func(t *testing.T) {
+			for _, backend := range []string{"", "codex"} {
+				md := &run.Metadata{
+					Project: "p", ID: "r", Workflow: tt.workflow, Status: run.StatusInProgress,
+					LastTurn: &run.Turn{Stage: tt.stage, Agent: backend},
+				}
+				want := tt.want
+				if want != "" && backend != "" {
+					want += " --agent " + backend
+				}
+				for _, stage := range []string{"", tt.stage} {
+					if got := conversationCommand(md, stage, backend); got != want {
+						t.Errorf("stage=%q backend=%q: command = %q, want %q", stage, backend, got, want)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestConversationCommandWithoutActiveConversation(t *testing.T) {
+	md := &run.Metadata{Project: "p", ID: "r", Workflow: "sdlc", Status: run.StatusInProgress}
+	if got := conversationCommand(md, "", ""); got != "" {
+		t.Fatalf("no conversation: command = %q", got)
+	}
+	md.LastTurn = &run.Turn{Stage: "design", Agent: "codex"}
+	for _, status := range []string{run.StatusPushed, run.StatusMerged, run.StatusClosed, run.StatusPromoted} {
+		md.Status = status
+		for _, stage := range []string{"", "design"} {
+			if got := conversationCommand(md, stage, "codex"); got != "" {
+				t.Errorf("status=%s stage=%q: command = %q", status, stage, got)
+			}
+		}
+	}
+}
+
 // Handoff holds the run and names the conversation to pick up: the last
 // stage that actually ran, with its backend — not the next pending one.
 func TestControlHandoffNamesLastConversation(t *testing.T) {
