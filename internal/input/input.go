@@ -37,7 +37,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -408,19 +407,15 @@ func MarkDelivered(root, projectID, runID, docID string, ids []int, consent stri
 // reopened, the originals are live again and the next promote re-carries
 // them.
 //
-// Pending notes, answered pings (question and answer travel together),
-// and the source's open ping all ride. Already-delivered entries do not.
-// If the source has an open ping and the destination already has one,
-// the source's is dropped with a warning: one open ping per run is what
-// lets a reply address the run, and the destination's own question is
-// the one that stands.
+// Pending entries ride, with their question when they have one.
+// Already-delivered entries do not.
 //
 // consent is the caller's MoE-Consent value, empty for an operator's own
 // promote. Returns the number of entries carried; zero with no error and
 // no commit is the overwhelmingly common case (no record, or nothing
 // left undelivered) — it costs one brief lock hold to find that out,
 // since the source read has to sit under the same lock as the write.
-func Carry(root, srcProject, srcRun, dstProject, dstRun, consent string, stderr io.Writer) (int, error) {
+func Carry(root, srcProject, srcRun, dstProject, dstRun, consent string) (int, error) {
 	var carried int
 	// One prepare closure reads both records: the lock is repo-wide, so
 	// a single hold covers the source read and the destination rewrite.
@@ -431,7 +426,7 @@ func Carry(root, srcProject, srcRun, dstProject, dstRun, consent string, stderr 
 		}
 		var carry []Entry
 		for _, e := range src.Notes {
-			if e.Pending() || e.Open() {
+			if e.Pending() {
 				carry = append(carry, e)
 			}
 		}
@@ -442,25 +437,13 @@ func Carry(root, srcProject, srcRun, dstProject, dstRun, consent string, stderr 
 		if err != nil {
 			return File{}, "", err
 		}
-		_, dstOpen := dst.OpenPing()
 
 		var srcIDs, dstIDs []string
 		for _, e := range carry {
-			if e.Open() {
-				if dstOpen {
-					fmt.Fprintf(stderr, "input: dropping open ping %s/%s#%d — %s/%s already has one open\n",
-						srcProject, srcRun, e.ID, dstProject, dstRun)
-					continue
-				}
-				dstOpen = true
-			}
 			copied := Entry{ID: len(dst.Notes) + 1, AskedBy: e.AskedBy, Question: e.Question, Text: e.Text}
 			dst.Notes = append(dst.Notes, copied)
 			srcIDs = append(srcIDs, strconv.Itoa(e.ID))
 			dstIDs = append(dstIDs, strconv.Itoa(copied.ID))
-		}
-		if len(srcIDs) == 0 {
-			return File{}, "", run.ErrNothingToCommit
 		}
 		carried = len(srcIDs)
 

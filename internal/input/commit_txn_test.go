@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -172,7 +171,7 @@ func TestInputCommitSuccessPreservesUnrelatedStaging(t *testing.T) {
 					trailer = "MoE-Input-Delivered: moe/destination#1 code"
 				case "carry":
 					var n int
-					n, err = Carry(root, "moe", "source", "moe", "destination", "dynamic", io.Discard)
+					n, err = Carry(root, "moe", "source", "moe", "destination", "dynamic")
 					if err == nil && n != 1 {
 						t.Fatalf("carried %d entries, want 1", n)
 					}
@@ -255,7 +254,7 @@ func TestInputCommitFailureRestoresAllWriters(t *testing.T) {
 				case "delivered":
 					return MarkDelivered(root, "moe", "destination", "code", []int{1}, "")
 				default:
-					_, err := Carry(root, "moe", "source", "moe", "destination", "", io.Discard)
+					_, err := Carry(root, "moe", "source", "moe", "destination", "")
 					return err
 				}
 			}
@@ -481,7 +480,7 @@ func TestInputNothingToCommitRemainsNoOp(t *testing.T) {
 		t.Fatalf("already delivered = %v", err)
 	}
 	for _, source := range []string{"no-record", "source"} {
-		if n, err := Carry(root, "moe", source, "moe", "destination", "", io.Discard); err != nil || n != 0 {
+		if n, err := Carry(root, "moe", source, "moe", "destination", ""); err != nil || n != 0 {
 			t.Fatalf("no-op carry from %s = %d, %v", source, n, err)
 		}
 	}

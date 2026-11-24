@@ -231,7 +231,7 @@ func markIdeaPromoted(root string, md *run.Metadata, destProjectID, destSlug, co
 	if err := bumpIdeaPromoted(root, md, destProjectID, destSlug, consent); err != nil {
 		return err
 	}
-	n, err := input.Carry(root, md.Project, md.ID, destProjectID, destSlug, consent, stderr)
+	n, err := input.Carry(root, md.Project, md.ID, destProjectID, destSlug, consent)
 	switch {
 	case err != nil:
 		fmt.Fprintf(stderr, "warning: promoted %s/%s but could not carry its operator input to %s/%s: %v\n",

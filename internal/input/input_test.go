@@ -2,7 +2,6 @@ package input
 
 import (
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -420,23 +419,22 @@ func TestCarryCopiesUndeliveredEntriesWithDenseDestinationIDs(t *testing.T) {
 	if _, err := Answer(root, "moe", "idea", answered.ID, "Keep the old policy."); err != nil {
 		t.Fatal(err)
 	}
-	open := ask(t, root, "idea")
 	add(t, root, "destination", "destination-local note")
 
-	n, err := Carry(root, "moe", "idea", "moe", "destination", "dynamic", io.Discard)
+	n, err := Carry(root, "moe", "idea", "moe", "destination", "dynamic")
 	if err != nil {
 		t.Fatalf("Carry: %v", err)
 	}
-	if n != 3 {
-		t.Fatalf("Carry count = %d, want 3", n)
+	if n != 2 {
+		t.Fatalf("Carry count = %d, want 2", n)
 	}
 
 	dst, err := Load(root, "moe", "destination")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(dst.Notes) != 4 {
-		t.Fatalf("destination notes = %+v, want its note plus three carried entries", dst.Notes)
+	if len(dst.Notes) != 3 {
+		t.Fatalf("destination notes = %+v, want its note plus two carried entries", dst.Notes)
 	}
 	for i, e := range dst.Notes {
 		if e.ID != i+1 {
@@ -452,20 +450,17 @@ func TestCarryCopiesUndeliveredEntriesWithDenseDestinationIDs(t *testing.T) {
 	if got := dst.Notes[2]; got.Question != answered.Question || got.Text != "Keep the old policy." || got.AskedBy != answered.AskedBy {
 		t.Fatalf("carried answered ping = %+v", got)
 	}
-	if got := dst.Notes[3]; got.Question != open.Question || got.Text != "" || got.AskedBy != open.AskedBy || !got.Open() {
-		t.Fatalf("carried open ping = %+v", got)
-	}
 
 	src, err := Load(root, "moe", "idea")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(src.Notes) != 4 || src.Notes[0].DeliveredTo != "idea" || src.Notes[1].ID != 2 || src.Notes[3].ID != 4 {
+	if len(src.Notes) != 3 || src.Notes[0].DeliveredTo != "idea" || src.Notes[1].ID != 2 || src.Notes[2].ID != 3 {
 		t.Fatalf("source record changed: %+v", src.Notes)
 	}
 	msg := gittest.Output(t, root, "log", "-1", "--format=%B")
 	for _, want := range []string{
-		"input: carried moe/idea#2,3,4 → moe/destination#2,3,4",
+		"input: carried moe/idea#2,3 → moe/destination#2,3",
 		"MoE-Run: destination",
 		"MoE-Project: moe",
 		"MoE-Workflow: sdlc",
@@ -485,7 +480,7 @@ func TestCarryNoOpsWithoutUndeliveredInput(t *testing.T) {
 	seedRun(t, root, "destination")
 
 	head := gittest.Output(t, root, "rev-parse", "HEAD")
-	if n, err := Carry(root, "moe", "no-record", "moe", "destination", "", io.Discard); err != nil || n != 0 {
+	if n, err := Carry(root, "moe", "no-record", "moe", "destination", ""); err != nil || n != 0 {
 		t.Fatalf("Carry(no record) = %d, %v", n, err)
 	}
 	if got := gittest.Output(t, root, "rev-parse", "HEAD"); got != head {
@@ -497,55 +492,11 @@ func TestCarryNoOpsWithoutUndeliveredInput(t *testing.T) {
 		t.Fatal(err)
 	}
 	head = gittest.Output(t, root, "rev-parse", "HEAD")
-	if n, err := Carry(root, "moe", "idea", "moe", "destination", "", io.Discard); err != nil || n != 0 {
+	if n, err := Carry(root, "moe", "idea", "moe", "destination", ""); err != nil || n != 0 {
 		t.Fatalf("Carry(all delivered) = %d, %v", n, err)
 	}
 	if got := gittest.Output(t, root, "rev-parse", "HEAD"); got != head {
 		t.Fatalf("all-delivered carry committed: before %s after %s", head, got)
-	}
-}
-
-// A destination can already have an open ping on the twin path. The
-// source's machine question is re-askable there, while carrying it would
-// violate the run-addressed answer invariant, so only that entry drops.
-func TestCarryDropsAnOpenPingCollisionAndCarriesTheRest(t *testing.T) {
-	root := seedRoot(t)
-	seedRun(t, root, "idea")
-	seedRun(t, root, "destination")
-
-	sourceOpen := ask(t, root, "idea")
-	add(t, root, "idea", "still carry me")
-	destinationOpen := ask(t, root, "destination")
-	add(t, root, "destination", "already here")
-
-	var stderr strings.Builder
-	n, err := Carry(root, "moe", "idea", "moe", "destination", "", &stderr)
-	if err != nil {
-		t.Fatalf("Carry: %v", err)
-	}
-	if n != 1 {
-		t.Fatalf("Carry count = %d, want 1", n)
-	}
-	if !strings.Contains(stderr.String(), "dropping open ping moe/idea#1") ||
-		!strings.Contains(stderr.String(), "moe/destination already has one open") {
-		t.Fatalf("collision warning = %q", stderr.String())
-	}
-
-	dst, err := Load(root, "moe", "destination")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(dst.Notes) != 3 || dst.Notes[2].ID != 3 || dst.Notes[2].Text != "still carry me" {
-		t.Fatalf("destination record = %+v", dst.Notes)
-	}
-	if got, ok := dst.OpenPing(); !ok || got.ID != destinationOpen.ID || got.Question != destinationOpen.Question {
-		t.Fatalf("destination open ping = %+v, %v", got, ok)
-	}
-	if src, err := Load(root, "moe", "idea"); err != nil || len(src.Notes) != 2 || src.Notes[0] != sourceOpen {
-		t.Fatalf("source record = %+v, %v", src.Notes, err)
-	}
-	if got := gittest.Output(t, root, "log", "-1", "--format=%s"); !strings.Contains(got, "moe/idea#2 → moe/destination#3") {
-		t.Fatalf("carry subject = %q", got)
 	}
 }
 
@@ -828,16 +779,14 @@ func TestAnswerRefusesAPingAnsweredMidWindow(t *testing.T) {
 }
 
 // Carry reads the destination under the lock too, so a ping opened there
-// mid-window is both preserved and honoured — the source's own open ping
-// drops with the collision warning. Read outside the lock, Carry rewrote
-// the destination from a snapshot that predated the new ping: it landed
-// the source's ping and the destination's vanished.
-func TestCarryHonoursAnOpenPingLandedOnTheDestinationMidWindow(t *testing.T) {
+// mid-window survives the rewrite. Read outside the lock, Carry rewrote
+// the destination from a snapshot that predated the new ping, and the
+// ping vanished.
+func TestCarryKeepsAnOpenPingLandedOnTheDestinationMidWindow(t *testing.T) {
 	root := seedRoot(t)
 	seedRun(t, root, "idea")
 	seedRun(t, root, "destination")
 
-	ask(t, root, "idea")
 	add(t, root, "idea", "still carry me")
 	add(t, root, "destination", "already here")
 
@@ -848,31 +797,24 @@ func TestCarryHonoursAnOpenPingLandedOnTheDestinationMidWindow(t *testing.T) {
 		}}, "input: ask moe/destination#2")
 	})
 
-	var stderr strings.Builder
-	n, err := Carry(root, "moe", "idea", "moe", "destination", "", &stderr)
+	n, err := Carry(root, "moe", "idea", "moe", "destination", "")
 	if err != nil {
 		t.Fatalf("Carry: %v", err)
 	}
 	if n != 1 {
-		t.Fatalf("Carry count = %d, want 1 — the source ping collides with the mid-window one", n)
-	}
-	if !strings.Contains(stderr.String(), "dropping open ping moe/idea#1") {
-		t.Fatalf("collision warning = %q", stderr.String())
+		t.Fatalf("Carry count = %d, want 1", n)
 	}
 
 	dst, err := Load(root, "moe", "destination")
 	if err != nil {
 		t.Fatalf("Load destination: %v", err)
 	}
-	if len(dst.Notes) != 3 {
-		t.Fatalf("destination notes = %+v, want its note, the mid-window ping, and the carried note", dst.Notes)
-	}
 	got, ok := dst.OpenPing()
 	if !ok || got.ID != 2 || got.Question != "Ship behind a flag?" {
 		t.Fatalf("destination open ping = %+v, %v — want the mid-window one kept", got, ok)
 	}
-	if dst.Notes[2].Text != "still carry me" {
-		t.Fatalf("carried entry = %+v", dst.Notes[2])
+	if len(dst.Notes) != 3 || dst.Notes[2].ID != 3 || dst.Notes[2].Text != "still carry me" {
+		t.Fatalf("destination notes = %+v, want its note, the mid-window ping, and the carried note", dst.Notes)
 	}
 }
 
