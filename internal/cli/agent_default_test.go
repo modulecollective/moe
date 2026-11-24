@@ -368,3 +368,132 @@ func TestTemporaryDefaultPollPreservesRecoveredSessionSelection(t *testing.T) {
 		t.Fatalf("reads=%d dispatch=%+v", reads, fake.execCalls)
 	}
 }
+
+func TestTemporaryDefaultChangesRecoveredQuotaWait(t *testing.T) {
+	for _, change := range []string{"switch", "reset", "expiry", "budget"} {
+		for _, mask := range []string{"none", "flag", "binding", "force"} {
+			if change == "budget" && mask != "none" {
+				continue
+			}
+			t.Run(change+"/"+mask, func(t *testing.T) {
+				root, fake := setupResumeFixture(t, "unused-recovered-wait")
+				for _, name := range []string{"claude", "codex"} {
+					original, _ := agent.Get(name)
+					agent.Unregister(name)
+					agent.Register(name, fake)
+					t.Cleanup(func() { agent.Unregister(name); agent.Register(name, original) })
+				}
+				now := time.Now().UTC().Truncate(time.Second)
+				start := now
+				previousNow := agentDefaultNow
+				agentDefaultNow = func() time.Time { return now }
+				t.Cleanup(func() { agentDefaultNow = previousNow })
+				opts := stageSessionOpts{Headless: true, SkipNextStage: true}
+				switch mask {
+				case "flag":
+					opts.Agent = "codex"
+				case "binding":
+					md := loadRun(t, root, "tele", "fix-it")
+					md.Agent = "codex"
+					if err := run.Save(root, md); err != nil {
+						t.Fatal(err)
+					}
+					gittest.Commit(t, root, "explicit binding")
+				case "force":
+					t.Setenv("MOE_FORCE_AGENT", "codex")
+				}
+				gittest.WriteAndCommit(t, root, stylesheet.FileName, "* {agent:claude;model-claude:c;model-codex:x;}", "canonical policy")
+				if change == "reset" || change == "expiry" {
+					created := now
+					if change == "expiry" {
+						created = now.Add(-agentdefault.Lifetime + 30*time.Second)
+					}
+					if _, err := agentdefault.Set(root, "claude", nil, func() time.Time { return created }); err != nil {
+						t.Fatal(err)
+					}
+				}
+				sess, _, cancel, err := openStageSession(root, stageTurnInputs{Project: "tele", RunSlug: "fix-it", DocID: "design", LockPurpose: "test"}, io.Discard, io.Discard)
+				if err != nil {
+					t.Fatal(err)
+				}
+				gittest.WriteAndCommit(t, sess.WorktreePath, stylesheet.FileName, "* {agent:codex;model-codex:recovered;model-claude:retained-c;}", "retained session policy")
+				if err := cancel(); err == nil {
+					t.Fatal("changed reservation discarded")
+				}
+				writeDeadClaim(t, sess, false)
+				oldSelection, wantSelection := "codex/recovered", "claude/retained-c"
+				if change == "reset" || change == "expiry" {
+					oldSelection, wantSelection = wantSelection, oldSelection
+				}
+				if mask != "none" {
+					oldSelection, wantSelection = "codex/recovered", "codex/recovered"
+				}
+				oldFactory, oldRead := newCooldownGate, readStageQuota
+				t.Cleanup(func() { newCooldownGate = oldFactory; readStageQuota = oldRead })
+				var reads []string
+				reset := start.Add(3 * time.Hour)
+				readStageQuota = func(_ context.Context, name, model string, _ []string) (agent.Quota, error) {
+					selection := name + "/" + model
+					reads = append(reads, selection)
+					if selection == oldSelection && now.Before(reset) {
+						return quota(99, reset), nil
+					}
+					if selection != wantSelection {
+						t.Fatalf("unexpected quota selection: %s", selection)
+					}
+					if change == "budget" {
+						// This reset fits a fresh six-hour budget but exceeds the
+						// original one by thirty seconds, including reset slack.
+						return quota(99, start.Add(cooldownBudget-cooldownResetSlack+30*time.Second)), nil
+					}
+					return quota(1, time.Time{}), nil
+				}
+				sleeps := 0
+				newCooldownGate = func(resume string, w io.Writer) *cooldownGate {
+					g := oldFactory(resume, w)
+					g.start, g.now = start, func() time.Time { return now }
+					g.after = func(d time.Duration) <-chan time.Time {
+						if d > time.Minute || (mask == "none" && sleeps > 0) {
+							t.Fatalf("still waiting on recovered selection: elapsed=%s quotaReads=%v nextSleep=%s", now.Sub(start), reads, d)
+						}
+						if change == "expiry" && sleeps == 0 && d != 30*time.Second {
+							t.Fatalf("missed expiry boundary: %s", d)
+						}
+						now = now.Add(d)
+						sleeps++
+						if sleeps == 1 && change != "expiry" {
+							desired := "claude"
+							if change == "reset" {
+								desired = ""
+							}
+							if _, err := agentdefault.Set(root, desired, nil, func() time.Time { return now }); err != nil {
+								t.Fatal(err)
+							}
+						}
+						ch := make(chan time.Time, 1)
+						ch <- now
+						return ch
+					}
+					return g
+				}
+				var log bytes.Buffer
+				code := runStageSession("tele", "fix-it", "design", opts, io.Discard, &log)
+				if len(reads) != 2 || reads[0] != oldSelection || reads[1] != wantSelection {
+					t.Fatalf("quota reads: %v\n%s", reads, &log)
+				}
+				if change == "budget" {
+					if code != exitNotStarted || len(fake.execCalls) != 0 || !strings.Contains(log.String(), "beyond the 6h cooldown cap") {
+						t.Fatalf("renewed wait budget: code=%d calls=%+v\n%s", code, fake.execCalls, &log)
+					}
+					return
+				}
+				if code != 0 || len(fake.execCalls) != 1 || fake.execCalls[0].model != strings.Split(wantSelection, "/")[1] {
+					t.Fatalf("dispatch: code=%d calls=%+v\n%s", code, fake.execCalls, &log)
+				}
+				if mask != "none" && now.Before(reset.Add(cooldownResetSlack)) {
+					t.Fatal("masked change bypassed exhausted selection")
+				}
+			})
+		}
+	}
+}

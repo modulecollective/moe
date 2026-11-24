@@ -619,12 +619,12 @@ func selectStageAgent(root string, sheet *stylesheet.Sheet, opts stageSessionOpt
 	return name, cmp.Or(explicitModel, sheet.ModelForAgent(md.Workflow, stage, name)), state.ExpiresAt, nil
 }
 
-func (s *stageSession) canonicalSelection(now time.Time) (string, string, time.Time, error) {
-	fresh, err := run.Load(s.root, s.projectID, s.runID)
+func (s *stageSession) selectionFrom(workRoot string, now time.Time) (string, string, time.Time, error) {
+	fresh, err := run.Load(workRoot, s.projectID, s.runID)
 	if err != nil {
 		return "", "", time.Time{}, err
 	}
-	sheet, err := stylesheet.Load(s.root)
+	sheet, err := stylesheet.Load(workRoot)
 	if err == nil {
 		err = sheet.Validate(stylesheetVocab())
 	}
@@ -954,10 +954,10 @@ func (s *stageSession) commitStager(workRoot string, runErr error) error {
 // and wait out quota.
 func (s *stageSession) admit(sess *session.Session) int {
 	root, md, docID, stderr := s.root, s.md, s.docID, s.stderr
-	// Capture canonical configuration before resolving the reservation. A
-	// recovered session may deliberately differ from main; only a subsequent
-	// canonical change asks it to reconcile, never that pre-existing difference.
-	observedName, observedModel, _, err := s.canonicalSelection(agentDefaultNow())
+	// Capture canonical configuration before resolving the reservation, so a
+	// recovered session's pre-existing policy difference is not itself a
+	// reconciliation cue.
+	observedName, observedModel, _, err := s.selectionFrom(root, agentDefaultNow())
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
@@ -990,7 +990,7 @@ func (s *stageSession) admit(sess *session.Session) int {
 		return readStageQuota(ctx, name, model, mapToEnv(s.devEnv))
 	}
 	g.selection = func() (string, string, time.Time, error) {
-		name, model, expiry, err := s.canonicalSelection(g.now())
+		name, model, expiry, err := s.selectionFrom(root, g.now())
 		if err != nil {
 			return "", "", time.Time{}, err
 		}
@@ -998,7 +998,9 @@ func (s *stageSession) admit(sess *session.Session) int {
 			observedName, observedModel = name, model
 			return name, model, expiry, nil
 		}
-		return s.agentName, s.opts.Model, expiry, nil
+		// Canonical policy can stay constant while a temporary default starts
+		// or stops overriding a recovered session's different stylesheet.
+		return s.selectionFrom(sess.WorktreePath, g.now())
 	}
 	code := stageCooldown(g, &s.agentName, &s.opts.Model,
 		func(fresh *run.Metadata) (string, string, error) {
