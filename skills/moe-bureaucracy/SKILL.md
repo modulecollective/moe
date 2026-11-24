@@ -151,13 +151,20 @@ wrap across lines:
     go-module-cache-readonly-sandbox, pnpm-store-readonly-sandbox,
     uv-cache-readonly-sandbox
 
-    Put the merged fact here.
+    Put the complete merged entry here; nothing from the superseded
+    files carries over.
 
 The harvester writes the replacement first, then deletes the named
 entries. A missing superseded file is treated as already done so a
 partial attempt can be retried. When the new slug also appears in
 `supersedes:`, the entry is amended in place instead of becoming a
-`-2` sibling. An in-place amendment preserves the entry's original
+`-2` sibling.
+An amendment replaces the body; it does not patch it.
+The harvester writes the body you submit as the whole entry and
+discards the old text, so copy the existing entry's full body into
+the note and edit it there. A note that says "keep the existing body
+and add this" becomes the entry verbatim and deletes the text it
+refers to. An in-place amendment preserves the entry's original
 `discovered-in` and appends the amending run to an `updated-in`
 frontmatter list, so provenance survives the patch. If this paragraph
 does not mention `updated-in`, the opening binary rewrites

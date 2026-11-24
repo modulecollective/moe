@@ -28,6 +28,9 @@ func TestMoeBureaucracySkillEmbedded(t *testing.T) {
 		"{{.Followups}}",
 		"supersedes:",
 		"opening binary does not support superseding lore",
+		// A patch-shaped amendment ("keep the existing body and add
+		// this") once replaced two lore entries' bodies with itself.
+		"An amendment replaces the body; it does not patch it.",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("embedded skill missing %q in body", want)

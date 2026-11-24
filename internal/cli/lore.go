@@ -50,7 +50,8 @@ Save this file to promote each unchecked ` + "`- [ ]`" + ` entry into
 lore/<slug>.md at the bureaucracy root. Delete the line to skip.
 Use an indented ` + "`supersedes:`" + ` paragraph to replace or merge
 existing lore entries; the replacement is written before they are deleted.
-Naming an entry's own slug amends it in place, keeping its provenance.
+Naming an entry's own slug amends it in place, keeping its provenance;
+the body written here replaces the old entry whole, so include all of it.
 Lines marked ` + "`- [x]`" + ` are already promoted; leave them alone.
 This header is auto-injected on editor pop; remove it freely.
 -->`
