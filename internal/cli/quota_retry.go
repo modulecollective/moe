@@ -158,6 +158,11 @@ func combinePulseExit(current, next int) int {
 	if next == exitYielded {
 		return current
 	}
+	// A ride parked at a gate ran its stage and committed; nothing broke
+	// for a backoff to pace.
+	if next == exitParked {
+		return current
+	}
 	if next != 0 && (current == 0 || current == exitQuotaDeferred) {
 		return next
 	}

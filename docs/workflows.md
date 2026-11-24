@@ -287,12 +287,14 @@ The board still gathers every three seconds and follows owner status
 subscriptions. A separate 500 ms timer cycles cached smoke without extra
 observation work.
 
-None of them interrupts an agent. The owner finishes the turn it is on —
-commit, transcript, input stamps, any recovery that turn needs — and acts at
-its next boundary: before the next stage, a gate kickback, a ship attempt, a
-nominated close, or while it waits for quota or at the
-next-stage prompt (both wake on a control). A yield exits 77, which a sweep
-reads as the operator's decision: no failure backoff.
+None of them interrupts an agent. The owner finishes the turn it is on — commit,
+transcript, input stamps, any recovery that turn needs — and acts at its next
+boundary: before the next stage, a gate kickback, a ship attempt, a nominated
+close, or while it waits for quota or at the next-stage prompt (both wake on a
+control). A yield exits 77, which a sweep reads as the operator's decision: no
+failure backoff. A pulse ride that parks at a stage's gate is clean the same
+way: the stage's turn ran and committed, and the run waits on what its canvas
+says.
 
 **Pause and handoff hold the run** from the moment they are accepted until
 an explicit resume — across sweeps, restarts and disconnects, and against

@@ -68,21 +68,49 @@ func rideRun(root, projectID, runID string, mode rideMode, oneStage bool, stdout
 		return 0
 	}
 	// A pending operator finish turns this ride into this run's `!!`
-	// through the ordinary gates.
+	// through the ordinary gates. The park is read after the finish
+	// settles, so its receipt records the walk's real code.
 	if r, ok := openFinish(root, md); ok {
-		return applyFinish(root, md, r, "stage "+next, stdout, stderr, func() int {
-			res, code := cascadeFromGate(next, "", false, md, stdout, stderr)
+		var res cascadeResult
+		code := applyFinish(root, md, r, "stage "+next, stdout, stderr, func() int {
+			var code int
+			res, code = cascadeFromGate(next, "", false, md, stdout, stderr)
 			if summary := renderCascadeSummary(projectID+"/"+runID, res); summary != "" {
 				moePrintln(stdout, summary)
 			}
 			return code
 		})
+		return rideParked(root, wf, md, res, code, stderr)
 	}
 	res, code := cascadeFromGate(next, "" /*destination*/, oneStage, md, stdout, stderr)
 	if summary := renderCascadeSummary(projectID+"/"+runID, res); summary != "" {
 		moePrintln(stdout, summary)
 	}
-	return finishAfterKick(root, md, res, code, oneStage, stdout, stderr)
+	code = finishAfterKick(root, md, res, code, oneStage, stdout, stderr)
+	return rideParked(root, wf, md, res, code, stderr)
+}
+
+// rideParked turns a walk's non-zero code into exitParked when the walk
+// stopped at a gate: its last step ran cleanly (exit 0, not deferred) and
+// that stage's gate, asked again, still holds without a read error. The
+// stage's turn ran and committed, so nothing failed — a blocked design,
+// an unstamped build, a spent review loop all wait on their canvas, and
+// none should cool the heartbeat's shared backoff. A stage that failed,
+// a deferral, a yield or an unreadable gate keeps its code.
+func rideParked(root string, wf *Workflow, md *run.Metadata, res cascadeResult, code int, stderr io.Writer) int {
+	if code == 0 || len(res.ran) == 0 {
+		return code
+	}
+	last := res.ran[len(res.ran)-1]
+	if last.code != 0 || last.deferred != "" {
+		return code
+	}
+	problems, err := wf.StageGateProblems(root, md, last.stage)
+	if err != nil || len(problems) == 0 {
+		return code
+	}
+	moePrintf(stderr, "pulse: ride %s/%s parked at its %s gate\n", md.Project, md.ID, last.stage)
+	return exitParked
 }
 
 // finishAfterKick acts on a finish the operator asked for while a kick's

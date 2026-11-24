@@ -116,6 +116,9 @@ func TestHeldRunRefusesKick(t *testing.T) {
 	if combinePulseExit(0, exitYielded) != 0 || combinePulseExit(1, exitYielded) != 1 {
 		t.Fatal("a yield must neither fail the sweep nor mask a failure")
 	}
+	if combinePulseExit(0, exitParked) != 0 || combinePulseExit(1, exitParked) != 1 {
+		t.Fatal("a park must neither fail the sweep nor mask a failure")
+	}
 	if !controlRecord(t, root).Held() {
 		t.Fatal("a machine entry cleared the hold")
 	}

@@ -535,7 +535,8 @@ func TestBlockedSourceTaggedFollowupPulseHandoff(t *testing.T) {
 		t.Fatalf("non-dynamic pulse moved idea: %+v %v", idea, err)
 	}
 	defer withRideMode(rideDynamic)()
-	if code := runPulseSurvey(root, project.RootID, "", nil, &out, &out); code != 1 || !strings.Contains(out.String(), "design gate not satisfied; parked at design") {
+	// A park at a gate is a clean ride for the sweep's exit (no backoff).
+	if code := runPulseSurvey(root, project.RootID, "", nil, &out, &out); code != 0 || !strings.Contains(out.String(), "design gate not satisfied; parked at design") || !strings.Contains(out.String(), "parked at its design gate") {
 		t.Fatalf("quiet dynamic pulse should park at the prerequisite design gate, exit %d: %s", code, &out)
 	}
 	idea, err = run.Load(root, "tele", "required-fix")

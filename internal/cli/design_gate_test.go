@@ -295,8 +295,10 @@ func TestDesignMachineKickCannotAdvanceAnUnreadyVerdict(t *testing.T) {
 	// produce a ready verdict before that ride can reach build.
 	calls := stubSdlcStageWritingCanvas(t, root, md, "design", designCanvasSkeleton+"\nStill needs a contract decision.\n")
 	pushes := stubPushFromCascade(t, 0, nil)
-	if code := rideRun(root, md.Project, md.ID, rideDynamic, false, io.Discard, io.Discard); code == 0 {
-		t.Fatal("unready machine design advanced")
+	// Parked, not failed: the design turn ran and committed, so the
+	// sweep must not feed this to the shared failure backoff.
+	if code := rideRun(root, md.Project, md.ID, rideDynamic, false, io.Discard, io.Discard); code != exitParked {
+		t.Fatalf("unready machine design: exit %d, want exitParked", code)
 	}
 	if len(*calls) != 1 || (*calls)[0] != "design" || len(*pushes) != 0 {
 		t.Fatalf("kick dispatches=%v pushes=%d", *calls, len(*pushes))

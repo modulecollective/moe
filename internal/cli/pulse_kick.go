@@ -172,6 +172,8 @@ func pulseRide(root string, pick *pulsePick, prChecks []ownedPRChecks, stdout, s
 	case 0:
 	case exitYielded:
 		moePrintf(stderr, "pulse: ride %s yielded to operator control\n", key)
+	case exitParked:
+		// rideParked said where; it alone knows the stage.
 	default:
 		moePrintf(stderr, "pulse: ride %s exited %d\n", key, code)
 	}
