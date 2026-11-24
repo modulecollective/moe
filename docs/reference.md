@@ -325,18 +325,19 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   including the ride. `moe pulse new` exits non-zero when the sweep died,
   concluded nothing, or the ride failed, which drives the failure backoff. A
   ride that parks at a stage's gate (the stage's turn ran and committed, but its
-  gate still holds) is not a failure and does not drive it. A clock pulse with
-  only quota deferrals exits 76: it neither increases the failure streak nor
-  clears previous failure history. Real failures take precedence in mixed
-  outcomes; interruption exits 130. See [Subscription quota
-  cooldown](workflows.md#subscription-quota-cooldown) for the quota policy. The
-  heartbeat also passes `--emit-run <path>`: the sweep writes the run it opens
-  there, so /serve can link a sweep to the pulse run it minted rather than
-  leaving the operator to hunt the dash for a matching `pulse-*` slug. It also
-  passes its exact owned-PR observation through the internal `--pr-checks`
-  argument, so a successful sweep acknowledges what its survey saw. New
-  actionable failures on recorded pushed PRs can wake a sweep without a journal
-  change. A survey may pick same-run CI repair with
+  gate still holds) is not a failure and does not drive it, nor is a CI repair
+  whose turns ran cleanly and found nothing to ship (no repair commit, or a
+  nominated close). A clock pulse with only quota deferrals exits 76: it neither
+  increases the failure streak nor clears previous failure history. Real
+  failures take precedence in mixed outcomes; interruption exits 130. See
+  [Subscription quota cooldown](workflows.md#subscription-quota-cooldown) for
+  the quota policy. The heartbeat also passes `--emit-run <path>`: the sweep
+  writes the run it opens there, so /serve can link a sweep to the pulse run it
+  minted rather than leaving the operator to hunt the dash for a matching
+  `pulse-*` slug. It also passes its exact owned-PR observation through the
+  internal `--pr-checks` argument, so a successful sweep acknowledges what its
+  survey saw. New actionable failures on recorded pushed PRs can wake a sweep
+  without a journal change. A survey may pick same-run CI repair with
   `{"run":"<project>/<slug>","why":"…","repair":"ci"}`. Dynamic consent and
   safe-mode operator marks still apply; a fresh run note licenses retry after
   the one-attempt-per-head journal claim is spent.

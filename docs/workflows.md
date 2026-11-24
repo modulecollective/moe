@@ -294,7 +294,8 @@ close, or while it waits for quota or at the next-stage prompt (both wake on a
 control). A yield exits 77, which a sweep reads as the operator's decision: no
 failure backoff. A pulse ride that parks at a stage's gate is clean the same
 way: the stage's turn ran and committed, and the run waits on what its canvas
-says.
+says. So is a CI repair whose turns ran cleanly and found nothing to ship: no
+repair commit, or a nominated close.
 
 **Pause and handoff hold the run** from the moment they are accepted until
 an explicit resume — across sweeps, restarts and disconnects, and against
