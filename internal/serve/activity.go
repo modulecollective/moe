@@ -182,9 +182,9 @@ func (a *activity) recordTick(at time.Time, decisions []HeartbeatDecision) {
 	a.push(activityEvent{At: at, Kind: "tick", Decisions: slices.Clone(decisions)})
 }
 
-// recordSkip overrides a project's verdict with the ticker's own — the
-// cool-off, which the gate knows nothing about. Without it a project the
-// gate wanted swept and the ticker held would render as sweeping.
+// recordSkip overrides a project's verdict with the ticker's own and
+// carries the cool-off's counters, which the gate knows nothing about —
+// including for the root project, which no gate decision names.
 //
 // held marks a hold that deserves its own row rather than collapsing
 // into the quiet tally. The cool-off passes false: it earns its row

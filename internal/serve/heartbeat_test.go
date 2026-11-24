@@ -215,6 +215,14 @@ func TestHeartbeatBacksOffAfterFailures(t *testing.T) {
 	if !strings.Contains(log.String(), "cooling off") {
 		t.Errorf("log = %q, want the cool-off named", log.String())
 	}
+	// The cooling tick is all quiet, so the list drops it: one line per
+	// sweep that actually started.
+	if lines := tickLines(s); len(lines) != 2 {
+		t.Errorf("tick lines = %q, want the two spawning ticks and nothing for the cooling one", lines)
+	}
+	if got := strings.Count(log.String(), "heartbeat: sweeping alpha"); got != 2 {
+		t.Errorf("log names alpha's sweep %d times, want once per spawn (2):\n%s", got, log.String())
+	}
 }
 
 // TestHeartbeatResetsBackoffOnACleanSweep: the cool-off is a reaction to
@@ -307,6 +315,73 @@ func TestHeartbeatStartsOneSweepAcrossProjects(t *testing.T) {
 	if _, ok := s.children.get(heartbeatChildPrefix + project.RootID); !ok {
 		t.Fatal("the root sweep should hold the slot")
 	}
+}
+
+// TestHeartbeatSlotHeldTickIsQuiet: a project that comes due while the
+// root sweep holds the serial slot is waiting, not sweeping. Only the
+// tick that started the sweep may say so, in the ring or in the log.
+func TestHeartbeatSlotHeldTickIsQuiet(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "slow-moe")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nsleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gate := &fakeHeartbeat{due: []string{"alpha", "beta"}}
+	var log syncBuf
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: bin, Heartbeat: gate, Logger: &log,
+	})
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		s.children.shutdown(ctx, io.Discard)
+	})
+
+	s.heartbeatTick()
+	s.heartbeatTick()
+
+	var sweeping []string
+	for _, line := range tickLines(s) {
+		if strings.Contains(line, "sweeping —") {
+			sweeping = append(sweeping, line)
+		}
+	}
+	if len(sweeping) != 1 {
+		t.Fatalf("tick lines announcing a sweep = %q, want only the tick that started it", sweeping)
+	}
+	if !strings.Contains(sweeping[0], "alpha sweeping —") || !strings.Contains(sweeping[0], "beta sweeping —") {
+		t.Errorf("starting tick = %q, want both projects named", sweeping[0])
+	}
+	p := snapshotProject(t, s, "alpha")
+	if p.Sweep || !strings.Contains(p.Decision, "waiting on the running sweep") {
+		t.Errorf("alpha = %+v, want a quiet wait on the running sweep", p)
+	}
+	if got := strings.Count(log.String(), "heartbeat: sweeping alpha — the journal moved"); got != 1 {
+		t.Errorf("log names alpha's sweep %d times, want once:\n%s", got, log.String())
+	}
+}
+
+// tickLines is the text of every tick line /serve's activity list shows,
+// oldest first.
+func tickLines(s *Server) []string {
+	var out []string
+	for _, ev := range s.activity.panel(time.Now()).Events {
+		if ev.Kind == "tick" {
+			out = append([]string{ev.Text}, out...)
+		}
+	}
+	return out
+}
+
+func snapshotProject(t *testing.T, s *Server, id string) ActivityProject {
+	t.Helper()
+	for _, p := range s.activity.snapshot(time.Now()).Projects {
+		if p.Project == id {
+			return p
+		}
+	}
+	t.Fatalf("no %s in the snapshot", id)
+	return ActivityProject{}
 }
 
 // TestHeartbeatChildIdCannotCollideWithARun: the heartbeat/Rex label

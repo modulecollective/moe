@@ -134,15 +134,15 @@ func (g *heartbeatGate) Due(tick time.Duration, log io.Writer) []serve.Heartbeat
 
 	// Every project's verdict comes back, not just the ones to sweep: the
 	// stand-downs are the trace that used to be invisible, and the loop
-	// already computed them. Only the sweeps are logged, as before — a
-	// line per quiet project per tick would bury the ones that matter.
+	// already computed them. None is logged here: the ticker logs a sweep
+	// where it starts one, since it may still hold what the gate offered,
+	// and a line per quiet project per tick would bury the ones that matter.
 	decisions := make([]serve.HeartbeatDecision, 0, len(projects))
 	anySweep := false
 	for _, p := range projects {
 		sweep, held, reason := g.projectDue(sc, p, occupied, tick, now)
 		if sweep {
 			anySweep = true
-			fmt.Fprintf(log, "heartbeat: sweeping %s — %s\n", p.ID, reason)
 		}
 		decisions = append(decisions, serve.HeartbeatDecision{
 			Project: p.ID, Sweep: sweep, Held: held, Reason: reason,

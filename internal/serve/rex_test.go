@@ -502,6 +502,9 @@ func TestRexDiscovery(t *testing.T) {
 		if !strings.Contains(log.String(), "rex host unusable") {
 			t.Errorf("log = %q, want the withheld dispatch named", log.String())
 		}
+		if lines := tickLines(s); len(lines) != 1 || !strings.HasPrefix(lines[0], "_cabinet held — ") || !strings.Contains(lines[0], "rex host unusable") {
+			t.Errorf("tick lines = %q, want the hold, not a sweep", lines)
+		}
 	})
 }
 

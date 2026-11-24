@@ -185,12 +185,14 @@ func (s *Server) runHeartbeat(ctx context.Context) {
 // heartbeatTick is one pass: ask the gate, filter by the ticker's own
 // state, spawn what's left, and record the whole verdict set — swept and
 // skipped alike — into the activity record both dashes read.
+//
+// The tick is recorded once, after the ticker has had its say. A sweep
+// verdict the ticker then held is rewritten to the hold first, so the
+// ring never announces a sweep that did not start.
 func (s *Server) heartbeatTick() {
 	hostErr := s.reconcileHost()
 	now := time.Now()
 	decisions := s.opts.Heartbeat.Due(heartbeatInterval, s.syncWriter())
-	s.activity.recordTick(now, decisions)
-	s.saveActivity()
 
 	var due []HeartbeatDecision
 	for _, d := range decisions {
@@ -198,12 +200,19 @@ func (s *Server) heartbeatTick() {
 			due = append(due, d)
 		}
 	}
+	record := func() {
+		s.activity.recordTick(now, decisions)
+		s.saveActivity()
+	}
 	if len(due) == 0 {
+		record()
 		return
 	}
 	if hostErr != nil {
 		reason := hostErr.Error()
 		s.logf("heartbeat: sweep held — %s", reason)
+		holdDue(decisions, reason, true)
+		record()
 		for _, d := range due {
 			s.activity.recordSkip(d.Project, reason, true, 0, 0)
 		}
@@ -217,6 +226,8 @@ func (s *Server) heartbeatTick() {
 		// The gate wanted these swept and the backoff held them, so its
 		// reason is not what happened.
 		reason := fmt.Sprintf("cooling off after %d failure(s)", fails)
+		holdDue(decisions, reason, false)
+		record()
 		s.activity.recordSkip(project.RootID, reason, false, fails, left)
 		for _, d := range due {
 			s.activity.recordSkip(d.Project, reason, false, fails, left)
@@ -227,10 +238,15 @@ func (s *Server) heartbeatTick() {
 	// The server is serial: one working agent, bureaucracy-wide. Any
 	// unsettled sweep holds the slot, including one adopted from a previous
 	// serve's Rex session, and a sweep that kicked a ride can hold it for
-	// many ticks.
+	// many ticks. Waiting on it is normal operation, not a hold the
+	// operator can act on: the running sweep's own row says why nothing
+	// else is moving, so the wait counts as quiet.
 	if s.children.sweepActive() {
+		holdDue(decisions, "waiting on the running sweep", false)
+		record()
 		return
 	}
+	record()
 	// --heartbeat is the child saying who invoked it. The command is
 	// otherwise spelled exactly like the one an operator types, and each
 	// project's mode caps the clock rather than the operator.
@@ -244,7 +260,20 @@ func (s *Server) heartbeatTick() {
 		s.logf("heartbeat: spawn sweep: %v", err)
 		return
 	}
+	for _, d := range due {
+		s.logf("heartbeat: sweeping %s — %s", d.Project, d.Reason)
+	}
 	s.logf("heartbeat: sweeping (%d project(s) due)", len(due))
+}
+
+// holdDue rewrites the gate's sweep verdicts in place to the ticker's
+// hold, so the tick records what happened rather than what was asked.
+func holdDue(decisions []HeartbeatDecision, reason string, held bool) {
+	for i := range decisions {
+		if decisions[i].Sweep {
+			decisions[i].Sweep, decisions[i].Held, decisions[i].Reason = false, held, reason
+		}
+	}
 }
 
 // completeHeartbeat records a sweep's outcome once its child exits: the
