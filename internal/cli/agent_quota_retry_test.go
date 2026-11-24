@@ -143,3 +143,70 @@ func TestDeferredRideSelectionUsesCurrentBindingAndStage(t *testing.T) {
 		t.Fatalf("bad config woke: %v %v", got, err)
 	}
 }
+
+func TestChangedDefaultWakesJournaledRideRetryAcrossRestart(t *testing.T) {
+	root := quietFixture(t)
+	t.Setenv("MOE_FORCE_AGENT", "")
+	if err := project.EnsureRoot(root, ""); err != nil {
+		t.Fatal(err)
+	}
+	ride, err := run.New(root, "moe", run.Options{ID: "deferred-ride", Workflow: sdlcWorkflow})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pulse, err := run.New(root, project.RootID, run.Options{ID: "ride-survey", Workflow: pulseWorkflow, SeedDocs: map[string]string{pulseDoc: pulseCanvasSkeleton}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := disposePulseRunReason(root, project.RootID, pulse.ID, "test setup", io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	q, err := newPulseQuotaRetries(root, project.RootID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q.pulse, q.survey = pulse.ID, false
+	if err := q.record(quotaDeferral{target: run.QuotaTarget{Project: "moe", Run: ride.ID, Stage: "design", Backend: "claude", Reason: "spent"}, retryAt: time.Now().Add(48 * time.Hour)}, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	p, err := project.Load(root, project.RootID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := func(want bool) {
+		t.Helper()
+		g := newHeartbeatGate(root)
+		due, _, why := g.projectDue(mustPulseScan(t, root), p, nil, 0, time.Now())
+		if due != want {
+			t.Fatalf("restart opportunity=%v want=%v: %s", due, want, why)
+		}
+	}
+	check(false)
+	if _, err := agentdefault.Set(root, "codex", nil, time.Now); err != nil {
+		t.Fatal(err)
+	}
+	check(true)
+	ride.Agent = "claude"
+	if err := run.Save(root, ride); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Commit(t, root, "bind deferred ride")
+	check(false)
+	ride.Agent = ""
+	if err := run.Save(root, ride); err != nil {
+		t.Fatal(err)
+	}
+	gittest.Commit(t, root, "unbind deferred ride")
+	check(true)
+	t.Setenv("MOE_FORCE_AGENT", "claude")
+	check(false)
+	t.Setenv("MOE_FORCE_AGENT", "")
+	if _, err := agentdefault.Set(root, "", nil, time.Now); err != nil {
+		t.Fatal(err)
+	}
+	check(false)
+	idx, err := run.BuildJournalIndex(root)
+	if err != nil || len(idx.QuotaRetries) != 1 {
+		t.Fatalf("gate consumed obligation: %v %v", idx, err)
+	}
+}
