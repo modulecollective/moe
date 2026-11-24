@@ -100,3 +100,48 @@ func TestRefusedCommitKeepsStrayEdits(t *testing.T) {
 		t.Errorf("refused turn printed a drop:\n%s", errb.String())
 	}
 }
+
+// TestDropStrayEditsLeavesDirtySubmodule: a submodule with untracked
+// content inside it shows as modified in the superproject's status,
+// but the close's rebase ignores it and reset --hard cannot clear it.
+// The drop leaves it unnamed, and still names and resets a real stray
+// beside it.
+func TestDropStrayEditsLeavesDirtySubmodule(t *testing.T) {
+	root := gittest.InitSeeded(t)
+	donor := gittest.Init(t)
+	gittest.Commit(t, donor, "donor seed")
+	gittest.Run(t, root, "-c", "protocol.file.allow=always", "submodule", "add", donor, "sub")
+	gittest.WriteAndCommit(t, root, "tracked.md", "head\n", "add submodule and tracked file")
+	inside := filepath.Join(root, "sub", "build.out")
+	if err := os.WriteFile(inside, []byte("artifact\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if st := gittest.Output(t, root, "status", "--porcelain", "--", "sub"); st != "M sub" {
+		t.Fatalf("fixture: submodule not dirty in status: %q", st)
+	}
+
+	var errb bytes.Buffer
+	if err := dropStrayEdits(root, &errb); err != nil {
+		t.Fatalf("dropStrayEdits: %v", err)
+	}
+	if errb.Len() != 0 {
+		t.Errorf("dirty submodule alone printed a drop:\n%s", errb.String())
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "tracked.md"), []byte("stray\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	errb.Reset()
+	if err := dropStrayEdits(root, &errb); err != nil {
+		t.Fatalf("dropStrayEdits: %v", err)
+	}
+	if got, want := errb.String(), "dropped edit outside this turn's write set: tracked.md\n"; got != want {
+		t.Errorf("stderr = %q, want %q", got, want)
+	}
+	if b, _ := os.ReadFile(filepath.Join(root, "tracked.md")); string(b) != "head\n" {
+		t.Errorf("stray not reset: %q", b)
+	}
+	if _, err := os.Stat(inside); err != nil {
+		t.Errorf("file inside the submodule was touched: %v", err)
+	}
+}

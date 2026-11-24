@@ -169,17 +169,20 @@ func commitTurn(root string, md *run.Metadata, docID, backend string, timedOut t
 // it dropped. Such an edit is outside the turn's write set by
 // definition: left in place it refuses the close's rebase and wedges
 // the turn. Untracked files are left alone; they never block a rebase
-// and die with the pruned worktree. The turn's transcript, committed
-// with the canvas, still holds the dropped edit.
+// and die with the pruned worktree. Submodule state is left alone too:
+// the rebase's clean-tree check ignores submodules, and the
+// superproject's reset cannot clear a dirty or moved submodule, so
+// naming one would report a drop that never happened. The turn's
+// transcript, committed with the canvas, still holds the dropped edit.
 func dropStrayEdits(workRoot string, stderr io.Writer) error {
-	entries, err := git.Status(workRoot)
+	out, err := git.Output(workRoot, "diff", "--name-only", "-z", "--ignore-submodules=all", "HEAD")
 	if err != nil {
 		return fmt.Errorf("drop stray edits: %w", err)
 	}
 	var stray []string
-	for _, e := range entries {
-		if !e.Untracked() {
-			stray = append(stray, e.Path)
+	for p := range strings.SplitSeq(out, "\x00") {
+		if p != "" {
+			stray = append(stray, p)
 		}
 	}
 	if len(stray) == 0 {
