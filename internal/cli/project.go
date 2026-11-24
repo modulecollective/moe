@@ -137,12 +137,12 @@ func runProjectMode(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "word it reports the current one.")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "  paused  the heartbeat never sweeps the project")
-		moePrintln(stderr, "  safe    it sweeps and grooms, but starts only threads the")
+		moePrintln(stderr, "  safe    it surveys, but a pick starts only a run the")
 		moePrintln(stderr, "          operator marked (an advance, a workflow tag, a chore, or an")
-		moePrintln(stderr, "          undelivered note or answer on the thread, consumed on delivery)")
-		moePrintln(stderr, "  auto    it starts every kickable parked thread (the default)")
+		moePrintln(stderr, "          undelivered note or answer on the run, consumed on delivery)")
+		moePrintln(stderr, "  auto    a pick starts whenever it clears the floor (the default)")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "The mode binds the clock, not you: bangs, stage verbs, chain kicks")
+		moePrintln(stderr, "The mode binds the clock, not you: bangs, stage verbs")
 		moePrintln(stderr, "and a hand-typed `moe pulse new --dynamic` run in every mode.")
 	}
 	if err := fs.Parse(args); err != nil {
@@ -210,8 +210,8 @@ func runProjectShip(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Existing settings stay unchanged; an absent ship field means pr.")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Binds every unflagged ship — bare `moe sdlc push`, `!!` / `!!!`,")
-		moePrintln(stderr, "`moe chain kick`, and the heartbeat's rides. `--pr` / `--merge` on")
+		moePrintln(stderr, "Binds every unflagged ship — bare `moe sdlc push`, `!!`, and the")
+		moePrintln(stderr, "heartbeat's rides. `--pr` / `--merge` on")
 		moePrintln(stderr, "push, and m/p at the chain prompt, override it per ship.")
 	}
 	if err := fs.Parse(args); err != nil {

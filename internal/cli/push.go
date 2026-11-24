@@ -263,9 +263,9 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 
 	// One route seam for every entry. A flag is an explicit override;
 	// with neither, the project's standing ship setting decides — so a
-	// bare `moe <wf> push`, a `!!` cascade, a chain kick and a
-	// heartbeat ride all land the same way, and the operator sets that
-	// way once per project instead of remembering a flag per ship.
+	// bare `moe <wf> push`, a `!!` cascade and a heartbeat ride all land
+	// the same way, and the operator sets that way once per project
+	// instead of remembering a flag per ship.
 	openPR := project.ShipOf(pj) == project.ShipPR
 	if *prFlag {
 		openPR = true

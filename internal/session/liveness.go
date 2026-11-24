@@ -53,7 +53,7 @@ const beatInterval = 30 * time.Second
 type Claim struct {
 	Branch string `json:"branch"`
 	// Machine reports that a machine walk opened this session — a bang
-	// cascade, a chain kick, a heartbeat sweep. False means an operator
+	// cascade, a heartbeat sweep. False means an operator
 	// typed a bare stage verb; absent (no record at all) means unknown.
 	// Only a true here makes a dead session reapable.
 	Machine bool `json:"machine"`

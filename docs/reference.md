@@ -7,7 +7,7 @@ source of truth for the exact command surface; this page is a map.
 ## Command Catalog
 
 Global `--no-cooldown`, accepted anywhere before `--`, skips subscription quota
-checks for the entire invocation, including cascades and chain rides. See
+checks for the entire invocation, including cascades and rides. See
 [Subscription quota cooldown](workflows.md#subscription-quota-cooldown) for the
 wait policy, controls, exit codes, and consequences of choosing to bypass it.
 
@@ -145,8 +145,8 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   or the next serve start takes them — `git status` in the bureaucracy says
   how many are waiting, and serve's log carries any push failure. `--dynamic`
   (or a non-empty `MOE_SERVE_DYNAMIC`) is the standing consent rung: it starts
-  the resident heartbeat, a per-project ticker that runs `moe pulse new
-  --dynamic` when the board warrants it. Unarmed, the ticker never fires and
+  the resident heartbeat, a ticker that runs one `moe pulse new --dynamic` at
+  a time when any project's board warrants it. Unarmed, the ticker never fires and
   what the web wrote simply waits. Stopping the process retracts it: no new
   sweep starts. At armed startup, serve looks for a local Rex server. With a
   usable server, serve runs its sweeps in a Rex session named `moe`, reached
@@ -192,7 +192,7 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
 - `moe control pause|handoff|park|finish|resume [--id <id>] <project>/<run>`
   steers a stageful run at its next boundary: pause and handoff hold it until
   an explicit resume; park has the current owner yield once; finish ships it
-  with `!!` and rides no chain; resume releases a hold and starts nothing. A
+  with `!!`; resume releases a hold and starts nothing. A
   retry with the same `--id` reads back the first outcome. See
   [Seeing and steering a running run](workflows.md#seeing-and-steering-a-running-run).
 - `moe input add <project>/<run> [text ...]` pushes a chunk of prose at a run;
@@ -212,7 +212,7 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   Writing an entry starts nothing: it makes the prose available to the next
   agent turn and can make eligible work actionable for an armed serve's sweep.
   Project mode, readiness, and occupancy still apply; a hand-typed
-  `moe pulse new --dynamic <project>` is the expedite path. A pending note or
+  `moe pulse new --dynamic` is the expedite path. A pending note or
   answer counts as an operator mark under `safe` mode, consumed on delivery.
 - `moe usage [--project <id>] [--since <dur>]` sums the token usage recorded in
   every mirrored stage transcript, grouped by workflow, stage and model, with a
@@ -259,22 +259,20 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
 - `moe project list` lists registered projects with their mode and ship route.
 - `moe project mode <id> [paused|safe|auto]` reads or sets a project's mode —
   the standing cap on what the heartbeat may start there:
-  - `paused` — the heartbeat never sweeps the project. No agent turn is spent
-    on it at all.
-  - `safe` — it sweeps and grooms as ever (survey, park, chore nomination), but
-    the kick starts only threads carrying an explicit operator mark: a valid
-    advance marker, a chore's standing intent, a workflow tag on the idea a run
-    was promoted from, or an undelivered note on any run in the thread — a
-    `moe input add` note or an answered question, consumed once a turn delivers
-    it. Everything else is held with a named reason.
-  - `auto` — the default, and today's behaviour: every kickable parked thread
-    the survey doesn't park gets started.
+  - `paused` — the survey leaves the project alone and a pick there starts
+    nothing.
+  - `safe` — it is surveyed as ever, but a pick starts only a run carrying an
+    explicit operator mark: a valid advance marker, a chore's standing intent,
+    a workflow tag on the idea a run was promoted from, or an undelivered note
+    on the run — a `moe input add` note or an answered question, consumed once
+    a turn delivers it. Anything else is held with a named reason.
+  - `auto` — the default: a pick starts whenever it clears the floor.
 
-  The mode binds the clock, not you. `!`, `!!`, `!!!`, `moe chain kick`, stage
-  verbs and a hand-typed `moe pulse new --dynamic` all run in every mode — the
-  typed word is consent whatever the config says. Serve's advance mark is the
-  same shape from the other direction: it writes an operator mark, which is
-  exactly what `safe` looks for before it starts a thread.
+  The mode binds the clock, not you. `!`, `!!`, stage verbs and a hand-typed
+  `moe pulse new --dynamic` all run in every mode — the typed word is consent
+  whatever the config says. Serve's advance mark is the same shape from the
+  other direction: it writes an operator mark, which is exactly what `safe`
+  looks for before it starts a run.
   Serve's arming stays above all three: an unarmed serve starts no agent
   anywhere. The mode is stored in `projects/<id>/project.json` (absent means
   `auto`) and is settable from the project hub's switch as well.
@@ -288,8 +286,7 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
     `merged`.
 
   The setting binds every ship that carries no route flag: bare
-  `moe sdlc push`, `!!` / `!!!` at any gate, `moe chain kick`, and the
-  heartbeat's rides. `--pr` and `--merge` on push, and `m` / `p` at the chain
+  `moe sdlc push`, `!!` at any gate, and the heartbeat's rides. `--pr` and `--merge` on push, and `m` / `p` at the chain
   prompt, override it for one invocation; giving both flags is a usage error.
   Stored in `projects/<id>/project.json` (absent means `pr`) and settable from
   the project hub's switch as well.
@@ -301,21 +298,6 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   remain.
 - `moe sync` explicitly reconciles bureaucracy history, pushed runs, and
   project submodule pointers.
-- `moe chain new [--seed] <project>/<slug>` mints a chain run: a stageless
-  placeholder head that collects a batch while parked, then closes when kicked
-  before the ride continues through its members. `--seed` pops `$EDITOR` on its
-  purpose note first.
-- `moe chain edit` opens an editor over active operator-cascade runs (SDLC)
-  plus chain heads; reorder lines to record a run chain in the bureaucracy
-  journal.
-- `moe chain note <project>/<run>` edits a head's purpose note: why the batch
-  exists. Membership isn't written there — it renders live from the edges.
-- `moe chain kick <project>/<run>` rides a chain headlessly from the named head,
-  resuming each run from its first pending stage through shipping. What is
-  chained now is what runs: a kick sweeps nothing, so nothing can grow the batch
-  under it.
-- `moe chain close [--no-edit] <project>/<run>` drops a head without riding it.
-- `moe chain clear [--yes]` drops every currently live run-chain edge.
 - `moe <workflow> close [--no-edit] <project>/<run>` closes a run; for `sdlc` it
   abandons the run instead of shipping it through `sdlc push`. `--no-edit` skips
   the followups and feedback editors, harvesting the files as-is. Capture
@@ -333,18 +315,18 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   one design turn before the run holds; untagged ideas are operator-only.
 - `moe intent new|edit|close|list|cat|log|harvest` manages operator-authored
   standing direction.
-- `moe pulse new|close|cat|log` runs and inspects project sweeps and optional
-  work dispatch. The survey is read-only; opening due chore runs does not
-  execute their stages. `moe pulse new --dynamic <project>` starts eligible
-  parked threads and nominated CI repairs on existing pushed PRs after the
-  survey. Without `--dynamic`, curated work stays parked. The heartbeat inside
-  `moe serve --dynamic` calls this with its own marker, and reads the exit
-  status — which describes the whole invocation, including the rides the sweep
-  started. `moe pulse new` exits non-zero when the sweep died, concluded
-  nothing, or a kicked ride stalled, which drives the failure backoff. A clock
-  pulse with only quota deferrals exits 76: it neither increases the failure
-  streak nor clears previous failure history. Real failures take precedence
-  in mixed outcomes; interruption exits 130. See
+- `moe pulse new|close|cat|log` runs and inspects the bureaucracy's one survey.
+  It lives in the `_cabinet` root project and takes no project argument. The
+  survey is read-only; opening due chore runs does not execute their stages.
+  `moe pulse new --dynamic` rides the one run the survey names as `next`, which
+  may be a CI repair on an existing pushed PR. Without `--dynamic`, nothing
+  starts. The heartbeat inside `moe serve --dynamic` calls this with its own
+  marker, and reads the exit status — which describes the whole invocation,
+  including the ride. `moe pulse new` exits non-zero when the sweep died,
+  concluded nothing, or the ride stalled, which drives the failure backoff. A
+  clock pulse with only quota deferrals exits 76: it neither increases the
+  failure streak nor clears previous failure history. Real failures take
+  precedence in mixed outcomes; interruption exits 130. See
   [Subscription quota cooldown](workflows.md#subscription-quota-cooldown) for
   the quota policy. The heartbeat also passes `--emit-run <path>`: the sweep
   writes the run it opens there, so /serve can link a sweep to the pulse run it
@@ -352,10 +334,10 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   `pulse-*` slug. It also passes its exact owned-PR observation through the
   internal `--pr-checks` argument, so a successful sweep acknowledges what its
   survey saw. New actionable failures on recorded pushed PRs can wake a sweep
-  without a journal change. A survey may nominate same-run CI repair with
-  `{"run":"<slug>","repair":"ci"}` in a singleton thread group. Dynamic consent
-  and safe-mode operator marks still apply; a fresh run note licenses retry
-  after the one-attempt-per-head journal claim is spent.
+  without a journal change. A survey may pick same-run CI repair with
+  `{"run":"<project>/<slug>","why":"…","repair":"ci"}`. Dynamic consent and
+  safe-mode operator marks still apply; a fresh run note licenses retry after
+  the one-attempt-per-head journal claim is spent.
 
 `moe <workflow> harvest [--no-edit] <project>/<run>` re-runs a run's
 `followups.md`, `feedback/lore.md`, and `feedback/twin.md` harvests — into

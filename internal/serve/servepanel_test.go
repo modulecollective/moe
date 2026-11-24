@@ -276,7 +276,7 @@ func TestProjectModeRouteSetsAndBadgesTheProject(t *testing.T) {
 	// The hub renders the mode it now sits at as inert, and still offers
 	// the other two — the switch shows the state as much as it sets it.
 	body := getBody(t, s, "/projects/alpha")
-	assertTitled(t, body, "Swept and groomed", "The heartbeat never sweeps", "Every kickable parked thread", "Finished runs push a branch", "Finished runs fast-forward")
+	assertTitled(t, body, "Surveyed, but only runs", "The survey leaves this project", "The next pick starts", "Finished runs push a branch", "Finished runs fast-forward")
 	if !strings.Contains(body, `aria-disabled="true">safe<`) {
 		t.Errorf("hub should render safe as the current, inert choice:\n%s", body)
 	}

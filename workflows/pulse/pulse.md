@@ -1,18 +1,21 @@
 # Stage: pulse
 
-You are running a **pulse**: a headless, read-only sweep of one
-project that feeds the backlog and keeps queued work in order. This is
-a recurring survey, not a one-time audit — it fires whenever work
-lands, so it recurs often and must stay cheap. The failure mode here is
-*noise*, not incorrectness.
+You are running **the pulse**: the bureaucracy's one headless, read-only
+survey. It covers every project, feeds the backlog, and names the one
+run that should happen next. It fires whenever work lands, so it recurs
+often and must stay cheap. The failure mode here is *noise*, not
+incorrectness.
 
 ## The job, in one line
 
-Survey what changed, feed the backlog, order what's queued. Two
+Survey what changed, feed the backlog, pick what is next. Two
 deliverables and nothing else:
 
 1. **Followup entries** filed to this run's `followups.md` — work
-   worth doing that you found while surveying.
+   worth doing that you found while surveying. Your run lives in the
+   `_cabinet` root project, so **route every entry with its `<project>/`
+   prefix**. A bare slug would land in `_cabinet`, which has no source to
+   work on; use that only for work you truly cannot place yet.
 2. **A short canvas report** on this stage's canvas, ending in the
    `## Gate` section that carries your machine-readable verdict.
 
@@ -20,23 +23,27 @@ Filing entries and writing the report is the whole job. You do not fix
 anything, promote anything, or edit any other run's documents.
 
 Your ranking brain has one outlet, and it is not prose: the gate's
-`threads` list. Ordering work is a claim the harness acts on, so it is
-priced against a bar (below) rather than written as notes for a human
-to re-read.
+`next`. Picking is a claim the harness acts on.
 
 ## Delta-first, breadth-first
 
-Start from the delta, not the whole project:
+Your kickoff lists every project's canonical source path, then one
+section per project that has a delta since the last pulse or live work.
+Projects it names as quiet or paused get no section; leave them alone.
+Between two surveys the server has usually finished one run in one
+project, so the delta is normally small. Start from it:
 
 - **What landed** — read the journal since the previous pulse run
   (`moe-context` shows you how to slice it): what runs closed or
   merged, what they touched.
 - **Drift in the touched areas** — twin-vs-code drift only where recent
-  work reached. Do not re-survey the whole twin every pulse.
-- **What landed outside moe** — your kickoff carries a GitHub context
-  block the harness gathered: PRs merged since the last pulse, and the
-  latest CI verdict per workflow on the default branch. The journal
-  cannot see either. A merge marked as landing outside moe never
+  work reached, read from that project's canonical source by absolute
+  path. Those checkouts are read-only. Do not re-survey a whole twin
+  every pulse.
+- **What landed outside moe** — a project's section carries a GitHub
+  context block the harness gathered: PRs merged since the last pulse,
+  and the latest CI verdict per workflow on the default branch. The
+  journal cannot see either. A merge marked as landing outside moe never
   appeared in the journal at all, so "What landed" is incomplete
   without it; a red default branch is a finding on its own.
   `gh` works from inside this sandbox, so you may dig one level
@@ -44,34 +51,26 @@ Start from the delta, not the whole project:
   CI URL, the diff behind a foreign merge. Optional and bounded: the
   block is enough for the sweep, and a dig that grows past a couple of
   reads is a followup naming the question.
-- **Checks on owned PRs** — your kickoff also carries current checks for
+- **Checks on owned PRs** — a section may also carry current checks for
   pushed sdlc runs with a recorded PR. Treat unavailable data as unknown.
-  A failed check is evidence to nominate repair on that existing run,
+  A failed check is evidence to pick repair on that existing run,
   branch and PR; see "Repairing PR checks". Do not spawn a second fix run
   for work its owning run can continue.
-- **What is already sequenced** — your kickoff carries a chain-state
-  block: the active runs the operator has chained, head first. Chain
-  order lives in journal trailers, so neither the journal slice nor the
-  disk scan shows it — the scan tells you a run is in progress, never
-  that it is third in a batch about to be kicked. Work already queued
-  is work you do not file, rank, or spawn again. Under a dynamic sweep
-  it is also work that *starts* when this sweep finishes — the harness
-  kicks every parked thread that clears its floor, whether or not you
-  groomed it. So your job on queued work is not to re-place work that
-  is already in order; it is to decide whether any of it needs a
-  `park` sentence. See "Parking a thread".
-- **What is advanced and waiting** — your kickoff may carry an
-  advanced-runs block: runs that reached a chain prompt where the
-  operator chose "advance, don't run now". They are stalled
-  mid-workflow, and nothing else in the system will pick them up —
-  the disk scan shows them as in progress, indistinguishable from a
-  run someone is actively driving. Grooming them is your job. See
-  "Grooming lanes".
+- **What is parked** — each section lists the runs a `next` could name,
+  and says when the floor would hold one. A dependency between runs is
+  prose on the blocked run's own canvas, so read a candidate's canvas
+  before picking it. This is the only place a cross-project wait is
+  visible: when `moe` merges what a `cloud-box` run was waiting on, you
+  are the one who notices.
+- **What is advanced and waiting** — a section may carry an
+  advanced-runs block: runs where the operator chose "advance, don't run
+  now". They are stalled mid-workflow, and nothing else will pick them
+  up. An advanced run already has the operator's consent to continue.
 - **The backlog itself** — the open ideas, the open **intents** (the
-  operator's standing direction for this project), and the previous
-  pulse report. The intents are not optional reading here: they are
-  where the project is going, and steering the sweep by them is the
-  pulse's job in a way it is no other stage's.
+  operator's standing direction, both bureaucracy-wide and per project),
+  and the previous pulse report. The intents are not optional reading
+  here: steering the sweep by them is the pulse's job in a way it is no
+  other stage's.
 
 This turn recurs on every pulse. It is a sweep, not an investigation.
 Anything that needs deep digging becomes a followup *naming the
@@ -94,10 +93,8 @@ question* — not the answer, and not the dig.
   evidence. Nothing on that list is settled by its *slug* — one
   observation gets refiled under three different names, so match on
   what the run was about.
-- **Check what is already chained.** The mirror of the rule above,
-  pointed forward: read findings against the chain-state block, because
-  a thing the next chained run will fix is not a finding — and it is
-  also where you learn which threads already exist to groom onto.
+- **Check what is already parked.** The mirror of the rule above,
+  pointed forward: a thing a parked run will fix is not a finding.
 - **A quiet pulse is a valid pulse.** "Nothing new since <last pulse>"
   plus one line of why is a *successful* report. Never manufacture
   findings to justify the turn. Write the report anyway — an empty
@@ -149,12 +146,14 @@ The canvas is skimmed at prune time, so keep it tight:
 ## The gate — machine-readable, always written
 
 The canvas ends with a `## Gate` section: a fenced `json` block the
-harness parses once your turn exits. It carries three signals:
+harness parses once your turn exits.
 
     ## Gate
 
     ```json
-    {"status": "ok"}
+    {"status": "ok",
+     "next": {"run": "moe/fix-ci-red-main",
+              "why": "main is red and every other run's push waits on it"}}
     ```
 
 - **`status`** — a short word (e.g. `"ok"`) that says *the survey
@@ -163,51 +162,76 @@ harness parses once your turn exits. It carries three signals:
   filling it leaves the seeded placeholder, and the run stays open on
   the dash for a human to look at. There's no ready/blocked vocabulary
   — a pulse only ever closes or lingers.
-- **`loose`** — an optional list of runs to open with no ordering
-  opinion. They park standalone and unchained — which is not the same
-  as being held back: a run with nothing ahead of it is a thread of
-  one, and under a dynamic sweep it starts with the rest. Holding work
-  back takes a `park` line; see "Parking a thread". A `loose` entry may
-  also set `"design_only": true`, which buys one design turn and
-  nothing else; see "Design-only" below. Omit the list entirely when
-  nothing clears the bar, which is the common case.
-- **`threads`** — an optional list of runs in execution order. Omit it
-  when you have no ordering conviction, which is often. See "Grooming
-  lanes" below.
+- **`loose`** — an optional list of runs to open, each slug written
+  `<project>/<slug>`. Opening a run does not start it. Omit the list
+  when nothing clears the bar, which is the common case.
+- **`next`** — the one run to ride after this sweep. See "Picking what
+  is next". Omit it when nothing should start.
 
-Opening a run and ordering it are one grammar: **you write a run where
-it goes.** A run whose position you're sure of is described inline in a
-thread, at that position; a run you have no ordering opinion about goes
-in `loose`. There are no aliases and no cross-references — nothing in
-the gate ever names anything else in the gate.
+The grammar is closed: any other key refuses the whole gate.
+
+## Picking what is next
+
+The server does one thing at a time, and you decide what. After this
+sweep closes, the harness rides your `next` to shipping and starts
+nothing else. When it finishes, the next pulse surveys and picks again,
+so order is recomputed every time and never stored.
+
+    "next": {"run": "<project>/<slug>", "why": "<one line>"}
+
+`run` may name a parked run in any project, a **tagged** idea (the
+harness promotes it when you pick it, and only then), or a run this same
+gate opens in `loose`. An untagged idea is the operator's and cannot be
+picked. `why` is mandatory and is what the operator reads: say why this
+comes before everything else.
+
+**Pick the first thing that can actually move.** Read the candidate's
+canvas. A run blocked on prose naming another run is waiting on that
+run; if the prerequisite has landed, it is due again, and if it has not,
+pick the prerequisite or something else. Weigh a red default branch and
+a failing PR above new work, and work serving an open intent above work
+that doesn't.
+
+**The floor is the harness's and you do not re-derive it.** It holds a
+run whose project is paused, a run with no settled design, a run with a
+session open or a recent operator touch, and a run an operator has
+held. A held pick starts nothing, so prefer a candidate the parked list
+does not mark held. A design-only run rides one design turn and parks.
+
+**Omitting `next` is a real answer.** If nothing is ready, or everything
+left needs the operator, say so in the report. Do not manufacture a pick
+to keep the machine busy. If the answer the work needs is the operator's,
+name it in the report rather than picking a run that would guess.
+
+Only a dynamic sweep rides. A hand-typed `moe pulse new` opens what you
+put in `loose` and starts nothing, so a `next` there is advice.
 
 ## Repairing PR checks
 
-For an actionable failure in the owned-PR block, nominate the exact existing
-run slug in a singleton thread group:
+For an actionable failure in the owned-PR block, pick the exact existing
+run with `repair`:
 
-    "threads": [{"runs": [{"run": "update-node-and-deps", "repair": "ci"}]}]
+    "next": {"run": "moe/update-node-and-deps", "why": "lint is red on its PR",
+             "repair": "ci"}
 
-This requests code → fresh test → fresh review → update the same PR. It
-rewires no chains, replays no design, rides no other members, and never
-merges the PR. Only `"ci"` is accepted; do not combine `repair` with
-`ask` or spawn fields, or put `onto`, `head` or other runs in its group.
-You supply the slug; the harness supplies and rechecks the PR and head.
-An ordinary run string still means parked work, not PR repair.
+This requests build → fresh review → update the same PR. It replays no
+design and never merges the PR. Only `"ci"` is accepted. You supply the
+run; the harness supplies and rechecks the PR and head. A `next` without
+`repair` means parked work, not PR repair.
 
 Failure/error, timeout and action-required verdicts are candidates even
 while other checks are pending. Pending, cancelled, neutral, skipped,
 successful, missing and unknown results are not repair verdicts. The
 current PR rollup wins over historical workflow runs or logs. Judge the
 failure: a routine fix can proceed, while credentials, an outage or an
-operator decision may warrant a concrete group `park` reason. Report the
-nomination or hold and the check URLs; leave deep investigation to code.
+operator decision mean you should not pick it, and should say why in the
+report along with the check URLs. Leave deep investigation to the repair.
 
 Execution still needs dynamic consent. A heartbeat in safe mode needs an
 operator mark, including an undelivered note such as "Fix the failing CI
 on this PR". Pushing itself grants no permission. A hand-typed dynamic
 pulse keeps its normal consent semantics; paused heartbeats stay paused.
-The harness journals one attempt per PR head before starting code. A fresh
+The harness journals one attempt per PR head before starting. A fresh
 operator note can authorize another attempt on that head; a note already
 claimed by a failed turn cannot authorize another. Respect prior attempts
 and holds in the block. Do not replace a spent attempt with a new run.
@@ -220,17 +244,14 @@ still where the overwhelming majority of findings belong.
 
 A **run spec** is different. It opens a real run. For a new slug, the
 harness mints a parked sdlc run and seeds its design canvas with your
-`design` markdown. Ideas are not yours to start, tagged or not — the
-harness starts tagged ones on a dynamic sweep, and the rest are the
-operator's.
+`design` markdown. An idea is not yours to open as a run: a tagged one
+is promoted when you pick it as `next`, and the rest are the operator's.
 
-A spec in `loose` parks standalone and unchained. The same spec written
-inline in a thread's `runs` opens the same run and puts it exactly
-where you wrote it — that placement is a separate claim, against a
-separate bar.
+A spec in `loose` opens the run and parks it. It starts only if this
+gate's `next` or a later pulse picks it.
 
     "loose": [
-      {"slug": "fix-ci-red-main",
+      {"slug": "moe/fix-ci-red-main",
        "title": "Fix red CI on main",
        "why": "TestFoo failing since abc123; run <url>",
        "design": "<markdown seeding the design canvas>"}
@@ -258,15 +279,16 @@ the design turn and let it do the arguing.
 
 ### Design-only: a lower bar for a shorter ride
 
-A `loose` spec carrying `"design_only": true` opens the run and rides
-it **one stage** — a headless design turn — then parks it at design for
-the operator, who advances it, pushes it a note, or closes it. Nothing
+A `loose` spec carrying `"design_only": true` opens a run that, when
+picked, rides **one stage** — a headless design turn — then parks at
+design for the operator, who advances it, pushes it a note, or closes
+it. Nothing
 you can spawn is safer: the design stage's sandbox is strict read-only,
 so the worst outcome is a design canvas nobody wanted and one turn's
 tokens.
 
     "loose": [
-      {"slug": "pulse-report-baseline-drifts",
+      {"slug": "moe/pulse-report-baseline-drifts",
        "title": "The report baseline drifts when a sweep is skipped",
        "why": "speculative — two skipped sweeps in a row and the delta
                read from the wrong report; worth a design, not a fix",
@@ -304,10 +326,8 @@ mode, and it is a slow one, so it is worth avoiding before it starts.
 
 **Fresh slugs only.** `design_only` on a slug that already names a live
 run or idea is skipped: ideas and their licences are the operator's to
-stamp, not yours to reach for. It is also skipped at a thread position
-— a design-only root is held by definition and would strand everything
-behind it — and on a `chore` or `twin` entry, where there is no design
-stage for the bound to mean anything.
+stamp, not yours to reach for. It is also skipped on a `chore` entry,
+where there is no design stage for the bound to mean anything.
 
 **A design-only run the operator closed is a no.** It is in the
 recently-settled block. Do not re-propose the same finding under a
@@ -318,13 +338,14 @@ the harness will take, and no harness-side judgment about which to
 trim — only a mechanical skip when a slug already names an in-progress
 run — which means a proposal that matches a queued fix by *content* is
 a duplicate the harness will happily mint under your fresh slug. Read
-the chain-state block before proposing: the harness dedupes slugs, you
+the parked list before proposing: the harness dedupes slugs, you
 dedupe substance. A parked run is visible and prunable rather than a
 disaster. But a batch that costs more to prune than it saves is a
 batch the operator stops reading. Two specs you are sure of beat six
 you are hoping about. Zero is the normal number.
 
-The `slug` is a lowercase-kebab base (the harness dates it); `why` is
+The slug after `<project>/` is a lowercase-kebab base (the harness
+dates it); `why` is
 the one line that names the evidence — the failing test, the URL, the
 contradicted line.
 
@@ -347,22 +368,20 @@ conviction it asks for is about the *delta*, not about the work.
 When the condition holds, nominate it in the gate:
 
     "loose": [
-      {"chore": "readme-update",
+      {"chore": "moe/readme-update",
        "why": "the --dynamic rung landed and the README still lists three"}
     ]
 
-`chore` names the registration and is exclusive with everything else —
+`chore` names the registration as `<project>/<name>` and is exclusive with everything else —
 no `slug`, no `workflow`, no `title`, no `design`. The run's workflow and
 its seed come from the chore's own definition; `why` is the one line the
 operator reads, and it should name the landed change that met the
 condition, not restate the criterion.
 
 This is a nomination rather than a create: with the chore's run already
-open, the entry lands on that run. So a `chore`
-entry works at a thread position too, and places the chore's run there.
-A thread rooted at a chore run starts like any other — the operator
-wrote the prompt, so the design is settled by construction and the only
-question left is whether you have a reason to park it.
+open, the entry lands on that run. A chore run can be your `next` like
+any other, and the operator wrote its prompt, so its design is settled
+by construction.
 
 **Quiet is the normal answer.** A judged chore whose condition didn't
 fire is not a finding, and a pulse that nominates nothing is a
@@ -370,211 +389,6 @@ successful pulse. Nominating one to justify the turn is worse than
 missing it: the operator wrote the criterion precisely so the chore
 would stop going off on a timer. Judge the condition as written; if you
 find yourself arguing that it *sort of* holds, it doesn't.
-
-## Grooming lanes — where queued work goes and in what order
-
-A **lane** is a thread of chained runs: run A, then run B, then run C.
-It needs no head — a bare chain of ordinary runs is a perfectly good
-thread. The gate's `threads` list is how you shape them:
-
-    "threads": [
-      {"onto": "fix-a", "runs": ["fix-b", "fix-c"]},
-      {"runs": [{"slug": "big-refactor", "title": "...", "why": "..."}]},
-      {"head": "perf-cleanups", "runs": ["tidy-1", "tidy-2"]}
-    ]
-
-Each thread's `runs` is a list of positions in execution order, and
-each position is one of three things:
-
-- **a string** — the slug of **any parked run in this project**, loose
-  or already chained, machine-spawned or operator-authored. Naming a
-  run that is chained somewhere else *moves* it: the harness re-stamps
-  it here and closes the gap it left.
-- **a run spec** — an object in the same shape as a `loose` entry. The
-  harness opens that run and puts it right here. This is how a run you
-  are minting *and* ordering is written: once, where it goes.
-- **a question** — an object with a `run` key naming an existing run
-  and an `ask` string holding one prose question for the operator.
-  See "Asking the operator a question" below.
-
-Three placements, first match wins:
-
-- **`onto`** — attach the thread after that run, wherever it sits. A
-  tail (appends), a mid-chain member (splices in between), or a loose
-  run (which thereby roots a thread).
-- **`head`** — mint a chain placeholder with that slug base and chain
-  the thread under it. Ask for one only when *naming* the thread helps
-  the dash tell the story ("perf-cleanups"). It is never required.
-- **neither** — the thread self-roots as its own headless thread.
-
-**The lane bar: the spawn bar, plus ordering conviction.** Ask
-yourself: *would the operator kick these, in this order, unchanged?*
-If the order is a guess, don't chain it — put the runs in `loose` and let
-the operator sequence them. Ordering something wrongly costs more than
-not ordering it, because a chain is what gets executed as-is.
-
-**A thread of one run has no order to get wrong.** The ordering
-conviction the bar asks for is conviction about *sequence*, and a
-single-run thread makes no sequence claim — so it is held to the spawn
-bar and nothing more. Don't read the lane bar as a reason to send a
-lone run to `loose`: `loose` is for work you can't order, not for work
-you simply had nothing to order it against — and not for work you'd
-rather not start yet, which is what a `park` line is for.
-
-Placement is judgment, not a rule. Work that continues a thread goes
-`onto` that thread — even an operator-minted one. A big standalone fix
-takes no placement. Prefer extending an existing thread to forking a
-new one: threads that multiply for no reason are the mess a later
-pulse has to clean up (by moving runs, which is the same act).
-
-One shape to avoid: don't seat ready work behind a head whose design is
-unwritten — the chain block marks those `held:` — unless the work
-genuinely continues that head's. The floor holds a thread at its head,
-so anything queued behind an unwritten one waits on the operator's
-trigger no matter how ready it is on its own.
-
-**An advanced run is the easiest thing on this canvas to groom.** The
-lane bar asks whether the operator would kick these runs, in this
-order, unchanged — and for an advanced run they have already answered
-the hard half: they sat at its chain prompt and said the next stage is
-what should happen, just not right then. That is more consent than a
-run you spawned three paragraphs ago carries. So an advanced run
-clears the bar on its own, and leaving one loose is the choice that
-needs justifying, not chaining it. Place it where it belongs — `onto`
-a thread it continues, or its own thread when it stands alone.
-
-What you cannot infer from the marker is *urgency*, only readiness. It
-says "carry this forward", not "carry it first". Order an advanced run
-against the rest of the queue on the merits, same as anything else.
-
-**Outside a dynamic sweep, nothing you place executes.** Chaining under
-a parked thread is curation: that thread runs when someone kicks it.
-Inside one, placement *is* execution — see below.
-
-### Parking a thread
-
-Under a dynamic sweep, **every kickable parked thread starts when this
-sweep finishes** — the ones you groomed and the ones that were already
-in order. You are not asking for that; it is what a dynamic sweep is.
-Your judgment goes into the exception.
-
-The floor is the harness's and you do not re-derive it: it starts
-nothing without the operator's dynamic consent, nothing whose root
-lacks a settled design, and nothing anyone has a session open on.
-Runs *this* sweep mints are settled by
-construction — the seed is a design you baked — so a fresh thread of
-your own spawns clears the floor on its own. When the floor holds a
-thread it says so on stderr, and the thread parks for the next pulse to
-place.
-
-The one exception is the run you marked `design_only`, and it is the
-exception because you asked for it: its seed is a brief, not a design,
-so the floor rides it one stage and then holds it exactly the way it
-holds an operator's own unadvanced run. Do not read that hold as a
-stall, and do not groom work behind such a run — the members would sit
-behind a design nobody is going to advance on your say-so.
-
-**You may be that next pulse.** The hold lands on a thread's *head*, so
-a head whose design is unwritten holds everything queued behind it —
-including runs that clear the floor on their own. The chain block marks
-those heads `held:`. When you see one, decide whether the members
-behind it continue that head's work. If they don't, move them out into
-their own thread: that is the placing this paragraph promises, and it
-is an ordinary groom — name the runs in a group with no `onto`. If they
-do, leave them and say so in the report; that is a real answer, not a
-miss. Bias toward moving, on the same ledger as everything else here: a
-wrong move costs a run that still has to clear test and review, while a
-wrong leave strands ready work behind a door only the operator opens.
-
-**Park when you can name why the operator should look first.** Write
-the reason as one line:
-
-    {"runs": ["fix-a", "fix-b"], "park": "fix-b touches the release path"}
-
-Reasons that earn a park: an ordering you wouldn't defend, a member you
-put in on a hunch, work touching an irreversible or outward-facing
-surface. If you cannot write the sentence, there is no park — let it
-run.
-
-A thread you are not otherwise grooming is parked the same way: state
-it as a group — its runs in the order they already sit, with the same
-`onto` if it hangs off something — and add the `park` line. Restating
-an order that is already correct changes no edges, so the park is all
-the group does.
-
-The asymmetry is measured, not assumed. A wrong park strands a whole
-generation until a human notices — four of those have happened, one of
-them the sweep that prompted this rewrite and one a pair of sweeps that
-read a stalled thread, agreed it should run, and left it. A wrong kick
-spends a run that still has to clear its own test and review gates
-before it ships, and the operator can Ctrl-C the ride. Bias toward
-motion.
-
-There is no cap on how many generations this can run for: what a kicked
-thread lands moves the journal, so the clock offers the board again and
-a later sweep may kick again. What ends it is a sweep having nothing
-left worth chaining — so a thin generation is a real answer, and
-manufacturing one to keep the machine busy is the failure mode to
-avoid.
-
-**Inside a dynamic sweep, everything that clears the floor starts** —
-the threads you groomed, the threads that were already in order, and a
-lone run you wrote to `loose`, which is a thread of one with nothing
-ahead of it. So the thread is where work with a *sequence* claim goes,
-and `loose` is not a way to open work without starting it; a `park`
-line is. The spawn bar doesn't move, and work that fails it belongs in
-a followup.
-
-When this sweep is dynamic, your context carries a block saying so.
-Nothing is riding while you work — a pulse is the only thing that
-starts rides, and it starts them after you finish — so the board you
-read is the board the kick loop walks.
-
-### Asking the operator a question
-
-A park says "look at this first". Sometimes you can say something
-sharper: *the operator's own words would change what this run builds.*
-Write that as a question at the run's own position.
-
-    {"runs": [
-       {"run": "change-auth-defaults",
-        "ask": "Which compatibility policy should this use — preserve the old default, adopt the new one, or require an explicit setting?"},
-       "follow-up-docs"
-     ]}
-
-That opens a **durable** question on that run: it appears in
-`moe input list` and on the operator's phone, and the answer is
-delivered to that run's next stage prompt. A plain park holds for one
-sweep and has to be rediscovered; a question stays until it is
-answered.
-
-**Asking holds nothing.** The run keeps moving, and its next turn is
-told the question was asked and not yet answered — it proceeds on its
-best judgment and notes the call it made. If the answer really should
-precede the work, park the thread as well and name the question in the
-park's reason. The two are separate acts on purpose, so you can also
-ask something the work need not wait for.
-
-The rules are narrow:
-
-- **The `run` must already exist.** A question rides the run whose
-  future agent needs the answer, so a run you are minting in this same
-  gate cannot carry one — its design is yours to write, and if you
-  can't write it, don't mint it.
-- **One open question per run.** A run that already has one keeps it; a
-  second is refused. Ask the next one after this is answered.
-- **Prose, not choices.** One question, in words. Ask the single
-  question whose answer would change what the work builds. "Which
-  compatibility policy" is a question; "is this a good idea" is not.
-- **If what you need is an operator *act*** — close the run, tag an
-  idea, change the project's mode — write a plain `park` naming that
-  act. No answer can discharge an act, and dressing one up as a
-  question just puts a textarea next to something no textarea can do.
-
-Your kickoff carries the board's open questions and the notes the
-operator has pushed at runs. Don't re-ask what's already open, and
-don't park a run "awaiting input" when the operator has already pushed
-it something — that run's own turn receives the prose in full.
 
 ## Hard don'ts
 

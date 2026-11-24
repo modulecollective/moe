@@ -358,3 +358,113 @@ func TestClosedChainRunStillLoadsAndRenders(t *testing.T) {
 		t.Fatalf("closed chain run's workflow no longer resolves: %v", err)
 	}
 }
+
+// A machine-ridden run that parked on a blocked gate must stay reachable:
+// the incident's run sat blocked at design, and a pick that cannot re-enter
+// it could never move it.
+func TestNextReentersARunParkedOnABlockedDesignGate(t *testing.T) {
+	defer withRideMode(rideDynamic)()
+	root, stages := nextFixture(t)
+	id := mintIn(t, root, "beta", "blocked-design")
+	canvas := filepath.Join(root, run.ContentPath("beta", id, "design"))
+	body := "# Design\n\n## Gate\n\n```json\n{\"status\":\"blocked\"}\n```\n\nWaiting on moe/other.\n"
+	if err := os.WriteFile(canvas, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	msg := "work: update design\n\n" + trailers.Block{
+		Run: id, Project: "beta", Workflow: "sdlc", Document: "design", Consent: "dynamic",
+	}.String()
+	if err := run.StageAndCommit(root, msg, canvas); err != nil {
+		t.Fatal(err)
+	}
+	code, stderr := sweepWithGate(t, root, `{"status":"ok","next":{"run":"beta/`+id+`","why":"its prerequisite landed"}}`)
+	if strings.Contains(stderr, "is held") || strings.Contains(stderr, "waiting at its first stage") {
+		t.Fatalf("the floor held a blocked machine run: %s", stderr)
+	}
+	if got := kickStages(*stages); len(got) == 0 || got[0] != id+":design" {
+		t.Fatalf("stages = %v (exit %d), want the design stage re-entered; %s", got, code, stderr)
+	}
+}
+
+func TestNextHeldBySafeModeWithoutAnOperatorMark(t *testing.T) {
+	defer withRideMode(rideDynamic)()
+	defer withClockInvoked()()
+	root, stages := nextFixture(t)
+	id := mintIn(t, root, "beta", "unmarked-work")
+	if err := project.SetMode(root, "beta", project.ModeSafe); err != nil {
+		t.Fatal(err)
+	}
+	code, stderr := sweepWithGate(t, root, `{"status":"ok","next":{"run":"beta/`+id+`","why":"try"}}`)
+	if code != 0 || len(*stages) != 0 || !strings.Contains(stderr, "safe mode") {
+		t.Fatalf("exit=%d stages=%+v stderr=%s", code, *stages, stderr)
+	}
+}
+
+func TestNextOnAnUnsettledDesignIsHeld(t *testing.T) {
+	defer withRideMode(rideDynamic)()
+	root, stages := nextFixture(t)
+	if _, err := runopen.Open(root, "beta", run.Options{
+		ID: "typed-sketch", Workflow: "sdlc",
+		SeedDocs: map[string]string{"design": "# Only a seed\n"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	code, stderr := sweepWithGate(t, root, `{"status":"ok","next":{"run":"beta/typed-sketch","why":"try"}}`)
+	if code != 0 || len(*stages) != 0 || !strings.Contains(stderr, "the operator holds the trigger") {
+		t.Fatalf("exit=%d stages=%+v stderr=%s", code, *stages, stderr)
+	}
+}
+
+func TestNextOnAnUntaggedIdeaIsHeld(t *testing.T) {
+	defer withRideMode(rideDynamic)()
+	root, stages := nextFixture(t)
+	if _, err := runopen.Open(root, "beta", run.Options{
+		ID: "human-idea", Workflow: "idea",
+		SeedDocs: map[string]string{"idea": "# Mine\n"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	code, stderr := sweepWithGate(t, root, `{"status":"ok","next":{"run":"beta/human-idea","why":"try"}}`)
+	if code != 0 || len(*stages) != 0 || !strings.Contains(stderr, "untagged idea") {
+		t.Fatalf("exit=%d stages=%+v stderr=%s", code, *stages, stderr)
+	}
+}
+
+// One sweep surveys every project, so its exit moves every dispatched
+// cursor, except where work it could not have seen landed in the window,
+// and never for a project held out of the sweep.
+func TestRootSweptMovesEachDispatchedCursorOnItsOwnEvidence(t *testing.T) {
+	root, _ := nextFixture(t)
+	quiet := mintIn(t, root, "moe", "quiet-work")
+	busy := mintIn(t, root, "beta", "busy-work")
+	_ = quiet
+	base := map[string]string{}
+	for _, p := range []string{"moe", "beta"} {
+		tip, _, _, ok := projectJournalTip(root, p)
+		if !ok {
+			t.Fatalf("no tip for %s", p)
+		}
+		base[p] = tip
+	}
+	// A ride lands in beta during the sweep.
+	msg := "work: update design\n\n" + trailers.Block{
+		Run: busy, Project: "beta", Workflow: "sdlc", Document: "design", Consent: "dynamic",
+	}.String()
+	if err := git.Run(root, "commit", "--allow-empty", "-m", msg); err != nil {
+		t.Fatal(err)
+	}
+	g := newHeartbeatGate(root)
+	g.dispatched["moe"], g.dispatched["beta"] = base["moe"], base["beta"]
+
+	g.Swept(project.RootID, true)
+
+	if g.surveyed["moe"] != base["moe"] {
+		t.Errorf("moe surveyed = %q, want its tip %q", g.surveyed["moe"], base["moe"])
+	}
+	if _, moved := g.surveyed["beta"]; moved {
+		t.Error("beta's cursor moved past a ride the survey never saw")
+	}
+	if len(g.dispatched) != 0 {
+		t.Errorf("dispatched not consumed: %v", g.dispatched)
+	}
+}

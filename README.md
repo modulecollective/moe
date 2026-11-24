@@ -14,11 +14,11 @@ and every turn is committed to a personal Git journal, so the project keeps
 memory that can be resumed, reverted, audited, and reused.
 
 Work travels as far as you license, and no further. Typed, that's a bang
-grammar: `!` runs one stage and parks at the gate, `!!!` ships the run and rides
-the chain queued behind it. Standing, it's an armed `moe serve --dynamic`, whose
-heartbeat surveys each project's board, opens work that's ready — a due chore, a
-tagged idea, a parked chain — and rides it through build, review, and ship while
-you're away. Stopping serve prevents new sweeps; already-launched Rex-hosted
+grammar: `!` runs one stage and parks at the gate, `!!` ships the run. Standing,
+it's an armed `moe serve --dynamic`, whose heartbeat surveys every project's
+board, picks the one thing that should happen next — a due chore, a tagged idea,
+a parked run — and rides it through build, review, and ship while you're away,
+one run at a time. Stopping serve prevents new sweeps; already-launched Rex-hosted
 sweeps and the rides they carry can finish independently.
 
 Underneath is a bet that agents have made careful work cheap. When a designed,
@@ -57,15 +57,13 @@ wrote, each turn committed to the journal.
 
 The bangs are the lever for how far a run travels without you: `!` runs just
 the next stage and parks at the gate, `!<stage>` runs up to a named gate, `!!`
-ships this run, and `!!!` ships it and rides on into the next queued run. The
-full vocabulary — every stage spelled out, chains, and the matching CLI flags —
-is in [docs/workflows.md](docs/workflows.md#sdlc).
+ships this run. The full vocabulary — every stage spelled out and the matching
+CLI flags — is in [docs/workflows.md](docs/workflows.md#sdlc).
 
-`!!!` is where the economics turn: shape a few runs during the day,
-`moe chain edit` them into a sequence, and fire `!!!` once as you step away.
-The chain then codes, tests, reviews, and ships on capacity your flat-rate dev
-subscription already pays for while you sleep — each run still gated,
-journaled, and revertible in the morning.
+The armed server is where the economics turn: shape a few runs during the day,
+tag the ideas you want done, and step away. It then works through them one at a
+time on capacity your flat-rate dev subscription already pays for while you
+sleep — each run still gated, journaled, and revertible in the morning.
 
 The standing rung removes even that keystroke. Leave `moe serve --dynamic`
 running and its heartbeat finds ready work across each project's board, opens
@@ -159,8 +157,7 @@ full treatment.
 | [`chat`](docs/workflows.md#chat) | one `chat` run, continued across sittings | a read-only thinking partner that reviews the project and grooms the backlog |
 | [`idea`](docs/workflows.md#ideas) | one `idea` canvas, edited through verbs | backlog capture before a full run exists |
 | [`intent`](docs/workflows.md#intents) | one `intent` canvas, edited through verbs | operator-authored standing direction agents read but never originate |
-| [`pulse`](docs/workflows.md#pulse) | `pulse` | a read-only survey, fired by the armed serve's heartbeat or by hand, that feeds the backlog, grooms queued work into lanes, and under `--dynamic` starts what's ready |
-| [`chain`](docs/workflows.md#chains) | one `chain` purpose note, no stages | a placeholder head: the batch chained behind it rides as one on `moe chain kick` |
+| [`pulse`](docs/workflows.md#pulse) | `pulse` | a read-only survey, fired by the armed serve's heartbeat or by hand, that feeds the backlog and, under `--dynamic`, picks and rides the one run that should happen next |
 
 Four bureaucracy-side artifacts have no workflow of their own — project
 [hooks](docs/workflows.md#hooks), [chores](docs/workflows.md#chores),
@@ -175,7 +172,7 @@ nothing to the target repo — build's `test.md` gate says so (`ship: none`) and
 ## Going Deeper
 
 - [docs/workflows.md](docs/workflows.md) — how to drive each workflow:
-  commands, stages, cascades, and chains.
+  commands, stages, and cascades.
 - [docs/concepts.md](docs/concepts.md) — the moving parts: runs and canvases,
   the bureaucracy repo, sandboxes and workspaces, feedback channels, and how
   agents are steered.

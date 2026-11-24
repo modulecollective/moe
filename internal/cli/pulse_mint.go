@@ -109,7 +109,7 @@ type pulseMinter struct {
 //
 // No numeric cap. The harness has no basis for judging which proposals
 // to trim, and parked is itself the review gate: spawned runs are
-// visible on the dash and prunable with `moe chain edit`. Over-proposal
+// visible on the dash and closable. Over-proposal
 // is visible junk, which the pulse already prefers to invisible absence.
 // The bar — mechanical, bounded, verifiable — is taught in the stage
 // fragment, where judgment belongs.

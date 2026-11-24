@@ -65,7 +65,7 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 		moePrintln(stderr, "MOE_SERVE_NOTIFY_URL optionally sets the sweep-exit webhook.")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "`moe project mode <id> paused|safe|auto` sets one project's clock cap")
-		moePrintln(stderr, "without stopping anything: paused is never swept, safe is swept and groomed")
+		moePrintln(stderr, "without stopping anything: paused is left alone, safe is surveyed")
 		moePrintln(stderr, "but starts only what you marked, and auto is uncapped. Mode binds the")
 		moePrintln(stderr, "clock, not you.")
 	}

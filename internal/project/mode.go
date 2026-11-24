@@ -11,7 +11,7 @@ import (
 // the clock do here".
 //
 // It is a cap on the *heartbeat*, not on the operator. Everything typed
-// — `!`, `!!`, `!!!`, `moe chain kick`, stage verbs, serve's per-run
+// — `!`, `!!`, stage verbs, serve's per-run
 // chips, and a hand-typed `moe pulse new --dynamic` — runs in every
 // mode. The typed word is consent whatever the standing config says; the
 // mode governs only what the machine does uninvoked. Serve's global
@@ -26,12 +26,11 @@ import (
 type Mode string
 
 const (
-	// ModePaused: no automated work at all. The heartbeat never sweeps
-	// the project, so not even an agent turn is spent looking.
+	// ModePaused: no automated work at all. The one sweep leaves the
+	// project alone and a pick there starts nothing.
 	ModePaused Mode = "paused"
-	// ModeSafe: the heartbeat sweeps as ever — survey, groom, park, chore
-	// nomination — but the kick starts only threads carrying an explicit
-	// operator mark. Safe keeps the machine proposing; it stops the
+	// ModeSafe: surveyed as ever, but a pick starts only a run carrying
+	// an explicit operator mark. Safe keeps the machine proposing; it stops the
 	// machine disposing.
 	ModeSafe Mode = "safe"
 	// ModeAuto: today's behaviour, and the default.

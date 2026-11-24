@@ -17,9 +17,9 @@ var tips = map[string]string{
 	"resume":  "Release the hold. Starts nothing; the run waits for the next eligible sweep.",
 
 	// Project modes (project.Modes).
-	"paused": "The heartbeat never sweeps this project.",
-	"safe":   "Swept and groomed, but only threads you marked are started (an advance, a tag, a chore, an undelivered note or answer).",
-	"auto":   "Every kickable parked thread is started. The default.",
+	"paused": "The survey leaves this project alone and starts nothing here.",
+	"safe":   "Surveyed, but only runs you marked can start (an advance, a tag, a chore, an undelivered note or answer).",
+	"auto":   "The next pick starts if it clears the floor. The default.",
 
 	// Ship routes (project.Ships).
 	"pr":    "Finished runs push a branch and open a PR; the run stays pushed until it merges.",

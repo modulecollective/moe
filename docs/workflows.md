@@ -18,10 +18,10 @@ back to `build` or `design`, not to decorate the ladder.
 `moe sdlc` is the main software-development workflow:
 
 ```sh
-moe sdlc new [--workspace <project>/<name>] [--agent <name>] [--seed] [--park|--ship|--chain] <project>/<slug>
-moe sdlc design [--workspace <project>/<name>] [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
-moe sdlc build  [--workspace <project>/<name>] [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
-moe sdlc review [--workspace <project>/<name>] [--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>
+moe sdlc new [--workspace <project>/<name>] [--agent <name>] [--seed] [--park|--ship] <project>/<slug>
+moe sdlc design [--workspace <project>/<name>] [--agent <name>] [--once | --to=<stage> | --ship] <project>/<run>
+moe sdlc build  [--workspace <project>/<name>] [--agent <name>] [--once | --to=<stage> | --ship] <project>/<run>
+moe sdlc review [--workspace <project>/<name>] [--agent <name>] [--once | --to=<stage> | --ship] <project>/<run>
 moe sdlc push [--pr|--merge] <project>/<run>
 moe sdlc shell  <project>/<run>
 ```
@@ -98,21 +98,15 @@ stub and opens the run with your edited body as the first-stage seed (mutually
 exclusive with `--from-idea`, which already claims that seed). `--park` opens
 the run and stops, printing the next-stage hint instead of prompting to run
 the first stage — handy for minting a run to pick up later. Opposite it sits
-the cascade ladder, the same one the chain prompt spells in bangs: `--ship`
-(= `!!`) opens the run and cascades every stage headless through push, then
-ships — fire-and-forget; `--chain` (= `!!!`) does that and rides the chain the
-run heads. The rungs are a ladder, not modifiers — pick one, and `--park`
-excludes both. Every tail composes with either seed: `--seed --park` mints from
-a typed seed and walks away, `--from-idea --chain` promotes an idea and rides
-it. All ride the shared `new` facade, so
-every workflow's `new` that takes `--from-idea` takes these too (a cascade tail
-needs the workflow to have a cascade dispatcher, which it refuses to mint a
-run without). These tails reach past `new`: `moe chore open` and `moe sdlc
-reopen` — the other creators that end at the chain prompt — take `--park` and
-the whole `--ship`/`--chain` ladder with the same meaning. (`--chain`'s ride
-is usually a no-op on a freshly minted run, which heads no chain yet; it's
-offered because the ladder is one vocabulary and the rung's consent is what
-matters — same as `new --chain` on a fresh run.)
+`--ship` (= `!!`), which opens the run and cascades every stage headless through
+push, then ships — fire-and-forget. `--park` excludes it. Either tail composes
+with either seed: `--seed --park` mints from a typed seed and walks away,
+`--from-idea --ship` promotes an idea and ships it. All ride the shared `new`
+facade, so every workflow's `new` that takes `--from-idea` takes these too (a
+cascade tail needs the workflow to have a cascade dispatcher, which it refuses
+to mint a run without). These tails reach past `new`: `moe chore open` and `moe
+sdlc reopen` — the other creators that end at the chain prompt — take `--park`
+and `--ship` with the same meaning.
 
 ### Cascades: the bang vocabulary
 
@@ -123,16 +117,14 @@ Every cascade is headless — the axis is *how far*, not *how*:
 - `!<stage>` runs headlessly up to that named gate, without shipping.
 - `!!` runs every remaining stage headlessly and ships **this run** (or
   auto-closes, for workflows without a push gate), then stops.
-- `!!!` is the same as `!!`, but after this run ships it **rides the whole
-  chain** — cascading into the next live chained run. It is the top rung: what
-  is chained when you type it is what runs, because nothing sweeps mid-ride.
+- `!!!` is a synonym for `!!`, kept so old muscle memory ships instead of
+  declining.
 
 The cascade mode flags on `design`/`build`/`review` mirror the chain
 prompt's bang vocabulary at the CLI: `--once` (= `!`) dispatches one stage
 headless and parks at the next gate; `--to=<stage>` (= `!<stage>`) walks
 headless to a named gate; `--ship` (= `!!`) cascades headless through push
-and ships this run; `--chain` (= `!!!`) does the same and then rides the
-whole chain. The four
+and ships this run. The three
 cascade flags are mutually exclusive; `--agent` combines
 with them by switching the run's persisted agent before the cascade walks the
 stages, so every cascaded stage runs on the switched agent.
@@ -202,82 +194,6 @@ alike. The reasoning is durable (it is the committed canvas) and the run stops
 being re-offered on every sweep; `moe sdlc reopen` mints a successor seeded from
 that canvas if the operator disagrees. A close that fails — lock contention, a
 dirty tree — warns and leaves the run open. sdlc only.
-
-### Chains
-
-Chains are the batch version of that same forward motion for active SDLC runs.
-Why they exist: Claude Code and Codex run on flat-rate dev subscriptions, so
-the capacity you don't use while sleeping or at dinner is already paid for.
-Chains turn that idle capacity into throughput. Shape work into designed runs
-during the day, `moe chain edit` them into a sequence, fire `!!!` once as you
-step away, and the chain codes, tests, reviews, and ships unattended — each run
-still gated, journaled, and revertible in the morning.
-
-Every chain roots in operator consent, which is either typed — the bang you
-fire — or standing, an armed `moe serve --dynamic` whose
-[heartbeat](#the-heartbeat) is the one clock MoE carries. Stopping serve stops
-that clock from starting new sweeps. MoE ships no cron of anyone else's. Typed,
-the story is "you pull the trigger at 6pm and the work outlasts your
-attention", not "MoE runs at night"; standing, it is "the clock you armed keeps
-asking", under every guard a typed ride runs under.
-
-`moe chain edit` opens every active chainable run across projects in `$EDITOR`
-— every operator-cascade workflow (SDLC today) plus chain heads — grouped into
-blocks that mirror the dash's chains. A blank line is a chain boundary: each
-contiguous block of run lines becomes one linear chain (each line chains-to
-the one below it in its block; the block's last line chains-to nothing). The
-editor is WYSIWYG — the blocks you see are the chains you get.
-Move a line into another block to fold it into that chain, and isolate a run in
-its own block (or delete its line) to unchain it. Saving unchanged is a no-op.
-
-`moe dash` shows a `chained -> <project>/<run>` hint for active parents with a
-live child. When a `!!!` cascade reaches the end of a chained parent, MoE
-starts the child at its first pending stage: a fresh child starts at `design`,
-while a partly completed child resumes where it is parked. (`!!` ships the
-parent and stops — it does not ride into the child.) `moe chain clear` drops
-every currently-live chain edge in one commit.
-
-A chain's handle moves every time its head ships, which is awkward when you want
-to collect work under a stable name. `moe chain new <project>/<slug>` mints a
-**chain run**: a placeholder head that registers no stages, so it is done the
-moment it exists and no agent ever opens it. Name it for the topic it collects,
-and keep as many live at once as you have topics.
-
-```sh
-moe chain new moe/perf-cleanups     # mint a head to collect under
-moe chain note moe/perf-cleanups    # why this batch exists
-moe chain edit                      # move runs beneath it
-moe chain kick moe/perf-cleanups    # ride the batch as it stands
-moe chain close moe/perf-cleanups   # drop the head without riding
-```
-
-A head's canvas is its **purpose note**: what ties the batch together, in your
-words. It's the one thing the chain edges can't tell you, and it's optional —
-`moe chain new` returns immediately with an empty note, `--seed` pops `$EDITOR`
-at mint, and `moe chain note` writes it whenever. Membership is not written
-there. The head's run page in `moe serve` renders the batch live from the
-edges, one row per member with the dash's own status vocabulary — the batch a
-kick would actually ride, so you can read it before typing one. The kick itself
-stays a terminal verb: a hand-staged head is a deliberate staging fence, and
-staging is something you do at a keyboard.
-
-`moe chain kick` is a programmatic `!!!` aimed at one named head: it cascades
-that run to its ship, then rides on into each chained run in order. A chain-run
-head has no stages to walk, so it just closes and the ride carries on. An
-ordinary run works too — it ships first, then rides its children — and a run
-with no children is a chain of one, so kick is also how you fire a single parked
-run headlessly. Kick refuses a run that is itself chained under another; kick
-the head instead.
-
-Kick exits non-zero if any run in the chain stalls — the stalled stage's own
-exit code, with a `chain ride into <run> exited N` line on stderr naming where.
-A cron or script driving kick can treat the exit code as "the whole chain rode
-clean", and read stderr only when it didn't. `!!!` behaves the same way.
-
-When you type an older idea or run slug into an SDLC command, MoE follows
-promotion and reopen trailers where it can. In an interactive shell it can ask
-whether you meant the current descendant; in non-interactive use it prints a
-hint.
 
 ### Seeing and steering a running run
 
@@ -374,10 +290,9 @@ observation work.
 None of them interrupts an agent. The owner finishes the turn it is on —
 commit, transcript, input stamps, any recovery that turn needs — and acts at
 its next boundary: before the next stage, a gate kickback, a ship attempt, a
-nominated close, the chain ride, or while it waits for quota or at the
+nominated close, or while it waits for quota or at the
 next-stage prompt (both wake on a control). A yield exits 77, which a sweep
-reads as the operator's decision: no failure backoff, and unrelated threads
-carry on.
+reads as the operator's decision: no failure backoff.
 
 **Pause and handoff hold the run** from the moment they are accepted until
 an explicit resume — across sweeps, restarts and disconnects, and against
@@ -395,13 +310,12 @@ it in place.
 **Park** asks only the current owner to yield, holds nothing, and is retired
 if that owner is gone before it reaches a boundary. It is refused when no
 owner answers, since there is nothing to address. **Finish** is `!!` for this
-run alone: through the same gates and ship route, then no chain ride. It
-applies at the next-stage prompt, at the next kick (widening a `!`, narrowing
-a `!!!`), from the stage after the one a running `!` kick is on, or on an open
-CI repair's existing PR; it does not start an idle run. A walk through the run
-that fails — a kick, a typed cascade, a chain ride, a stage entered on its
-own, or a CI repair — or a kick that meets a blocked gate or stops short of
-shipping is the finish's outcome: it is recorded as failed, not kept for a
+run alone: through the same gates and ship route. It applies at the next-stage
+prompt, at the next ride (widening a `!`), from the stage after the one a
+running `!` ride is on, or on an open CI repair's existing PR; it does not start
+an idle run. A walk through the run that fails — a ride, a typed cascade, a
+stage entered on its own, or a CI repair — or a ride that meets a blocked gate
+or stops short of shipping is the finish's outcome: it is recorded as failed, not kept for a
 later ride. If that receipt cannot be committed, it is kept under
 `.moe/control-unrecorded/` and the finish grants nothing; the next owner
 records it before starting work, and yields while it still cannot. Until then
@@ -652,7 +566,7 @@ moe chore edit <project>/<name> [--cadence D]  # edit those fields, or open the 
 moe chore rm <project>/<name>                 # remove the definition
 moe chore list [--project <p>]                # show what's due
 moe chore check [--project <p>] [<project>/<chore>]  # dry-run validation and due-state
-moe chore open [--now] [--park|--ship|--chain] <project>/<chore>  # open the seeded run for a due chore
+moe chore open [--now] [--park|--ship] <project>/<chore>  # open the seeded run for a due chore
 moe chore skip <project>/<chore>              # clear a due chore until it is next triggered
 ```
 
@@ -687,64 +601,71 @@ the chore mechanically due.
 
 ## Pulse
 
-A pulse is a read-only sweep of one project that feeds the backlog and grooms
-queued work into lanes. "Work just landed — what's next?" is a reflex worth
-automating, but only inside consent bounds: **the only pulse that fires on its
-own is the clock's**, and the only clock is one you started — `moe serve
---dynamic` carries a resident heartbeat (see [the heartbeat](#the-heartbeat)
-below). No verb tails a sweep. A ship is quiet whatever bang drove it, a `moe
-chain kick` rides the batch you kicked and nothing else, and `moe sync` never
-pulses. `moe pulse new <project>` is the manual valve.
+The pulse is the bureaucracy's one read-only survey. It covers every project,
+feeds the backlog, and names the one run that should happen next. "Work just
+landed — what's next?" is a reflex worth automating, but only inside consent
+bounds: **the only pulse that fires on its own is the clock's**, and the only
+clock is one you started — `moe serve --dynamic` carries a resident heartbeat
+(see [the heartbeat](#the-heartbeat) below). No verb tails a sweep. A ship is
+quiet whatever bang drove it, and `moe sync` never pulses. `moe pulse new` is
+the manual valve; it takes no project, and naming one is refused.
 
-Growth is therefore clock-paced rather than recursive. A ride's own commits
-move the journal tip, so the next tick's sweep sees the generation it landed
-and can start the next one; nothing starts work in the middle of a ride. What
-that costs is latency — a finding after a ship waits for the next tick (≤20
-minutes) or a hand-run pulse. What it buys is one walker: a sweep's picture of
-the board stays the board it walks, so what it says it is starting is what
-starts.
+A pulse lives in **`_cabinet`**, the root project that stands for the
+bureaucracy itself. `_cabinet` has no submodule or remote and is created the
+first time something needs it. Besides the pulse it holds top-level intents,
+which reach every project's prompts above that project's own, and top-level
+ideas: work you can log without choosing a project (`moe idea new
+_cabinet/disk-ran-out`). Source stages refuse it, so `moe sdlc new _cabinet/x`
+is an error. The survey reads each project's canonical checkout at
+`projects/<p>/src` by absolute path, so a pulse needs no clone.
+
+The server is serial: an armed serve has one working agent across the whole
+bureaucracy. Each sweep picks one run, that run rides, and the next sweep picks
+again, so order is recomputed every time and never stored. A dependency between
+runs is prose on the blocked run's canvas, and the survey is its reader. What
+that costs is throughput and latency: a survey before every run, and up to a
+twenty-minute tick between them. What it buys is that nothing has to be
+hand-sequenced, and a run that was waiting on another project becomes visible
+the moment that project's work lands.
 
 The LLM supplies content judgment: what warrants a followup, a bounded fix,
-a design investigation, a judged chore, a repair or a park. The harness
+a design investigation, a judged chore, a repair or the next pick. The harness
 validates those nominations and enforces consent, deduplication, readiness and
 execution. A heartbeat tick first checks mechanically whether a sweep is
 warranted; it does not automatically spend an LLM turn.
 
 Every pulse does three things:
 
-- **Chore auto-open (always).** Every *mechanically* due chore for the project
-  gets its run opened — the same seeded run `moe chore open` would mint — and
+- **Chore auto-open (always).** Every *mechanically* due chore in a non-paused
+  project gets its run opened — the same seeded run `moe chore open` would mint — and
   nothing more. No stage executes; the opened runs wait in `moe dash` like any
   other. This is automation acting on a chore definition you authored, never a
   fresh decision. Judged chores are not opened here: their condition is the
   survey's to evaluate, below.
-- **PR reconcile (always).** The project's `pushed` runs are checked against
-  GitHub — the same walk `moe sync` does, scoped to this project — so a PR you
-  merged from your phone reads as `merged` before the survey looks at the
+- **PR reconcile (always).** Each non-paused project's `pushed` runs are
+  checked against GitHub — the same walk `moe sync` does — so a PR you merged from your phone reads as `merged` before the survey looks at the
   delta. Pointer bumps stay `moe sync`'s job. Offline or without `gh`, this
   warns once and the sweep carries on.
-- **The survey (every fire).** A headless, read-only agent sweep — it reads
-  the journal since the last pulse, the twin, and the open backlog; files
-  followups; and writes a short report ending in a machine-readable `## Gate`.
-  It also judges the project's **judged chores**: for each, does what landed
-  meet the condition the operator wrote? When it does, the gate nominates the
-  chore and the harness opens its ordinary chore run. The gate may also open
-  parked runs and order queued work into chained lanes, in one grammar: a run
-  with no ordering opinion goes in `loose`, a run whose position the sweep is
-  sure of is written inline at that position in `threads`. A `loose` entry may
-  set `"design_only": true`, which opens the run, rides it one headless design
-  turn and parks it — the sweep's rung between filing a followup and proposing
-  a fix. See "Grooming lanes" in the stage guidance. A clean sweep auto-closes
-  its own run: the filed followups harvest straight into ideas (review them by
-  scrapping on the dash). Every fire runs a fresh sweep unconditionally — a
-  lingering open pulse run means a failed or abandoned sweep, sitting visible
-  on the dash's ACTIVE list until you inspect and close it, but it never
-  blocks the next survey.
+- **The survey (every fire).** A headless, read-only agent sweep. Its kickoff
+  lists each project's source and carries one section per project with a delta
+  since the last pulse or live work; paused and quiet projects are named and
+  skipped. It reads the journal since the last pulse, the twin where work
+  landed, and the open backlog; files followups with `<project>/` routing; and
+  writes a short report ending in a machine-readable `## Gate`. It also judges
+  **judged chores**: does what landed meet the condition the operator wrote?
+  The gate has three keys. `status` says the survey concluded. `loose` opens
+  runs, each slugged `<project>/<slug>`; an entry may set `"design_only": true`,
+  the rung between filing a followup and proposing a fix. `next` names the one
+  run to ride, with a reason. A clean sweep auto-closes its own run: the filed
+  followups harvest straight into ideas (review them by scrapping on the dash).
+  Every fire runs a fresh sweep unconditionally — a lingering open pulse run
+  means a failed or abandoned sweep, sitting visible on the dash's ACTIVE list
+  until you inspect and close it, but it never blocks the next survey.
 
 ```sh
-moe pulse new <project>                  # run the whole pulse by hand (chore auto-open + survey)
-moe pulse cat <project>/<run> pulse      # read a sweep's report
-moe pulse close [--no-edit] <project>/<run>  # close a failed or interrupted sweep by hand
+moe pulse new                            # run the whole pulse by hand (chore auto-open + survey)
+moe pulse cat _cabinet/<run> pulse       # read a sweep's report
+moe pulse close [--no-edit] _cabinet/<run>  # close a failed or interrupted sweep by hand
 ```
 
 A sweep is machine-paced and has no re-open verb: a failed one is read with
@@ -753,9 +674,9 @@ running another. The survey blocks with a `Ctrl-C to skip` banner. Interrupting
 before a pulse run opens leaves no run to clean up. If the run has been minted
 but the survey agent has not started, MoE closes the unused run with a skip
 note. Once the agent has started, interrupting leaves the run open for
-inspection and closing. An interrupted survey applies no gate proposals,
-grooming, or kicks, and the next survey starts fresh; chores already opened by
-the pre-survey pass are not rolled back.
+inspection and closing. An interrupted survey applies no gate proposals and
+starts nothing, and the next survey starts fresh; chores already opened by the
+pre-survey pass are not rolled back.
 
 `moe pulse new` is also the verb an external cron would call — the primitives
 are cron-safe, but MoE ships no cron of anyone else's. The one clock it does
@@ -769,13 +690,12 @@ going through a run.
 
 Current checks on recorded PRs belonging to pushed sdlc runs appear in a
 separate block, including the head, check URLs and prior repair claims. A survey
-can nominate `{"run":"<exact-slug>","repair":"ci"}` as the only entry in a
-`threads[].runs` group, with no `onto` or `head`; `park` can withhold it. Under
-dynamic consent, build first passes quota admission; the harness then rechecks
-the current PR and claims an attempt in the journal before implementation. That
-build turn implements and verifies the repair, stamping both build canvases
-ready before a fresh review follows. Then that PR is updated without merging or
-riding other chain members. Safe-mode heartbeats still need an operator mark;
+can pick `{"run":"<project>/<slug>","why":"…","repair":"ci"}` as its `next`.
+Under dynamic consent, build first passes quota admission; the harness then
+rechecks the current PR and claims an attempt in the journal before
+implementation. That build turn implements and verifies the repair, stamping
+both build canvases ready before a fresh review follows. Then that PR is updated
+without merging. Safe-mode heartbeats still need an operator mark;
 add a note with `moe input add <project>/<run>` to authorize repair. One
 automatic attempt is allowed per head across restarts. A fresh note can
 authorize a retry on the same head, and each note can license only one claim.
@@ -783,66 +703,53 @@ Quota deferral before the claim spends no attempt. Deferral after the claim
 stops the repair, keeps the claim spent, and requires operator recovery or fresh
 input; it creates no automatic repair continuation. Unavailable checks are
 unknown, and successful, pending or cancelled checks do not nominate repair. The
-survey judges whether failure warrants a repair or a concrete hold; the
-heartbeat never starts build directly.
+survey judges whether failure warrants a repair; the heartbeat never starts
+build directly.
 
-### Proposed work and grooming
+### Proposed work and the next run
 
 Most of what a survey finds becomes a followup. When it finds work that is
 mechanical, bounded, and verifiable — a red check with a named failing test,
 documentation the code plainly contradicts — it may open or nominate an
-ordinary `sdlc` or chore run. Tagged ideas are not the survey's call: a dynamic
-sweep promotes every one the gate left alone.
+ordinary `sdlc` or chore run in `loose`. Opening a run does not start it.
 
-The survey can place new and existing queued runs into ordinary chain threads,
-leave them loose when it has no ordering opinion, or add a chain head when a
-stable name helps tell the thread's story. A head is a naming convenience, not
-a container every batch receives.
+One more rung sits between those two. A `loose` spec carrying
+`"design_only": true` opens a run that, when picked, rides exactly one stage — a
+headless design turn — then parks at design. The `design` body is the survey's
+*brief* rather than a baked design, so the bar is lower: a finding worth a
+designer's hour, not a fix worth a ride. An idea the operator tagged design-only
+(`moe idea tag --design-only`) reaches the same rung from the other side: the
+tag carries the bit, and the promoted run gets the identical one-stage ride with
+the idea canvas as its brief. The run is then held the way any unadvanced run is
+held, and your exits are the run page's advance chip (a full ride follows when a
+later sweep picks it), a pushed note (one more design turn), or close. A spec's
+`design_only` is skipped on a slug that already names live work, on a chore
+entry, and on a spec with no `design` body; on an already-design-only idea the
+flag agrees with the tag and is ignored. The bit stays in `run.json` afterwards
+as provenance.
 
-Between those two there is one more rung. A `loose` spec carrying
-`"design_only": true` opens the run and rides it exactly one stage — a
-headless design turn — then parks it at design. The `design` body is the
-survey's *brief* rather than a baked design, so the bar is lower: a finding
-worth a designer's hour, not a fix worth a ride. An idea the operator tagged
-design-only (`moe idea tag --design-only`) reaches the same rung from the other
-side: the tag carries the bit, and the promoted run gets the identical
-one-stage ride with the idea canvas as its brief. The run is then held the way
-any unadvanced run is held, and your exits are the run page's advance chip (a
-full ride follows on the next sweep), a pushed note (one more design turn), or
-close. A spec's `design_only` is skipped on a slug that already names live
-work — a run in flight, or an idea whose licence is the operator's to write —
-at a thread position, on a chore or twin entry, and on a spec with no `design`
-body; on an already-design-only idea the flag agrees with the tag and is
-ignored rather than skipped. The bit stays in `run.json` afterwards as
-provenance.
+`next` is the only way anything starts:
 
-In a hand-typed `moe pulse new`, grooming changes recorded placement and not
-execution: newly placed work parks for a later kick. Under `--dynamic`,
-placement *is* execution, and the candidate set is the whole board — every
-structurally kickable parked thread is kicked when the sweep finishes, the ones
-this sweep groomed first and then the rest, deduped by root. Kicking is the
-default; the survey's way out is a `"park"` line naming why the operator should
-look first, and that reason is mandatory. Either way the harness holds a root
-that has only a seed, a live session, or a dead machine turn nobody has touched
-since (the reap's tombstone, below); a machine-baked, chore-authored, or
-past-first-stage root has a settled design and is ready to start. A
-design-only spawn is the exception to "machine-baked": its seed is a brief, so
-it rides its one design stage and is held from then on like any unadvanced
-run. The sweep
-stamps that order onto its own canvas as a closing `## Kick` section — each root
-queued, parked with the survey's reason, or held by the floor and why — in the
-same commit as the close, so a sweep's report says what it was about to run and
-not only what it filed. The section records a plan, not a promise: the floor is
-re-checked as each root is reached, so a root can still be held past its
-"queued" line. Curation sweeps stamp nothing — they start nothing.
+```json
+{"status": "ok",
+ "next": {"run": "moe/fix-red-main", "why": "every other push waits on main"}}
+```
 
-Grooming may move a queued run out of one thread and into another — that is how
-stray threads consolidate. One unit is off limits: any unit under a **chain
-head you minted yourself**. The head is your staging fence, so a batch you are
-composing by hand is never reshaped under you. Machine-minted heads and
-headless threads stay fully groomable. Want something held, name a head; want
-it gone, close it. A ride needs no fence of its own — nothing sweeps while one
-is walking, so what you kicked is what runs.
+It may name a parked run in any project, a run this gate's `loose` just opened,
+or a tagged idea, which is promoted only when picked. An untagged idea stays
+yours. A hand-typed `moe pulse new` starts nothing. Under `--dynamic`, the
+harness rides the pick and nothing else, under the target project's mode and
+floor: it holds a run in a paused project, a run touched by hand within the last
+tick, a run with only a seed, a live session, an operator hold, or a dead
+machine turn nobody has touched since (the reap's tombstone, below). A
+machine-baked, chore-authored, or past-first-stage run has a settled design and
+is ready to start; a design-only spawn rides its one design stage and is held
+from then on. A held pick prints the floor's reason and starts nothing.
+
+The sweep stamps its pick onto its own canvas as a closing `## Next` section, in
+the same commit as the close, so a sweep's report says what it was about to run
+and not only what it filed. It records a plan, not a promise, because the floor
+is asked again when the ride starts. Curation sweeps stamp nothing.
 
 ### Prose, both directions
 
@@ -859,8 +766,8 @@ moe input add moe/change-auth-defaults          # no text: reads stdin
 That is the stuck-run loop: from the terminal or from the web's `/input` queue
 on a phone, write a sentence, and the next turn on that run acts on it. The
 note starts nothing — it writes one journal commit, so an armed serve's next
-heartbeat offers the project to a pulse; `moe pulse new --dynamic <project>`
-is the expedite path. A note can steer further work on an open PR or accompany
+heartbeat offers the board to a pulse; `moe pulse new --dynamic` is the
+expedite path. A note can steer further work on an open PR or accompany
 an idea into its eventual run. A pending note counts as an operator mark under
 `safe` mode, so eligible work can continue on a project that otherwise starts
 nothing on its own. It neither tags an untagged idea nor advances a stage.
@@ -871,30 +778,15 @@ lives on the web run page and in the selected item's details in
 that turn writes is where durable direction is supposed to persist. A turn that
 fails marks nothing, so the next attempt redelivers.
 
-The other direction: a dynamic survey can ask *you* something, at the run whose
-future agent needs the answer.
-
-```json
-{"runs": [{"run": "change-auth-defaults",
-           "ask": "Which compatibility policy should this use — preserve the old default or adopt the new one?"}]}
-```
-
-That opens a durable question on that run. It shows up on the dash as `· ask?`,
-in `moe input list`, and on the web's `/input` queue with a reply box;
+The other direction: a run can ask *you* something. It shows up on the dash as
+`· ask?`, in `moe input list`, and on the web's `/input` queue with a reply box;
 `moe input answer moe/change-auth-defaults "<prose>"` fills it, and the run's
 next turn gets the question and your answer as a pair. One open question per
-run; a question on a run the survey is minting in the same gate, on a tagged
-idea, or on a chain head is refused with a line.
+run. Asking holds nothing by itself: turns are told the question was asked and
+no reply came, and they proceed on their best judgment and note the call on the
+canvas.
 
-**Asking itself holds nothing.** Without a separate hold, turns are told the
-question was asked and no reply came, and they proceed on their best judgment
-and note the call on the canvas. Stillness stays the park's job: a survey that
-needs the answer first parks the thread and names the question in the reason.
-That keeps ask and hold separate, so a survey can also ask a question the work
-need not wait for.
-
-A stopped review loop can also open a question on the run, using the same
-input channel. Its hold is separate from the question; answering it or adding
+A stopped review loop opens such a question on the run. Its hold is separate from the question; answering it or adding
 any note releases that hold for one more review turn. See
 [Blocked gates](#cascades-the-bang-vocabulary) for the recovery path. Input
 starts no agent and does not clear an explicit pause or handoff.
@@ -906,8 +798,9 @@ answering it — "not relevant, proceed" is prose the next turn can read.
 
 `moe serve --dynamic` is the standing consent rung, and it licenses exactly one
 thing: a resident heartbeat that looks at each project's board every twenty
-minutes and runs `moe pulse new --dynamic <project>` when it finds something
-worth looking at. That heartbeat is the only automatic pulse there is, and the
+minutes and runs one `moe pulse new --dynamic` when any of them has something
+worth looking at. While a sweep or the ride it started is running, no other
+starts. That heartbeat is the only automatic pulse there is, and the
 only thing in the process that starts an agent at all — the web writes licences
 and marks, and the clock spends them. Stopping serve stops new sweeps. An
 existing Rex-hosted sweep and the rides it carries survive serve shutdown; an
@@ -924,20 +817,19 @@ settings; an absent ship field still means `pr`. To select PRs, run
 `moe project ship <id> pr`. The PR route pushes the branch and opens a PR,
 leaving the run `pushed` with its sandbox until the PR merges (the pulse's
 reconcile then flips it to merged or closed). Every unflagged ship — bare
-`moe sdlc push`, `!!` and `!!!`, `moe chain kick`, and the heartbeat's rides —
+`moe sdlc push`, `!!`, and the heartbeat's rides —
 follows the project setting. `--pr` / `--merge` on push, and `m` / `p` at the
 chain prompt, override it for one ship. The project hub carries the switch
 beside mode's.
 
 Per project, `moe project mode <id> paused|safe|auto` caps what that clock may
-do. `paused` means the heartbeat never sweeps the project at all. `safe` means
-it sweeps and grooms as ever but starts only threads you marked — a stage you
-advanced, a chore's standing intent, a workflow tag on the idea a run came
-from, a note or answer you left on any run in the thread that no turn has
-delivered yet — holding everything else with a named reason. `auto` is the
-default and today's behaviour. The mode binds the clock, not you: bangs, stage
-verbs, chain kicks and a hand-typed `moe pulse new --dynamic` run in every
-mode, because the typed word is the consent. Serve's **advance mark** is that
+do. `paused` means the survey leaves the project alone and a pick there starts
+nothing. `safe` means it is surveyed as ever but a pick starts only a run you
+marked — a stage you advanced, a chore's standing intent, a workflow tag on the
+idea a run came from, a note or answer you left on it that no turn has delivered
+yet — holding anything else with a named reason. `auto` is the default. The mode
+binds the clock, not you: bangs, stage verbs and a hand-typed `moe pulse new
+--dynamic` run in every mode, because the typed word is the consent. Serve's **advance mark** is that
 same consent from the phone: it records the stage you just read as done — one
 journal commit, no agent — and `safe` starts on exactly such a mark. The
 project hub carries the same three-way switch, and the boards' serve cluster
@@ -966,16 +858,12 @@ project's journal moved since its last heartbeat sweep; when a chore's clock
 says so (a mechanically due chore, or a judged chore whose cooldown has expired
 without a sweep since — one probe per expiry, not one per tick); or when
 startable work is parked with nobody inside it *and no sweep has looked at that
-board since it last changed* — a settled thread, or an open idea you tagged,
-since the tag is the licence to start it. A thread a survey saw and deliberately
-parked with a reason is not re-offered until something moves. That parked leg
-looks one step past a held door: settled work queued behind a thread head that
-is itself waiting on your design still counts, because a sweep grooms before it
-kicks and the groom is what can move that work out from behind the head. A
-`chain` head you minted yourself is the exception — it fences its whole batch,
-since staging one by hand is the point. The heartbeat stands down while anything
-is live in the project — a ride mid-hop, you sitting in a stage, a survey
-mid-turn — and for one full tick after anything you did by hand. A quiet board
+board since it last changed* — a settled run, or an open idea you tagged, since
+the tag is the licence to start it. A run a survey saw and did not pick is not
+re-offered until something moves; every release from a hold is a journal commit.
+A project with anything live in it — you sitting in a stage, a ride mid-hop —
+and a project you touched by hand in the last tick is held out of that tick's
+verdict, and its cursors stay put so the next tick offers it again. A quiet board
 costs no agent turn, run or journal line. Recorded pushed PRs are polled at this
 cadence outside the journal lock. A merged or closed owned PR wakes a pulse to
 reconcile its still-pushed run before the survey reads the board. It keeps
@@ -991,20 +879,20 @@ alone spend no turn. No recorded pushed PR means no added network read.
 Known quota exhaustion yields the session and records a retry in the journal.
 The first ordinary heartbeat at or after its date can commission a fresh
 survey, even after restart and with nothing parked. The survey rejudges the
-current board; it never resumes an old kick plan. Future retries alone cost
+current board; it never resumes an old pick. Future retries alone cost
 no run or agent call and do not block new journal, chore or PR work. Paused
 mode, the operator quiet window and live occupancy still hold a due retry.
 Stopping or unarming serve leaves its dates inert. Pure quota deferral neither
 acknowledges the board or PR checks as fully surveyed nor increases the
 failure streak, and sends no routine exit webhook. Existing failure history
-stays until a fully clean sweep. Other eligible roots still get their turn.
+stays until a fully clean sweep.
 
-Failure cools itself off: consecutive failed sweeps back a project's tick off
+Failure cools itself off: consecutive failed sweeps back the one sweep off
 exponentially, so a dead network or unavailable quota interface does not mint
 a pile of pulse runs. Quota admission refused before any survey agent starts
 closes the untouched pulse with a skip note. An agent that started and died
 leaves its real artifact open on ACTIVE; the heartbeat sweeps past that open
-run rather than letting one failed sweep wedge the project. In a mixed
+run rather than letting one failed sweep wedge the board. In a mixed
 outcome, real failures take precedence over quota deferral; failure backoff
 and any recorded quota retry both apply.
 
@@ -1030,11 +918,10 @@ inspection and recovery; the log names `moe session resolve` and
 For an abandoned session, the tombstone is a brake as well as a record, and that
 is what keeps one refusal from costing a stage turn every sweep: a headless
 stage that refuses because the work needs you can leave no committed canvas
-change, so with no brake the next sweep kicks the same stage again. While the
-note stands the kick floor holds the whole thread and the heartbeat's pre-ask
-skips it. Any touch of your own on the thread — a `moe input` note, an advance,
-a `moe chain edit` or `moe chain clear` that names one of its runs, anything
-landing a journal commit the machine didn't stamp — releases it for one retry,
+change, so with no brake a later pick could run the same stage again. While the
+note stands the floor holds the run and the heartbeat's pre-ask skips it. Any
+touch of your own on the run — a `moe input` note, an advance, anything landing
+a journal commit the machine didn't stamp — releases it for one retry,
 and opening a stage there clears it outright. If that retry refuses too, its
 fresh tombstone re-arms the hold: each thing you do buys one attempt and no more.
 
@@ -1134,7 +1021,7 @@ command to skip checks for the entire invocation, including its cascade
 and chain ride. For example:
 
 ```sh
-moe sdlc build --no-cooldown --chain myproject/my-run
+moe sdlc build --no-cooldown --ship myproject/my-run
 ```
 
 A quota refusal returns 75 and leaves the stage unstarted; a clock pulse with

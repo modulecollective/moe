@@ -476,8 +476,8 @@ func TestBuildSystemPromptInjectsPulseFragment(t *testing.T) {
 	if !strings.Contains(got, "# Stage: pulse") {
 		t.Fatalf("prompt missing pulse fragment heading:\n%s", got)
 	}
-	if !strings.Contains(got, "The lane bar") {
-		t.Fatalf("pulse.md missing the lane bar it owns:\n%s", got)
+	if !strings.Contains(got, "Picking what is next") {
+		t.Fatalf("pulse.md missing the pick it owns:\n%s", got)
 	}
 	if !strings.Contains(got, "mechanical, bounded, and verifiable") {
 		t.Fatalf("pulse.md missing the spawn bar it owns:\n%s", got)
@@ -487,8 +487,8 @@ func TestBuildSystemPromptInjectsPulseFragment(t *testing.T) {
 	// once and asked to judge nothing about them — no readiness bar for
 	// a choice it no longer makes.
 	flat := strings.Join(strings.Fields(got), " ")
-	if !strings.Contains(flat, "Ideas are not yours to start, tagged or not — the harness starts tagged ones on a dynamic sweep") {
-		t.Errorf("pulse.md missing the line that hands tagged ideas to the harness")
+	if !strings.Contains(flat, "a tagged one is promoted when you pick it as `next`") {
+		t.Errorf("pulse.md missing the line on how a tagged idea starts")
 	}
 	for name, text := range map[string]string{
 		"assembled system prompt": got,

@@ -212,11 +212,11 @@ propose an untagged idea, whoever filed it. What isn't valid is
 skipping the decision. An untagged entry should mean "a human should
 look at this", not "I didn't think about it".
 
-A tagged idea starts on the next dynamic sweep: the harness promotes
-it into a run and the kick rides it, without waiting for the survey to
-name it. That is why the bar above is yours to hold. Tags are validated
-at harvest against staged, chainable workflows; unknown or non-chainable
-tags are rejected rather than silently ignored. A missed tag is
+A tagged idea is licensed to start: the pulse may pick it as the next
+run, and the harness then promotes and rides it with no human look in
+between. That is why the bar above is yours to hold. Tags are validated
+at harvest against staged, operator-cascading workflows; anything else
+is rejected rather than silently ignored. A missed tag is
 recoverable — the operator can stamp or clear one later with `moe idea
 tag` / `moe idea untag` — but it strands the work until someone
 notices.
@@ -238,7 +238,8 @@ Keep the source's first gate blocked until that evidence exists. Extraction
 creates an idea; a checked line means extracted, never completed. Completion
 never resumes the source automatically. Code prerequisites must land on
 default through the existing merge route or normal PR merge; a pushed PR
-alone does not satisfy them. Chains batch independent work, not dependencies.
+alone does not satisfy them. Name the prerequisite in prose on the blocked
+run's canvas: that is what the pulse reads when it picks the next run.
 
 Check prior context and reuse a known owner's slug. One source slug identifies
 one extraction even if its title/body changes; a separate request needs a

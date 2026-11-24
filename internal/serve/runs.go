@@ -651,9 +651,8 @@ func (s *Server) buildRunVM(projectID, slug, id string) (runVM, error) {
 // idea has no stage ladder to derive from). Staged workflows get the
 // advance mark, keyed off the re-derived next stage and its declared
 // stage set (Options.WorkflowUI). Workflows with a close pipeline get a
-// close-run chip on non-perpetual pages. A chain head gets nothing: it
-// has no stages to mark, and kicking one is a terminal act (`moe chain
-// kick`) because a hand-staged head is a deliberate staging fence.
+// close-run chip on non-perpetual pages. A legacy chain run gets nothing:
+// it has no stages to mark.
 //
 // nextStage is the bare next-stage name re-derived from the dash row.
 func (s *Server) composeRunActions(projectID, slug, nextStage string, md *run.Metadata) []runAction {

@@ -10,7 +10,7 @@ import (
 // The resident pusher: the one place the bureaucracy's local main
 // reaches origin.
 //
-// Every journal verb — a UI tag, `moe sdlc new`, a chain edit, a stage
+// Every journal verb — a UI tag, `moe sdlc new`, a stage
 // session close — used to run `git push` inside the repo lock before it
 // returned. From the cloud-box that leg costs whole seconds, and it was
 // costing them twice: once on the verb's own path, and again on every
