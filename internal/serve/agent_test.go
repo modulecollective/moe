@@ -161,7 +161,7 @@ func TestAgentMenuStatesAndConflictRecovery(t *testing.T) {
 			t.Fatal("agent state outside menu")
 		}
 		menu := body[start:end]
-		for _, want := range []string{"Agent default", "this process forces claude", `method="post" action="/agent"`, "Use Codex for 24h", "Use Claude for 24h", "Return to stylesheet"} {
+		for _, want := range []string{`role="group" aria-label="Global default agent"`, "Agent default", "this process forces claude", `method="post" action="/agent"`, "Use Codex for 24h", "Use Claude for 24h", "Return to stylesheet"} {
 			if !strings.Contains(menu, want) {
 				t.Fatalf("menu missing %q", want)
 			}
