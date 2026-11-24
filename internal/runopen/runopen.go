@@ -56,6 +56,17 @@ var ErrNotReopenableIdea = errors.New("runopen: not a reopenable idea")
 // (workflow, status) failed.
 var ErrNotTaggableIdea = errors.New("runopen: not a taggable idea")
 
+// ErrNotReopenableIntent is returned by ReopenIntent when the slug is
+// not a closed intent.
+var ErrNotReopenableIntent = errors.New("runopen: not a reopenable intent")
+
+// ErrMachineCloseSpent is returned by CloseCaptureWith when a machine
+// close names an intent a machine already closed once. The operator's
+// reopen after that close is the operator saying the machine was wrong,
+// so the machine does not get a second try on the same intent; the
+// operator's own close is unaffected.
+var ErrMachineCloseSpent = errors.New("runopen: a machine already closed this intent once and the operator reopened it")
+
 // NotClosableError reports a close refused because of the run's current
 // state — a non-idea run that is pushed, already terminal, or of a
 // different workflow — rather than an internal failure (the
@@ -171,7 +182,9 @@ func Promote(root, projectID, ideaSlug string, opts PromoteOptions, stdout, stde
 		SubjectFrom: "idea " + ideaSlug,
 		SpawnedBy:   opts.SpawnedBy,
 		DesignOnly:  opts.DesignOnly,
-		Trailers:    trailers.Block{Idea: ideaSlug, SpawnedBy: opts.SpawnedBy, Consent: opts.Consent},
+		// The link follows the work across the slug change.
+		Intent:   src.Intent,
+		Trailers: trailers.Block{Idea: ideaSlug, SpawnedBy: opts.SpawnedBy, Consent: opts.Consent},
 	}
 
 	md, err := Open(root, projectID, runOpts)
@@ -433,6 +446,25 @@ func MarkAdvanced(root, projectID, slug, docID string, options ...AdvanceOptions
 // workflow, so the resulting commit is byte-identical to the one the
 // matching CLI verb (`moe idea close` / `moe intent close`) writes.
 func CloseCapture(root, projectID, slug string) error {
+	return CloseCaptureWith(root, projectID, slug, CloseOptions{})
+}
+
+// CloseOptions marks a capture close a machine made. The zero value is
+// the operator's close, byte-identical to what it always wrote.
+type CloseOptions struct {
+	// ClosedBy names the sweep closing an intent through the pulse gate.
+	// It is recorded on run.json and is what the one-try rule reads.
+	ClosedBy string
+	// Why is the reason, carried in the commit body.
+	Why string
+	// Consent is the MoE-Consent value for the close commit.
+	Consent string
+}
+
+// CloseCaptureWith is CloseCapture with a machine's mark. A non-empty
+// ClosedBy refuses with ErrMachineCloseSpent when the intent already
+// carries one, checked under the lock against fresh metadata.
+func CloseCaptureWith(root, projectID, slug string, opts CloseOptions) error {
 	preflight, err := run.Load(root, projectID, slug)
 	if err != nil {
 		return err
@@ -445,6 +477,9 @@ func CloseCapture(root, projectID, slug string) error {
 		if !dash.IsCapture(md.Workflow) || md.Status != run.StatusInProgress {
 			return ErrNotCapture
 		}
+		if opts.ClosedBy != "" && md.ClosedBy != "" {
+			return fmt.Errorf("%w (closed by %s)", ErrMachineCloseSpent, md.ClosedBy)
+		}
 		if err := session.RequireUnreserved(root, projectID, slug); err != nil {
 			return err
 		}
@@ -456,12 +491,19 @@ func CloseCapture(root, projectID, slug string) error {
 			return errors.New("working tree has uncommitted changes; commit or stash first")
 		}
 		rel := filepath.Join(run.Dir(projectID, slug), "run.json")
-		msg := fmt.Sprintf("Close %s %s/%s\n\n", md.Workflow, projectID, slug) + trailers.Block{Run: slug, Project: projectID, Workflow: md.Workflow}.String()
+		msg := fmt.Sprintf("Close %s %s/%s\n\n", md.Workflow, projectID, slug)
+		if why := strings.TrimSpace(opts.Why); why != "" {
+			msg += why + "\n\n"
+		}
+		msg += trailers.Block{Run: slug, Project: projectID, Workflow: md.Workflow, Consent: opts.Consent}.String()
 		prev, err := snapFile(root, rel)
 		if err != nil {
 			return err
 		}
 		md.Status = run.StatusClosed
+		if opts.ClosedBy != "" {
+			md.ClosedBy = opts.ClosedBy
+		}
 		if err := run.Save(root, md); err != nil {
 			return err
 		}
@@ -571,6 +613,29 @@ func ReopenIdea(root, projectID, slug string) (err error) {
 		}
 	default:
 		return fmt.Errorf("%w: idea %s/%s is %s, not closed or promoted", ErrNotReopenableIdea, projectID, slug, md.Status)
+	}
+	return Reopen(root, md, owner)
+}
+
+// ReopenIntent flips a closed intent back to in_progress under the same
+// slug, so every run linked to it stays linked. A machine close's
+// closed_by mark survives the flip: it is what keeps the pulse from
+// closing the intent again on the same evidence.
+func ReopenIntent(root, projectID, slug string) (err error) {
+	owner, err := runowner.Acquire(root, projectID, slug)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, owner.Release()) }()
+	md, err := run.Load(root, projectID, slug)
+	if err != nil {
+		return err
+	}
+	if md.Workflow != dash.IntentWorkflow {
+		return fmt.Errorf("%w: run %s/%s is a %s run, not an intent", ErrNotReopenableIntent, projectID, slug, md.Workflow)
+	}
+	if md.Status != run.StatusClosed {
+		return fmt.Errorf("%w: intent %s/%s is %s, not closed", ErrNotReopenableIntent, projectID, slug, md.Status)
 	}
 	return Reopen(root, md, owner)
 }

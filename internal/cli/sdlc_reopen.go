@@ -222,6 +222,8 @@ func mintSDLCReopen(verb, root string, prior *run.Metadata, wsName, agentName st
 		Workspace:   wsName,
 		Agent:       agentName,
 		ReopenOf:    priorSlug,
+		// The successor serves what its prior served.
+		Intent: prior.Intent,
 	}
 
 	var md *run.Metadata

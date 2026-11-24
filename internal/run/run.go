@@ -131,6 +131,20 @@ type Metadata struct {
 	// promote copies the bit onto the run it mints; `--from-idea`
 	// deliberately does not.
 	DesignOnly bool `json:"design_only,omitempty"`
+	// Intent, when non-empty, names the open intent this run serves, as
+	// "<project>/<slug>". One per run. The pulse writes it through its
+	// gate's `serves` key and may change it on a later survey; idea
+	// promotion and an sdlc reopen successor carry it forward, a
+	// harvested followup does not. It is state rather than a trailer
+	// because the link is the pulse's to correct, and every reader (the
+	// kickoff, the dashes, `moe intent runs`) already has run.json.
+	Intent string `json:"intent,omitempty"`
+	// ClosedBy, set only on an intent, names the sweep that closed it
+	// through the pulse gate. Its presence is the one-try rule: a gate
+	// close of an intent that already carries it is refused, because an
+	// operator reopen after a machine close says the machine was wrong.
+	// Reopen leaves it in place for exactly that reason.
+	ClosedBy string `json:"closed_by,omitempty"`
 	// Reaped, when non-nil, records that the run's last machine turn
 	// was unfinished and the heartbeat abandoned its session branch.
 	// Written by the reap's abandon ending and cleared by the next
@@ -263,6 +277,11 @@ type Options struct {
 	// Only ever set alongside SpawnedBy — an operator-opened run is held
 	// at its first stage without needing it.
 	DesignOnly bool
+
+	// Intent persists Metadata.Intent: the "<project>/<slug>" of the
+	// intent the new run serves. Set where a run continues one that was
+	// linked (idea promotion, an sdlc reopen successor); empty elsewhere.
+	Intent string
 
 	// AllowDirty bypasses the working-tree-clean precondition (staged
 	// changes and tracked modifications, never untracked files). The
@@ -398,6 +417,7 @@ func New(root, projectID string, opts Options) (md *Metadata, err error) {
 		PromoteTo:  opts.PromoteTo,
 		SpawnedBy:  opts.SpawnedBy,
 		DesignOnly: opts.DesignOnly,
+		Intent:     opts.Intent,
 		Documents:  map[string]*Document{},
 	}
 
