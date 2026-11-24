@@ -517,8 +517,17 @@ func serveProjectLine(now time.Time, id string, p *activityProject) serveProject
 // it. ok is false for a tick that was entirely trivial; recordTick
 // already keeps those out of the ring, since a "nothing happened" line
 // is what the status line's last tick says once, for all of them.
+//
+// A tick that folded repeats dates itself by the last of them, so the
+// newest-first column stays in order and "still held" reads as current;
+// the text says how many and when the first was. "first", not "since":
+// a quiet gap between two folded ticks never entered the ring.
 func serveEventLine(now time.Time, ev activityEvent) (serveEventVM, bool) {
-	vm := serveEventVM{When: dash.HumanAgo(now, ev.At), Kind: ev.Kind, Failed: ev.Failed}
+	at := ev.At
+	if !ev.Last.IsZero() {
+		at = ev.Last
+	}
+	vm := serveEventVM{When: dash.HumanAgo(now, at), Kind: ev.Kind, Failed: ev.Failed}
 	if ev.Kind == "tick" {
 		var parts []string
 		quiet := 0
@@ -537,6 +546,9 @@ func serveEventLine(now time.Time, ev activityEvent) (serveEventVM, bool) {
 		}
 		if quiet > 0 {
 			parts = append(parts, fmt.Sprintf("%d quiet", quiet))
+		}
+		if ev.Ticks > 1 {
+			parts = append(parts, fmt.Sprintf("%d ticks, first %s", ev.Ticks, dash.HumanAgo(now, ev.At)))
 		}
 		vm.Text = strings.Join(parts, " · ")
 		return vm, true

@@ -3,6 +3,7 @@ package serve
 import (
 	"errors"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -123,6 +124,98 @@ func TestActivityQuietTicksDoNotEvictAFailure(t *testing.T) {
 	vm := a.panel(at)
 	if len(vm.Events) != 1 || !vm.Events[0].Failed || vm.Events[0].Tail == "" {
 		t.Errorf("panel events = %+v, want the failed exit and its tail a day of quiet ticks later", vm.Events)
+	}
+}
+
+// TestActivityRepeatedHoldDoesNotEvictAFailure: a hold that outlasts
+// fifty ticks used to fill the ring with the same line and push the
+// failure out — the clock setting the ring's reach, which quiet ticks
+// were already kept from doing. Repeats fold into one entry that dates
+// itself by the last tick and counts back to the first.
+func TestActivityRepeatedHoldDoesNotEvictAFailure(t *testing.T) {
+	start := time.Now().Add(-25 * time.Hour)
+	a := testActivity(t, start, true)
+	a.recordChildExit(heartbeatChildPrefix+"moe", start, errors.New("exit status 1"), "credit limit reached", "" /*run*/)
+	at := start
+	for range int(24 * time.Hour / heartbeatInterval) {
+		at = at.Add(heartbeatInterval)
+		a.recordTick(at, []HeartbeatDecision{
+			{Project: "moe", Held: true, Reason: "somebody is already inside the project"},
+			{Project: "alpha", Reason: "a sweep already surveyed the current tip"},
+		})
+	}
+
+	if len(a.events) != 2 {
+		t.Fatalf("ring holds %d events, want the failed exit and one folded hold", len(a.events))
+	}
+	vm := a.panel(at.Add(10 * time.Minute))
+	if len(vm.Events) != 2 {
+		t.Fatalf("panel events = %+v, want two", vm.Events)
+	}
+	if ex := vm.Events[1]; !ex.Failed || ex.Tail != "credit limit reached" {
+		t.Errorf("exit row = %+v, want the failed exit and its tail a day of holds later", ex)
+	}
+	tick := vm.Events[0]
+	if tick.When != "10m ago" {
+		t.Errorf("tick when = %q, want the last tick it folded", tick.When)
+	}
+	n := int(24 * time.Hour / heartbeatInterval)
+	want := "moe held — somebody is already inside the project · 1 quiet · " +
+		strconv.Itoa(n) + " ticks, first 1d ago"
+	if tick.Text != want {
+		t.Errorf("tick text = %q, want %q", tick.Text, want)
+	}
+}
+
+// TestActivityDifferentNewsDoesNotFold: only a repeat folds. A changed
+// reason, the same hold on another project, or a sweep landing between
+// two holds is news, and each gets its own entry.
+func TestActivityDifferentNewsDoesNotFold(t *testing.T) {
+	now := time.Now()
+	hold := HeartbeatDecision{Project: "moe", Held: true, Reason: "somebody is already inside the project"}
+	for _, tc := range []struct {
+		name   string
+		replay func(a *activity, at time.Time)
+		want   int
+	}{
+		{
+			name: "a different reason",
+			replay: func(a *activity, at time.Time) {
+				a.recordTick(at, []HeartbeatDecision{{Project: "moe", Held: true, Reason: "rex is unreachable"}})
+			},
+			want: 2,
+		},
+		{
+			name: "the same hold on another project",
+			replay: func(a *activity, at time.Time) {
+				a.recordTick(at, []HeartbeatDecision{{Project: "alpha", Held: true, Reason: hold.Reason}})
+			},
+			want: 2,
+		},
+		{
+			name: "a spawn in between",
+			replay: func(a *activity, at time.Time) {
+				a.recordChildSpawn(heartbeatChildPrefix+"alpha", at, "started")
+				a.recordTick(at.Add(time.Second), []HeartbeatDecision{hold})
+			},
+			want: 3,
+		},
+		{
+			// The control: a plain repeat does fold, so the cases above
+			// fail on the comparison rather than on the fixture.
+			name:   "the same hold again",
+			replay: func(a *activity, at time.Time) { a.recordTick(at, []HeartbeatDecision{hold}) },
+			want:   1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := testActivity(t, now, true)
+			a.recordTick(now, []HeartbeatDecision{hold})
+			tc.replay(a, now.Add(heartbeatInterval))
+			if len(a.events) != tc.want {
+				t.Errorf("ring holds %d events, want %d", len(a.events), tc.want)
+			}
+		})
 	}
 }
 

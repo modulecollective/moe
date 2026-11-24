@@ -37,9 +37,10 @@ import (
 // durable record of a pulse is its run, as it already was.
 
 // activityRing is how many events the record keeps: fifty pieces of news
-// — spawns, exits, ticks that swept or held. A quiet tick never enters
-// (see recordTick), so the reach back is set by how much happened, not
-// by the tick cadence, and still renders on a phone in one page.
+// — spawns, exits, ticks that swept or held. A quiet tick never enters,
+// and a tick repeating the newest entry's news folds into it (see
+// recordTick), so the reach back is set by how much happened, not by the
+// tick cadence, and still renders on a phone in one page.
 const activityRing = 50
 
 // tailRenderLines caps how much of a child's output tail reaches the
@@ -70,6 +71,11 @@ type activityEvent struct {
 	// Decisions is the whole per-project verdict set for a tick — the
 	// gate trace. Tick events only.
 	Decisions []HeartbeatDecision
+	// Ticks counts the ticks folded into a tick event: 1 at push, one
+	// more for each later tick whose news repeated this one's. Last is
+	// the newest of them, zero while Ticks is 1. At stays the first.
+	Ticks int
+	Last  time.Time
 }
 
 // activityProject is the ticker's per-project record.
@@ -171,10 +177,16 @@ func (a *activity) push(ev activityEvent) {
 
 // recordTick folds one heartbeat pass into the record: the tick instant
 // (which is also what dates the next one) and every project's verdict.
-// Only a tick that swept or held something earns a ring entry. A quiet
+// Only a tick that swept or held something is news for the ring. A quiet
 // one is already said by lastTick, and at a five-minute cadence letting
 // it in would push a failed sweep's exit and tail out of the ring within
 // hours.
+//
+// A hold repeats the same way — "somebody is already inside the
+// project" every tick for an afternoon — so a tick whose news equals the
+// newest entry's folds into that entry instead of pushing its own. Only
+// the newest event, and only if it is a tick: folding past a spawn or
+// exit would leave one row straddling that sweep on the timeline.
 func (a *activity) recordTick(at time.Time, decisions []HeartbeatDecision) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -184,10 +196,38 @@ func (a *activity) recordTick(at time.Time, decisions []HeartbeatDecision) {
 		p.decision = d.Reason
 		p.sweep, p.held = d.Sweep, d.Held
 	}
-	if !slices.ContainsFunc(decisions, func(d HeartbeatDecision) bool { return d.Sweep || d.Held }) {
+	if !slices.ContainsFunc(decisions, isNews) {
 		return
 	}
-	a.push(activityEvent{At: at, Kind: "tick", Decisions: slices.Clone(decisions)})
+	if n := len(a.events); n > 0 {
+		if last := &a.events[n-1]; last.Kind == "tick" && sameNews(last.Decisions, decisions) {
+			last.Ticks++
+			last.Last = at
+			// The quiet tally is this tick's, not the first one's.
+			last.Decisions = slices.Clone(decisions)
+			return
+		}
+	}
+	a.push(activityEvent{At: at, Kind: "tick", Decisions: slices.Clone(decisions), Ticks: 1})
+}
+
+// isNews is the verdict a tick line spells out rather than tallies.
+func isNews(d HeartbeatDecision) bool { return d.Sweep || d.Held }
+
+// sameNews reports whether two ticks say the same thing on the ring:
+// the same news verdicts, in order. Quiet verdicts are only a tally, and
+// PRChecks never renders, so neither is compared.
+func sameNews(a, b []HeartbeatDecision) bool {
+	news := func(ds []HeartbeatDecision) []HeartbeatDecision {
+		var out []HeartbeatDecision
+		for _, d := range ds {
+			if isNews(d) {
+				out = append(out, HeartbeatDecision{Project: d.Project, Sweep: d.Sweep, Held: d.Held, Reason: d.Reason})
+			}
+		}
+		return out
+	}
+	return slices.Equal(news(a), news(b))
 }
 
 // recordSkip overrides a project's verdict with the ticker's own and
