@@ -678,10 +678,11 @@ Every pulse does three things:
   landed, and the open backlog; files followups with `<project>/` routing; and
   writes a short report ending in a machine-readable `## Gate`. It also judges
   **judged chores**: does what landed meet the condition the operator wrote?
-  The gate has three keys. `status` says the survey concluded. `loose` opens
-  runs, each slugged `<project>/<slug>`; an entry may set `"design_only": true`,
-  the rung between filing a followup and proposing a fix. `next` names the one
-  run to ride, with a reason. A clean sweep auto-closes its own run: the filed
+  `status` says the survey concluded. `loose` opens runs, each slugged
+  `<project>/<slug>`; an entry may set `"design_only": true`, the rung between
+  filing a followup and proposing a fix. `next` names the one run to ride, with
+  a reason. `serves` links work to intents, and `intents` opens or closes them;
+  see [Intents](#intents). A clean sweep auto-closes its own run: the filed
   followups harvest straight into ideas (review them by scrapping on the dash).
   Every fire runs a fresh sweep unconditionally — a lingering open pulse run
   means a failed or abandoned sweep, sitting visible on the dash's ACTIVE list
@@ -763,13 +764,15 @@ as provenance.
 It may name a parked run in any project, a run this gate's `loose` just opened,
 or a tagged idea, which is promoted only when picked. An untagged idea stays
 yours. A hand-typed `moe pulse new` starts nothing. Under `--dynamic`, the
-harness rides the pick and nothing else, under the target project's mode and
-floor: it holds a run in a paused project, a run touched by hand within the last
-tick, a run with only a seed, a live session, an operator hold, or a dead
-machine turn nobody has touched since (the reap's tombstone, below). A
-machine-baked, chore-authored, or past-first-stage run has a settled design and
-is ready to start; a design-only spawn rides its one design stage and is held
-from then on. A held pick prints the floor's reason and starts nothing.
+harness rides the pick and nothing else. The shared floor holds a run with only
+a seed, a live session or execution owner, an operator hold, or a dead machine
+turn nobody has touched since (the reap's tombstone, below). Clock-started rides
+also obey project mode and the one-tick operator quiet window, with the
+[pending-note exception](#prose-both-directions). A hand-typed
+`moe pulse new --dynamic` bypasses mode and the quiet window. A machine-baked,
+chore-authored, or past-first-stage run has a settled design; a design-only
+spawn rides its one design stage and is held from then on. A held pick prints
+the floor's reason and starts nothing.
 
 The sweep stamps its pick onto its own canvas as a closing `## Next` section, in
 the same commit as the close, so a sweep's report says what it was about to run
@@ -866,19 +869,22 @@ remains visible in project controls.
 
 Both surfaces show what the heartbeat is doing. `moe dash` reads the snapshot
 serve keeps on disk and carries its status in the banner's tail — armed or not,
-how long it has been up, when the next tick lands — spending a line on a
-project only when that project is sweeping, cooling off after a failure, or its
-last sweep died. The same tail reports `N unpushed` while commits are waiting
-and `push failing 12m · 3 unpushed` with a row carrying git's reason when
-origin is refusing. An empty queue stays quiet. The count comes from git at
-render, so it is honest about a serve that has crashed or was never running;
-the rest comes from the pusher's own record. Web headers carry the same cluster
-and refresh every five seconds while visible, plus on return to the tab.
-Without JavaScript, reload refreshes status. The cluster links to `/serve`,
-which holds the trace: what each recent tick decided and the output tail of any
-sweep that failed. That trace is the running process's memory rather than
-history — a restart starts it over, and the durable record of a sweep is still
-the run it opened.
+how long it has been up, when the next tick lands — spending a line on a project
+only when that project is sweeping, cooling off after a failure, or its last
+sweep died. The same tail reports `N unpushed` while commits are waiting and
+`push failing 12m · 3 unpushed` with a row carrying git's reason when origin is
+refusing. An empty queue stays quiet. The count comes from git at render, so it
+is honest about a serve that has crashed or was never running; the rest comes
+from the pusher's own record. Web headers carry the same cluster and refresh
+every five seconds while visible, plus on return to the tab. Without JavaScript,
+reload refreshes status. The cluster links to `/serve`, which holds the trace:
+what each recent tick decided and the output tail of any sweep that failed.
+Repeated identical tick decisions can share one row, dated by the latest tick
+and showing the count and first occurrence (for example,
+`48 ticks, first 4h ago`). Quiet ticks add no rows, and a sweep event separates
+groups. That trace is the running process's memory rather than history — a
+restart starts it over, and the durable record of a sweep is still the run it
+opened.
 
 The tick decides nothing. It only asks the question you used to ask by typing a
 verb — everything about what a sweep may *do* is unchanged, including the
