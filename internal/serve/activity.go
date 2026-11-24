@@ -183,8 +183,9 @@ func (a *activity) recordTick(at time.Time, decisions []HeartbeatDecision) {
 }
 
 // recordSkip overrides a project's verdict with the ticker's own and
-// carries the cool-off's counters, which the gate knows nothing about —
-// including for the root project, which no gate decision names.
+// carries the cool-off's counters, which the gate knows nothing about.
+// The cool-off calls it for the root project too, whether or not the gate
+// offered it.
 //
 // held marks a hold that deserves its own row rather than collapsing
 // into the quiet tally. The cool-off passes false: it earns its row
