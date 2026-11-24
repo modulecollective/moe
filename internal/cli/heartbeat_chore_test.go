@@ -175,7 +175,7 @@ func TestHeartbeatProbesAJudgedChoreOnceEligible(t *testing.T) {
 
 // TestHeartbeatProbesAJudgedChoreExactlyOnce is the property that makes
 // the leg affordable. Sweeping whenever a judged chore is merely
-// eligible burns an agent turn every twenty minutes until the condition
+// eligible burns an agent turn every tick until the condition
 // happens to hold; the probe sweep mints a pulse run of its own, which
 // moves lastPulseAt past the expiry and closes the edge.
 func TestHeartbeatProbesAJudgedChoreExactlyOnce(t *testing.T) {

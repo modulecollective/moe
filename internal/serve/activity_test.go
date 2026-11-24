@@ -500,9 +500,9 @@ func TestCleanTailKeepsOnlyTheNewestLines(t *testing.T) {
 func TestActivityPanelClusterMatchesTheCLIBanner(t *testing.T) {
 	now := time.Now()
 	a := testActivity(t, now.Add(-3*24*time.Hour-2*time.Hour), true)
-	// A tick 8m back puts the next one 12m out on the 20m cadence.
-	a.recordTick(now.Add(-8*time.Minute), nil)
-	if got, want := a.panel(now).Cluster, "serve armed · up 3d 2h · next 12m"; got != want {
+	// A tick 2m back puts the next one 3m out on the 5m cadence.
+	a.recordTick(now.Add(-2*time.Minute), nil)
+	if got, want := a.panel(now).Cluster, "serve armed · up 3d 2h · next 3m"; got != want {
 		t.Errorf("panel cluster = %q, want %q", got, want)
 	}
 }

@@ -97,10 +97,10 @@ func TestDashBannerCarriesAnArmedServe(t *testing.T) {
 	writeServeState(t, root, serve.ActivitySnapshot{
 		Pid: os.Getpid(), Armed: true,
 		Started:  now.Add(-3*24*time.Hour - 2*time.Hour),
-		NextTick: now.Add(12 * time.Minute),
+		NextTick: now.Add(3 * time.Minute),
 	})
 
-	if got, want := serveCluster(t, root, now), "serve armed · up 3d 2h · next 12m"; got != want {
+	if got, want := serveCluster(t, root, now), "serve armed · up 3d 2h · next 3m"; got != want {
 		t.Errorf("banner tail = %q, want %q", got, want)
 	}
 	if got := serveLines(t, root, now); got != "" {
@@ -249,7 +249,7 @@ func TestDashSurvivesATruncatedStateFile(t *testing.T) {
 
 // TestDashBannerCarriesTheModeCounts: modes are read off project.json
 // rather than out of serve.json, so `moe project mode` shows up in `moe
-// dash` on the next frame instead of the next tick — twenty minutes of
+// dash` on the next frame instead of the next tick — minutes of
 // the dash disagreeing with the command just typed.
 func TestDashBannerCarriesTheModeCounts(t *testing.T) {
 	root := t.TempDir()

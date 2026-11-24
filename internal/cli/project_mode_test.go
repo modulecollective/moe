@@ -207,8 +207,8 @@ func TestOperatorMarkedAdmitsARunPromotedFromATaggedIdea(t *testing.T) {
 // --- the parked-leg pre-ask ------------------------------------------
 
 // TestParkedLegUnderSafeHoldsAnUnmarkedBoard: a board with plenty parked
-// and nothing marked must cost no agent turn to discover, every twenty
-// minutes, forever.
+// and nothing marked must cost no agent turn to discover, every
+// tick, forever.
 func TestParkedLegUnderSafeHoldsAnUnmarkedBoard(t *testing.T) {
 	root := quietFixture(t)
 	want := "moe/" + groomFixture(t, root, "fix-a")["fix-a"]
@@ -250,8 +250,8 @@ func TestPausedProjectIsNeverSwept(t *testing.T) {
 	if got := reasonFor(decisions, "moe"); got != "paused" {
 		t.Errorf("reason = %q, want %q", got, "paused")
 	}
-	// Not held: the operator chose this state, so a held row every twenty
-	// minutes would be the panel nagging about a decision. The mode badge
+	// Not held: the operator chose this state, so a held row every tick
+	// would be the panel nagging about a decision. The mode badge
 	// carries the visibility instead.
 	if heldFor(decisions, "moe") {
 		t.Error("a paused project must collapse into the quiet count, not earn a held row")

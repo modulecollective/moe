@@ -18,7 +18,7 @@ import (
 // pulseQuietWindow is the operator's quiet tick, matching serve's baked
 // heartbeat cadence. The heartbeat holds a project for it, but the one
 // sweep can still see that project's board, so the ride asks again.
-const pulseQuietWindow = 20 * time.Minute
+const pulseQuietWindow = 5 * time.Minute
 
 // pulsePick is the survey's `next`, resolved against the board.
 type pulsePick struct {

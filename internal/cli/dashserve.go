@@ -58,7 +58,7 @@ type serveState struct {
 	// from project.json rather than out of the snapshot. Serve only
 	// rewrites serve.json on its own events, so waiting for a mode flip to
 	// appear there would leave `moe project mode` invisible in `moe dash`
-	// until the next tick — twenty minutes of the dash disagreeing with
+	// until the next tick — minutes of the dash disagreeing with
 	// the command the operator just ran.
 	modes dash.ModeCounts
 	// ahead is how many commits local main holds that origin doesn't,

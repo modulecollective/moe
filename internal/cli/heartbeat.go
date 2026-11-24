@@ -47,7 +47,7 @@ import (
 //   - surveyed — where it stood when the last *clean* sweep finished.
 //     Answers "has a survey already looked at this exact board", which
 //     is what keeps a thread the survey deliberately parked with a
-//     reason from being re-offered every twenty minutes forever. It
+//     reason from being re-offered every tick forever. It
 //     works because a project's kickable-thread state is a function of
 //     its journal tip: everything the parked leg reads is
 //     journal-derived, and a sweep surveys the whole board rather than
@@ -114,7 +114,7 @@ func newHeartbeatGate(root string) *heartbeatGate {
 //
 // Warn-only throughout, mirroring the pulse itself: a read that fails
 // drops the project from this tick rather than failing the tick. The
-// next one is twenty minutes away and re-derives everything.
+// next one is a few minutes away and re-derives everything.
 func (g *heartbeatGate) Due(tick time.Duration, log io.Writer) []serve.HeartbeatDecision {
 	g.log = log
 	g.reap(log)
@@ -294,7 +294,7 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 	// The operator's standing cap, ahead of every read: a paused project
 	// costs this tick nothing at all, which is the whole of what paused
 	// promises. Not held — the operator chose this state, so a held row
-	// every twenty minutes would be the panel nagging about a decision.
+	// every tick would be the panel nagging about a decision.
 	// The mode badge carries the visibility instead.
 	mode := project.ModeOf(p)
 	if mode == project.ModePaused {
@@ -463,7 +463,7 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 			}
 			// Under safe the leg offers only what the kick could actually
 			// start, so a board with plenty parked and nothing marked spends
-			// no agent turn discovering that every twenty minutes. The moved
+			// no agent turn discovering that every tick. The moved
 			// and unswept legs above are untouched: safe stops the machine
 			// disposing, not proposing, and a delta still deserves a survey.
 			parked = parkedKickableThread(g.root, sc, projectID, mode == project.ModeSafe)
@@ -569,7 +569,7 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 // judgment is a function of exactly two things — landed work, which the
 // moved leg already covers, and the cooldown expiring, which is the same
 // pure clock event as above. Sweeping whenever a judged chore is merely
-// eligible would burn an agent turn every twenty minutes until the
+// eligible would burn an agent turn every tick until the
 // condition happened to hold, so the leg is edge-triggered on the expiry
 // with no new state: probe only when no pulse run has looked at the
 // board since the chore became eligible.

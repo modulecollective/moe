@@ -241,15 +241,21 @@ func TestHeartbeatResetsBackoffOnACleanSweep(t *testing.T) {
 	}
 }
 
-// TestHeartbeatBackoffIsCapped: exponential, but bounded. Six skipped
-// ticks is two hours at the default cadence — long enough to stop a
-// pile-up, short enough that the loop comes back on its own.
+// TestHeartbeatBackoffIsCapped: exponential, but bounded. The cap is
+// twenty-four skipped ticks, two hours at the default cadence — long
+// enough to stop a pile-up, short enough that the loop comes back on its
+// own. Pinned as a sequence so moving the tick without re-deriving the
+// cap fails here.
 func TestHeartbeatBackoffIsCapped(t *testing.T) {
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: "/bin/true"})
-	for range 20 {
-		if _, skip := s.heartbeat.record("alpha", true); skip > heartbeatBackoffCap {
-			t.Fatalf("skip = %d, want no more than the cap %d", skip, heartbeatBackoffCap)
+	want := []int{1, 2, 4, 8, 16, 24, 24}
+	for i, w := range want {
+		if _, skip := s.heartbeat.record("alpha", true); skip != w {
+			t.Fatalf("failure %d: skip = %d, want %d", i+1, skip, w)
 		}
+	}
+	if got := time.Duration(heartbeatBackoffCap) * heartbeatInterval; got != 2*time.Hour {
+		t.Errorf("cap = %s of quiet, want 2h0m0s", got)
 	}
 }
 
@@ -449,8 +455,9 @@ func TestUnarmedServeNeverTicks(t *testing.T) {
 		Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: bin, Heartbeat: gate,
 	})
 
+	prev := heartbeatInterval
 	heartbeatInterval = 5 * time.Millisecond
-	t.Cleanup(func() { heartbeatInterval = 20 * time.Minute })
+	t.Cleanup(func() { heartbeatInterval = prev })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
@@ -475,8 +482,9 @@ func TestArmedServeTicks(t *testing.T) {
 		Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: bin, Heartbeat: gate, Dynamic: true,
 	})
 
+	prev := heartbeatInterval
 	heartbeatInterval = 5 * time.Millisecond
-	t.Cleanup(func() { heartbeatInterval = 20 * time.Minute })
+	t.Cleanup(func() { heartbeatInterval = prev })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -568,8 +576,9 @@ func TestArmedServeJoinsTheHeartbeat(t *testing.T) {
 		Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: bin, Heartbeat: gate, Dynamic: true,
 	})
 
+	prev := heartbeatInterval
 	heartbeatInterval = 5 * time.Millisecond
-	t.Cleanup(func() { heartbeatInterval = 20 * time.Minute })
+	t.Cleanup(func() { heartbeatInterval = prev })
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})

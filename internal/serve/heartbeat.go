@@ -48,17 +48,19 @@ import (
 //     the heartbeat.
 
 // heartbeatInterval is the tick. Baked, not configurable: the gate makes
-// quiet ticks free, so anything in the ten-to-sixty-minute range changes
-// little, and a knob here would be one more thing to get wrong. Variable
-// rather than const so tests can shorten it.
-var heartbeatInterval = 20 * time.Minute
+// quiet ticks free, and a knob here would be one more thing to get
+// wrong. Sweeps run one at a time, so the tick is also the gap between
+// one sweep finishing and the next starting — an idle slot with work
+// parked. Short keeps that gap small. Variable rather than const so tests
+// can shorten it.
+var heartbeatInterval = 5 * time.Minute
 
-// heartbeatBackoffCap bounds the exponential cool-off. Six skipped ticks
-// is two hours of quiet at the default cadence — long enough that a
+// heartbeatBackoffCap bounds the exponential cool-off. Twenty-four skipped
+// ticks is two hours of quiet at the default cadence — long enough that a
 // night of exhausted plan limits or a dead network mints a handful of
 // failed sweeps rather than a pile, short enough that the loop comes
 // back on its own once the vendor does.
-const heartbeatBackoffCap = 6
+const heartbeatBackoffCap = 24
 
 // heartbeatChildPrefix labels project sweep jobs in the child registry
 // and Rex. A restarted serve uses the same label to reconcile its jobs;
