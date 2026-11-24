@@ -527,9 +527,9 @@ func serveProjectLine(now time.Time, id string, p *activityProject) serveProject
 // serveEventLine turns one ring entry into its line. A tick's body is
 // the verdicts that are news — sweeps and holds, each with its reason —
 // plus a tally of the ones that aren't; a child's is what happened to
-// it. ok is false for a tick that was entirely trivial: it stays in the
-// ring, but a "nothing happened" line is what the status line's last
-// tick says once, for all of them.
+// it. ok is false for a tick that was entirely trivial; recordTick
+// already keeps those out of the ring, since a "nothing happened" line
+// is what the status line's last tick says once, for all of them.
 func serveEventLine(now time.Time, ev activityEvent) (serveEventVM, bool) {
 	vm := serveEventVM{When: dash.HumanAgo(now, ev.At), Kind: ev.Kind, Failed: ev.Failed}
 	if ev.Kind == "tick" {

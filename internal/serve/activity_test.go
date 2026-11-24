@@ -106,6 +106,26 @@ func TestActivityRingIsBounded(t *testing.T) {
 	}
 }
 
+// TestActivityQuietTicksDoNotEvictAFailure: the ring's job is to reach
+// past the last thing that went wrong. A sweep that dies at night must
+// still be on the page the next morning, however many quiet ticks the
+// heartbeat ran in between.
+func TestActivityQuietTicksDoNotEvictAFailure(t *testing.T) {
+	start := time.Now().Add(-25 * time.Hour)
+	a := testActivity(t, start, true)
+	a.recordChildExit(heartbeatChildPrefix+"moe", start, errors.New("exit status 1"), "credit limit reached", "" /*run*/)
+	at := start
+	for range int(24 * time.Hour / heartbeatInterval) {
+		at = at.Add(heartbeatInterval)
+		a.recordTick(at, []HeartbeatDecision{{Project: "moe", Reason: "a sweep already surveyed the current tip"}})
+	}
+
+	vm := a.panel(at)
+	if len(vm.Events) != 1 || !vm.Events[0].Failed || vm.Events[0].Tail == "" {
+		t.Errorf("panel events = %+v, want the failed exit and its tail a day of quiet ticks later", vm.Events)
+	}
+}
+
 // TestActivityNextTickIsExactBeforeTheFirstTick: the ticker is
 // fixed-cadence and starts with the listener, so "next sweep in 12m" is
 // answerable from the moment serve is up — "armed, nothing swept yet" is
@@ -366,9 +386,8 @@ func TestActivityPanelCollapsesTheQuiet(t *testing.T) {
 }
 
 // TestActivityPanelDropsAnAllQuietTick: a tick where nothing happened is
-// not an event. The ring still records it — it is the CLI snapshot's
-// source and a debugging trail — but the page says "the heartbeat is
-// alive" once, on the status line, instead of once per tick.
+// not an event. The ring never records it; the page says "the heartbeat
+// is alive" once, on the status line, instead of once per tick.
 func TestActivityPanelDropsAnAllQuietTick(t *testing.T) {
 	now := time.Now()
 	a := testActivity(t, now.Add(-time.Hour), true)
@@ -383,8 +402,8 @@ func TestActivityPanelDropsAnAllQuietTick(t *testing.T) {
 	if len(vm.Events) != 0 {
 		t.Errorf("panel events = %+v, want an empty ring — nothing happened", vm.Events)
 	}
-	if len(a.events) != 2 {
-		t.Errorf("record holds %d events, want both ticks still recorded", len(a.events))
+	if len(a.events) != 0 {
+		t.Errorf("record holds %d events, want quiet ticks kept out of the ring", len(a.events))
 	}
 	if vm.LastTick != "4m ago" {
 		t.Errorf("last tick = %q, want the liveness those entries were carrying", vm.LastTick)

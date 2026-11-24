@@ -36,9 +36,10 @@ import (
 // Started is what says so. Nothing here writes to the journal: the
 // durable record of a pulse is its run, as it already was.
 
-// activityRing is how many events the record keeps. Fifty spans a day of
-// ticks at the baked cadence — far enough back to reach past the last
-// thing that went wrong, short enough to render on a phone in one page.
+// activityRing is how many events the record keeps: fifty pieces of news
+// — spawns, exits, ticks that swept or held. A quiet tick never enters
+// (see recordTick), so the reach back is set by how much happened, not
+// by the tick cadence, and still renders on a phone in one page.
 const activityRing = 50
 
 // tailRenderLines caps how much of a child's output tail reaches the
@@ -170,6 +171,10 @@ func (a *activity) push(ev activityEvent) {
 
 // recordTick folds one heartbeat pass into the record: the tick instant
 // (which is also what dates the next one) and every project's verdict.
+// Only a tick that swept or held something earns a ring entry. A quiet
+// one is already said by lastTick, and at a five-minute cadence letting
+// it in would push a failed sweep's exit and tail out of the ring within
+// hours.
 func (a *activity) recordTick(at time.Time, decisions []HeartbeatDecision) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -178,6 +183,9 @@ func (a *activity) recordTick(at time.Time, decisions []HeartbeatDecision) {
 		p := a.project(d.Project)
 		p.decision = d.Reason
 		p.sweep, p.held = d.Sweep, d.Held
+	}
+	if !slices.ContainsFunc(decisions, func(d HeartbeatDecision) bool { return d.Sweep || d.Held }) {
+		return
 	}
 	a.push(activityEvent{At: at, Kind: "tick", Decisions: slices.Clone(decisions)})
 }
