@@ -203,7 +203,10 @@ func TestCloneCLITTYJobControlInterruptAndExitCode(t *testing.T) {
 		}
 	}
 	write("printf '__ready__\\n'; sleep 20\n")
-	waitCloneCondition(t, "foreground command", func() bool { return strings.Contains(screen.String(), "\r\n__ready__\r\n") })
+	// Match only the marker's trailing CRLF. The typed command's echo has a
+	// literal backslash-n there, and bash with bracketed paste precedes the
+	// output with an escape sequence and a bare CR rather than CRLF.
+	waitCloneCondition(t, "foreground command", func() bool { return strings.Contains(screen.String(), "__ready__\r\n") })
 	write("\x1a")
 	waitCloneCondition(t, "stopped foreground job", func() bool { return strings.Contains(screen.String(), "Stopped") })
 	write("fg\n")
@@ -219,7 +222,7 @@ func TestCloneCLITTYJobControlInterruptAndExitCode(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("TTY did not recover after Ctrl-Z/fg/Ctrl-C: " + screen.String())
 	}
-	if !strings.Contains(screen.String(), "\r\n__recovered__\r\n") {
+	if !strings.Contains(screen.String(), "__recovered__\r\n") {
 		t.Fatal("shell did not execute after interrupt: " + screen.String())
 	}
 	if busy, err := runowner.Busy(root, "tele", "finish"); err != nil || busy {
