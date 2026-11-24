@@ -205,15 +205,15 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   `moe input list [project]` shows both halves, oldest first: what has asked
   you, then what you have given and no turn has picked up.
 
-  A question itself holds nothing. A survey's `park` or a stopped review
-  loop's hold is separate; an answer or any note releases the latter for one
-  more review turn. See [Blocked gates](workflows.md#cascades-the-bang-vocabulary)
-  for review recovery. Input does not clear an explicit pause or handoff.
-  Writing an entry starts nothing: it makes the prose available to the next
-  agent turn and can make eligible work actionable for an armed serve's sweep.
-  Project mode, readiness, and occupancy still apply; a hand-typed
-  `moe pulse new --dynamic` is the expedite path. A pending note or
-  answer counts as an operator mark under `safe` mode, consumed on delivery.
+  A question itself holds nothing. A stopped review loop's hold is separate;
+  an answer or any note releases it for one more review turn. See [Blocked
+  gates](workflows.md#cascades-the-bang-vocabulary) for review recovery. Input
+  does not clear an explicit pause or handoff. Writing an entry starts
+  nothing: it makes the prose available to the next agent turn and can make
+  eligible work actionable for an armed serve's sweep. Project mode,
+  readiness, and occupancy still apply; a hand-typed `moe pulse new --dynamic`
+  is the expedite path. A pending note or answer counts as an operator mark
+  under `safe` mode, consumed on delivery.
 - `moe usage [--project <id>] [--since <dur>]` sums the token usage recorded in
   every mirrored stage transcript, grouped by workflow, stage and model, with a
   selected rolling-window total plus per-run and by-day breakdowns. It reads

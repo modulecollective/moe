@@ -424,16 +424,16 @@ lineage in the journal. `idea reopen` is for a promoted idea whose destination
 run was abandoned and should become backlog again.
 
 `idea tag` is the other way in, and the cheaper one: it stamps a workflow tag
-(`sdlc` by default), and the next dynamic sweep promotes the idea under its own
-slug and rides it. The survey can order a tagged idea or `park` it by naming it
-in a thread, but it does not decide whether the idea starts; if the work turns
-out not to be ready, the destination's design gate holds or closes it. The tag
-is the whole fence — **the machine starts only tagged ideas**, whoever filed
-them — so `idea untag` is the per-idea pause, and an untagged idea stays
-operator-only forever. Agents can tag at capture time with the followups grammar
-(`` - [ ] `slug` (sdlc) — Title ``); `idea tag` is how the operator stamps one
-that was filed without it. Tagged ideas say so on the dash, and both verbs have
-a chip on the idea's page.
+(`sdlc` by default), which lets a dynamic sweep pick the idea as its `next`; the
+harness then promotes it under its own slug and rides it. The survey decides
+when a tagged idea's turn comes, one pick per sweep, but not whether it may
+start; if the work turns out not to be ready, the destination's design gate
+holds or closes it. The tag is the whole fence — **the machine starts only
+tagged ideas**, whoever filed them — so `idea untag` is the per-idea pause, and
+an untagged idea stays operator-only forever. Agents can tag at capture time
+with the followups grammar (`` - [ ] `slug` (sdlc) — Title ``); `idea tag` is
+how the operator stamps one that was filed without it. Tagged ideas say so on
+the dash, and both verbs have a chip on the idea's page.
 
 `--design-only` narrows that licence to one headless design turn: the promoted
 run rides design and then holds until you read the canvas and advance it, which
