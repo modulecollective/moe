@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"io"
 	"math/rand"
@@ -320,8 +321,13 @@ func TestServeShowsOwedOutcomeThroughRealWiring(t *testing.T) {
 		}
 	}
 	rr := do(httptest.NewRequest("GET", "/run-status", nil))
-	if !strings.Contains(rr.Body.String(), `"moe/change-auth":"finish failed · receipt not recorded"`) {
-		t.Errorf("run-status = %s", rr.Body.String())
+	var statuses map[string]json.RawMessage
+	if err := json.Unmarshal(rr.Body.Bytes(), &statuses); err != nil {
+		t.Fatal(err)
+	}
+	var status serve.RunRowStatus
+	if err := json.Unmarshal(statuses["moe/change-auth"], &status); err != nil || status.Summary != "finish failed · receipt not recorded" {
+		t.Errorf("run-status = %s (%v)", rr.Body.String(), err)
 	}
 	post := httptest.NewRequest("POST", "/run/moe/change-auth/control", strings.NewReader(url.Values{"action": {"finish"}, "id": {"web-again"}}.Encode()))
 	post.Header.Set("Content-Type", "application/x-www-form-urlencoded")

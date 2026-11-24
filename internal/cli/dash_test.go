@@ -103,8 +103,8 @@ func TestDashAfterCodeShowsCodeStage(t *testing.T) {
 	if !strings.Contains(got, "fix-it") || !strings.Contains(got, "tele") {
 		t.Fatalf("row missing project/run:\n%s", got)
 	}
-	if !containsRunRow(got, "tele", "fix-it", "sdlc:build") {
-		t.Fatalf("expected run row with stage 'sdlc:build' (parked), got:\n%s", got)
+	if !containsRunRow(got, "tele", "fix-it", "sdlc:build [blocked]") {
+		t.Fatalf("expected parked build row with its unready gate badge, got:\n%s", got)
 	}
 }
 
@@ -136,8 +136,8 @@ func TestDashPrereqReworkedShowsDesignStage(t *testing.T) {
 	if !strings.Contains(got, "ACTIVE (1)") {
 		t.Fatalf("expected one active run row, got:\n%s", got)
 	}
-	if !containsRunRow(got, "tele", "fix-it", "sdlc:design") {
-		t.Fatalf("expected run row with stage 'sdlc:design', got:\n%s", got)
+	if !containsRunRow(got, "tele", "fix-it", "sdlc:design [blocked]") {
+		t.Fatalf("expected reworked design row with its missing gate badge, got:\n%s", got)
 	}
 }
 
