@@ -711,8 +711,18 @@ func TestUIClosedIntentsInspectable(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := takeBoard(t, s)
-	if it := uiItem(t, b, "moe", "a-goal", ui.ItemIntent); !it.Editable {
+	if it := uiItem(t, b, "moe", "a-goal", ui.ItemIntent); !it.Editable || it.Status != "" {
 		t.Fatalf("open intent = %+v", it)
+	}
+	// The pulse's status.md rides beside the canvas, never inside the
+	// Body an edit draft is seeded from.
+	writeFile(t, filepath.Join(root, run.StatusPath("moe", "a-goal")), "2026-11-24, pulse\n")
+	if err := s.refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	b = takeBoard(t, s)
+	if it := uiItem(t, b, "moe", "a-goal", ui.ItemIntent); it.Status != "2026-11-24, pulse\n" || it.Body != body {
+		t.Fatalf("intent with status.md = %+v", it)
 	}
 	for _, slug := range []string{"a-goal", "b-goal", "an-idea"} {
 		if r := do(ui.Action{Kind: ui.ActClose, Project: "moe", Run: slug}); !r.OK {

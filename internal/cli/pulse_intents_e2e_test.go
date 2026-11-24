@@ -14,11 +14,12 @@ import (
 )
 
 // TestPulseSurveyKeepsIntentsEndToEnd drives a real sweep with a fake
-// agent on a two-project bureaucracy. The agent rewrites one intent's
-// Status and writes a gate that links, opens and closes. The turn commit
-// carries the intent canvas and no other run's document; the commits
-// after it hold the link, the new intent and the close; nothing is left
-// dirty.
+// agent on a two-project bureaucracy. The agent writes one intent's
+// status.md, strays onto an idea canvas and an intent canvas, and writes
+// a gate that links, opens and closes. The turn commit carries status.md
+// and neither canvas; both strays are dropped and named, with no resolve
+// agent; the commits after it hold the link, the new intent and the
+// close; nothing is left dirty.
 func TestPulseSurveyKeepsIntentsEndToEnd(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -34,7 +35,10 @@ func TestPulseSurveyKeepsIntentsEndToEnd(t *testing.T) {
 	seedIdea(t, root, "moe", "some-idea")
 	seedIdea(t, root, "tele", "incident-fix")
 	ideaRel := run.ContentPath("moe", "some-idea", dash.IdeaDocID)
+	intentRel := run.ContentPath("moe", "goal", dash.IntentDocID)
+	statusRel := run.StatusPath("moe", "goal")
 	ideaBefore, _ := os.ReadFile(filepath.Join(root, ideaRel))
+	intentBefore, _ := os.ReadFile(filepath.Join(root, intentRel))
 
 	fakeClaudeOnPath(t, `#!/bin/sh
 prompt=
@@ -46,7 +50,9 @@ done
 canvas=$(printf '%s' "$prompt" | awk '/Your canvas for this document is the single file:/ {getline; gsub(/^ +| +$/, ""); print; exit}')
 wt=${canvas%%/projects/*}
 ticks=$(printf '\140\140\140')
-printf '%s\n' '' '## Status' '' '2026-11-24, pulse' '- Landed: the first half.' >> "$wt/projects/moe/runs/goal/documents/intent/content.md"
+printf '%s\n' '2026-11-24, pulse' '- Landed: the first half.' > "$wt/`+statusRel+`"
+printf '%s\n' '' '## Status' '' '- stray' >> "$wt/`+intentRel+`"
+printf '%s\n' 'stray' >> "$wt/`+ideaRel+`"
 printf '%s\n' '# Pulse' '' '## Gate' '' "${ticks}json" '{"status":"ok","serves":[{"run":"moe/some-idea","intent":"moe/goal"},{"run":"tele/incident-fix","intent":"_cabinet/incident"}],"intents":[{"open":"_cabinet/incident","title":"Incident closed out","body":"Done when: no recurrence.","why":"two runs serve it"},{"close":"tele/finished","why":"tele/x merged"}]}' "$ticks" > "$canvas"
 exit 0
 `)
@@ -56,21 +62,32 @@ exit 0
 	if code != 0 {
 		t.Fatalf("pulse exit=%d stderr=%s", code, errb.String())
 	}
+	for _, rel := range []string{intentRel, ideaRel} {
+		if want := "dropped edit outside this turn's write set: " + rel; !strings.Contains(errb.String(), want) {
+			t.Errorf("stderr lacks %q:\n%s", want, errb.String())
+		}
+	}
+	if strings.Contains(errb.String(), "launching an agent") {
+		t.Errorf("a resolve agent was launched:\n%s", errb.String())
+	}
 
 	turn := strings.TrimSpace(gittest.Output(t, root, "log", "-1", "--format=%H", "--grep=^work: update pulse"))
 	files := gittest.Output(t, root, "show", "--name-only", "--format=", turn)
-	if !strings.Contains(files, run.ContentPath("moe", "goal", dash.IntentDocID)) {
-		t.Errorf("turn commit lacks the intent canvas:\n%s", files)
+	if !strings.Contains(files, statusRel) {
+		t.Errorf("turn commit lacks the intent's status.md:\n%s", files)
 	}
-	if strings.Contains(files, ideaRel) {
+	if strings.Contains(files, ideaRel) || strings.Contains(files, intentRel) {
 		t.Errorf("turn commit staged a non-whitelisted run document:\n%s", files)
 	}
-	intent, _ := os.ReadFile(filepath.Join(root, run.ContentPath("moe", "goal", dash.IntentDocID)))
-	if !strings.Contains(string(intent), "## Status\n\n2026-11-24, pulse\n- Landed: the first half.") {
-		t.Errorf("intent canvas after the sweep:\n%s", intent)
+	status, _ := os.ReadFile(filepath.Join(root, statusRel))
+	if string(status) != "2026-11-24, pulse\n- Landed: the first half.\n" {
+		t.Errorf("status.md after the sweep:\n%s", status)
 	}
-	if ideaAfter, _ := os.ReadFile(filepath.Join(root, ideaRel)); !bytes.Equal(ideaAfter, ideaBefore) {
-		t.Errorf("idea canvas changed: %q", ideaAfter)
+	if after, _ := os.ReadFile(filepath.Join(root, intentRel)); !bytes.Equal(after, intentBefore) {
+		t.Errorf("intent canvas changed: %q", after)
+	}
+	if after, _ := os.ReadFile(filepath.Join(root, ideaRel)); !bytes.Equal(after, ideaBefore) {
+		t.Errorf("idea canvas changed: %q", after)
 	}
 
 	subjects := gittest.Output(t, root, "log", "--format=%s", turn+"..HEAD")
@@ -101,38 +118,25 @@ exit 0
 	}
 }
 
-// TestPulseStatusEditMeetsAnOperatorEdit is the peer-edit collision the
-// design accepted. While the sweep runs, the operator commits to the
-// same intent canvas. An edit to another part of the file rebases clean
-// and both land; an edit to the same lines fails the sweep, leaves the
-// pulse run open, applies nothing from the gate, and keeps the
-// operator's edit.
-func TestPulseStatusEditMeetsAnOperatorEdit(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		operator string // sed expression the operator applies to the canvas
-		clean    bool
-	}{
-		{"different lines", "s/^# The goal$/# The sharper goal/", true},
-		{"same lines", "s/^Done when: the thing ships.$/Done when: the thing ships, twice./", false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			root := newTestBureaucracy(t)
-			markBureaucracy(t, root)
-			seedSdlcOneShotProject(t, root, "moe")
-			t.Setenv("MOE_HOME", root)
-			t.Setenv("NO_COLOR", "1")
-			if err := project.EnsureRoot(root, ""); err != nil {
-				t.Fatal(err)
-			}
-			seedIntent(t, root, "moe", "goal", "# The goal\n\nDirection.\n\nDone when: the thing ships.\n")
-			seedIdea(t, root, "moe", "some-idea")
-			intentRel := run.ContentPath("moe", "goal", dash.IntentDocID)
+// TestPulseStatusMeetsAnOperatorEdit: while the sweep runs, the operator
+// commits to the intent canvas — on the very lines the old in-canvas
+// Status sat beside. The pulse writes only status.md, a file the
+// operator never touches, so the close rebases clean and both land.
+func TestPulseStatusMeetsAnOperatorEdit(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedSdlcOneShotProject(t, root, "moe")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	if err := project.EnsureRoot(root, ""); err != nil {
+		t.Fatal(err)
+	}
+	seedIntent(t, root, "moe", "goal", "# The goal\n\nDirection.\n\nDone when: the thing ships.\n")
+	seedIdea(t, root, "moe", "some-idea")
+	intentRel := run.ContentPath("moe", "goal", dash.IntentDocID)
+	statusRel := run.StatusPath("moe", "goal")
 
-			// The pulse rewrites the Done-when line's neighbourhood by
-			// appending Status straight after it; the operator's "same
-			// lines" edit touches that last line.
-			fakeClaudeOnPath(t, `#!/bin/sh
+	fakeClaudeOnPath(t, `#!/bin/sh
 prompt=
 next=0
 for a in "$@"; do
@@ -143,52 +147,28 @@ canvas=$(printf '%s' "$prompt" | awk '/Your canvas for this document is the sing
 [ -n "$canvas" ] || exit 1
 wt=${canvas%%/projects/*}
 root=${wt%%/.moe/worktrees/*}
-sed -i '`+tc.operator+`' "$root/`+intentRel+`"
+sed -i 's/^Done when: the thing ships.$/Done when: the thing ships, twice./' "$root/`+intentRel+`"
 git -C "$root" commit -q -am "operator edits the intent" >/dev/null
 ticks=$(printf '\140\140\140')
-printf '%s\n' '' '## Status' '' '2026-11-24, pulse' '- Landed: half.' >> "$wt/`+intentRel+`"
+printf '%s\n' '2026-11-24, pulse' '- Landed: half.' > "$wt/`+statusRel+`"
 printf '%s\n' '# Pulse' '' '## Gate' '' "${ticks}json" '{"status":"ok","serves":[{"run":"moe/some-idea","intent":"moe/goal"}]}' "$ticks" > "$canvas"
 exit 0
 `)
-			var out, errb bytes.Buffer
-			code := runPulseSurvey(root, project.RootID, "", nil, &out, &errb)
-			canvas, _ := os.ReadFile(filepath.Join(root, intentRel))
-			if tc.clean {
-				if code != 0 {
-					t.Fatalf("exit=%d stderr=%s", code, errb.String())
-				}
-				if !strings.Contains(string(canvas), "# The sharper goal") || !strings.Contains(string(canvas), "- Landed: half.") {
-					t.Fatalf("both edits should land:\n%s", canvas)
-				}
-				if mustLoad(t, root, "moe", "some-idea").Intent != "moe/goal" {
-					t.Fatal("gate not applied")
-				}
-				return
-			}
-			if code == 0 {
-				t.Fatalf("an overlapping edit should fail the sweep; stderr=%s", errb.String())
-			}
-			if !strings.Contains(errb.String(), "rebase") {
-				t.Errorf("stderr does not name the rebase:\n%s", errb.String())
-			}
-			if !strings.Contains(string(canvas), "twice.") || strings.Contains(string(canvas), "Landed: half.") {
-				t.Errorf("root canvas should hold the operator's edit only:\n%s", canvas)
-			}
-			if mustLoad(t, root, "moe", "some-idea").Intent != "" {
-				t.Error("a failed sweep applied its gate")
-			}
-			open := false
-			for _, md := range mustScan(t, root) {
-				if md.Workflow == pulseWorkflow && md.Status == run.StatusInProgress {
-					open = true
-				}
-			}
-			if !open {
-				t.Error("the failed sweep's run should stay open on the dash")
-			}
-			if st := gittest.Output(t, root, "status", "--porcelain"); strings.TrimSpace(st) != "" {
-				t.Errorf("root left dirty:\n%s", st)
-			}
-		})
+	var out, errb bytes.Buffer
+	if code := runPulseSurvey(root, project.RootID, "", nil, &out, &errb); code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, errb.String())
+	}
+	canvas, _ := os.ReadFile(filepath.Join(root, intentRel))
+	if !strings.Contains(string(canvas), "twice.") {
+		t.Errorf("operator's edit lost:\n%s", canvas)
+	}
+	if status, _ := os.ReadFile(filepath.Join(root, statusRel)); !strings.Contains(string(status), "- Landed: half.") {
+		t.Errorf("status.md did not land:\n%s", status)
+	}
+	if mustLoad(t, root, "moe", "some-idea").Intent != "moe/goal" {
+		t.Error("gate not applied")
+	}
+	if st := gittest.Output(t, root, "status", "--porcelain"); strings.TrimSpace(st) != "" {
+		t.Errorf("root left dirty:\n%s", st)
 	}
 }

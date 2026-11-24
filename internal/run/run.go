@@ -549,6 +549,15 @@ func FollowupsPath(projectID, id string) string {
 	return filepath.Join(Dir(projectID, id), "followups.md")
 }
 
+// StatusPath returns the path (relative to the bureaucracy root) of an
+// intent's status.md: the pulse's companion to the operator's canvas,
+// sibling of run.json. The pulse is its one writer; the canvas stays
+// the operator's. Optional — an intent the pulse has not reported on
+// has none.
+func StatusPath(projectID, id string) string {
+	return filepath.Join(Dir(projectID, id), "status.md")
+}
+
 // FeedbackDir returns the path (relative to the bureaucracy root) of a
 // run's feedback/ directory: sibling of run.json that holds free-form
 // notes workflow agents leave for downstream recipients (twin,

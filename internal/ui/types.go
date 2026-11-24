@@ -42,6 +42,10 @@ type Item struct {
 	// Body is a capture's canvas (ideas and intents), or a chore's
 	// definition in its editable text form.
 	Body string
+	// Status is an intent's status.md, kept by the pulse beside the
+	// operator's canvas. Shown under the canvas, never part of Body:
+	// Body seeds the edit draft, and status is not the operator's text.
+	Status string
 	// Editable: an open capture whose body can be edited, closed and —
 	// for ideas — tagged; or a chore whose definition can be edited,
 	// deleted and opened now.

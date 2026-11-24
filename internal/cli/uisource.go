@@ -83,6 +83,9 @@ type uiExtra struct {
 	inputErr error
 	body     string
 	bodyErr  error
+	// status is an intent's status.md, the pulse's companion to the
+	// canvas; empty when there is none.
+	status string
 }
 
 func newUISource(root string, filter DashFilter, terminal *os.File) *uiSource {
@@ -162,6 +165,10 @@ func (s *uiSource) readExtras(snap DashSnapshot) map[string]uiExtra {
 		if doc, ok := dash.CaptureDocID(md.Workflow); ok {
 			b, err := os.ReadFile(s.root + "/" + run.ContentPath(md.Project, md.ID, doc))
 			e.body, e.bodyErr = string(b), err
+		}
+		if md.Workflow == dash.IntentWorkflow {
+			b, _ := os.ReadFile(s.root + "/" + run.StatusPath(md.Project, md.ID))
+			e.status = string(b)
 		}
 		out[key] = e
 	}
@@ -486,6 +493,7 @@ func (s *uiSource) item(row dash.Row, now time.Time, obs map[string]RunObservati
 	inProgress := md.Status == run.StatusInProgress
 	if it.Kind != ui.ItemRun {
 		it.Body = ex.body
+		it.Status = ex.status
 		it.Editable = inProgress
 		it.Notes = inProgress && it.Kind == ui.ItemIdea
 		it.Detail = s.captureDetail(md, ex)

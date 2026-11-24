@@ -289,7 +289,8 @@ func TestPulseKickoffMapsWork(t *testing.T) {
 	}
 	got := openIntentsBlock(sc)
 	for _, want := range []string{
-		"- `moe/goal` — The goal\n  canvas: " + filepath.Join(root, run.ContentPath("moe", "goal", dash.IntentDocID)),
+		"- `moe/goal` — The goal\n  canvas: " + filepath.Join(root, run.ContentPath("moe", "goal", dash.IntentDocID)) +
+			"\n  status: " + filepath.Join(root, run.StatusPath("moe", "goal")),
 		"  - `moe/linked` (idea, in_progress)",
 		"- `_cabinet/incident` — Incident (opened by pulse)",
 	} {
@@ -323,26 +324,33 @@ func TestPulsePromptSeesEveryProjectsIntents(t *testing.T) {
 		t.Fatalf("root section:\n%s", got)
 	}
 	other := intentsReferenceSection(root, "moe")
-	if strings.Contains(other, "Intents of") || !strings.Contains(other, "## Project intents") || !strings.Contains(other, "the pulse keeps each one's `## Status`") {
+	if strings.Contains(other, "Intents of") || !strings.Contains(other, "## Project intents") || !strings.Contains(other, "the pulse keeps each one's Status") {
 		t.Fatalf("project section:\n%s", other)
 	}
 }
 
-// TestPulseStagesOpenIntentCanvases: the pulse turn's whitelist is every
-// open intent's canvas and nothing else.
-func TestPulseStagesOpenIntentCanvases(t *testing.T) {
+// TestPulseStagesOpenIntentStatus: the pulse turn's whitelist is the
+// status.md of every open intent that has one, and nothing else — no
+// canvas, no closed intent's status, no idea.
+func TestPulseStagesOpenIntentStatus(t *testing.T) {
 	root := intentFixture(t)
 	seedIntent(t, root, "moe", "goal", "# Goal\n")
+	seedIntent(t, root, "moe", "bare", "# Bare\n")
 	seedIntent(t, root, "moe", "shut", "# Shut\n")
 	if err := runopen.CloseCapture(root, "moe", "shut"); err != nil {
 		t.Fatal(err)
 	}
 	seedIdea(t, root, "moe", "an-idea")
-	got, err := openIntentCanvasPaths(root, nil)
+	for _, slug := range []string{"goal", "shut"} {
+		if err := os.WriteFile(filepath.Join(root, run.StatusPath("moe", slug)), []byte("2026-11-24, pulse\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := openIntentStatusPaths(root, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := run.ContentPath("moe", "goal", dash.IntentDocID)
+	want := run.StatusPath("moe", "goal")
 	if len(got) != 1 || got[0] != want {
 		t.Fatalf("paths = %v, want [%s]", got, want)
 	}

@@ -169,3 +169,19 @@ func TestNoteOnIdeaStillOffersTheTag(t *testing.T) {
 		t.Fatalf("a note on an idea saved without the save/tag choice: mode=%v", m.mode)
 	}
 }
+
+// TestIntentDetailShowsStatusBelowCanvas: an intent's status renders
+// under its own rule after the canvas; an intent without one shows no
+// status rule.
+func TestIntentDetailShowsStatusBelowCanvas(t *testing.T) {
+	m, _ := testModel(t)
+	it := Item{Project: "p", Run: "goal", Kind: ItemIntent, Body: "# Goal\n", Status: "2026-11-24, pulse\n- Landed: half.\n"}
+	detail := strings.Join(m.itemDetail(it, true), "\n")
+	if want := "── canvas ──\n# Goal\n\n── status ──\n2026-11-24, pulse\n- Landed: half."; !strings.Contains(detail, want) {
+		t.Fatalf("detail = %q, want it to contain %q", detail, want)
+	}
+	it.Status = ""
+	if detail := strings.Join(m.itemDetail(it, true), "\n"); strings.Contains(detail, "status ──") {
+		t.Fatalf("intent without status shows a status rule: %q", detail)
+	}
+}

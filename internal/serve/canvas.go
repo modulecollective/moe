@@ -56,7 +56,11 @@ func (s *Server) handleCanvas(w http.ResponseWriter, r *http.Request) {
 		Stage:   stage,
 		Path:    path,
 	}
-	body, mod, err := readCanvas(path, s.canvasFiles(projectID, slug, stage), s.canvasReferenceResolver(projectID))
+	refs := s.canvasReferenceResolver(projectID)
+	body, mod, err := readCanvas(path, s.canvasFiles(projectID, slug, stage), refs)
+	if err == nil && stage == dash.IntentDocID {
+		body, mod, err = withIntentStatus(path, body, mod, refs)
+	}
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			vm.Missing = true
@@ -151,6 +155,34 @@ func readCanvas(path string, declared []string, refs func(md.Reference) string) 
 		b.WriteString(md.RenderWithReferences(string(body), nil, refs))
 		b.WriteString("\n</section>\n")
 	}
+	return template.HTML(b.String()), mod, nil
+}
+
+// withIntentStatus joins an intent's status.md to its rendered canvas.
+// The pulse writes status.md beside run.json and the operator writes
+// the canvas, so the page shows the two the way a build shows code and
+// test: each under its own label, canvas first. An intent with no
+// status.md renders exactly as its canvas alone. path is the canvas
+// ResolveCanvas returned, so a live session's status is read from the
+// same tree as its canvas.
+func withIntentStatus(path string, canvas template.HTML, mod time.Time, refs func(md.Reference) string) (template.HTML, time.Time, error) {
+	statusPath := filepath.Join(filepath.Dir(path), "..", "..", "status.md")
+	status, err := os.ReadFile(statusPath)
+	if errors.Is(err, fs.ErrNotExist) {
+		return canvas, mod, nil
+	}
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	if st, err := os.Stat(statusPath); err == nil && st.ModTime().After(mod) {
+		mod = st.ModTime()
+	}
+	var b strings.Builder
+	b.WriteString("<section class=\"canvas-file\">\n<h2 class=\"canvas-file-label\">Intent <span class=\"meta\">content.md</span></h2>\n")
+	b.WriteString(string(canvas))
+	b.WriteString("\n</section>\n<section class=\"canvas-file\">\n<h2 class=\"canvas-file-label\">Status <span class=\"meta\">status.md</span></h2>\n")
+	b.WriteString(md.RenderWithReferences(string(status), nil, refs))
+	b.WriteString("\n</section>\n")
 	return template.HTML(b.String()), mod, nil
 }
 

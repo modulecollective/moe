@@ -19,9 +19,10 @@ import (
 // dedicated single-stage workflow (dash.IntentWorkflow, dash.IntentDocID),
 // the same shape as ideas.
 //
-// The operator writes the direction. The pulse keeps the rest: the
-// `## Status` section at the foot of each canvas, the link from each run
-// to the intent it serves (run.json's `intent`), and — through its gate,
+// The operator writes the direction, and the canvas is theirs whole. The
+// pulse keeps the rest: status.md beside run.json (run.StatusPath),
+// which every reader shows under the canvas, the link from each run to
+// the intent it serves (run.json's `intent`), and — through its gate,
 // each held to a high bar in the stage fragment — opening an intent for
 // an outcome nobody named and closing one whose done condition it can
 // show met. `moe intent reopen` undoes a close in one command, and a

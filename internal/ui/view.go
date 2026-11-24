@@ -343,6 +343,10 @@ func (m *model) itemDetail(it Item, ok bool) []string {
 		out = append(out, "", "── canvas ──")
 		out = append(out, strings.Split(strings.TrimRight(it.Body, "\n"), "\n")...)
 	}
+	if status := strings.TrimSpace(it.Status); status != "" {
+		out = append(out, "", "── status ──")
+		out = append(out, strings.Split(status, "\n")...)
+	}
 	return out
 }
 

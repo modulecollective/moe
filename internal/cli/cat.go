@@ -9,8 +9,10 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
+	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/session"
 )
@@ -93,6 +95,19 @@ func runCat(workflow, defaultStage string) func(args []string, stdout, stderr io
 			}
 			moePrintf(stderr, "moe %s cat: %v\n", workflow, err)
 			return 1
+		}
+		// An intent's status.md sits beside run.json, two levels above
+		// the document dir; the pulse keeps it, the canvas stays the
+		// operator's. Read from the same tree as the canvas.
+		if workflow == dash.IntentWorkflow {
+			status, err := os.ReadFile(filepath.Join(filepath.Dir(abs), "..", "..", "status.md"))
+			if err != nil && !errors.Is(err, iofs.ErrNotExist) {
+				moePrintf(stderr, "moe %s cat: %v\n", workflow, err)
+				return 1
+			}
+			if text := strings.TrimSpace(string(status)); text != "" {
+				body = strings.TrimRight(body, "\n") + "\n\n## Status\n\n" + text + "\n"
+			}
 		}
 		if _, err := io.WriteString(stdout, body); err != nil {
 			moePrintf(stderr, "moe %s cat: %v\n", workflow, err)

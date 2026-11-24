@@ -211,10 +211,11 @@ func requireOpenIntent(root, ref string) error {
 	return nil
 }
 
-// openIntentCanvasPaths is the pulse turn's ExtraStagePaths: the canvas
-// of every open intent in the session worktree, relative to it. A
-// canvas missing on disk is left out so `git add` never fails on it.
-func openIntentCanvasPaths(workRoot string, _ *run.Metadata) ([]string, error) {
+// openIntentStatusPaths is the pulse turn's ExtraStagePaths: the
+// status.md of every open intent in the session worktree, relative to
+// it. Intent canvases are the operator's and stay off the list; a
+// status.md missing on disk is left out so `git add` never fails on it.
+func openIntentStatusPaths(workRoot string, _ *run.Metadata) ([]string, error) {
 	mds, err := run.Scan(workRoot)
 	if err != nil {
 		return nil, err
@@ -224,7 +225,7 @@ func openIntentCanvasPaths(workRoot string, _ *run.Metadata) ([]string, error) {
 		if md.Workflow != dash.IntentWorkflow || md.Status != run.StatusInProgress {
 			continue
 		}
-		rel := run.ContentPath(md.Project, md.ID, dash.IntentDocID)
+		rel := run.StatusPath(md.Project, md.ID)
 		if _, err := os.Stat(filepath.Join(workRoot, rel)); err == nil {
 			out = append(out, rel)
 		}
@@ -248,9 +249,10 @@ func openIntentsBlock(sc *pulseScan) string {
 			continue
 		}
 		key := md.Project + "/" + md.ID
-		lines = append(lines, fmt.Sprintf("- `%s` — %s%s\n  canvas: %s",
+		lines = append(lines, fmt.Sprintf("- `%s` — %s%s\n  canvas: %s\n  status: %s",
 			key, intentTitle(sc.root, md.Project, md.ID), intentMarks(md),
-			filepath.Join(sc.root, run.ContentPath(md.Project, md.ID, dash.IntentDocID))))
+			filepath.Join(sc.root, run.ContentPath(md.Project, md.ID, dash.IntentDocID)),
+			filepath.Join(sc.root, run.StatusPath(md.Project, md.ID))))
 		work := linked[key]
 		sortRunsByKey(work)
 		for _, w := range work {
@@ -260,7 +262,7 @@ func openIntentsBlock(sc *pulseScan) string {
 	if len(lines) == 0 {
 		return ""
 	}
-	return "Open intents, each with the work linked to it. Keep each one's `## Status` as the stage guidance says:\n" +
+	return "Open intents, each with the work linked to it. Keep each one's `status.md` as the stage guidance says:\n" +
 		strings.Join(lines, "\n")
 }
 

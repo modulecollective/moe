@@ -176,16 +176,24 @@ func TestIntentsReferenceSection(t *testing.T) {
 	seedIntentRun(t, root, "tele", "north-star", run.StatusInProgress,
 		"# Be the fastest dash\n\nThe bet body.\n\n## Done when\n\n```sh\n# not a heading\n```\n#hashtag\n")
 	seedIntentRun(t, root, "tele", "retired", run.StatusClosed, "# Old direction\n\nold body\n")
+	seedIntentRun(t, root, "tele", "quiet", run.StatusInProgress, "# Pure direction\n\nNo status.\n")
+	if err := os.WriteFile(filepath.Join(root, run.StatusPath("tele", "north-star")), []byte("2026-11-24, pulse\n- Landed: half.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	got := intentsReferenceSection(root, "tele")
 	for _, want := range []string{
 		"## Project intents",
-		"### `north-star` — Be the fastest dash\n\nThe bet body.\n\n#### Done when\n\n```sh\n# not a heading\n```\n#hashtag\n",
-		"the pulse keeps each one's `## Status`",
+		"### `north-star` — Be the fastest dash\n\nThe bet body.\n\n#### Done when\n\n```sh\n# not a heading\n```\n#hashtag\n\n#### Status\n\n2026-11-24, pulse\n- Landed: half.\n",
+		"### `quiet` — Pure direction\n\nNo status.\n",
+		"the pulse keeps each one's Status",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("intents section missing %q in:\n%s", want, got)
 		}
+	}
+	if strings.Count(got, "#### Status") != 1 {
+		t.Errorf("only the intent with a status.md gets a Status heading:\n%s", got)
 	}
 	if strings.Count(got, "Be the fastest dash") != 1 {
 		t.Errorf("title should render once, as the ### heading:\n%s", got)

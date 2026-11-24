@@ -384,3 +384,61 @@ func TestDashRendersTheIntentCaptureLink(t *testing.T) {
 
 	mustContain(t, get(t, s, "/"), `href="/intent/new"`, `href="/idea/new"`)
 }
+
+// TestIntentPageShowsStatusBesideCanvas: an intent with a status.md
+// renders the canvas and the status as two labelled sections, canvas
+// first, on both the run page and the canvas route. An intent without
+// one renders its canvas alone, unlabelled, as before.
+func TestIntentPageShowsStatusBesideCanvas(t *testing.T) {
+	root := t.TempDir()
+	seedRun(t, root, "alpha", "ship-faster", dash.IntentWorkflow)
+	seedRun(t, root, "alpha", "pure-direction", dash.IntentWorkflow)
+	for slug, body := range map[string]string{
+		"ship-faster":    "# Ship faster\n\nThe operator's words.\n",
+		"pure-direction": "# Pure direction\n\nNo status.\n",
+	} {
+		p := filepath.Join(root, run.ContentPath("alpha", slug, dash.IntentDocID))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, run.StatusPath("alpha", "ship-faster")), []byte("2026-11-24, pulse\n\n- Landed: the first half.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := newTestServer(t, Options{
+		Addr: "127.0.0.1:0",
+		Root: root,
+		ResolveCanvas: func(p, slug, stage string) (string, error) {
+			return filepath.Join(root, run.ContentPath(p, slug, stage)), nil
+		},
+		RunStages: func(_, _ string) ([]string, error) { return []string{dash.IntentDocID}, nil },
+	})
+	for _, path := range []string{"/run/alpha/ship-faster", "/run/alpha/ship-faster/canvas/intent"} {
+		out := get(t, s, path).Body.String()
+		last := -1
+		for _, want := range []string{
+			`canvas-file-label">Intent <span class="meta">content.md</span>`,
+			"The operator&#39;s words.",
+			`canvas-file-label">Status <span class="meta">status.md</span>`,
+			"Landed: the first half.",
+		} {
+			at := strings.Index(out, want)
+			if at < 0 {
+				t.Fatalf("%s: missing %q\n%s", path, want, out)
+			}
+			if at < last {
+				t.Fatalf("%s: %q out of order\n%s", path, want, out)
+			}
+			last = at
+		}
+	}
+	for _, path := range []string{"/run/alpha/pure-direction", "/run/alpha/pure-direction/canvas/intent"} {
+		out := get(t, s, path).Body.String()
+		if !strings.Contains(out, "No status.") || strings.Contains(out, "canvas-file-label") {
+			t.Errorf("%s: an intent without status.md should render its canvas alone\n%s", path, out)
+		}
+	}
+}

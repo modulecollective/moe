@@ -890,6 +890,9 @@ func (s *Server) canvasLinks(projectID, slug string, now time.Time) []canvasLink
 		// it and emit the row with no body, so the reader still gets
 		// the stage link.
 		body, mod, err := readCanvas(path, s.canvasFiles(projectID, slug, stage), refs)
+		if err == nil && stage == dash.IntentDocID {
+			body, mod, err = withIntentStatus(path, body, mod, refs)
+		}
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}

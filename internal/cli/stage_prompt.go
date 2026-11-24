@@ -399,8 +399,8 @@ to prioritise); they don't fence what's allowed.
 		return ""
 	}
 	closing := `
-You read intents; the pulse keeps each one's ` + "`## Status`" + ` and the links
-from runs to the intent they serve. If your work changes where an intent
+You read intents; the pulse keeps each one's Status and the links from
+runs to the intent they serve. If your work changes where an intent
 stands, say so on your canvas, and the next pulse will carry it.
 `
 	if projectID == project.RootID {
@@ -431,6 +431,11 @@ func intentsSection(root string, intents []*run.Metadata, heading, intro string)
 		}
 		if body := intentPromptBody(string(content)); body != "" {
 			b.WriteString("\n" + body + "\n")
+		}
+		if status, err := os.ReadFile(filepath.Join(root, run.StatusPath(md.Project, md.ID))); err == nil {
+			if text := strings.TrimSpace(string(status)); text != "" {
+				b.WriteString("\n#### Status\n\n" + text + "\n")
+			}
 		}
 	}
 	return b.String()

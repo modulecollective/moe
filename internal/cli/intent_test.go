@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
@@ -404,6 +405,17 @@ func TestIntentCatPrintsCanvas(t *testing.T) {
 	}
 	if out.String() != "# read-me-back\n" {
 		t.Fatalf("unexpected canvas dump: %q", out.String())
+	}
+
+	// With a status.md beside run.json, cat prints the canvas, then the
+	// pulse's status under its own heading.
+	writeFile(t, filepath.Join(root, run.StatusPath("tele", "read-me-back")), "2026-11-24, pulse\n- Landed: half.\n")
+	out.Reset()
+	if code := Run([]string{"intent", "cat", "tele/read-me-back"}, &out, &errb); code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	if want := "# read-me-back\n\n## Status\n\n2026-11-24, pulse\n- Landed: half.\n"; out.String() != want {
+		t.Fatalf("cat with status = %q, want %q", out.String(), want)
 	}
 }
 

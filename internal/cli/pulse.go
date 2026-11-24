@@ -624,10 +624,10 @@ var openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt,
 				return prompt, nil
 			},
 			CanvasSkeleton: pulseCanvasSkeleton,
-			// The pulse keeps each intent's Status as a peer edit on the
-			// intent canvas. Only those canvases are staged beside the
-			// report; an edit to any other run's document still is not.
-			ExtraStagePaths: openIntentCanvasPaths,
+			// The pulse keeps each intent's status.md beside its canvas.
+			// Only those files are staged beside the report; an edit to
+			// any other run's document is dropped after the commit.
+			ExtraStagePaths: openIntentStatusPaths,
 		}, stdout, stderr)
 	return out
 }
