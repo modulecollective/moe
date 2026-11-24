@@ -3,14 +3,19 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"io"
 	"math/rand"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/git/gittest"
+	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runcontrol"
 	"github.com/modulecollective/moe/internal/runowner"
+	"github.com/modulecollective/moe/internal/runsock"
 	"github.com/modulecollective/moe/internal/serve"
 )
 
@@ -103,6 +108,70 @@ func TestServeControlDoors(t *testing.T) {
 	v, _, _ = serveRunControl(root, "moe", "change-auth")
 	if strings.Join(v.Actions, ",") != "pause,handoff,finish" {
 		t.Fatalf("idle actions = %v", v.Actions)
+	}
+}
+
+func TestServeContinuationEligibility(t *testing.T) {
+	for _, workflow := range []string{"idea", "intent", "pulse", "sdlc"} {
+		t.Run(workflow, func(t *testing.T) {
+			root, md := controlFixture(t)
+			stage := workflow
+			if workflow == "sdlc" {
+				stage = "design"
+			}
+			md.Workflow = workflow
+			md.LastTurn = &run.Turn{Stage: stage, Agent: "codex"}
+			if err := run.Save(root, md); err != nil {
+				t.Fatal(err)
+			}
+			gittest.Run(t, root, "add", "-A")
+			gittest.Commit(t, root, "record conversation")
+			srv, err := serve.New(serveOptions(root, io.Discard))
+			if err != nil {
+				t.Fatal(err)
+			}
+			before := gittest.HeadSHA(t, root)
+			for _, live := range []bool{false, true} {
+				if live {
+					ownForTest(t, root)
+					publishRun(root, md.Project, md.ID, func(s *runsock.Status) {
+						s.Phase, s.Stage, s.Agent = runsock.PhaseRunning, stage, "codex"
+					})
+				}
+				v, ok, err := serveRunControl(root, md.Project, md.ID)
+				if err != nil || !ok || len(v.Lines) == 0 {
+					t.Fatalf("live=%v: status diagnostics missing: %+v, %v, %v", live, v, ok, err)
+				}
+				want := ""
+				if workflow == "sdlc" {
+					want = "moe sdlc design moe/change-auth --agent codex"
+					wantActions := "pause,handoff,finish"
+					if live {
+						wantActions = "pause,handoff,park,finish"
+					}
+					if strings.Join(v.Actions, ",") != wantActions {
+						t.Fatalf("live=%v: controls = %v", live, v.Actions)
+					}
+				} else if len(v.Actions) != 0 {
+					t.Fatalf("live=%v: unsupported controls = %v", live, v.Actions)
+				}
+				if v.Conversation != want {
+					t.Errorf("live=%v: conversation = %q, want %q", live, v.Conversation, want)
+				}
+				rr := httptest.NewRecorder()
+				srv.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/run/moe/change-auth/status", nil))
+				body := rr.Body.String()
+				if rr.Code != 200 || !strings.Contains(body, `id="run-status"`) || !strings.Contains(body, "owner:") {
+					t.Fatalf("live=%v: status = %d %s", live, rr.Code, body)
+				}
+				if got := strings.Contains(body, "continue the conversation at a terminal:"); got != (want != "") || (want != "" && !strings.Contains(body, want)) {
+					t.Errorf("live=%v: continuation guidance = %s", live, body)
+				}
+			}
+			if gittest.HeadSHA(t, root) != before || strings.TrimSpace(gittest.Output(t, root, "status", "--porcelain")) != "" {
+				t.Fatal("status reads mutated the journal")
+			}
+		})
 	}
 }
 

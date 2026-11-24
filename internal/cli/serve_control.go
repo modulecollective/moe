@@ -48,8 +48,8 @@ func serveRunControl(root, projectID, runID string) (serve.RunControlView, bool,
 		v.Lines = append(v.Lines, "recovery required: "+f.Recovery.Reason)
 	}
 	v.Lines = append(v.Lines, o.localLines()...)
-	v.Conversation = conversationCommand(md, stage, agent)
 	if controlPolicy(md) == nil {
+		v.Conversation = conversationCommand(md, stage, agent)
 		v.Actions = controlActions(md, o)
 	}
 	for _, r := range f.Requests {
