@@ -146,7 +146,8 @@ words stay as they wrote them. An intent with no linked work and no
 done condition is pure direction and gets no Status.
 
 **Links.** The kickoff's **Unmapped** block lists runs and ideas opened
-since the last pulse that serve no intent. Link the ones that do in the
+this week that moved since the last pulse and serve no intent. A run
+you leave unlinked may show up again while it stays active. Link the ones that do in the
 gate's `serves` list, one intent per run (the one it serves most). Leave
 tidying and unrelated work unlinked; that is a judgement, not an
 omission. You may correct a link you see is wrong. Do not go looking

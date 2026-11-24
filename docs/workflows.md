@@ -487,8 +487,10 @@ Where intents reach the robots:
   you; a few lines, dated when it last changed) as a peer edit; that canvas is
   the only other run document its turn commits. It links runs and ideas to the
   intent each serves through its gate's `serves` key, which writes `intent` on
-  `run.json`; the kickoff lists the work opened since the last pulse with no
-  link, so mapping is cheap and nothing is backfilled. And through the gate's
+  `run.json`; the kickoff lists the week's unlinked work that moved since the
+  last pulse, so mapping is cheap and nothing is backfilled. A run with an
+  open session is skipped (the link would conflict its close) and offered
+  again once it lands. And through the gate's
   `intents` key it may open an intent for an outcome several runs serve that
   nobody named, or close one whose done condition it can show met, clause by
   clause. Both bars are high and held in its stage guidance. A pulse never

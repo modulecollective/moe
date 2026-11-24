@@ -384,3 +384,89 @@ func mustScan(t *testing.T, root string) []*run.Metadata {
 	}
 	return mds
 }
+
+// TestServesSkipsRunWithOpenSession drives a pulse's `serves` link into
+// a run's first design turn: the fake agent runs applyPulseServes from
+// another process mid-turn, as a clock pulse would. The link must skip
+// rather than write run.json under the session, whose close would then
+// conflict on the rebase; once the session lands, the run is still
+// offered in Unmapped and the next pulse links it.
+func TestServesSkipsRunWithOpenSession(t *testing.T) {
+	root, _, _ := designFixture(t, "")
+	seedIntent(t, root, "tele", "goal", "# Goal\n")
+	before := time.Now().Add(-time.Minute)
+	servesLog := filepath.Join(t.TempDir(), "serves.log")
+	t.Setenv("MOE_TEST_SERVES_BIN", os.Args[0])
+	t.Setenv("MOE_TEST_SERVES_LOG", servesLog)
+	fakeClaudeOnPath(t, `#!/bin/sh
+set -eu
+prompt=
+next=0
+for a in "$@"; do
+ if [ "$next" = 1 ]; then prompt=$a; next=0; fi
+ case "$a" in --append-system-prompt) next=1 ;; esac
+done
+canvas=$(printf '%s' "$prompt" | awk '/Your canvas for this document is the single file:/ {getline; gsub(/^ +| +$/, ""); print; exit}')
+MOE_TEST_SERVES_ROOT="$MOE_HOME" "$MOE_TEST_SERVES_BIN" -test.run='^TestServesTurnHelper$' > "$MOE_TEST_SERVES_LOG" 2>&1
+printf '\nUnresolved: the service contract needs investigation.\n' >> "$canvas"
+`)
+	code, out := designTurn(t, "progress")
+	helper, _ := os.ReadFile(servesLog)
+	if code != 0 || strings.Contains(out, "rebase") {
+		t.Fatalf("design turn exit %d:\n%s\nserves helper:\n%s", code, out, helper)
+	}
+	if !strings.Contains(string(helper), "has an open session") {
+		t.Fatalf("serves did not skip the reserved run:\n%s", helper)
+	}
+	if md := mustLoad(t, root, "tele", "design-gate"); md.Intent != "" {
+		t.Fatalf("link landed under an open session: %q", md.Intent)
+	}
+
+	sc, ok := newPulseScan(root)
+	if !ok {
+		t.Fatal("scan")
+	}
+	if !strings.Contains(unmappedBlock(sc, before, ""), "`tele/design-gate`") {
+		t.Fatalf("skipped run not offered again:\n%s", unmappedBlock(sc, before, ""))
+	}
+	var errs bytes.Buffer
+	applyPulseServes(root, "_cabinet/pulse-2", []pulseServes{{Run: "tele/design-gate", Intent: "tele/goal"}}, nil, &errs)
+	if md := mustLoad(t, root, "tele", "design-gate"); md.Intent != "tele/goal" {
+		t.Fatalf("link after the session landed: %q\n%s", md.Intent, errs.String())
+	}
+}
+
+// TestServesTurnHelper is the pulse side of TestServesSkipsRunWithOpenSession,
+// run by the fake agent in its own process.
+func TestServesTurnHelper(t *testing.T) {
+	root := os.Getenv("MOE_TEST_SERVES_ROOT")
+	if root == "" {
+		return
+	}
+	applyPulseServes(root, "_cabinet/pulse-1", []pulseServes{{Run: "tele/design-gate", Intent: "tele/goal"}}, nil, os.Stdout)
+}
+
+// TestUnmappedLooksBackAWeek: a run opened before the last pulse is still
+// offered while it moves, within the window; older work is not.
+func TestUnmappedLooksBackAWeek(t *testing.T) {
+	root := intentFixture(t)
+	for slug, age := range map[string]int{"recent": 3, "old": 10} {
+		seedIdea(t, root, "moe", slug)
+		md := mustLoad(t, root, "moe", slug)
+		md.Created = time.Now().AddDate(0, 0, -age).Local().Format("2006-01-02")
+		if err := run.Save(root, md); err != nil {
+			t.Fatal(err)
+		}
+		if err := run.StageAndCommit(root, "age "+slug+"\n\nMoE-Run: moe/"+slug+"\n", filepath.Join(run.Dir("moe", slug), "run.json")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sc, ok := newPulseScan(root)
+	if !ok {
+		t.Fatal("scan")
+	}
+	got := unmappedBlock(sc, time.Now().Add(-time.Hour), "")
+	if !strings.Contains(got, "`moe/recent`") || strings.Contains(got, "`moe/old`") {
+		t.Fatalf("unmapped block:\n%s", got)
+	}
+}

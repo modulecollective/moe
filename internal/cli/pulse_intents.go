@@ -15,6 +15,7 @@ import (
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
+	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
@@ -107,8 +108,9 @@ func closePulseIntents(root, spawnedBy string, acts []pulseIntentAct, stderr io.
 // in one journal commit carrying the sweep's consent. A run may be named
 // by the slug this gate's `loose` used (minted maps it to the id the
 // harness opened). A link to an unknown run, to anything but a sdlc run
-// or an idea, or to an intent that is not open, warns and skips; the
-// rest still apply. A link that already reads the same is not rewritten.
+// or an idea, to a run with an open session, or to an intent that is not
+// open, warns and skips; the rest still apply. A link that already reads
+// the same is not rewritten.
 func applyPulseServes(root, spawnedBy string, serves []pulseServes, minted map[string]string, stderr io.Writer) {
 	if len(serves) == 0 {
 		return
@@ -183,6 +185,13 @@ func resolveServesRun(root, ref string, minted map[string]string, changed map[st
 	if md.Workflow != "sdlc" && md.Workflow != dash.IdeaWorkflow {
 		return nil, fmt.Errorf("run %s is a %s run; only sdlc runs and ideas serve an intent", ref, md.Workflow)
 	}
+	// A session commits its own run.json and rebases onto main at close;
+	// a first turn's edit sits beside `intent`, so a link written now
+	// would conflict that close. The run stays in Unmapped while it is
+	// active (unmappedBlock), so a later survey links it.
+	if err := session.RequireUnreserved(root, md.Project, md.ID); err != nil {
+		return nil, fmt.Errorf("run %s has an open session; linking it later", ref)
+	}
 	return md, nil
 }
 
@@ -255,17 +264,24 @@ func openIntentsBlock(sc *pulseScan) string {
 		strings.Join(lines, "\n")
 }
 
-// unmappedBlock lists the runs and ideas opened since the last pulse
-// that serve no intent yet — the ones a `serves` entry could link. It is
-// what makes mapping cheap without a backfill: only new work is asked
-// about. "Opened since" is the run's creation date on or after the last
-// pulse's, with activity after it; a first-ever pulse looks at today.
+// unmappedWindow is how far back Unmapped looks for new work. It is
+// wider than one pulse so a run whose link was skipped for an open
+// session is offered again once that session lands.
+const unmappedWindow = 7 * 24 * time.Hour
+
+// unmappedBlock lists the recent runs and ideas that serve no intent yet
+// and moved since the last pulse — the ones a `serves` entry could link.
+// It is what makes mapping cheap without a backfill: only new work is
+// asked about. "New" is created within unmappedWindow of the last pulse
+// (of now, for a first-ever pulse, which skips the activity test). A run
+// the pulse leaves unlinked comes back while it stays active in that
+// window; the prompt says to leave the rest.
 func unmappedBlock(sc *pulseScan, last time.Time, runID string) string {
 	since := time.Now()
 	if !last.IsZero() {
 		since = last
 	}
-	day := since.Local().Format("2006-01-02")
+	day := since.Add(-unmappedWindow).Local().Format("2006-01-02")
 	var picked []*run.Metadata
 	for _, md := range sc.mds {
 		if md.Intent != "" || md.ID == runID || md.Created < day {
@@ -290,7 +306,7 @@ func unmappedBlock(sc *pulseScan, last time.Time, runID string) string {
 	for _, md := range picked {
 		lines = append(lines, fmt.Sprintf("- `%s/%s` (%s, %s) — %s", md.Project, md.ID, md.Workflow, md.Status, settledRunTitle(sc.root, md)))
 	}
-	return "Unmapped: runs and ideas opened since the last pulse that serve no intent. Link the ones that serve one with `serves`; leave the rest:\n" +
+	return "Unmapped: runs and ideas opened this week that moved since the last pulse and serve no intent. Link the ones that serve one with `serves`; leave the rest:\n" +
 		strings.Join(lines, "\n")
 }
 
