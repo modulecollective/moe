@@ -171,12 +171,15 @@ func kickCIRepair(root, key string, prChecks []ownedPRChecks, stdout, stderr io.
 		return 0
 	}
 	code := driveCIRepair(root, md, observed, stdout, stderr)
-	if code == exitYielded {
+	switch code {
+	case exitYielded:
 		moePrintf(stderr, "pulse: CI repair %s yielded to operator control\n", key)
-	} else if code != 0 {
-		moePrintf(stderr, "pulse: CI repair %s exited %d\n", key, code)
-	} else {
+	case exitParked:
+		// rideParked already named the gate it parked at.
+	case 0:
 		moePrintf(stderr, "pulse: CI repair %s updated existing PR %s\n", key, observed.PR)
+	default:
+		moePrintf(stderr, "pulse: CI repair %s exited %d\n", key, code)
 	}
 	return code
 }
@@ -190,6 +193,10 @@ func driveCIRepair(root string, md *run.Metadata, p ownedPRChecks, stdout, stder
 	// stopped is the repair step under way: a stop is the outcome of a
 	// finish the operator asked for during the repair.
 	stopped := "build"
+	// gateStop marks a stop at a gate after a stage turn that ran cleanly:
+	// the repair parked on its canvas, nothing failed.
+	gateStop := false
+	wf, _ := LookupWorkflow(md.Workflow)
 	if clockQuota != nil {
 		previous := clockQuota.repairClaimed
 		defer func() { clockQuota.repairClaimed = previous }()
@@ -202,6 +209,11 @@ func driveCIRepair(root string, md *run.Metadata, p ownedPRChecks, stdout, stder
 			moePrintln(stderr, "CI repair: stopped; attempt remains spent")
 		}
 		finishWalkStopped(root, md, cascadeResult{ran: []cascadeStepResult{{stage: stopped}}}, code, stderr)
+		// After the message and the finish settlement, which both report
+		// the stop as exit 1: only the sweep's backoff reads it as parked.
+		if gateStop {
+			code = rideParked(root, wf, md, cascadeResult{ran: []cascadeStepResult{{stage: stopped}}}, code, stderr)
+		}
 	}()
 	clone, err := sandboxClonePath(root, md)
 	if err != nil {
@@ -246,9 +258,9 @@ func driveCIRepair(root string, md *run.Metadata, p ownedPRChecks, stdout, stder
 		return 1
 	}
 	if code := requireStageReady(root, md, "build", stderr); code != 0 {
+		gateStop = true
 		return code
 	}
-	wf, _ := LookupWorkflow(md.Workflow)
 	dispatcher := lookupCascadeDispatcher(md.Workflow)
 	for _, stage := range []string{"review"} {
 		stopped = stage
@@ -256,6 +268,7 @@ func driveCIRepair(root string, md *run.Metadata, p ownedPRChecks, stdout, stder
 			return code
 		}
 		if ok, code := checkCascadeStageGate(wf, md, stage, stderr); !ok {
+			gateStop = true
 			return code
 		}
 		if stageNominatedClose(root, md, stage) {

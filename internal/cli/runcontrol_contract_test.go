@@ -473,14 +473,20 @@ func TestFinishDuringFailedCIRepairSettles(t *testing.T) {
 			t.Cleanup(func() { checkCascadeStageGate = priorGate })
 			checkCascadeStageGate = func(_ *Workflow, _ *run.Metadata, stage string, _ io.Writer) (bool, int) { return stage != "review", 1 }
 			push := stubPushFromCascade(t, 0, nil)
-			if code := driveCIRepair(f.root, md, redPR(md.Project+"/"+md.ID, "observed-head"), io.Discard, io.Discard); code == 0 {
-				t.Fatal("repair succeeded; want a stop")
+			// A review that blocks parks the repair, but the finish
+			// settles on the real stop (exit 1), not on the park.
+			want := 1
+			if tc.stage == "review" {
+				want = exitParked
+			}
+			if code := driveCIRepair(f.root, md, redPR(md.Project+"/"+md.ID, "observed-head"), io.Discard, io.Discard); code != want {
+				t.Fatalf("repair exit %d, want %d", code, want)
 			}
 			rec, err := runcontrol.Load(f.root, md.Project, md.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if r, _ := rec.Find("during-repair"); r.State != runcontrol.StateFailed || !strings.Contains(r.Outcome, tc.stage+" stopped") {
+			if r, _ := rec.Find("during-repair"); r.State != runcontrol.StateFailed || !strings.Contains(r.Outcome, tc.stage+" stopped (exit 1)") {
 				t.Fatalf("failed repair left the finish open: %+v", r)
 			}
 			if _, ok := openFinish(f.root, md); ok || len(*push) != 0 {
