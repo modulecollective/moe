@@ -41,11 +41,12 @@ import (
 // (a sweep carries on with unrelated threads).
 const exitYielded = 77
 
-// exitParked is rideRun's code for a ride that stopped because a stage
-// it ran cleanly left its gate unsatisfied: the turn ran and committed,
-// and the run waits on what its canvas says. Like a yield it is no
-// failure, so the sweep's exit (and the heartbeat's shared backoff)
-// ignores it. It never leaves the process: combinePulseExit folds it.
+// exitParked is the code of a ride (rideRun, or a CI repair) that
+// stopped because a stage it ran cleanly left its gate unsatisfied: the
+// turn ran and committed, and the run waits on what its canvas says.
+// Like a yield it is no failure, so the sweep's exit (and the
+// heartbeat's shared backoff) ignores it. It never leaves the process:
+// combinePulseExit folds it.
 const exitParked = 78
 
 // controlPollInterval paces the control watcher behind waits (quota,
