@@ -995,8 +995,8 @@ No run is needed to test a 30-line bash change. Landing a change is a plain file
 edit, or an sdlc run whose per-turn commit picks up `projects/<project>/hooks/`
 (`moe sdlc design → build → close`) when you want the edit journaled with a canvas.
 
-The hook events themselves (`dev-env.d`, `dev-env-teardown.d`, `pre-push.d`) and
-per-project dev secrets are covered in
+The hook events themselves (`dev-env.d`, `dev-env-teardown.d`, `pre-push.d`,
+`session-cleanup.d`) and per-project dev secrets are covered in
 [reference.md §Hooks And Environments](reference.md#hooks-and-environments).
 
 ## Subscription quota cooldown

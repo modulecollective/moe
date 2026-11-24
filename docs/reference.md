@@ -525,6 +525,15 @@ bureaucracy:
   explicit refresh or removal.
 - `pre-push.d/*` is an invocation-time ship gate; a failing script halts the
   push path and opens a recovery build session.
+- `session-cleanup.d/*` makes a leftover session directory removable when
+  session GC can't delete it — typically files a container wrote as root
+  through a bind mount. When an unregistered `.moe/worktrees/<uuid>/` refuses
+  removal with a permission error, `moe session gc` and the serve heartbeat
+  run the hooks of each project whose `projects/<project>/` survives inside
+  it, with cwd and `MOE_SESSION_DIR` set to that directory, then retry the
+  removal once. Scripts should only repair ownership or permissions under
+  `MOE_SESSION_DIR`; MoE does the deletion. Each script has a two-minute
+  deadline, and a failure leaves the directory in place, reported by path.
 
 Use `moe hook fire <project> dev-env|dev-env-teardown|pre-push` to exercise one
 event in a transient sandbox without creating a run. Each clone lives at
