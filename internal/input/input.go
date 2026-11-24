@@ -412,8 +412,8 @@ func MarkDelivered(root, projectID, runID, docID string, ids []int, consent stri
 // and the source's open ping all ride. Already-delivered entries do not.
 // If the source has an open ping and the destination already has one,
 // the source's is dropped with a warning: one open ping per run is what
-// lets a reply address the run, and a machine's unanswered question is
-// re-askable on the destination by the next sweep.
+// lets a reply address the run, and the destination's own question is
+// the one that stands.
 //
 // consent is the caller's MoE-Consent value, empty for an operator's own
 // promote. Returns the number of entries carried; zero with no error and
