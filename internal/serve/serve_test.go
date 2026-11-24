@@ -98,6 +98,7 @@ func TestServePagesRenderSharedHead(t *testing.T) {
 	})
 
 	paths := []string{
+		"/agent",                              // stale POST readback
 		"/",                                   // dash
 		"/idea/new",                           // new_idea
 		"/run/alpha/fix-it",                   // run
@@ -142,9 +143,16 @@ func TestServePagesRenderSharedHead(t *testing.T) {
 	for _, path := range paths {
 		t.Run(path, func(t *testing.T) {
 			rr := httptest.NewRecorder()
-			s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", path, nil))
-			if rr.Code != http.StatusOK {
-				t.Fatalf("want 200, got %d body=%s", rr.Code, rr.Body.String())
+			req := httptest.NewRequest("GET", path, nil)
+			want := http.StatusOK
+			if path == "/agent" {
+				req = httptest.NewRequest("POST", path, strings.NewReader("agent=codex&revision=1"))
+				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				want = http.StatusConflict
+			}
+			s.Handler().ServeHTTP(rr, req)
+			if rr.Code != want {
+				t.Fatalf("want %d, got %d body=%s", want, rr.Code, rr.Body.String())
 			}
 			assertSharedHead(t, rr.Body.String())
 		})

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -170,7 +171,7 @@ func TestAgentCLIAndUIWriterParity(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := takeBoard(t, src)
-	if !strings.Contains(strings.Join(b.Overview, "\n"), "Default: Claude until") || b.AgentRevision != 2 {
+	if b.AgentLabel != "default: claude" || !strings.Contains(b.AgentSummary, "Default: Claude until") || b.AgentRevision != 2 {
 		t.Fatalf("overview: %+v", b)
 	}
 	if code := runAgent([]string{"reset"}, io.Discard, &out); code != 0 {
@@ -180,7 +181,7 @@ func TestAgentCLIAndUIWriterParity(t *testing.T) {
 		t.Fatal(err)
 	}
 	b = takeBoard(t, src)
-	if b.AgentSummary != "Default: stylesheet" || b.AgentRevision != 3 {
+	if b.AgentSummary != "Default: stylesheet" || b.AgentRevision != 3 || b.AgentLabel != "" {
 		t.Fatalf("remote refresh: %+v", b)
 	}
 }
@@ -495,5 +496,47 @@ func TestTemporaryDefaultChangesRecoveredQuotaWait(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestUIAgentDefaultPresentationLifecycle(t *testing.T) {
+	root := newMoeHome(t)
+	t.Setenv("MOE_FORCE_AGENT", "claude")
+	now := time.Now()
+	src := newUISource(root, DashFilter{ProjectFilter: "absent"}, os.Stdout)
+	baseline, _ := src.buildBoard(now)
+	check := func(label, summary string) {
+		t.Helper()
+		b, _ := src.buildBoard(now)
+		if b.AgentLabel != label || !strings.Contains(b.AgentSummary, summary) {
+			t.Fatalf("label=%q summary=%q", b.AgentLabel, b.AgentSummary)
+		}
+		if !slices.Equal(b.Overview, baseline.Overview) || b.Art.Start != baseline.Art.Start || b.Art.Height != baseline.Art.Height || !slices.Equal(b.Lines, baseline.Lines) {
+			t.Fatal("agent state changed overview, artwork or board geometry")
+		}
+		if !strings.Contains(b.AgentSummary, "this process forces claude") && b.AgentError == "" {
+			t.Fatal("force readback missing")
+		}
+	}
+	check("", "Default: stylesheet")
+	for _, name := range []string{"codex", "claude"} {
+		if _, err := agentdefault.Set(root, name, nil, func() time.Time { return now }); err != nil {
+			t.Fatal(err)
+		}
+		check("default: "+name, "until")
+	}
+	now = now.Add(agentdefault.Lifetime)
+	check("", "Default: stylesheet")
+	if _, err := agentdefault.Set(root, "", nil, func() time.Time { return now }); err != nil {
+		t.Fatal(err)
+	}
+	check("", "Default: stylesheet")
+	if err := os.WriteFile(filepath.Join(root, agentdefault.FileName), []byte("bad"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	check("", "Default: unavailable")
+	b, _ := src.buildBoard(now)
+	if b.AgentError == "" || len(b.Issues) == 0 {
+		t.Fatal("unavailable state hidden")
 	}
 }

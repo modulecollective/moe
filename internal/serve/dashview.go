@@ -333,8 +333,7 @@ type serveProjectVM struct {
 // terms, and reuses its styling rather than minting a second look for a
 // second kind of trouble.
 type servePushVM struct {
-	// Item is what the header cluster carries ("3 unpushed", "pushed 2m
-	// ago"), empty when the drain has nothing to say.
+	// Item carries pending/failing pushes; successful drains stay quiet.
 	Item string
 	// State is "push failing" on the row the panel earns, empty
 	// otherwise. Detail qualifies it ("12m · 3 commits · retry in 4m"),
@@ -429,14 +428,10 @@ func (a *activity) panel(now time.Time) servePanelVM {
 	}
 	vm.Cluster = dash.ServeCluster(vm.Armed, vm.Up, vm.Host, vm.NextSweep,
 		dash.ModeCounts{Paused: vm.Paused, Safe: vm.Safe}, failing)
-	// Read per render, for the same reason the modes are: the record says
-	// what the pusher did, git says whether anything is waiting *now*. A
-	// true "pushed 2m ago" beside a live "3 unpushed" is exactly the state
-	// after a burst of commits or a manual `moe sync`, and only the pair
-	// can say so. One rev-list against local refs on a page load that
-	// already forks git for the gather.
+	// Git's current queue outranks historical push outcomes, including a
+	// manual sync that recovers while serve still records a failure.
 	ahead, _ := sync.Unpushed(a.root)
-	vm.Push.Item = dash.PushItem(now, true, ahead, a.lastPush, a.pushFailSince)
+	vm.Push.Item = dash.PushItem(now, true, ahead, a.pushFailSince)
 	if vm.Push.Item != "" {
 		vm.Cluster += " · " + vm.Push.Item
 	}

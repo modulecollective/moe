@@ -12,7 +12,7 @@
       <div class="banner-sub"><a href="/">dashboard</a>{{if .Project}} → <a href="/projects">projects</a> → <a href="/projects/{{.Project}}">{{.Project}}</a>{{end}} → usage</div>
     </div>
     {{template "serveheader" .Serve}}
-    {{template "headeractions" .}}
+    {{template "headeractions" false}}
   </header>
 
   {{/* No JS: the scope and the window are a plain GET form, so the page
@@ -124,6 +124,7 @@
 </main>
 {{template "usagesortjs" .}}
 {{template "themejs" .}}
+{{template "dashstatusjs" .}}
 </body>
 </html>
 

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head>
+{{template "head" .}}
+<title>Agent default changed — MoE</title>
+</head>
+<body>
+<main>
+  <header class="page-header">
+    <div class="banner"><div class="banner-bar">Agent default changed</div></div>
+    {{template "headeractions" false}}
+  </header>
+  <div class="agent-retry">
+    {{template "agent_control.html" .}}
+  </div>
+  <p><a href="/">Return to dashboard</a></p>
+</main>
+{{template "themejs" .}}
+</body>
+</html>

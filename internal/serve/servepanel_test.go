@@ -63,7 +63,7 @@ func TestServeClusterRidesTheBoardHeaders(t *testing.T) {
 	for _, path := range []string{"/", "/projects/alpha"} {
 		body := getBody(t, s, path)
 		cluster := s.activity.panel(time.Now()).Cluster
-		clusterMarkup := `<div class="banner-serve"><a href="/serve">` + cluster + `</a></div>`
+		clusterMarkup := `<div class="banner-serve"><a href="/serve" data-serve-cluster>` + cluster + `</a></div>`
 		if !strings.Contains(body, clusterMarkup) {
 			t.Errorf("%s is missing the header cluster %q", path, cluster)
 		}
@@ -351,7 +351,7 @@ func TestModeCountsRideTheHeaderCluster(t *testing.T) {
 	}
 	for _, path := range []string{"/", "/projects/alpha", "/serve"} {
 		body := getBody(t, s, path)
-		if !strings.Contains(body, "1 paused · 1 safe") {
+		if !strings.Contains(body, "1 paused") || strings.Contains(body, "· 1 safe") {
 			t.Errorf("%s header missing the mode counts:\n%s", path, body)
 		}
 	}
@@ -374,21 +374,18 @@ func TestServePanelBadgesADeviantProject(t *testing.T) {
 	}
 }
 
-// TestServePanelSaysTheJournalReachedOrigin is the seed's ask on the web
-// surface: the boards' one-line cluster gains the origin item, so an
-// operator on their phone can tell the bureaucracy sync happened without
-// opening a terminal. It rides the same slot the CLI banner uses, and
-// the same builder produces both.
-func TestServePanelSaysTheJournalReachedOrigin(t *testing.T) {
+// A landed push is historical evidence, not routine dashboard chatter.
+func TestServePanelQuietAfterPush(t *testing.T) {
 	s := panelServer(t)
+	before := s.activity.panel(time.Now()).Cluster
 	s.activity.recordPush(time.Now(), 2)
-
-	if got := s.activity.panel(time.Now()).Cluster; !strings.HasSuffix(got, " · pushed just now") {
-		t.Errorf("cluster = %q, want it to end with the landed push", got)
+	if got := s.activity.panel(time.Now()).Cluster; got != before {
+		t.Errorf("push changed cluster: %q -> %q", before, got)
 	}
-	// And it is actually on the board, not just in the VM.
-	if body := getBody(t, s, "/"); !strings.Contains(body, "pushed just now") {
-		t.Error("the dash header didn't carry the landed push")
+	for _, path := range []string{"/", "/serve"} {
+		if strings.Contains(getBody(t, s, path), "pushed just now") {
+			t.Errorf("%s reports routine success", path)
+		}
 	}
 }
 

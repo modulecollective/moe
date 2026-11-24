@@ -978,11 +978,13 @@ func TestUIBoardSeparatesPinnedRegionsAndEscapesLabels(t *testing.T) {
 	if len(b.Items) != 1 || !strings.Contains(b.Lines[b.Items[0].Line], "p/r") {
 		t.Fatalf("service lines displaced item: %+v", b.Items)
 	}
-	if len(b.Overview) != dash.HistRows+2+1+b.Art.Height+1 {
+	if len(b.Overview) != dash.HistRows+2+1+b.Art.Height {
 		t.Fatal("chart or internal spacing lost")
 	}
-	if b.Overview[len(b.Overview)-1] != ui.SafeText(b.AgentSummary) || !strings.HasPrefix(b.AgentSummary, "Default: ") {
-		t.Fatal("global default status missing from pinned overview")
+	for _, line := range b.Overview {
+		if strings.Contains(line, "Default:") {
+			t.Fatal("global default leaked into pinned overview")
+		}
 	}
 	for i, line := range b.Art.Frames[0] {
 		if b.Overview[b.Art.Start+i] != line {

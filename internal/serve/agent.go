@@ -43,7 +43,7 @@ func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
 		vm.Error = err.Error()
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusConflict)
-		s.render(w, r, "agent_control.html", vm)
+		s.render(w, r, "agent_conflict.html", vm)
 		return
 	}
 	if err != nil {

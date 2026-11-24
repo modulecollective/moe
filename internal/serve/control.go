@@ -125,7 +125,9 @@ func (s *Server) handleRunStatuses(w http.ResponseWriter, r *http.Request) {
 		}
 		maps.Copy(out, statuses)
 	}
-	view := defaultAgentView(s.opts.Root, time.Now())
+	now := time.Now()
+	view := defaultAgentView(s.opts.Root, now)
+	out["__serve_cluster"] = s.activity.panel(now).Cluster
 	out["__agent_summary"], out["__agent_error"] = view.Summary, view.Error
 	out["__agent_revision"] = strconv.Itoa(view.Revision)
 	w.Header().Set("Content-Type", "application/json")

@@ -13,7 +13,7 @@
       <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
       <div class="banner-sub"><a href="/">dashboard</a> → <a href="/projects">projects</a> → <a href="/projects/{{.Project}}">{{.Project}}</a> → <a href="/run/{{.Project}}/{{.Slug}}">{{.Slug}}</a> → edit {{if .Kind}}{{.Kind}}{{else}}capture{{end}}</div>
     </div>
-    {{template "headeractions" .}}
+    {{template "headeractions" false}}
   </header>
 
   {{if .ErrorBanner}}<p class="error">{{.ErrorBanner}}</p>{{end}}

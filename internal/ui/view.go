@@ -162,7 +162,22 @@ func (m *model) view() frame {
 	if m.console.unread > 0 {
 		label += fmt.Sprintf(" · %d new (End follows)", m.console.unread)
 	}
-	f.rows[l.consoleRule] = m.heading(label, m.paneFocused(paneConsole), w)
+	// Keep the full title/unread count and normal divider padding. Narrow
+	// consoles still expose the full setting through :agent.
+	extra := m.board.AgentLabel
+	showDefault := extra != "" && textWidth(label+" · "+extra)+4 <= w
+	if showDefault {
+		label += " · " + extra
+	}
+	consoleHeading := m.heading(label, m.paneFocused(paneConsole), w)
+	if showDefault && m.color {
+		color := cliout.Dim
+		if m.paneFocused(paneConsole) {
+			color = cliout.Bright
+		}
+		consoleHeading = strings.Replace(consoleHeading, " · "+extra, " · "+cliout.Dim+extra+cliout.Reset+color, 1)
+	}
+	f.rows[l.consoleRule] = consoleHeading
 	row = l.consoleRow
 	for i, line := range m.consoleLines() {
 		f.rows[row+i] = line

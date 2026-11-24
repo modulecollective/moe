@@ -12,7 +12,7 @@
       <div class="banner-sub"><a href="/">dashboard</a>{{if .Project}} → <a href="/projects/{{.Project}}">{{.Project}}</a>{{end}} → input</div>
     </div>
     {{template "serveheader" .Serve}}
-    {{template "headeractions" .}}
+    {{template "headeractions" false}}
   </header>
 
   <section class="dash-section">
@@ -49,5 +49,6 @@
   {{end}}
 </main>
 {{template "themejs" .}}
+{{template "dashstatusjs" .}}
 </body>
 </html>

@@ -11,7 +11,7 @@
       <a href="/" class="banner-bar">▓▒░ MINISTRY OF EVERYTHING ░▒▓</a>
       <div class="banner-sub"><a href="/">dashboard</a> → <a href="/projects">projects</a> → <a href="/projects/{{.Project}}">{{.Project}}</a> → {{.Slug}}</div>
     </div>
-    {{template "headeractions" .}}
+    {{template "headeractions" false}}
   </header>
 
   {{template "run_fragment.html" .}}

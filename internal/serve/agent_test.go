@@ -2,6 +2,7 @@ package serve
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
@@ -15,6 +16,7 @@ import (
 	"github.com/modulecollective/moe/internal/agentdefault"
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git/gittest"
+	"github.com/modulecollective/moe/internal/project"
 )
 
 func TestAgentControlAndRefreshWithoutArming(t *testing.T) {
@@ -119,5 +121,131 @@ func TestTemporaryAgentDoesNotFreezeRexLaunchArguments(t *testing.T) {
 	}
 	if launches != 1 {
 		t.Fatalf("Rex launches=%d", launches)
+	}
+}
+
+func TestObservationRefreshOnEveryHeaderPage(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node is needed to exercise served JavaScript")
+	}
+	s := panelServer(t)
+	gittest.InitAt(t, s.opts.Root)
+	gittest.Commit(t, s.opts.Root, "seed")
+	for _, path := range []string{"/", "/projects/alpha", "/input", "/usage"} {
+		t.Run(path, func(t *testing.T) {
+			cmd := exec.Command(node, "testdata/agent_refresh.js")
+			cmd.Stdin = strings.NewReader(getBody(t, s, path))
+			if output, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("refresh: %v %s", err, output)
+			}
+		})
+	}
+}
+
+func TestAgentMenuStatesAndConflictRecovery(t *testing.T) {
+	root := gittest.InitSeeded(t)
+	s := newTestServer(t, Options{Root: root, GatherDash: func(string) ([]dash.Row, int, int, []int, error) { return nil, 0, 0, nil, nil }})
+	t.Setenv("MOE_FORCE_AGENT", "claude")
+	for _, name := range []string{"", "codex", "claude", ""} {
+		if _, err := agentdefault.Set(root, name, nil, time.Now); err != nil {
+			t.Fatal(err)
+		}
+		body := getBody(t, s, "/")
+		start, end := strings.Index(body, `<details class="menu">`), strings.Index(body, `</details>`)
+		if start < 0 || end < start {
+			t.Fatal("native menu missing")
+		}
+		outside := body[:start] + body[end:]
+		if strings.Contains(outside, `id="agent-default"`) || strings.Contains(outside, "Default:") {
+			t.Fatal("agent state outside menu")
+		}
+		menu := body[start:end]
+		for _, want := range []string{"Agent default", "this process forces claude", `method="post" action="/agent"`, "Use Codex for 24h", "Use Claude for 24h", "Return to stylesheet"} {
+			if !strings.Contains(menu, want) {
+				t.Fatalf("menu missing %q", want)
+			}
+		}
+		want := "Default: stylesheet"
+		if name != "" {
+			want = "Default: " + strings.ToUpper(name[:1]) + name[1:] + " until"
+		}
+		if !strings.Contains(menu, want) {
+			t.Fatal(menu)
+		}
+	}
+	state, err := agentdefault.Set(root, "codex", nil, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := postForm(t, s, "/agent", "agent=claude&revision=0")
+	body := r.Body.String()
+	for _, want := range []string{"<!doctype html>", `/static/style.css`, "agent default changed; refresh and try again", "Default: Codex until", fmt.Sprintf(`name="revision" value="%d"`, state.Revision), `href="/">Return to dashboard`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("conflict missing %q: %s", want, body)
+		}
+	}
+	if r.Code != http.StatusConflict || strings.Index(body, `id="agent-default"`) < strings.Index(body, `</details>`) {
+		t.Fatal("retry hidden in menu")
+	}
+	// Retry the actual form's revision, without JavaScript.
+	if r := postForm(t, s, "/agent", fmt.Sprintf("agent=claude&revision=%d", state.Revision)); r.Code != http.StatusSeeOther {
+		t.Fatal(r.Body.String())
+	}
+}
+
+// The endpoint observes current modes and Git queue after initial page render.
+func TestHeaderObservationTracksExceptions(t *testing.T) {
+	for _, armed := range []bool{false, true} {
+		t.Run(fmt.Sprint(armed), func(t *testing.T) {
+			root, _ := pusherFixture(t)
+			seedProject(t, root, "alpha")
+			gittest.Run(t, root, "add", "-A")
+			gittest.Commit(t, root, "project")
+			gittest.Run(t, root, "push", "origin", "main")
+			s := newTestServer(t, Options{Root: root, Dynamic: armed, GatherDash: func(string) ([]dash.Row, int, int, []int, error) { return nil, 1, 0, nil, nil }})
+			getBody(t, s, "/")
+			observe := func() string {
+				t.Helper()
+				head := gittest.HeadSHA(t, root)
+				var m map[string]string
+				if err := json.Unmarshal([]byte(getBody(t, s, "/run-status")), &m); err != nil {
+					t.Fatal(err)
+				}
+				if gittest.HeadSHA(t, root) != head {
+					t.Fatal("observation wrote")
+				}
+				if m["__serve_cluster"] == "" {
+					t.Fatal("cluster missing from refresh")
+				}
+				return m["__serve_cluster"]
+			}
+			if err := project.SetMode(root, "alpha", project.ModeSafe); err != nil {
+				t.Fatal(err)
+			}
+			if got := observe(); strings.Contains(got, " safe") || !strings.Contains(got, "1 unpushed") {
+				t.Fatal(got)
+			}
+			if err := project.SetMode(root, "alpha", project.ModePaused); err != nil {
+				t.Fatal(err)
+			}
+			if got := observe(); !strings.Contains(got, "1 paused") || !strings.Contains(got, "2 unpushed") {
+				t.Fatal(got)
+			}
+			now := time.Now()
+			s.activity.recordPushFail(now.Add(-12*time.Minute), fmt.Errorf("refused"), now.Add(time.Minute))
+			if got := observe(); !strings.Contains(got, "push failing 12m · 2 unpushed") {
+				t.Fatal(got)
+			}
+			// A manual sync empties the queue before activity has recorded recovery.
+			gittest.Run(t, root, "push", "origin", "main")
+			if got := observe(); strings.Contains(got, "push") {
+				t.Fatal(got)
+			}
+			s.activity.recordPush(now, 2)
+			if got := observe(); strings.Contains(got, "push") {
+				t.Fatal(got)
+			}
+		})
 	}
 }

@@ -237,12 +237,13 @@ separators have a blank row on each side, and the console keeps six message
 rows even on short terminals. The minimum size is 40 columns by 20 rows.
 Moving to the first board item reveals the headings above it.
 
-The pinned overview shows the global default agent and its local expiry.
-`:agent codex` or `:agent claude` chooses that backend for 24 hours;
-`:agent reset` returns to the current stylesheet, and `:agent` shows status.
-These work without a selected row, serve or Rex. Flags and run bindings still
-win. Status refreshes with the normal three-second discovery pass. The web
-dashboard offers the same control, including when serve is unarmed.
+The Console heading quietly labels an active temporary default when space
+allows. `:agent codex` or `:agent claude` chooses that backend for 24 hours;
+`:agent reset` returns to the current stylesheet, and `:agent` shows full
+status and local expiry at every width. These work without a selected row,
+serve or Rex. Flags and run bindings still win. Status refreshes with the
+normal three-second discovery pass. The web dashboard offers the same controls
+and status inside its hamburger menu, including when serve is unarmed.
 
 The UI board carries no service rows. Service exceptions are logged to the
 Console instead; for routine sweep status, use `moe dash` or the web `/serve`
@@ -853,29 +854,31 @@ Per project, `moe project mode <id> paused|safe|auto` caps what that clock may
 do. `paused` means the survey leaves the project alone and a pick there starts
 nothing. `safe` means it is surveyed as ever but a pick starts only a run you
 marked — a stage you advanced, a chore's standing intent, a workflow tag on the
-idea a run came from, a note or answer you left on it that no turn has delivered
-yet — holding anything else with a named reason. `auto` is the default. The mode
-binds the clock, not you: bangs, stage verbs and a hand-typed `moe pulse new
---dynamic` run in every mode, because the typed word is the consent. Serve's **advance mark** is that
-same consent from the phone: it records the stage you just read as done — one
-journal commit, no agent — and `safe` starts on exactly such a mark. The
-project hub carries the same three-way switch, and the boards' serve cluster
-counts the projects that deviate.
+idea a run came from, a note or answer you left on it that no turn has
+delivered yet — holding anything else with a named reason. `auto` is the
+default. The mode binds the clock, not you: bangs, stage verbs and a hand-typed
+`moe pulse new --dynamic` run in every mode, because the typed word is the
+consent. Serve's **advance mark** is that same consent from the phone: it
+records the stage you just read as done — one journal commit, no agent — and
+`safe` starts on exactly such a mark. The project hub carries the same
+three-way switch. The boards' serve cluster counts paused projects; safe mode
+remains visible in project controls.
 
 Both surfaces show what the heartbeat is doing. `moe dash` reads the snapshot
 serve keeps on disk and carries its status in the banner's tail — armed or not,
-how long it has been up, when the next tick lands — spending a line on a project
-only when that project is sweeping, cooling off after a failure, or its last
-sweep died. The same tail says whether the journal has reached GitHub: `N
-unpushed` while commits are waiting, `pushed 2m ago` once serve's pusher has
-landed one, and `push failing 12m · 3 unpushed` with a row carrying git's reason
-when origin is refusing. The count comes from git at render, so it is honest
-about a serve that has crashed or was never running; the rest comes from the
-pusher's own record. The web boards carry the same one-line cluster, linked to a
-`/serve` page holding the trace: what each recent tick decided, and the output
-tail of any sweep that failed. That trace is the running process's memory rather
-than history — a restart starts it over, and the durable record of a sweep is
-still the run it opened.
+how long it has been up, when the next tick lands — spending a line on a
+project only when that project is sweeping, cooling off after a failure, or its
+last sweep died. The same tail reports `N unpushed` while commits are waiting
+and `push failing 12m · 3 unpushed` with a row carrying git's reason when
+origin is refusing. An empty queue stays quiet. The count comes from git at
+render, so it is honest about a serve that has crashed or was never running;
+the rest comes from the pusher's own record. Web headers carry the same cluster
+and refresh every five seconds while visible, plus on return to the tab.
+Without JavaScript, reload refreshes status. The cluster links to `/serve`,
+which holds the trace: what each recent tick decided and the output tail of any
+sweep that failed. That trace is the running process's memory rather than
+history — a restart starts it over, and the durable record of a sweep is still
+the run it opened.
 
 The tick decides nothing. It only asks the question you used to ask by typing a
 verb — everything about what a sweep may *do* is unchanged, including the

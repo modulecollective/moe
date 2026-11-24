@@ -409,7 +409,11 @@ func (s *uiSource) buildBoard(now time.Time) (ui.Board, []cliout.ProgramStatus) 
 		b.AgentSummary, b.AgentError = "Default: unavailable", err.Error()
 		b.Issues = append(b.Issues, "agent default: "+err.Error())
 	}
-	b.Overview = append(b.Overview, ui.SafeText(b.AgentSummary))
+	if err == nil {
+		if active := defaultState.Active(now); active != "" {
+			b.AgentLabel = "default: " + active
+		}
+	}
 	buf.Reset()
 	// Escape external labels before the renderer adds its own trusted SGR.
 	paintRows := slices.Clone(rows)

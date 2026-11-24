@@ -269,7 +269,7 @@ func TestDashBannerCarriesTheModeCounts(t *testing.T) {
 	writeProjectMetadata(t, root, &project.Metadata{
 		ID: "gamma", Remote: "x", DefaultBranch: "main"})
 
-	want := "serve armed · up 4m · next 12m · 1 paused · 1 safe"
+	want := "serve armed · up 4m · next 12m · 1 paused"
 	if got := serveCluster(t, root, now); got != want {
 		t.Errorf("banner tail = %q, want %q", got, want)
 	}
@@ -389,17 +389,15 @@ func TestDashCountsUnpushedWithoutAServe(t *testing.T) {
 	}
 }
 
-// TestDashSaysTheSyncHappened is the seed's actual ask: a positive
-// signal that the journal reached origin. It rides the cluster's tail
-// beside the serve status, in the same slot the count would use.
-func TestDashSaysTheSyncHappened(t *testing.T) {
+// Successful drains remain recorded, but no longer spend banner space.
+func TestDashQuietAfterSync(t *testing.T) {
 	root, now := aheadOfOriginRoot(t, 0), time.Now()
 	writeServeState(t, root, serve.ActivitySnapshot{
 		Pid: os.Getpid(), Armed: true,
 		Started:  now.Add(-4 * time.Minute),
 		LastPush: now.Add(-2 * time.Minute), LastPushCommits: 3,
 	})
-	if got, want := serveCluster(t, root, now), "serve armed · up 4m · pushed 2m ago"; got != want {
+	if got, want := serveCluster(t, root, now), "serve armed · up 4m"; got != want {
 		t.Errorf("banner tail = %q, want %q", got, want)
 	}
 }

@@ -83,6 +83,8 @@ type Art struct {
 // Board is one complete board: its painted lines and the items on them,
 // ordered by Line.
 type Board struct {
+	// AgentLabel is optional Console metadata for an active temporary default.
+	AgentLabel    string
 	AgentSummary  string
 	AgentRevision int
 	AgentError    string

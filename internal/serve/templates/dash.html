@@ -12,8 +12,7 @@
       <div class="banner-sub">dashboard → <a href="/projects">projects</a> · <a href="/lore">lore</a> · <a href="/usage">usage</a>{{if .InputCount}} · <a href="/input">input ({{.InputCount}})</a>{{end}}</div>
     </div>
     {{template "serveheader" .Serve}}
-    {{template "headeractions" .}}
-    {{template "agent_control.html" .Agent}}
+    {{template "headeractions" .Agent}}
   </header>
   {{template "bannerart" .}}
 

@@ -718,7 +718,7 @@ type ModeCounts struct {
 // cluster:
 //
 //	serve armed · up 4m · rex · next 15m · 1 failing
-//	serve armed · up 4m · local pty · next 15m · 1 paused · 2 safe
+//	serve armed · up 4m · local pty · next 15m · 1 paused
 //	serve browse-only · up 4m
 //
 // The two surfaces are contractually the same line, so the text is
@@ -731,10 +731,8 @@ type ModeCounts struct {
 // in the CLI.
 //
 // The mode counts are compact by exception for the same reason: they say
-// how much of the board the clock is holding back, and on the ordinary
-// all-auto board they say nothing at all. They ride here rather than on
-// the run rows because the mode is a property of the clock, and the
-// clock is what this cluster is about.
+// how much of the board is paused; safe mode remains in project detail.
+// They ride here because the mode is a property of the clock.
 func ServeCluster(armed bool, up, host, next string, modes ModeCounts, failing int) string {
 	cluster := "serve browse-only · up " + up
 	if armed {
@@ -749,39 +747,16 @@ func ServeCluster(armed bool, up, host, next string, modes ModeCounts, failing i
 	if modes.Paused > 0 {
 		cluster += fmt.Sprintf(" · %d paused", modes.Paused)
 	}
-	if modes.Safe > 0 {
-		cluster += fmt.Sprintf(" · %d safe", modes.Safe)
-	}
 	if failing > 0 {
 		cluster += fmt.Sprintf(" · %d failing", failing)
 	}
 	return cluster
 }
 
-// PushItem spells the origin item both dashes append to the serve
-// cluster: whether the journal has reached GitHub, and what is wrong if
-// it hasn't. "" when there is nothing to say, which keeps a board with
-// no serve and nothing waiting exactly as quiet as it was.
-//
-//	3 unpushed
-//	push failing 12m · 3 unpushed
-//	pushed 2m ago
-//
-// Ahead-first, because the live count outranks anything recorded. A
-// serve that pushed at 10:00 and has been refused since 10:05 has a
-// perfectly true "pushed 5m ago" and three commits nobody can see;
-// reading git at render is what stops the item from being confidently
-// wrong. Conversely a recorded push is the only thing that can say a
-// sync *happened* — an ahead-count of zero is silence, not confirmation.
-//
-// serve reports whether a live serve vouches for lastPush and
-// failingSince. Without one they are stale or absent, so only the
-// ahead-count is trustworthy and a quiet board stays silent.
-//
-// failing only shows while commits are actually waiting: once a landed
-// push or a manual `moe sync` empties the queue the failure is history,
-// and the loop's own recovery line has the log covered.
-func PushItem(now time.Time, serve bool, ahead int, lastPush, failingSince time.Time) string {
+// PushItem spells the origin exceptions both dashes append to the serve
+// cluster. Successful pushes remain in the activity record and logs.
+// Failure only shows while commits are waiting; recovery empties the display.
+func PushItem(now time.Time, serve bool, ahead int, failingSince time.Time) string {
 	if ahead > 0 {
 		item := fmt.Sprintf("%d unpushed", ahead)
 		if serve && !failingSince.IsZero() {
@@ -789,18 +764,7 @@ func PushItem(now time.Time, serve bool, ahead int, lastPush, failingSince time.
 		}
 		return item
 	}
-	if !serve || lastPush.IsZero() {
-		// Nothing waiting and nothing pushed yet in this serve's life. The
-		// tempting item here is a standing "in sync", and it is the one
-		// this deliberately doesn't render: an ahead-count of zero also
-		// reads zero on a bureaucracy with no origin configured at all, so
-		// the claim would be confident and, on a local-only box,
-		// permanently false. A push that landed is the only positive this
-		// can actually stand behind — and the first journal commit of the
-		// session turns silence into one.
-		return ""
-	}
-	return "pushed " + HumanAgo(now, lastPush)
+	return ""
 }
 
 // Plural spells "1 tick" / "2 ticks". Both dashes count down the

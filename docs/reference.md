@@ -21,16 +21,16 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   banner's tail — armed or not, uptime, next sweep — and a project earns a
   line of its own only when it is sweeping, cooling off, or its last sweep
   died. The tail also carries the drain to origin: `N unpushed` when commits
-  are waiting (read from git, so it shows with or without a serve), or
-  `pushed 2m ago` once serve's pusher has landed one. A push origin is
-  refusing earns a row of its own with git's reason.
+  are waiting (read from git, so it shows with or without a serve). An empty
+  queue stays quiet. A push origin is refusing earns a row with git's reason.
 - `moe agent [codex|claude|reset]` reports or sets the global default backend
   for 24 hours. Flags, persisted run bindings and `MOE_FORCE_AGENT` still win.
   Re-selecting an active backend keeps its expiry; choosing the other starts
   a fresh window. Reset returns to the current stylesheet. The web dashboard
-  offers the same control, and `moe ui` accepts `:agent codex`, `:agent claude`,
-  `:agent reset` and `:agent` for status, even on an empty or filtered board.
-  The status describes defaults; stage banners identify executing backends.
+  menu offers the same control, and `moe ui` accepts `:agent codex`,
+  `:agent claude`, `:agent reset` and `:agent` for status, even on an empty or
+  filtered board. The status describes defaults; stage banners identify
+  executing backends.
 - `moe ui [--project <id>] [--workflow <name>]` is the dashboard as a console:
   the whole board, every completed run included, above the selected item's
   details and a console of recent outcomes. Arrows or `j`/`k` select; `Tab` /

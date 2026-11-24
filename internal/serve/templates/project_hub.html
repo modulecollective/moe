@@ -12,7 +12,7 @@
       <div class="banner-sub"><a href="/">dashboard</a> → <a href="/projects">projects</a> → {{.Project}} · <a href="/usage?project={{.Project}}">usage</a>{{if .InputCount}} · <a href="/input?project={{.Project}}">input ({{.InputCount}})</a>{{end}}</div>
     </div>
     {{template "serveheader" .Serve}}
-    {{template "headeractions" .}}
+    {{template "headeractions" false}}
   </header>
   {{template "bannerart" .}}
 
@@ -142,6 +142,7 @@
   {{template "completedsection" .Completed}}
 </main>
 {{template "themejs" .}}
+{{template "dashstatusjs" .}}
 {{template "completedjs" .}}
 </body>
 </html>

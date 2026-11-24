@@ -24,6 +24,7 @@
     <a href="/serve">serve</a>
     <a href="/usage">usage</a>
     <button id="theme-toggle" class="theme-toggle" type="button"><span class="theme-label-dark">dark mode</span><span class="theme-label-light">light mode</span></button>
+    {{with .}}{{template "agent_control.html" .}}{{end}}
   </div>
 </details>
 {{end}}
@@ -82,7 +83,7 @@
 {{/* The boards' whole spend on serve: the same status cluster the CLI
      dash's banner carries, in the page header, linked to the trace. */}}
 {{define "serveheader"}}
-  <div class="banner-serve"><a href="/serve">{{.Cluster}}</a></div>
+  <div class="banner-serve"><a href="/serve" data-serve-cluster>{{.Cluster}}</a></div>
 {{end}}
 
 {{define "servepanel"}}
@@ -92,8 +93,8 @@
          and "why has nothing happened in alpha" has to be answerable
          here. Compact by exception — an all-auto board says nothing. */}}
     <h2><span>serve
-      {{if .Armed}}<span class="count">(armed · up {{.Up}}{{with .Host}} · {{.}}{{end}}{{if .NextSweep}} · next sweep in {{.NextSweep}}{{end}}{{if .LastTick}} · last tick {{.LastTick}}{{end}}{{if .Paused}} · {{.Paused}} paused{{end}}{{if .Safe}} · {{.Safe}} safe{{end}}{{with .Push.Item}} · {{.}}{{end}})</span>
-      {{else}}<span class="count">(browse-only · up {{.Up}}{{if .Paused}} · {{.Paused}} paused{{end}}{{if .Safe}} · {{.Safe}} safe{{end}}{{with .Push.Item}} · {{.}}{{end}})</span>{{end}}
+      {{if .Armed}}<span class="count">(armed · up {{.Up}}{{with .Host}} · {{.}}{{end}}{{if .NextSweep}} · next sweep in {{.NextSweep}}{{end}}{{if .LastTick}} · last tick {{.LastTick}}{{end}}{{if .Paused}} · {{.Paused}} paused{{end}}{{with .Push.Item}} · {{.}}{{end}})</span>
+      {{else}}<span class="count">(browse-only · up {{.Up}}{{if .Paused}} · {{.Paused}} paused{{end}}{{with .Push.Item}} · {{.}}{{end}})</span>{{end}}
     </span></h2>
     {{with .HostError}}<p class="serve-state failed">{{.}}</p>{{end}}
     {{if or .Projects .QuietCount .Push.State}}
@@ -282,7 +283,7 @@ document.getElementById('theme-toggle').addEventListener('click', function () {
 </script>
 {{end}}
 
-{{/* The dash's compact row status, refreshed from one observation pass
+{{/* Shared header and dashboard status, refreshed from one observation pass
      every five seconds while the page is visible. */}}
 {{define "dashstatusjs"}}
 <script>
@@ -293,7 +294,9 @@ document.getElementById('theme-toggle').addEventListener('click', function () {
     fetch('/run-status', {credentials: 'same-origin', cache: 'no-store'})
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (m) {
-        if (!m) return;
+        if (!m || document.hidden) return;
+        var cluster = document.querySelector('[data-serve-cluster]');
+        if (cluster) cluster.textContent = m.__serve_cluster;
         var agent = document.getElementById('agent-default');
         if (agent) {
           agent.querySelector('[data-agent-summary]').textContent = m.__agent_summary;

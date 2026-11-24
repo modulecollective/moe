@@ -183,20 +183,13 @@ func (s serveState) serveCluster(now time.Time) string {
 		s.snap.Host, next, s.modes, s.failing(now))
 }
 
-// pushItem is the origin half: has the journal reached GitHub.
-//
-// Only a serve that could plausibly still be pushing vouches for the
-// recorded fields. A provably dead one — and a root with no state file
-// at all — gets the ahead-count alone, because "pushed 2m ago" from a
-// process that has since crashed is the one reading that would send an
-// operator away happy while their journal sits on the box. Unknown
-// vouches: git answers from a sandbox, the process is probably fine, and
-// the headline already says the reader can't check.
+// pushItem reports the current origin queue. Only a live or unknown serve
+// vouches for failure age; a dead or absent one reports the Git count alone.
 func (s serveState) pushItem(now time.Time) string {
 	if !s.ok || s.live == serveDead {
-		return dash.PushItem(now, false, s.ahead, time.Time{}, time.Time{})
+		return dash.PushItem(now, false, s.ahead, time.Time{})
 	}
-	return dash.PushItem(now, true, s.ahead, s.snap.LastPush, s.snap.PushFailingSince)
+	return dash.PushItem(now, true, s.ahead, s.snap.PushFailingSince)
 }
 
 // failing counts the projects whose row would read "cooling" or

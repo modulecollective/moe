@@ -308,12 +308,12 @@ func TestServeCluster(t *testing.T) {
 		{
 			name: "paused and safe", armed: true, up: "4m", next: "15m",
 			modes: ModeCounts{Paused: 1, Safe: 2},
-			want:  "serve armed · up 4m · next 15m · 1 paused · 2 safe",
+			want:  "serve armed · up 4m · next 15m · 1 paused",
 		},
 		{
 			name: "modes with failures", armed: true, up: "4m", next: "15m",
 			modes: ModeCounts{Safe: 1}, failing: 2,
-			want: "serve armed · up 4m · next 15m · 1 safe · 2 failing",
+			want: "serve armed · up 4m · next 15m · 2 failing",
 		},
 		// A browse-only serve has no clock, but the modes are still the
 		// operator's standing answer for when one arms — and unlike a
@@ -343,28 +343,25 @@ func TestServeCluster(t *testing.T) {
 func TestPushItem(t *testing.T) {
 	now := time.Now()
 	failing := now.Add(-12 * time.Minute)
-	landed := now.Add(-2 * time.Minute)
 
 	for _, tc := range []struct {
 		name         string
 		serve        bool
 		ahead        int
-		lastPush     time.Time
 		failingSince time.Time
 		want         string
 	}{
 		{
 			name: "waiting and refused", serve: true, ahead: 3,
-			lastPush: landed, failingSince: failing,
-			want: "push failing 12m · 3 unpushed",
+			failingSince: failing,
+			want:         "push failing 12m · 3 unpushed",
 		},
-		{name: "waiting, drain healthy", serve: true, ahead: 3, lastPush: landed, want: "3 unpushed"},
-		{name: "landed", serve: true, lastPush: landed, want: "pushed 2m ago"},
+		{name: "waiting, drain healthy", serve: true, ahead: 3, want: "3 unpushed"},
+		{name: "recovered queue, historical failure", serve: true, failingSince: failing, want: ""},
 		// A live serve that has pushed nothing yet says nothing. An
 		// ahead-count of zero reads the same on a caught-up box and on one
 		// with no origin at all, so a standing "in sync" would be
-		// permanently false on a local-only bureaucracy. The first journal
-		// commit of the session turns this into "pushed just now".
+		// permanently false on a local-only bureaucracy.
 		{name: "nothing to push, none landed yet", serve: true, want: ""},
 		// No serve vouching, nothing waiting: the banner is what it always
 		// was. The floor this whole change is measured against.
@@ -375,12 +372,12 @@ func TestPushItem(t *testing.T) {
 		// happy while the journal sits on the box.
 		{
 			name: "no serve, commits waiting", ahead: 3,
-			lastPush: landed, failingSince: failing,
-			want: "3 unpushed",
+			failingSince: failing,
+			want:         "3 unpushed",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := PushItem(now, tc.serve, tc.ahead, tc.lastPush, tc.failingSince)
+			got := PushItem(now, tc.serve, tc.ahead, tc.failingSince)
 			if got != tc.want {
 				t.Errorf("PushItem = %q, want %q", got, tc.want)
 			}
