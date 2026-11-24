@@ -42,27 +42,11 @@ func ciRepairEligibilityExcept(sc *pulseScan, p ownedPRChecks, ownBranch string)
 	if !p.actionable() {
 		return nil, "PR has no current actionable failure"
 	}
-	f, err := input.Load(sc.root, md.Project, md.ID)
+	fresh, spent, err := ciRepairSpent(sc, md, p)
 	if err != nil {
 		return nil, "could not read operator input: " + err.Error()
 	}
-	spent := map[int]bool{}
-	attempted := false
-	for _, a := range sc.idx.CIRepairAttempts[p.Run] {
-		if a.PR == p.PR && a.Head == p.Head {
-			attempted = true
-		}
-		for _, id := range a.InputIDs {
-			spent[id] = true
-		}
-	}
-	var fresh []int
-	for _, e := range f.Pending() {
-		if !spent[e.ID] {
-			fresh = append(fresh, e.ID)
-		}
-	}
-	if attempted && len(fresh) == 0 {
+	if spent {
 		return nil, "CI repair attempt already spent for this head; add a fresh operator note to retry"
 	}
 	if clockInvoked {
@@ -90,6 +74,33 @@ func ciRepairEligibilityExcept(sc *pulseScan, p ownedPRChecks, ownBranch string)
 		return nil, "run " + hold
 	}
 	return fresh, ""
+}
+
+// ciRepairSpent is the durable half of eligibility: the journal's claims
+// for this PR head and the run's unspent pending notes. Nothing here
+// changes without a journal commit, which is why the heartbeat gate may
+// suppress a PR wake on it (see projectDue) and on no other hold.
+func ciRepairSpent(sc *pulseScan, md *run.Metadata, p ownedPRChecks) (fresh []int, spent bool, err error) {
+	f, err := input.Load(sc.root, md.Project, md.ID)
+	if err != nil {
+		return nil, false, err
+	}
+	used := map[int]bool{}
+	attempted := false
+	for _, a := range sc.idx.CIRepairAttempts[p.Run] {
+		if a.PR == p.PR && a.Head == p.Head {
+			attempted = true
+		}
+		for _, id := range a.InputIDs {
+			used[id] = true
+		}
+	}
+	for _, e := range f.Pending() {
+		if !used[e.ID] {
+			fresh = append(fresh, e.ID)
+		}
+	}
+	return fresh, attempted && len(fresh) == 0, nil
 }
 
 func claimCIRepair(root string, observed ownedPRChecks, reserved ...*session.Session) (*run.Metadata, error) {
