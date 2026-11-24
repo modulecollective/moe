@@ -17,12 +17,6 @@ import (
 // by qualified "<project>/<slug>" (the always-qualified index contract).
 func buildSpawn(t *testing.T, runs []*run.Metadata, when map[string]time.Time, spawnedBy map[string]string) (map[string]Row, []Row) {
 	t.Helper()
-	return buildSpawnChained(t, runs, when, spawnedBy, nil)
-}
-
-// buildSpawnChained is buildSpawn with chain edges in the index too —
-// the state the tail-sweep splice reads.
-func buildSpawnChained(t *testing.T, runs []*run.Metadata, when map[string]time.Time, spawnedBy, chained map[string]string) (map[string]Row, []Row) {
 	t.Helper()
 	next := make(map[string]NextDecision)
 	for _, md := range runs {
@@ -30,7 +24,7 @@ func buildSpawnChained(t *testing.T, runs []*run.Metadata, when map[string]time.
 			next[md.Project+"/"+md.ID] = NextDecision{Stage: "code"}
 		}
 	}
-	idx := &run.JournalIndex{LastActivity: when, SpawnedBy: spawnedBy, ChainedChild: chained}
+	idx := &run.JournalIndex{LastActivity: when, SpawnedBy: spawnedBy}
 	rows, err := BuildRows(Inputs{Now: time.Now().UTC(), Runs: runs, Index: idx, NextByRun: next})
 	if err != nil {
 		t.Fatalf("BuildRows: %v", err)
@@ -500,105 +494,5 @@ func TestRenderNestedCompletedDrawsConnector(t *testing.T) {
 	}
 	if strings.Contains(out, "↳ p/ship-it") {
 		t.Fatalf("the parent row must not carry a connector:\n%s", out)
-	}
-}
-
-// TestTailSweepSplicesIntoChainFlow: a survey spawned by a run that sat
-// on a chain reads as the next thing that happened on that chain, not as
-// something hanging off it — flush "→" instead of the "↳" ladder. Depth
-// stays 1 on purpose: the row belongs to its spawner's block, so the
-// completed cap and every Depth-keyed walk keep treating the pair as one
-// unit. The reflect the survey parked keeps its ladder rung, because its
-// own spawner (the survey) is on no chain.
-func TestTailSweepSplicesIntoChainFlow(t *testing.T) {
-	base := time.Now().UTC()
-	runs := []*run.Metadata{
-		closedRun("p", "hop-one", "sdlc"),
-		closedRun("p", "hop-two", "sdlc"),
-		closedRun("p", "pulse-1", "pulse"),
-		closedRun("p", "reflect-1", "chat"),
-	}
-	when := map[string]time.Time{
-		"p/hop-one":   base.Add(-4 * time.Hour),
-		"p/hop-two":   base.Add(-3 * time.Hour),
-		"p/pulse-1":   base.Add(-2 * time.Hour),
-		"p/reflect-1": base.Add(-1 * time.Hour),
-	}
-	byKey, completed := buildSpawnChained(t, runs, when,
-		map[string]string{"p/pulse-1": "p/hop-two", "p/reflect-1": "p/pulse-1"},
-		map[string]string{"p/hop-one": "p/hop-two"})
-
-	sweep := byKey["p/pulse-1"]
-	if !sweep.Chained {
-		t.Errorf("tail sweep Chained = false, want the chain-flow connector")
-	}
-	if sweep.Depth != 1 {
-		t.Errorf("tail sweep Depth = %d, want 1 so it stays inside its spawner's block", sweep.Depth)
-	}
-	if got := rowPrefix(sweep); got != "→ " {
-		t.Errorf("tail sweep prefix = %q, want the flush chain arrow", got)
-	}
-	if reflect := byKey["p/reflect-1"]; reflect.Chained {
-		t.Errorf("reflect Chained = true, want the lineage ladder — its spawner is on no chain")
-	}
-	var order []string
-	for _, r := range completed {
-		order = append(order, r.Project+"/"+r.Run)
-	}
-	want := "p/hop-two,p/pulse-1,p/reflect-1,p/hop-one"
-	if strings.Join(order, ",") != want {
-		t.Fatalf("completed order = %v, want %s", order, want)
-	}
-}
-
-// TestSweepOffChainKeepsTheLadder is the other half of the split: a
-// survey whose spawner never sat on a chain — a `!!!` ship of a
-// standalone run — keeps today's nested "↳" fold. Chain flow is a claim
-// about a chain, so with no chain there is nothing to splice into.
-func TestSweepOffChainKeepsTheLadder(t *testing.T) {
-	base := time.Now().UTC()
-	runs := []*run.Metadata{
-		closedRun("p", "ship-it", "sdlc"),
-		closedRun("p", "pulse-1", "pulse"),
-	}
-	when := map[string]time.Time{
-		"p/ship-it": base.Add(-2 * time.Hour),
-		"p/pulse-1": base.Add(-1 * time.Hour),
-	}
-	byKey, _ := buildSpawnChained(t, runs, when,
-		map[string]string{"p/pulse-1": "p/ship-it"},
-		// A cleared edge puts neither end on a chain.
-		map[string]string{"p/ship-it": ""})
-
-	sweep := byKey["p/pulse-1"]
-	if sweep.Chained {
-		t.Errorf("sweep Chained = true, want the lineage ladder off-chain")
-	}
-	if got := rowPrefix(sweep); got != "↳ " {
-		t.Errorf("sweep prefix = %q, want the nesting connector", got)
-	}
-}
-
-// TestRenderCompletedSweepDrawsChainFlow guards the render path, not the
-// helper: a spliced tail sweep lands in COMPLETED, and that section drew
-// its connector straight from Depth until this test caught it — so a
-// sweep marked Chained still rendered the "↳" ladder on the CLI while
-// the serve template already showed chain flow. Its lineage sibling in
-// the same block keeps the ladder, which is what makes the glyph carry
-// information rather than decorate every nested row.
-func TestRenderCompletedSweepDrawsChainFlow(t *testing.T) {
-	rows := []Row{
-		{Project: "p", Run: "hop-two", Note: "sdlc: merged", Bucket: BucketCompletedRuns},
-		{Project: "p", Run: "pulse-1", Note: "pulse: closed", Bucket: BucketCompletedRuns, Depth: 1, Chained: true},
-		{Project: "p", Run: "reflect-1", Note: "twin: closed", Bucket: BucketCompletedRuns, Depth: 2},
-	}
-	var buf bytes.Buffer
-	Render(&buf, time.Now().UTC(), nil, rows, 1, 0, false, FactoryState{}, rand.New(rand.NewSource(1)))
-	out := buf.String()
-	if !strings.Contains(out, "\n  → p/pulse-1") {
-		t.Fatalf("a chained completed row should render the flush chain arrow:\n%s", out)
-	}
-	if !strings.Contains(out, "\n    ↳ p/reflect-1") {
-		t.Fatalf("an unchained completed child keeps the ladder at its depth:\n%s", out)
 	}
 }

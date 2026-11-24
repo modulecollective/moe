@@ -22,12 +22,8 @@ func TestDashRendersLinkifiedNotes(t *testing.T) {
 			// Qualified spawned target (what dash emits) → links as-is.
 			{Project: "moe", Run: "head", Note: "sdlc:merged · spawned → moe/pulse-child",
 				Bucket: dash.BucketCompletedRuns, When: now.Add(-time.Hour)},
-			// Qualified chained target → links as-is.
-			{Project: "alpha", Run: "worker", Note: "sdlc:code · chained → beta/child-run",
-				Bucket: dash.BucketActiveRuns, When: now},
-			// Settled-chain hint (dash.settledChainHint) → target links,
-			// trailing status suffix stays plain text.
-			{Project: "moe", Run: "tail", Note: "sdlc:code · chained after moe/head-run (merged)",
+			// Qualified spawned target → links as-is.
+			{Project: "alpha", Run: "worker", Note: "sdlc:code · spawned → beta/child-run",
 				Bucket: dash.BucketActiveRuns, When: now},
 			// Free text with HTML metachars → escaped, no anchor.
 			{Project: "moe", Run: "plain", Note: "pull: <b>rebalance</b> now",
@@ -47,9 +43,7 @@ func TestDashRendersLinkifiedNotes(t *testing.T) {
 		// Qualified target links as-is; anchor text is the qualified target.
 		`spawned → <a href="/run/moe/pulse-child">moe/pulse-child</a>`,
 		// Qualified target links as-is (not double-qualified).
-		`chained → <a href="/run/beta/child-run">beta/child-run</a>`,
-		// "chained after" links its target; " (merged)" is outside the match.
-		`chained after <a href="/run/moe/head-run">moe/head-run</a> (merged)`,
+		`spawned → <a href="/run/beta/child-run">beta/child-run</a>`,
 		// Free-text HTML metachars stay escaped — no raw <b> from note text.
 		`pull: &lt;b&gt;rebalance&lt;/b&gt; now`,
 	} {
@@ -74,14 +68,14 @@ func TestProjectHubRendersLinkifiedNotes(t *testing.T) {
 	seedProject(t, root, "alpha")
 	gather := func(string) ([]dash.Row, int, int, []int, error) {
 		return []dash.Row{
-			{Project: "alpha", Run: "fix-1", Note: "sdlc:code · chained → alpha/downstream",
+			{Project: "alpha", Run: "fix-1", Note: "sdlc:code · spawned → alpha/downstream",
 				Bucket: dash.BucketActiveRuns, When: time.Now()},
 		}, 1, 1, nil, nil
 	}
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, GatherDash: gather})
 
 	rr := get(t, s, "/projects/alpha")
-	mustContain(t, rr, `chained → <a href="/run/alpha/downstream">alpha/downstream</a>`)
+	mustContain(t, rr, `spawned → <a href="/run/alpha/downstream">alpha/downstream</a>`)
 }
 
 // TestRunPageRendersLinkifiedRowNote drives the fillRunRow path: the

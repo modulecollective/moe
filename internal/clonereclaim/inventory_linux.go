@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 
+	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 )
 
@@ -46,7 +47,7 @@ func Inventory(root string) ([]string, error) {
 			return nil, errors.New("project inventory limit exceeded")
 		}
 		for _, p := range projects {
-			if !run.ValidID(p.Name()) {
+			if !project.ValidID(p.Name()) {
 				base.Close()
 				return nil, errors.New("invalid project inventory entry")
 			}

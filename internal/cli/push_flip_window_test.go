@@ -358,7 +358,7 @@ func TestPushPRContendedLockLeavesRootClean(t *testing.T) {
 
 	// The sweep's run is committed; resume under a different ride. The
 	// unflipped marker must take the resume route, not walk the push.
-	defer withRideMode(rideStatic)()
+	defer withRideMode(rideNone)()
 	synthBefore := *f.synthCalls
 	ghBefore := f.ghCalls(t)
 	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
@@ -380,7 +380,7 @@ func TestPushPRContendedLockLeavesRootClean(t *testing.T) {
 	if got := push.TrailerValue(f.root, f.projectID, f.runID, "MoE-PR"); got != f.url {
 		t.Fatalf("MoE-PR after resume: want %q, got %q", f.url, got)
 	}
-	if body := lastCommitMessage(t, f.root); !strings.Contains(body, "MoE-Consent: dynamic") || strings.Contains(body, "MoE-Consent: static") {
+	if body := lastCommitMessage(t, f.root); !strings.Contains(body, "MoE-Consent: dynamic") || strings.Contains(body, "MoE-Consent: none") {
 		t.Fatalf("resume did not preserve the shipping consent:\n%s", body)
 	}
 	if got := f.sheetAt("HEAD"); got != proposedSheet {

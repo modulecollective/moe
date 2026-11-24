@@ -199,11 +199,11 @@ func TestOwedFinishClearsAfterRecovery(t *testing.T) {
 	ran := len(*dispatched)
 	delete(exits, "build")
 	var errs bytes.Buffer
-	if code := chainKickRun(root, md.Project, md.ID, rideDynamic, true, io.Discard, &errs); code != exitYielded || len(*dispatched) != ran {
+	if code := rideRun(root, md.Project, md.ID, rideDynamic, true, io.Discard, &errs); code != exitYielded || len(*dispatched) != ran {
 		t.Fatalf("kick with the receipt still refused: exit=%d dispatched %d→%d: %s", code, ran, len(*dispatched), errs.String())
 	}
 	gittest.Run(t, root, "config", "--unset", "core.hooksPath")
-	chainKickRun(root, md.Project, md.ID, rideDynamic, true, io.Discard, io.Discard)
+	rideRun(root, md.Project, md.ID, rideDynamic, true, io.Discard, io.Discard)
 	if len(*push) != 0 {
 		t.Fatalf("shipped under the failed finish: pushes=%d", len(*push))
 	}

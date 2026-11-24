@@ -12,6 +12,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/atomicfile"
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/project"
 )
 
 // A receipt is transaction intent, never satisfaction. Only ancestry of its
@@ -30,7 +31,7 @@ func closePath(s *Session) string {
 var objectID = regexp.MustCompile(`^[0-9a-f]{40}([0-9a-f]{24})?$`)
 
 func readClose(s *Session) (*pendingClose, error) {
-	if !sessionIDPattern.MatchString(s.Project) || !sessionIDPattern.MatchString(s.Run) || !filepath.IsLocal(s.Doc) || s.Branch != BranchName(s.Project, s.Run, s.Doc) {
+	if !project.ValidID(s.Project) || !sessionIDPattern.MatchString(s.Run) || !filepath.IsLocal(s.Doc) || s.Branch != BranchName(s.Project, s.Run, s.Doc) {
 		return nil, fmt.Errorf("session close: invalid session identity %q", s.Branch)
 	}
 	body, err := os.ReadFile(closePath(s))

@@ -170,13 +170,6 @@ func serveOptions(root string, stderr io.Writer) serve.Options {
 		SubmitControl: func(project, runID, action, id string, revision int) (string, error) {
 			return serveSubmitControl(root, project, runID, action, id, revision)
 		},
-		// The chain head's own page is where the dash's `parked · kick?`
-		// hint sends the operator, so it's where the batch has to be
-		// legible. Membership is journal state, so it crosses the seam as
-		// a callback like every other journal-shaped fact.
-		ChainMembers: func(project, runID string) ([]dash.Row, error) {
-			return chainMembers(root, project, runID, time.Now().UTC())
-		},
 		// Provenance crosses the seam already resolved to display strings:
 		// the walk reads the journal index *and* the spawning pulse's
 		// canvas gate, and neither belongs on serve's side.

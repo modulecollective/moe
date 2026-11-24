@@ -129,15 +129,15 @@ func TestRexStartupWaitsForReconciliation(t *testing.T) {
 			// gamma, and blocks that must not become heartbeat children.
 			fake.reply("block-ls", `{"blocks":[{"block_id":"block:A","label":"heartbeat:alpha"},{"block_id":"block:EXIT","label":"heartbeat:gamma"},{"block_id":"block:D","label":"dash"},{"block_id":"block:X","label":"shell"}]}`, 0)
 			fake.reply("wait@block:EXIT", `{"exit_code":1}`, 1)
-			fake.reply("run@heartbeat:beta", `{"block_ids":["block:B"]}`, 0)
+			fake.reply("run@heartbeat:_cabinet", `{"block_ids":["block:B"]}`, 0)
 			s.heartbeatTick()
 			a, ok := s.children.get("heartbeat:alpha")
 			if !ok || testBlock(s.children, a) != "block:A" || testAdoptionError(s) != nil {
 				t.Fatalf("alpha not reconciled before dispatch: child %v, error %v", a, testAdoptionError(s))
 			}
 			// The adopted live sweep holds the server's one slot.
-			if _, ok := s.children.get("heartbeat:beta"); ok || len(s.children.all) != 2 {
-				t.Fatalf("beta dispatched beside adopted alpha or foreign block adopted: %d children", len(s.children.all))
+			if _, ok := s.children.get("heartbeat:_cabinet"); ok || len(s.children.all) != 2 {
+				t.Fatalf("sweep dispatched beside adopted alpha or foreign block adopted: %d children", len(s.children.all))
 			}
 			if fake.called("run --json --focus=false --keep-open -s session:OLD --label heartbeat:alpha ") || fake.called("new ") || fake.called("block close block:X") {
 				t.Fatalf("recovery duplicated alpha, replaced session, or closed foreign block: %q", fake.calls())
@@ -180,11 +180,11 @@ func TestRexStartupWaitsForReconciliation(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("adopted alpha never settled")
 			}
-			// Alpha's exit frees the slot; it is cooling, so beta starts.
+			// Alpha's exit frees the slot for the one root sweep.
 			s.heartbeatTick()
-			b, ok := s.children.get("heartbeat:beta")
+			b, ok := s.children.get("heartbeat:_cabinet")
 			if !ok || testBlock(s.children, b) != "block:B" {
-				t.Fatalf("beta not dispatched once the slot freed: child %v", b)
+				t.Fatalf("root sweep not dispatched once the slot freed: child %v", b)
 			}
 			runs := 0
 			for _, call := range fake.calls() {
@@ -193,15 +193,15 @@ func TestRexStartupWaitsForReconciliation(t *testing.T) {
 				}
 			}
 			if fake.called("block close block:D") || runs != 1 {
-				t.Fatalf("want beta the only launch, the dash block left alone: %q", fake.calls())
+				t.Fatalf("want the root sweep the only launch, the dash block left alone: %q", fake.calls())
 			}
 			waitRexWorkers(t, testRex(s.children))
 			waitFor(t, "completion backoff", func() bool {
 				s.heartbeat.mu.Lock()
 				defer s.heartbeat.mu.Unlock()
-				return s.heartbeat.fails["alpha"] == 1 && s.heartbeat.fails["beta"] == 1
+				return s.heartbeat.fails["alpha"] == 1 && s.heartbeat.fails["_cabinet"] == 1
 			})
-			if got := gate.sweptList(); !slices.Equal(got, []string{"beta"}) {
+			if got := gate.sweptList(); !slices.Equal(got, []string{"_cabinet"}) {
 				t.Fatalf("Swept = %v; adopted jobs must not acknowledge dispatch", got)
 			}
 			s.activity.mu.Lock()
@@ -212,7 +212,7 @@ func TestRexStartupWaitsForReconciliation(t *testing.T) {
 				}
 			}
 			s.activity.mu.Unlock()
-			if counts["heartbeat:alpha"] != 1 || counts["heartbeat:gamma"] != 1 || counts["heartbeat:beta"] != 1 {
+			if counts["heartbeat:alpha"] != 1 || counts["heartbeat:gamma"] != 1 || counts["heartbeat:_cabinet"] != 1 {
 				t.Fatalf("completion hooks = %v", counts)
 			}
 		})
@@ -259,7 +259,7 @@ func TestRexStartupRecoversOnIdleTick(t *testing.T) {
 		t.Fatalf("idle tick repeated adoption: %q", fake.calls()[before:])
 	}
 	gate.due, gate.quiet = []string{"alpha"}, nil
-	fake.reply("run@heartbeat:alpha", `{"block_ids":["block:A"]}`, 0)
+	fake.reply("run@heartbeat:_cabinet", `{"block_ids":["block:A"]}`, 0)
 	s.heartbeatTick()
 	waitRexWorkers(t, testRex(s.children))
 	waitFor(t, "eligible sweep after idle recovery", func() bool { return len(gate.sweptList()) == 1 })
@@ -323,7 +323,7 @@ func TestRexStartupMissingSessionRetainsIdentityOnFailedReplacement(t *testing.T
 			waitFor(t, "replacement sweep backoff", func() bool {
 				s.heartbeat.mu.Lock()
 				defer s.heartbeat.mu.Unlock()
-				return s.heartbeat.fails["alpha"] == 1
+				return s.heartbeat.fails["_cabinet"] == 1
 			})
 			if newCalls() != 2 || testRex(s.children).sessionID() != "session:NEW" {
 				t.Fatalf("confirmed absence did not recover: %q", fake.calls())
@@ -331,15 +331,15 @@ func TestRexStartupMissingSessionRetainsIdentityOnFailedReplacement(t *testing.T
 			if body, _ := os.ReadFile(rexSessionPath(root)); string(body) != "session:NEW\n" {
 				t.Fatalf("successful replacement not persisted: %q", body)
 			}
-			if !fake.called("run --json --focus=false --keep-open -s session:NEW --label heartbeat:alpha ") {
+			if !fake.called("run --json --focus=false --keep-open -s session:NEW --label heartbeat:_cabinet ") {
 				t.Fatalf("sweep missing from replacement: %q", fake.calls())
 			}
-			s.heartbeat.record("alpha", false)
+			s.heartbeat.record("_cabinet", false)
 			fake.reply("run@session:NEW", `{"block_ids":["block:B"]}`, 0)
 			s.heartbeatTick()
 			waitRexWorkers(t, testRex(s.children))
 			waitFor(t, "second sweep", func() bool { return len(gate.sweptList()) == 2 })
-			if newCalls() != 2 || !fake.called("run --json --focus=false --keep-open -s session:NEW --label heartbeat:alpha ") {
+			if newCalls() != 2 || !fake.called("run --json --focus=false --keep-open -s session:NEW --label heartbeat:_cabinet ") {
 				t.Fatalf("next sweep did not reuse replacement: %q", fake.calls())
 			}
 		})

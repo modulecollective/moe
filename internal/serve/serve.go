@@ -154,21 +154,6 @@ type Options struct {
 	RunStatuses   func(project string) (map[string]string, error)
 	SubmitControl func(project, run, action, id string, revision int) (string, error)
 
-	// ChainMembers returns the live batch hanging off a chain head: one
-	// dash.Row per member in head→tail order — the runs `moe chain kick`
-	// would actually ride.
-	//
-	// The head's canvas is the operator's purpose note and says nothing
-	// about membership; this is where the head page gets the batch. The
-	// page offers no kick of its own — a hand-staged head is a deliberate
-	// staging fence, and staging is a terminal activity — so what it owes
-	// the operator is an honest picture of what `moe chain kick` would
-	// ride, nothing more.
-	//
-	// Only called for chain-workflow runs. Absent — or erroring — leaves
-	// the head page as it was: no members section.
-	ChainMembers func(project, run string) (members []dash.Row, err error)
-
 	// RunProvenance returns the per-run page's provenance section: how
 	// the run was opened and, walking up the MoE-Spawned-By chain, how
 	// each spawner came to be. It lives on the cli side because the walk

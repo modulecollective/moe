@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runowner"
 )
@@ -16,7 +17,7 @@ import (
 // A missing clone is safe only with no unresolved external generation evidence.
 // It never guesses whether an absent tree was safely removed.
 func CheckRunRecovery(h *runowner.Handle) error {
-	if h == nil || !h.Owns(h.Root, h.Project, h.Run) || !run.ValidID(h.Project) || !run.ValidID(h.Run) {
+	if h == nil || !h.Owns(h.Root, h.Project, h.Run) || !project.ValidID(h.Project) || !run.ValidID(h.Run) {
 		return errors.New("recovery admission requires exact held run ownership")
 	}
 	if err := CheckNamedShells(h); err != nil {

@@ -200,7 +200,7 @@ printf '# Pulse\n\nTerminal PR surveyed.\n\n## Gate\n\n%sjson\n{"status":"ok"}\n
 				t.Fatalf("real gate did not dispatch: %+v", decisions)
 			}
 			var out, log bytes.Buffer
-			if code := runPulseNew([]string{"--dynamic", "--heartbeat", "--pr-checks", decisions[0].PRChecks, f.projectID}, &out, &log); code != 0 {
+			if code := runPulseNew([]string{"--dynamic", "--heartbeat", "--pr-checks", decisions[0].PRChecks}, &out, &log); code != 0 {
 				t.Fatalf("pulse exit=%d; stdout=%s; stderr=%s", code, &out, &log)
 			}
 			argv, err := os.ReadFile(argvPath)

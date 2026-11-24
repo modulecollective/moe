@@ -72,7 +72,7 @@ func TestHoldStopsCascadeAtNextBoundary(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("build", "", false, true, md, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "", false, md, &stdout, &stderr)
 	if code != exitYielded {
 		t.Fatalf("exit = %d, want %d; stderr:\n%s", code, exitYielded, stderr.String())
 	}
@@ -96,30 +96,6 @@ func TestHoldStopsCascadeAtNextBoundary(t *testing.T) {
 	}
 }
 
-// A finish accepted during a `!!!` ships this run through the ordinary
-// route and withholds the chain ride; the ship that had begun is
-// reported as done.
-func TestFinishWithholdsChainRideAfterShip(t *testing.T) {
-	root, md := controlFixture(t)
-	ownForTest(t, root)
-	stubOpenSdlcStage(t, nil)
-	push := stubPushFromCascade(t, 0, nil)
-	submitControl(t, root, runcontrol.KindFinish, "f1")
-
-	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("review", "", false, true, md, &stdout, &stderr)
-	if code != 0 || !res.shipped || len(*push) != 1 {
-		t.Fatalf("exit %d shipped %v pushes %d; stderr:\n%s", code, res.shipped, len(*push), stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "chain continuation withheld") {
-		t.Fatalf("no withheld-ride line:\n%s", stdout.String())
-	}
-	f1, _ := controlRecord(t, root).Find("f1")
-	if f1.State != runcontrol.StateCompleted || !strings.Contains(f1.Outcome, "chain continuation withheld") {
-		t.Fatalf("finish = %+v", f1)
-	}
-}
-
 // A machine kick of a held run starts nothing, and the planner's floor
 // says why; a yield costs the sweep nothing.
 func TestHeldRunRefusesKick(t *testing.T) {
@@ -128,7 +104,7 @@ func TestHeldRunRefusesKick(t *testing.T) {
 	submitControl(t, root, runcontrol.KindHandoff, "h1")
 
 	var stdout, stderr bytes.Buffer
-	if code := chainKickRun(root, "moe", "change-auth", rideDynamic, false, &stdout, &stderr); code != exitYielded {
+	if code := rideRun(root, "moe", "change-auth", rideDynamic, false, &stdout, &stderr); code != exitYielded {
 		t.Fatalf("kick exit = %d; stderr:\n%s", code, stderr.String())
 	}
 	if len(*captured) != 0 {
@@ -154,7 +130,7 @@ func TestFinishWidensKickToBangBang(t *testing.T) {
 	submitControl(t, root, runcontrol.KindFinish, "f1")
 
 	var stdout, stderr bytes.Buffer
-	if code := chainKickRun(root, "moe", "change-auth", rideDynamic, true, &stdout, &stderr); code != 0 {
+	if code := rideRun(root, "moe", "change-auth", rideDynamic, true, &stdout, &stderr); code != 0 {
 		t.Fatalf("kick exit = %d; stderr:\n%s", code, stderr.String())
 	}
 	for _, s := range []string{"design", "build", "review"} {

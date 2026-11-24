@@ -258,7 +258,8 @@ func lastPulseAt(sc *pulseScan, projectID, currentRunID string) time.Time {
 	mds, idx := sc.mds, sc.idx
 	var latest time.Time
 	for _, md := range mds {
-		if md.Workflow != pulseWorkflow || md.Project != projectID || md.ID == currentRunID {
+		// Pulses live in the root project; older ones stay under their project.
+		if md.Workflow != pulseWorkflow || (md.Project != projectID && md.Project != project.RootID) || md.ID == currentRunID {
 			continue
 		}
 		if when := idx.LastActivity[md.Project+"/"+md.ID]; when.After(latest) {

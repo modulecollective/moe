@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -77,7 +79,10 @@ type heartbeatGate struct {
 	dispatched map[string]string
 	prSeen     map[string]string
 	prOffered  map[string][]ownedPRChecks
-	log        io.Writer
+	// tickPRs is this tick's observation per project, so a project with
+	// nothing due still shows the one sweep its PR state.
+	tickPRs map[string][]ownedPRChecks
+	log     io.Writer
 }
 
 func newHeartbeatGate(root string) *heartbeatGate {
@@ -88,6 +93,7 @@ func newHeartbeatGate(root string) *heartbeatGate {
 		dispatched: map[string]string{},
 		prSeen:     map[string]string{},
 		prOffered:  map[string][]ownedPRChecks{},
+		tickPRs:    map[string][]ownedPRChecks{},
 	}
 }
 
@@ -131,15 +137,41 @@ func (g *heartbeatGate) Due(tick time.Duration, log io.Writer) []serve.Heartbeat
 	// already computed them. Only the sweeps are logged, as before — a
 	// line per quiet project per tick would bury the ones that matter.
 	decisions := make([]serve.HeartbeatDecision, 0, len(projects))
+	anySweep := false
 	for _, p := range projects {
 		sweep, held, reason := g.projectDue(sc, p, occupied, tick, now)
 		if sweep {
+			anySweep = true
 			fmt.Fprintf(log, "heartbeat: sweeping %s — %s\n", p.ID, reason)
 		}
 		decisions = append(decisions, serve.HeartbeatDecision{
 			Project: p.ID, Sweep: sweep, Held: held, Reason: reason,
-			PRChecks: g.offeredPRJSON(p.ID),
 		})
+	}
+	if !anySweep {
+		return decisions
+	}
+	// One sweep surveys every project, so each one it will see records a
+	// base now. A held or paused project does not: its cursors must not
+	// move past work the sweep may not start.
+	for _, d := range decisions {
+		if d.Sweep || d.Held || d.Reason == "paused" {
+			continue
+		}
+		if tip, _, _, ok := projectJournalTip(g.root, d.Project); ok {
+			g.mu.Lock()
+			if _, inflight := g.dispatched[d.Project]; !inflight {
+				g.dispatched[d.Project] = tip
+				g.prOffered[d.Project] = g.tickPRs[d.Project]
+			}
+			g.mu.Unlock()
+		}
+	}
+	offered := g.offeredPRJSON()
+	for i := range decisions {
+		if decisions[i].Sweep {
+			decisions[i].PRChecks = offered
+		}
 	}
 	return decisions
 }
@@ -190,6 +222,23 @@ func (g *heartbeatGate) Due(tick time.Duration, log io.Writer) []serve.Heartbeat
 // Failed sweeps refuse on the same terms: the backoff still paces the
 // spawn, so re-offering costs a cool-off, not a loop.
 func (g *heartbeatGate) Swept(projectID string, clean bool) {
+	if projectID != project.RootID {
+		g.sweptProject(projectID, clean)
+		return
+	}
+	g.mu.Lock()
+	ids := slices.Collect(maps.Keys(g.dispatched))
+	g.mu.Unlock()
+	if !slices.Contains(ids, project.RootID) {
+		ids = append(ids, project.RootID)
+	}
+	for _, id := range ids {
+		g.sweptProject(id, clean)
+	}
+}
+
+// sweptProject moves one project's cursors; see Swept.
+func (g *heartbeatGate) sweptProject(projectID string, clean bool) {
 	tip, _, _, ok := projectJournalTip(g.root, projectID)
 	if !ok {
 		return
@@ -291,6 +340,7 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 		prs = gatherOwnedPRChecks(sc, projectID, log)
 	}
 	g.mu.Lock()
+	g.tickPRs[projectID] = prs
 	prChanged := false
 	prFinished := false
 	for _, p := range prs {
@@ -944,138 +994,35 @@ func machineAuthored(body string) bool {
 	return strings.Contains(body, "\nMoE-Consent:") || strings.Contains(body, "\nMoE-Spawned-By:")
 }
 
-// parkedKickableThread returns a run the heartbeat's sweep could cause
-// motion on, or "" when the project has none — asked ahead of time so a
-// project with genuinely nothing to do never spends an agent turn
-// finding that out.
+// parkedKickableThread returns a run a sweep could cause motion on, or ""
+// when the project has none, so a project with nothing to do never spends
+// an agent turn finding that out. It is a predicate rather than a decision:
+// what starts is the survey's pick, and the floor asks again at the ride.
 //
-// It is deliberately the *predicate*, not a decision: what actually gets
-// started is the survey's call, made with the park reasons and the
-// ordering bar in hand. This only says the board is not empty.
-//
-// Which roots are worth asking about is kickableThreadRoots' answer,
-// shared with the kick's own board enumeration so the two seams cannot
-// drift apart — the heartbeat re-offering a board the kick could not
-// reach is what stranded a run for two days on 2026-08-13. What each
-// side *does* with a root still differs, and this leg's extra reach is
-// the difference.
-//
-// "Not empty" is deliberately a wider question than pulseSelfKick's
-// admit. The kick evaluates a thread at its root; this leg is a pre-ask
-// for the whole *sweep*, and a sweep grooms before it kicks. So the
-// honest question is "could a sweep cause motion here", which includes
-// settled work queued behind a root the floor holds: the groom can
-// re-place it and the kick then starts it. Mirroring the root-only
-// admit is what let one seed-only head strand two settled runs behind
-// it on 2026-08-12 with no tick ever firing — the floor held the thread
-// correctly, and the recovery pulse.md promises never got its turn.
-//
-// Two shapes on top of the shared root set — plus a third that is no
-// thread at all, the tagged-idea leg at the bottom of the walk:
-//
-//   - A root that clears the floor itself: returned, as it always was.
-//   - A design-only spawn owed its one design turn: returned as itself.
-//     It is unsettled and stays that way until the operator advances
-//     it, but the sweep can still cause motion on it — exactly one
-//     stage — so answering "nothing to do" here would strand the run
-//     the sweep just minted. Same predicate the kick admits on.
-//   - A root held for an unsettled design: the first member behind it
-//     that clears the floor on its own. Whether those members actually
-//     belong behind that head is the survey's question to answer, not
-//     this predicate's — see the held-head annotation in
-//     chainStateBlock, which is what gets asked. This descent is the
-//     half that stays here: a member under a held head is grooming work
-//     for the survey, not something the kick may start.
-//
-// A root held for *occupancy* rather than design is not looked past.
-// The corpse-branch shape has its own deliberate recovery (the skip
-// line is the signpost, see openSessionStage) and nothing here changes
-// it. A thread holding a reaped turn is skipped the same way, for the
-// same reason — its recovery is an operator touch, and it is on the
-// dash already (see reapHeldThread).
-//
-// markedOnly is the project's `safe` mode reaching the pre-ask: the
-// question narrows from "could a sweep cause motion here" to "could it
-// cause motion the operator has already licensed". It is the same
-// operatorMarked the kick admits on, asked here so the tick doesn't
-// spend an agent turn learning what the kick would then hold. The
-// tagged-idea leg passes it by construction — the tag *is* the mark.
+// markedOnly is the project's `safe` mode: the question narrows to motion
+// the operator has already licensed. A tagged idea passes by construction,
+// since the tag is the mark.
 func parkedKickableThread(root string, sc *pulseScan, projectID string, markedOnly bool) string {
-	admits := func(md *run.Metadata) bool {
-		return !markedOnly || operatorMarked(root, md, sc.mds, sc.idx)
+	for _, key := range kickableRuns(sc, projectID) {
+		md := sc.byKey[key]
+		// A reaped turn's release is an operator touch, and it is on the dash.
+		if reapHeldReason(md, sc.idx.LastOperatorActivity[key]) != "" {
+			continue
+		}
+		if settled, turnClosed := rootDesignSettled(root, md, sc.idx); !settled && (!md.DesignOnly || turnClosed) {
+			continue
+		}
+		if openSessionStage(root, md) != "" || runOwnerHold(root, md) != "" {
+			continue
+		}
+		if markedOnly && !operatorMarked(root, md, sc.mds, sc.idx) {
+			continue
+		}
+		return key
 	}
-	for _, rootKey := range kickableThreadRoots(sc.mds, sc.byKey, sc.graph, projectID) {
-		rootMd := sc.byKey[rootKey]
-		// A thread carrying a reaped turn no operator movement has
-		// released is skipped whole, members included — the same shape
-		// the occupancy hold takes. The recovery is the operator's touch
-		// and it is surfaced on the dash (`· unfinished`) and the run page, so
-		// there is no stranded-work argument for descending past it the
-		// way the design-held leg below does. If one shows up, that
-		// incident earns the descent; the predicate takes the same
-		// arguments either way.
-		if reapHeldThread(rootKey, sc.byKey, sc.graph, sc.idx) != "" {
-			continue
-		}
-		if settled, turnClosed := rootDesignSettled(root, rootMd, sc.idx); !settled {
-			// A design-only spawn owed its bounded ride is motion, not a
-			// strand. kickFloorHold's own admit, minus the note leg: the
-			// pre-ask has no groomResult to read the input records
-			// through, and a note at a parked run wakes the tick through
-			// its own leg anyway.
-			if rootMd.DesignOnly && !turnClosed {
-				if openSessionStage(root, rootMd) == "" && runOwnerHold(root, rootMd) == "" && admits(rootMd) {
-					return rootKey
-				}
-				continue
-			}
-			// Chain edges only ever point at live runs (NewChainGraph drops
-			// terminal children), so in-progress is the only liveness the
-			// walk owes on top of the floor's own two questions.
-			for _, key := range sc.graph.Thread(rootKey)[1:] {
-				memberMd := sc.byKey[key]
-				if memberMd == nil || memberMd.Status != run.StatusInProgress {
-					continue
-				}
-				if settled, _ := rootDesignSettled(root, memberMd, sc.idx); !settled {
-					continue
-				}
-				if openSessionStage(root, memberMd) != "" || runOwnerHold(root, memberMd) != "" {
-					continue
-				}
-				if !admits(memberMd) {
-					continue
-				}
-				return key
-			}
-			continue
-		}
-		if openSessionStage(root, rootMd) != "" || runOwnerHold(root, rootMd) != "" {
-			continue
-		}
-		if !admits(rootMd) {
-			continue
-		}
-		return rootKey
-	}
-	// The fourth shape, walked after the threads so a parked run keeps
-	// today's claim on the returned key: a live idea carrying a workflow
-	// tag. The tag is the whole predicate — it is the licence to start
-	// (untagged means human), an idea has no thread and no design floor
-	// to clear, and validatePromoteTag already guaranteed at write time
-	// that the tag names a usable workflow.
-	//
-	// Without this leg a tag stamped while serve was down is swallowed
-	// for good — the cursors seed lazily and read as "not moved", and the
-	// recovery that is supposed to cover exactly that (an armed serve
-	// picking existing work up through this leg) couldn't see ideas at
-	// all. That is how two ideas tagged 2026-08-12 sat parked until a
-	// human intervened.
 	for _, md := range sc.mds {
-		if md.Project != projectID || md.Status != run.StatusInProgress {
-			continue
-		}
-		if md.Workflow == dash.IdeaWorkflow && md.PromoteTo != "" {
+		if md.Project == projectID && md.Status == run.StatusInProgress &&
+			md.Workflow == dash.IdeaWorkflow && md.PromoteTo != "" {
 			return md.Project + "/" + md.ID
 		}
 	}
@@ -1153,15 +1100,17 @@ func allProjectsOccupied(root string) map[string]bool {
 // heartbeatGate satisfies the serve seam.
 var _ serve.Heartbeat = (*heartbeatGate)(nil)
 
-func (g *heartbeatGate) offeredPRJSON(projectID string) string {
+// offeredPRJSON is the exact PR observation this tick hands the sweep,
+// across every project it recorded a base for.
+func (g *heartbeatGate) offeredPRJSON() string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	prs, ok := g.prOffered[projectID]
-	if !ok {
+	if len(g.prOffered) == 0 {
 		return ""
 	}
-	if prs == nil {
-		prs = []ownedPRChecks{}
+	prs := []ownedPRChecks{}
+	for _, id := range slices.Sorted(maps.Keys(g.prOffered)) {
+		prs = append(prs, g.prOffered[id]...)
 	}
 	b, _ := json.Marshal(prs)
 	return string(b)

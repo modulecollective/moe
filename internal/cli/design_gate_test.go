@@ -149,7 +149,7 @@ func TestDesignCascadeVerdicts(t *testing.T) {
 					}
 				}
 				pushes := stubPushFromCascade(t, 0, nil)
-				res, code := cascadeFromGate("design", destination, false, false, md, io.Discard, io.Discard)
+				res, code := cascadeFromGate("design", destination, false, md, io.Discard, io.Discard)
 				wantCode := 0
 				if verdict == "blocked" || verdict == "bare" {
 					wantCode = 1
@@ -295,7 +295,7 @@ func TestDesignMachineKickCannotAdvanceAnUnreadyVerdict(t *testing.T) {
 	// produce a ready verdict before that ride can reach build.
 	calls := stubSdlcStageWritingCanvas(t, root, md, "design", designCanvasSkeleton+"\nStill needs a contract decision.\n")
 	pushes := stubPushFromCascade(t, 0, nil)
-	if code := chainKickRun(root, md.Project, md.ID, rideDynamic, false, io.Discard, io.Discard); code == 0 {
+	if code := rideRun(root, md.Project, md.ID, rideDynamic, false, io.Discard, io.Discard); code == 0 {
 		t.Fatal("unready machine design advanced")
 	}
 	if len(*calls) != 1 || (*calls)[0] != "design" || len(*pushes) != 0 {

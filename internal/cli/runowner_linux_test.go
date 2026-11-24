@@ -2,17 +2,14 @@ package cli
 
 import (
 	"bufio"
-	"bytes"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
-	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runowner"
 )
@@ -114,89 +111,4 @@ func (h *promptHolder) drain(t *testing.T) string {
 	}
 	h.cmd.Wait()
 	return strings.Join(h.seen, "\n")
-}
-
-// TestUnansweredPromptHoldsItsRunAgainstAKick is the watchroll/cleanup
-// incident: a stage turn has settled (no session branch left), its
-// next-stage prompt is waiting, and a dynamic pulse in another process
-// sweeps the board. The real kick floor and the real chain-kick
-// admission must both leave the run alone — no stage started, no journal
-// motion — until the prompt's invocation is gone. Every case then proves
-// pickup works again, so a fix that disabled kicking cannot pass.
-func TestUnansweredPromptHoldsItsRunAgainstAKick(t *testing.T) {
-	for _, tc := range []struct {
-		name, answer string
-		kill         bool
-		wantStage    bool
-		wantOut      string
-	}{
-		{name: "decline", answer: "n\n", wantOut: "EXIT 0 busy=false"},
-		{name: "eof", wantOut: "EXIT 0 busy=false"},
-		{name: "interrupt-by-kill", kill: true},
-		{name: "advance", answer: "a\n", wantOut: "advanced past design"},
-		{name: "run", answer: "y\n", wantStage: true, wantOut: "EXIT 0 busy=false"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			root, threadRoot, groomed, stages := advancedKickFixture(t)
-			defer withRideMode(rideDynamic)()
-			for _, stage := range []string{"design", "build"} {
-				if openSessionStage(root, groomed.byKey[threadRoot]) != "" {
-					t.Fatalf("fixture has a live %s session; the prompt must be the only occupant", stage)
-				}
-			}
-			head, err := git.HEAD(root)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			h := startPromptHolder(t, root)
-			h.waitLine(t, "run now?")
-
-			var errb bytes.Buffer
-			pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot}), io.Discard, &errb)
-			if len(*stages) != 0 {
-				t.Fatalf("kick drove %v while the prompt was waiting", kickStages(*stages))
-			}
-			if !strings.Contains(errb.String(), threadRoot+" is owned by an active moe invocation") {
-				t.Fatalf("kick stderr = %q, want the owner hold", errb.String())
-			}
-			// Admission is the authoritative check: a plan stamped before
-			// the prompt opened still cannot start the run.
-			errb.Reset()
-			if code := chainKickRun(root, "moe", "advanced-run", rideDynamic, false, io.Discard, &errb); code == 0 || len(*stages) != 0 {
-				t.Fatalf("chain kick admitted a held run: code=%d stages=%v stderr=%q", code, kickStages(*stages), errb.String())
-			}
-			if after, _ := git.HEAD(root); after != head {
-				t.Fatalf("journal moved while held: %s -> %s", head, after)
-			}
-			if md, err := run.Load(root, "moe", "advanced-run"); err != nil || md.Status != run.StatusInProgress {
-				t.Fatalf("run state changed while held: %+v %v", md, err)
-			}
-
-			if tc.kill {
-				if err := h.cmd.Process.Signal(syscall.SIGKILL); err != nil {
-					t.Fatal(err)
-				}
-			} else {
-				io.WriteString(h.in, tc.answer)
-				h.in.Close()
-			}
-			out := h.drain(t)
-			if tc.wantOut != "" && !strings.Contains(out, tc.wantOut) {
-				t.Fatalf("child output missing %q:\n%s", tc.wantOut, out)
-			}
-			if got := strings.Count(out, "STAGE "); tc.wantStage != (got == 1) || got > 1 {
-				t.Fatalf("stage handoffs = %d, want stage=%v:\n%s", got, tc.wantStage, out)
-			}
-			if tc.wantStage && !strings.Contains(out, "STAGE moe/advanced-run build busy=true err=<nil> held=true") {
-				t.Fatalf("the chosen stage did not start under continuous ownership:\n%s", out)
-			}
-
-			errb.Reset()
-			pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot}), io.Discard, &errb)
-			if got := kickStages(*stages); len(got) == 0 || got[0] != "advanced-run:build" {
-				t.Fatalf("pickup after the invocation left: drove %v, stderr=%q", got, errb.String())
-			}
-		})
-	}
 }

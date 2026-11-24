@@ -2,8 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,16 +9,9 @@ import (
 
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/input"
-	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
 )
-
-// askEntry is a thread position carrying a question, as it arrives from
-// the gate.
-func askEntry(slug, question string) pulseThreadEntry {
-	return pulseThreadEntry{Existing: slug, Ask: question}
-}
 
 func seedParkedRun(t *testing.T, root, slug string) *run.Metadata {
 	t.Helper()
@@ -42,181 +33,6 @@ func addOn(t *testing.T, root, projectID, slug, text string) {
 	t.Helper()
 	if _, err := input.Add(root, projectID, slug, text); err != nil {
 		t.Fatal(err)
-	}
-}
-
-// The gate's three entry shapes have to stay distinguishable on the
-// wire. The `run` key is the discriminator against a mint spec's `slug`,
-// and the bare string keeps meaning exactly what it meant.
-func TestThreadEntryUnmarshalsThreeShapes(t *testing.T) {
-	var th pulseThread
-	body := `{"runs": [
-	  "already-parked",
-	  {"slug": "fresh", "title": "Fresh", "why": "because"},
-	  {"run": "change-auth", "ask": "Which policy — keep or adopt?"},
-	  {"run": "no-question"}
-	]}`
-	if err := json.Unmarshal([]byte(body), &th); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if len(th.Runs) != 4 {
-		t.Fatalf("runs = %d, want 4", len(th.Runs))
-	}
-	if got := th.Runs[0]; got.Existing != "already-parked" || got.Spec != nil || got.Ask != "" {
-		t.Fatalf("string entry = %+v", got)
-	}
-	if got := th.Runs[1]; got.Spec == nil || got.Spec.Slug != "fresh" || got.Ask != "" {
-		t.Fatalf("spec entry = %+v", got)
-	}
-	if got := th.Runs[2]; got.Existing != "change-auth" || got.Spec != nil || got.Ask != "Which policy — keep or adopt?" {
-		t.Fatalf("ask entry = %+v", got)
-	}
-	// `{"run": "x"}` with no ask is the string form written long-hand.
-	if got := th.Runs[3]; got.Existing != "no-question" || got.Ask != "" || got.Spec != nil {
-		t.Fatalf("bare run entry = %+v", got)
-	}
-}
-
-// Asking and holding are orthogonal: the ping lands on the run's record
-// and the thread is not parked by the ask alone.
-func TestGateAskOpensPingWithoutParking(t *testing.T) {
-	root := spawnFixture(t)
-	seedParkedRun(t, root, "change-auth")
-
-	var errb bytes.Buffer
-	groups := applyPulseGate(root, "moe", "pulse-one", pulseGate{
-		Status: "ok",
-		Threads: []pulseThread{{Runs: []pulseThreadEntry{
-			askEntry("change-auth", "Which compatibility policy?"),
-		}}},
-	}, io.Discard, &errb)
-
-	if len(groups) != 1 {
-		t.Fatalf("groups = %+v", groups)
-	}
-	if groups[0].Park != "" {
-		t.Fatalf("group park = %q, want the ask to hold nothing", groups[0].Park)
-	}
-	if len(groups[0].Runs) != 1 || groups[0].Runs[0].slug != "change-auth" {
-		t.Fatalf("members = %+v, want the run at its position", groups[0].Runs)
-	}
-
-	f, err := input.Load(root, "moe", "change-auth")
-	if err != nil {
-		t.Fatal(err)
-	}
-	e, ok := f.OpenPing()
-	if !ok || e.Question != "Which compatibility policy?" {
-		t.Fatalf("record = %+v, %v; stderr=%q", e, ok, errb.String())
-	}
-	if e.AskedBy != "moe/pulse-one" {
-		t.Fatalf("asked_by = %q, want the sweep", e.AskedBy)
-	}
-}
-
-// A survey that wants the answer first writes the park itself, and the
-// two acts compose.
-func TestGateAskKeepsExplicitThreadPark(t *testing.T) {
-	root := spawnFixture(t)
-	seedParkedRun(t, root, "change-auth")
-
-	groups := applyPulseGate(root, "moe", "pulse-one", pulseGate{
-		Status: "ok",
-		Threads: []pulseThread{{
-			Park: "waiting on the auth question",
-			Runs: []pulseThreadEntry{askEntry("change-auth", "Which policy?")},
-		}},
-	}, io.Discard, io.Discard)
-
-	if groups[0].Park != "waiting on the auth question" {
-		t.Fatalf("park = %q, want the survey's own line", groups[0].Park)
-	}
-	f, _ := input.Load(root, "moe", "change-auth")
-	if _, ok := f.OpenPing(); !ok {
-		t.Fatal("question did not land alongside an explicit park")
-	}
-}
-
-// An empty question is warn-and-skip like every other refusal in
-// applyPulseGate.
-func TestGateAskWithEmptyQuestionWarnsAndSkips(t *testing.T) {
-	root := spawnFixture(t)
-	seedParkedRun(t, root, "change-auth")
-
-	var errb bytes.Buffer
-	applyPulseGate(root, "moe", "pulse-one", pulseGate{
-		Status: "ok",
-		Threads: []pulseThread{{Runs: []pulseThreadEntry{
-			{Existing: "change-auth", Ask: "   "},
-		}}},
-	}, io.Discard, &errb)
-
-	if !strings.Contains(errb.String(), "pulse: input:") {
-		t.Fatalf("stderr = %q, want a warn line", errb.String())
-	}
-	f, err := input.Load(root, "moe", "change-auth")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(f.Notes) != 0 {
-		t.Fatalf("record = %+v, want nothing written", f)
-	}
-}
-
-// A ping lands only on a run that already existed. A tagged idea
-// resolves to a *different* run than the question was written against,
-// so the ask drops with a line rather than landing somewhere the survey
-// never looked.
-func TestGateAskOnTaggedIdeaIsDropped(t *testing.T) {
-	root := spawnFixture(t)
-	seedTaggedIdea(t, root, "moe", "cleanup-foo")
-
-	var errb bytes.Buffer
-	groups := applyPulseGate(root, "moe", "pulse-one", pulseGate{
-		Status: "ok",
-		Threads: []pulseThread{{Runs: []pulseThreadEntry{
-			askEntry("cleanup-foo", "Which policy?"),
-		}}},
-	}, io.Discard, &errb)
-
-	if !strings.Contains(errb.String(), "question dropped") {
-		t.Fatalf("stderr = %q, want the drop line", errb.String())
-	}
-	destID := groups[0].Runs[0].mintedID
-	if destID == "" {
-		t.Fatalf("member = %+v, want the promoted run", groups[0].Runs[0])
-	}
-	f, err := input.Load(root, "moe", destID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(f.Notes) != 0 {
-		t.Fatalf("promoted run carries %+v, want no question", f.Notes)
-	}
-}
-
-// A chain placeholder has no stage to deliver an answer to, so it is not
-// somewhere a question can live.
-func TestGateAskOnChainHeadIsDropped(t *testing.T) {
-	root := spawnFixture(t)
-	if _, err := run.New(root, "moe", run.Options{ID: "batch", Workflow: chainWorkflow}); err != nil {
-		t.Fatal(err)
-	}
-
-	var errb bytes.Buffer
-	applyPulseGate(root, "moe", "pulse-one", pulseGate{
-		Status: "ok",
-		Threads: []pulseThread{{Runs: []pulseThreadEntry{
-			askEntry("batch", "Which policy?"),
-		}}},
-	}, io.Discard, &errb)
-
-	if !strings.Contains(errb.String(), "chain head") {
-		t.Fatalf("stderr = %q, want the chain-head refusal", errb.String())
-	}
-	f, _ := input.Load(root, "moe", "batch")
-	if len(f.Notes) != 0 {
-		t.Fatalf("chain head carries %+v, want no question", f.Notes)
 	}
 }
 
@@ -331,140 +147,6 @@ func TestStagePromptCarriesOperatorInput(t *testing.T) {
 	if len(ids) != 1 || ids[0] != 1 {
 		t.Fatalf("delivered ids = %v, want [1]", ids)
 	}
-}
-
-// An open ping stops nothing. The thread rides on the agent's best
-// judgment, which is the whole orthogonality decision.
-func TestSelfKickRidesWithAnOpenPing(t *testing.T) {
-	root, threadRoot, groomed, stages := selfKickFixture(t)
-	tail := groomed.graph.Tail(threadRoot)
-	proj, runID, err := splitProjectRun(tail)
-	if err != nil {
-		t.Fatal(err)
-	}
-	askOn(t, root, proj, runID, "Which compatibility policy?")
-
-	defer withRideMode(rideDynamic)()
-	var errb bytes.Buffer
-	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot}), io.Discard, &errb)
-
-	if len(*stages) == 0 {
-		t.Fatalf("the ride was held by an open question; stderr=%q", errb.String())
-	}
-}
-
-// A malformed record no longer holds anything either — nothing in the
-// record is a floor, so a broken file costs a hint, not a stalled board.
-func TestSelfKickRidesOverMalformedRecord(t *testing.T) {
-	root, threadRoot, groomed, stages := selfKickFixture(t)
-	proj, runID, err := splitProjectRun(threadRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Dir(filepath.Join(root, input.Path(proj, runID))), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, input.Path(proj, runID)), []byte("{"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	defer withRideMode(rideDynamic)()
-	var errb bytes.Buffer
-	pulseSelfKick(root, wantKick(groomed, groomedThread{Root: threadRoot}), io.Discard, &errb)
-
-	if len(*stages) == 0 {
-		t.Fatalf("an unreadable record held the ride; stderr=%q", errb.String())
-	}
-}
-
-// A pending note is an operator mark under safe mode: the operator gave
-// this run direction, so requiring a second approval would break the
-// phone-to-motion loop the record exists for. Delivery consumes it.
-func TestSafeModeAdmitsAThreadWithAPendingNote(t *testing.T) {
-	root := quietFixture(t)
-	id := groomFixture(t, root, "fix-a")["fix-a"]
-	setMode(t, root, "moe", project.ModeSafe)
-
-	asClock(func() {
-		if got := holdFor(t, planFor(t, root), "moe/"+id); !strings.Contains(got, "safe mode") {
-			t.Fatalf("hold = %q, want the safe-mode hold before any note", got)
-		}
-	})
-
-	addOn(t, root, "moe", id, "Go ahead — the API shape is settled.")
-	asClock(func() {
-		if got := holdFor(t, planFor(t, root), "moe/"+id); got != "" {
-			t.Fatalf("hold = %q, want the note to license the thread under safe", got)
-		}
-	})
-
-	// Delivery consumes the licence; another note re-arms it.
-	if err := input.MarkDelivered(root, "moe", id, "code", []int{1}, ""); err != nil {
-		t.Fatal(err)
-	}
-	asClock(func() {
-		if got := holdFor(t, planFor(t, root), "moe/"+id); !strings.Contains(got, "safe mode") {
-			t.Fatalf("hold = %q, want the licence consumed by delivery", got)
-		}
-	})
-	addOn(t, root, "moe", id, "Second thoughts: use the other codec.")
-	asClock(func() {
-		if got := holdFor(t, planFor(t, root), "moe/"+id); got != "" {
-			t.Fatalf("hold = %q, want a fresh note to re-arm the licence", got)
-		}
-	})
-}
-
-// The licence is thread-scoped: operator prose lands at the run whose
-// next agent needs it, which is routinely queued behind the head the
-// floor evaluates. A note on the member alone starts the head, and
-// delivering that member's note re-arms the hold — so it is the
-// member's note doing the licensing, not anything else in the fixture.
-func TestSafeModeAdmitsAThreadOnAQueuedMembersNote(t *testing.T) {
-	root := quietFixture(t)
-	setMode(t, root, "moe", project.ModeSafe)
-	var member string
-	threadRoot, groomed := reapThread(t, root, func(minted map[string]string) {
-		member = minted["fix-b"]
-	})
-
-	asClock(func() {
-		if got := holdOf(t, root, threadRoot, groomed); !strings.Contains(got, "safe mode") {
-			t.Fatalf("hold = %q, want the safe-mode hold before any note", got)
-		}
-	})
-
-	addOn(t, root, "moe", member, "Go ahead — the API shape is settled.")
-	asClock(func() {
-		if got := holdOf(t, root, threadRoot, groomed); got != "" {
-			t.Fatalf("hold = %q, want none — a note on a queued member licenses the head", got)
-		}
-	})
-
-	// Delivering the member's own note re-arms the hold, which is what
-	// makes this a pin on fix-b's entry rather than on the fixture.
-	if err := input.MarkDelivered(root, "moe", member, "design", []int{1}, ""); err != nil {
-		t.Fatal(err)
-	}
-	asClock(func() {
-		if got := holdOf(t, root, threadRoot, groomed); !strings.Contains(got, "safe mode") {
-			t.Fatalf("hold = %q, want the hold back once the member's note is delivered", got)
-		}
-	})
-}
-
-// An open ping is not a mark: nobody has given the run anything yet.
-func TestSafeModeStillHoldsWithOnlyAnOpenPing(t *testing.T) {
-	root := quietFixture(t)
-	id := groomFixture(t, root, "fix-a")["fix-a"]
-	setMode(t, root, "moe", project.ModeSafe)
-	askOn(t, root, "moe", id, "Which policy?")
-
-	asClock(func() {
-		if got := holdFor(t, planFor(t, root), "moe/"+id); !strings.Contains(got, "safe mode") {
-			t.Fatalf("hold = %q, want an unanswered question to license nothing", got)
-		}
-	})
 }
 
 // The mark is not an advance marker: it licenses the kick and says
@@ -594,8 +276,7 @@ func TestPendingInputBlock(t *testing.T) {
 	for _, want := range []string{
 		"`moe/pushed` — Use the streaming path.",
 		"`moe/asked` — Which compatibility policy?",
-		`{"run": "<slug>", "ask": "…?"}`,
-		"don't park one \"awaiting input\"",
+		"don't treat one as waiting on input",
 		"stops nothing",
 	} {
 		if !strings.Contains(got, want) {
@@ -614,31 +295,6 @@ func TestPendingInputBlockEmptyOnAQuietBoard(t *testing.T) {
 	seedParkedRun(t, root, "quiet")
 	if got := pendingInputBlock(&pulseScan{root: root}, "moe"); got != "" {
 		t.Fatalf("block = %q, want empty", got)
-	}
-}
-
-// The ride boundary used to refuse on an open question. It doesn't any
-// more: a ping holds nothing, so the chain rides and the turns read the
-// unanswered line.
-func TestChainKickRidesWithAQuestionOnAMember(t *testing.T) {
-	root, stages, _ := kickFixture(t)
-
-	spawnAndHead(t, root, "moe", "pulse-one", "batch", []pulseRunSpec{
-		{Slug: "fix-one", Title: "One"},
-		{Slug: "fix-two", Title: "Two"},
-	}, os.Stderr)
-	heads := runsWithWorkflow(t, root, "moe", chainWorkflow)
-	if len(heads) != 1 {
-		t.Fatalf("chain runs %v, want 1", heads)
-	}
-	askOn(t, root, "moe", "fix-two", "Which policy?")
-
-	var errb bytes.Buffer
-	if code := runChainKick([]string{"moe/" + heads[0]}, io.Discard, &errb); code != 0 {
-		t.Fatalf("chain kick exited %d with a question open; stderr=%q", code, errb.String())
-	}
-	if len(*stages) == 0 {
-		t.Fatalf("the ride was held by an open question; stderr=%q", errb.String())
 	}
 }
 

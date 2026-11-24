@@ -90,7 +90,7 @@ func TestStageVerbMutualExclusionAcrossWorkflows(t *testing.T) {
 	for _, v := range verbs {
 		t.Run(v[0]+"/"+v[1], func(t *testing.T) {
 			var out, errb bytes.Buffer
-			args := append(append([]string{}, v...), "--once", "--chain", "tele/ghost")
+			args := append(append([]string{}, v...), "--once", "--ship", "tele/ghost")
 			code := Run(args, &out, &errb)
 			if code != 2 {
 				t.Fatalf("exit=%d, want 2; stderr=%q", code, errb.String())

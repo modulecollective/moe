@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/modulecollective/moe/internal/project"
 )
 
 // fakeHeartbeat is the cli-side gate, stubbed. due is the projects each
@@ -151,7 +153,7 @@ func TestHeartbeatSpawnsTheDynamicSweep(t *testing.T) {
 
 	got := argv()
 	if !strings.Contains(got, "pulse new --dynamic --heartbeat ") ||
-		!strings.HasSuffix(strings.TrimSpace(got), " alpha") {
+		!strings.HasSuffix(strings.TrimSpace(got), "sweep-"+project.RootID) {
 		t.Errorf("child argv = %q, want the clock-marked dynamic sweep", got)
 	}
 }
@@ -266,7 +268,7 @@ func TestHeartbeatSingleFlightsItsOwnChild(t *testing.T) {
 	s.heartbeatTick()
 	s.heartbeatTick()
 
-	c, ok := s.children.get(heartbeatChildPrefix + "alpha")
+	c, ok := s.children.get(heartbeatChildPrefix + project.RootID)
 	if !ok {
 		t.Fatal("no heartbeat child registered")
 	}
@@ -299,11 +301,11 @@ func TestHeartbeatStartsOneSweepAcrossProjects(t *testing.T) {
 	s.heartbeatTick()
 	s.heartbeatTick()
 
-	if _, ok := s.children.get(heartbeatChildPrefix + "alpha"); !ok {
-		t.Fatal("the first due project should hold the slot")
+	if len(s.children.all) != 1 {
+		t.Fatalf("children = %d, want the one root sweep", len(s.children.all))
 	}
-	if _, ok := s.children.get(heartbeatChildPrefix + "beta"); ok {
-		t.Fatal("a second sweep started while the first was running")
+	if _, ok := s.children.get(heartbeatChildPrefix + project.RootID); !ok {
+		t.Fatal("the root sweep should hold the slot")
 	}
 }
 
@@ -370,7 +372,7 @@ func TestArmedServeTicks(t *testing.T) {
 	if err := s.ListenAndServe(ctx); err != nil {
 		t.Fatalf("ListenAndServe: %v", err)
 	}
-	if got := argv(); !strings.Contains(got, "pulse new --dynamic ") || !strings.HasSuffix(strings.TrimSpace(got), " alpha") {
+	if got := argv(); !strings.Contains(got, "pulse new --dynamic ") || !strings.HasSuffix(strings.TrimSpace(got), "sweep-"+project.RootID) {
 		t.Errorf("armed serve spawned %q, want the dynamic sweep", got)
 	}
 }
@@ -518,8 +520,8 @@ func TestHeartbeatTickRecordsTheWholeVerdictSet(t *testing.T) {
 	for _, p := range s.activity.snapshot(time.Now()).Projects {
 		states[p.Project] = p.Decision
 	}
-	if len(states) != 2 {
-		t.Fatalf("recorded projects = %v, want the swept and the quiet one", states)
+	if _, swept := states[project.RootID]; !swept || len(states) != 3 {
+		t.Fatalf("recorded projects = %v, want the root sweep, the due one and the quiet one", states)
 	}
 	if states["beta"] != "a sweep already surveyed the current tip" {
 		t.Errorf("beta reason = %q, want the gate's stand-down words", states["beta"])
@@ -547,8 +549,12 @@ func TestHeartbeatTickWritesTheStateFile(t *testing.T) {
 		if !ok || err != nil {
 			return false
 		}
-		return len(snap.Projects) == 1 && snap.Projects[0].Decision == "the journal moved" &&
-			!snap.Projects[0].SweptAt.IsZero() && snap.Projects[0].SweepClean
+		var due, swept bool
+		for _, p := range snap.Projects {
+			due = due || (p.Project == "alpha" && p.Decision == "the journal moved")
+			swept = swept || (p.Project == project.RootID && !p.SweptAt.IsZero() && p.SweepClean)
+		}
+		return due && swept
 	})
 }
 
@@ -564,11 +570,13 @@ func TestHeartbeatRecordsTheCoolOffAsWhatHappened(t *testing.T) {
 
 	state := func() serveProjectVM {
 		t.Helper()
-		vm := s.activity.panel(time.Now())
-		if len(vm.Projects) != 1 {
-			t.Fatalf("panel projects = %+v, want alpha", vm.Projects)
+		for _, p := range s.activity.panel(time.Now()).Projects {
+			if p.Project == project.RootID {
+				return p
+			}
 		}
-		return vm.Projects[0]
+		t.Fatal("panel has no root sweep row")
+		return serveProjectVM{}
 	}
 
 	// One failure earns one skipped tick, and the tick after it spends the
@@ -638,13 +646,13 @@ func emitRunRecorder(t *testing.T, slug string, exitCode int) string {
 	return bin
 }
 
-// TestSweepExitEventLinksItsRun: "heartbeat:alpha exited cleanly" was
+// TestSweepExitEventLinksItsRun: "heartbeat:_cabinet exited cleanly" was
 // every word serve had about a sweep. The run the sweep opened is what
 // answers "and what did it do" — one click from the event, now that the
 // child names it.
 func TestSweepExitEventLinksItsRun(t *testing.T) {
 	root := t.TempDir()
-	seedRun(t, root, "alpha", "pulse-2026-04-01", "pulse")
+	seedRun(t, root, project.RootID, "pulse-2026-04-01", "pulse")
 	gate := &fakeHeartbeat{due: []string{"alpha"}}
 	s := newTestServer(t, Options{
 		Addr: "127.0.0.1:0", Root: root, Heartbeat: gate,
@@ -668,12 +676,12 @@ func TestSweepExitEventLinksItsRun(t *testing.T) {
 			exit = ev
 		}
 	}
-	if got, want := exit.RunURL, "/run/alpha/pulse-2026-04-01"; got != want {
+	if got, want := exit.RunURL, "/run/_cabinet/pulse-2026-04-01"; got != want {
 		t.Errorf("exit event RunURL=%q, want %q", got, want)
 	}
 	// Serve owns the file: read once, then gone, so its presence never
 	// outlives the sweep that wrote it.
-	if _, err := os.Stat(sweepRunPath(root, "alpha")); !os.IsNotExist(err) {
+	if _, err := os.Stat(sweepRunPath(root, project.RootID)); !os.IsNotExist(err) {
 		t.Errorf("emit file still there after the exit (err=%v), want it consumed", err)
 	}
 }
@@ -683,7 +691,7 @@ func TestSweepExitEventLinksItsRun(t *testing.T) {
 // a `pulse-*` slug whose date roughly matches was the whole complaint.
 func TestFailedSweepRowLinksItsRun(t *testing.T) {
 	root := t.TempDir()
-	seedRun(t, root, "alpha", "pulse-2026-04-01", "pulse")
+	seedRun(t, root, project.RootID, "pulse-2026-04-01", "pulse")
 	gate := &fakeHeartbeat{due: []string{"alpha"}}
 	s := newTestServer(t, Options{
 		Addr: "127.0.0.1:0", Root: root, Heartbeat: gate,
@@ -698,7 +706,7 @@ func TestFailedSweepRowLinksItsRun(t *testing.T) {
 	// covers both.
 	waitFor(t, "the cool-off row to link the run the dead sweep left open", func() bool {
 		for _, p := range s.activity.panel(time.Now()).Projects {
-			if p.Project == "alpha" && p.Failed && p.Run == "pulse-2026-04-01" {
+			if p.Project == project.RootID && p.Failed && p.Run == "pulse-2026-04-01" {
 				return true
 			}
 		}
@@ -752,7 +760,7 @@ func TestStaleEmitFileIsClearedBeforeTheSpawn(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, ".moe"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(sweepRunPath(root, "alpha"), []byte("pulse-2026-04-01\n"), 0o644); err != nil {
+	if err := os.WriteFile(sweepRunPath(root, "_cabinet"), []byte("pulse-2026-04-01\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -824,11 +832,11 @@ func TestLiveSweepRowLinksMidFlight(t *testing.T) {
 	root := t.TempDir()
 	now := time.Now()
 	a := newActivity(root, 4242, "127.0.0.1:4242", true, now)
-	a.recordSweepStart("alpha", now.Add(-3*time.Minute))
+	a.recordSweepStart("_cabinet", now.Add(-3*time.Minute))
 	if err := os.MkdirAll(filepath.Join(root, ".moe"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(sweepRunPath(root, "alpha"), []byte("pulse-2026-04-01\n"), 0o644); err != nil {
+	if err := os.WriteFile(sweepRunPath(root, "_cabinet"), []byte("pulse-2026-04-01\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -840,7 +848,7 @@ func TestLiveSweepRowLinksMidFlight(t *testing.T) {
 		t.Errorf("live row Run=%q, want the run the sweep is filling in", got)
 	}
 	// Cached: the next page load costs no read.
-	if err := os.Remove(sweepRunPath(root, "alpha")); err != nil {
+	if err := os.Remove(sweepRunPath(root, "_cabinet")); err != nil {
 		t.Fatal(err)
 	}
 	if got := a.panel(now).Projects[0].Run; got != "pulse-2026-04-01" {
@@ -856,10 +864,10 @@ func TestSweepRunFileTakesOnlyASlug(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, body := range []string{"../../etc/passwd", "a b", "", "Pulse-2026", "alpha/pulse-2026-04-01"} {
-		if err := os.WriteFile(sweepRunPath(root, "alpha"), []byte(body), 0o644); err != nil {
+		if err := os.WriteFile(sweepRunPath(root, "_cabinet"), []byte(body), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if got := readSweepRun(root, "alpha"); got != "" {
+		if got := readSweepRun(root, "_cabinet"); got != "" {
 			t.Errorf("readSweepRun(%q) = %q, want nothing — not a run slug", body, got)
 		}
 	}
@@ -871,24 +879,24 @@ func TestSweepRunFileTakesOnlyASlug(t *testing.T) {
 // behind the slug, the row must not keep wearing the cached link.
 func TestMissingRunDropsTheLazyCachedLink(t *testing.T) {
 	root := t.TempDir()
-	seedProject(t, root, "alpha")
+	seedProject(t, root, "_cabinet")
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root})
 	now := time.Now()
 
-	s.activity.recordSweepStart("alpha", now.Add(-3*time.Minute))
+	s.activity.recordSweepStart("_cabinet", now.Add(-3*time.Minute))
 	if err := os.MkdirAll(filepath.Join(root, ".moe"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	// The emit file names a run that is not on disk.
-	if err := os.WriteFile(sweepRunPath(root, "alpha"), []byte("pulse-2026-04-01\n"), 0o644); err != nil {
+	if err := os.WriteFile(sweepRunPath(root, "_cabinet"), []byte("pulse-2026-04-01\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if got := s.activity.panel(now).Projects[0].Run; got != "pulse-2026-04-01" {
 		t.Fatalf("live row Run=%q, want the lazily cached slug", got)
 	}
 
-	s.children.onExit(heartbeatChildPrefix+"alpha", now, errors.New("exit status 130"), "")
-	s.activity.recordSweepEnd("alpha", now, false, 1, 0)
+	s.children.onExit(heartbeatChildPrefix+"_cabinet", now, errors.New("exit status 130"), "")
+	s.activity.recordSweepEnd("_cabinet", now, false, 1, 0)
 
 	if got := s.activity.panel(now).Projects[0].Run; got != "" {
 		t.Errorf("row Run=%q after the exit read found no run, want the cached link dropped", got)
@@ -902,7 +910,7 @@ func TestMissingRunDropsTheLazyCachedLink(t *testing.T) {
 // names its run.
 func TestSweepExitLogsTheFailureTrace(t *testing.T) {
 	root := t.TempDir()
-	seedRun(t, root, "alpha", "pulse-2026-04-01", "pulse")
+	seedRun(t, root, "_cabinet", "pulse-2026-04-01", "pulse")
 	var log bytes.Buffer
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, Logger: &log})
 	now := time.Now()
@@ -912,10 +920,10 @@ func TestSweepExitLogsTheFailureTrace(t *testing.T) {
 
 	// Failed, and dead before it minted anything — the case where the
 	// tail is the only trace there will ever be.
-	s.children.onExit(heartbeatChildPrefix+"alpha", now, errors.New("exit status 1"),
+	s.children.onExit(heartbeatChildPrefix+"_cabinet", now, errors.New("exit status 1"),
 		"\x1b[2Jsetting up\n\n\x1b[31mError: no such workflow: pulse\x1b[0m\n")
 	got := log.String()
-	want := "heartbeat: alpha sweep failed (exit status 1), no run minted — last output:\n" +
+	want := "heartbeat: _cabinet sweep failed (exit status 1), no run minted — last output:\n" +
 		"  | setting up\n" +
 		"  | Error: no such workflow: pulse\n"
 	if got != want {
@@ -924,19 +932,19 @@ func TestSweepExitLogsTheFailureTrace(t *testing.T) {
 
 	// Clean, with a run on disk: the slug, no tail.
 	log.Reset()
-	if err := os.WriteFile(sweepRunPath(root, "alpha"), []byte("pulse-2026-04-01\n"), 0o644); err != nil {
+	if err := os.WriteFile(sweepRunPath(root, "_cabinet"), []byte("pulse-2026-04-01\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	s.children.onExit(heartbeatChildPrefix+"alpha", now, nil, "chatter the operator does not need\n")
-	if got, want := log.String(), "heartbeat: alpha swept clean, run pulse-2026-04-01\n"; got != want {
+	s.children.onExit(heartbeatChildPrefix+"_cabinet", now, nil, "chatter the operator does not need\n")
+	if got, want := log.String(), "heartbeat: _cabinet swept clean, run pulse-2026-04-01\n"; got != want {
 		t.Errorf("clean-sweep log = %q, want %q", got, want)
 	}
 
 	// Failed with nothing on the PTY: the header still lands, closed
 	// with "no output" rather than a promise of a tail that never comes.
 	log.Reset()
-	s.children.onExit(heartbeatChildPrefix+"alpha", now, errors.New("exit status 2"), "")
-	if got, want := log.String(), "heartbeat: alpha sweep failed (exit status 2), no run minted — no output\n"; got != want {
+	s.children.onExit(heartbeatChildPrefix+"_cabinet", now, errors.New("exit status 2"), "")
+	if got, want := log.String(), "heartbeat: _cabinet sweep failed (exit status 2), no run minted — no output\n"; got != want {
 		t.Errorf("empty-tail log = %q, want %q", got, want)
 	}
 
@@ -965,7 +973,7 @@ func TestHeartbeatPassesExactPRObservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(body), "<--pr-checks>\n<"+snapshot+">\n<alpha>\n") {
+	if !strings.Contains(string(body), "<--pr-checks>\n<"+snapshot+">\n") {
 		t.Fatalf("observation changed or split across arguments: %s", body)
 	}
 }

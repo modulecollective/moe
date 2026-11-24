@@ -5,7 +5,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 
@@ -13,88 +12,11 @@ import (
 	"github.com/modulecollective/moe/internal/run"
 )
 
-// TestPulseSurveyStampsTheKickOrder is the whole point of the change. A
-// dynamic sweep's canvas — the artifact the operator reads when a thread
-// looks stuck — now ends with the queue that sweep is about to run, in
-// the close's own commit. Three diagnosis runs in four days each
-// re-derived this by hand from a canvas that stopped at "parked".
-func TestPulseSurveyStampsTheKickOrder(t *testing.T) {
-	defer withRideMode(rideDynamic)()
-	root, stages, _ := kickFixture(t)
-	minted := groomFixture(t, root, "aa-board", "zz-gate-head", "zz-gate-tail")
-	installCloseResourceHooks(t, root, "moe")
-	var resources closeResources
-	dispatch := openSdlcStage
-	openSdlcStage = func(stage, projectID, runID string, headless bool, stdout, stderr io.Writer) int {
-		resources.assertReleased(t)
-		return dispatch(stage, projectID, runID, headless, stdout, stderr)
-	}
-
-	orig := openPulse
-	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
-		resources = allocateCloseResources(t, root, projectID, runID)
-		writePulseGate(t, root, projectID, runID,
-			`{"status":"ok","threads":[{"runs":["zz-gate-head","zz-gate-tail"]}]}`)
-		return surveyOutcome{code: 0, agentStarted: true}
-	}
-	t.Cleanup(func() { openPulse = orig })
-
-	var errb bytes.Buffer
-	if code := runPulseSurvey(root, "moe", "" /*emitRun*/, nil /*pi*/, io.Discard, &errb); code != 0 {
-		t.Fatalf("survey exit=%d, want 0; stderr=%q", code, errb.String())
-	}
-
-	closed := closedPulseRuns(t, root)
-	if len(closed) != 1 {
-		t.Fatalf("closed pulse runs = %v, want the swept run auto-closed", closed)
-	}
-	canvas := readPulseCanvas(t, root, "moe", closed[0])
-	wantOrder := []string{
-		"1. moe/" + minted["zz-gate-head"] + " — gate thread, queued",
-		"2. moe/" + minted["aa-board"] + " — parked board, queued",
-	}
-	for _, want := range wantOrder {
-		if !strings.Contains(canvas, want) {
-			t.Errorf("canvas =\n%s\nwant %q", canvas, want)
-		}
-	}
-	if !strings.Contains(canvas, "## Gate") {
-		t.Errorf("canvas =\n%s\nwant the survey's own report kept intact", canvas)
-	}
-	if first, second := strings.Index(canvas, wantOrder[0]), strings.Index(canvas, wantOrder[1]); first > second {
-		t.Errorf("canvas =\n%s\nwant the gate thread stamped ahead of the board root", canvas)
-	}
-
-	// The stamp rides the close's own commit. Separate commits could
-	// diverge — the close succeeding while the section was lost is the
-	// silence this change exists to remove.
-	touched := strings.Fields(gittest.Output(t, root, "show", "--name-only", "--format=", "HEAD"))
-	canvasRel := run.ContentPath("moe", closed[0], pulseDoc)
-	runJSONRel := filepath.Join(run.Dir("moe", closed[0]), "run.json")
-	if !slices.Contains(touched, canvasRel) || !slices.Contains(touched, runJSONRel) {
-		t.Errorf("close commit touched %v, want both the kick section (%s) and the status flip (%s) in one commit",
-			touched, canvasRel, runJSONRel)
-	}
-	if dirty, err := dirtyOutsidePaths(root); err != nil || dirty {
-		t.Errorf("tree dirty after the stamp (dirty=%v, err=%v); it must be committed", dirty, err)
-	}
-
-	// And the loop still executes what the section describes.
-	if got := kickStages(*stages); len(got) == 0 {
-		t.Fatalf("nothing was driven; stderr=%q", errb.String())
-	}
-	for _, id := range []string{minted["zz-gate-head"], minted["aa-board"]} {
-		if !strings.Contains(errb.String(), "pulse: kicking moe/"+id+" (dynamic)") {
-			t.Errorf("stderr = %q, want %s kicked as the section says", errb.String(), id)
-		}
-	}
-}
-
-// TestPulseSurveyStampsNoKickWithoutDynamicConsent: a static sweep
-// starts nothing, so a kick section would be a hypothetical — noise on
+// TestPulseSurveyStampsNoKickWithoutDynamicConsent: a sweep without
+// dynamic consent starts nothing, so a next section would be a hypothetical — noise on
 // the one artifact this change is trying to make trustworthy.
 func TestPulseSurveyStampsNoKickWithoutDynamicConsent(t *testing.T) {
-	defer withRideMode(rideStatic)()
+	defer withRideMode(rideNone)()
 	root, _, _ := kickFixture(t)
 	groomFixture(t, root, "aa-board")
 
@@ -112,7 +34,7 @@ func TestPulseSurveyStampsNoKickWithoutDynamicConsent(t *testing.T) {
 	if len(closed) != 1 {
 		t.Fatalf("closed pulse runs = %v, want the swept run auto-closed", closed)
 	}
-	if canvas := readPulseCanvas(t, root, "moe", closed[0]); strings.Contains(canvas, "## Kick") {
+	if canvas := readPulseCanvas(t, root, "moe", closed[0]); strings.Contains(canvas, "## Next") {
 		t.Errorf("canvas =\n%s\nwant no kick section on a sweep that starts nothing", canvas)
 	}
 }
@@ -153,10 +75,10 @@ func TestPulseSurveyKickStampFailureLeavesRunOpen(t *testing.T) {
 	if len(open) != 1 {
 		t.Fatalf("open pulse runs = %v, want the unclosed sweep left for review", open)
 	}
-	if canvas := readPulseCanvas(t, root, "moe", open[0]); strings.Contains(canvas, "## Kick") {
+	if canvas := readPulseCanvas(t, root, "moe", open[0]); strings.Contains(canvas, "## Next") {
 		t.Errorf("canvas =\n%s\nwant the survey's report untouched after a failed stamp", canvas)
 	}
-	if !strings.Contains(errb.String(), "stamp kick section") {
+	if !strings.Contains(errb.String(), "stamp next section") {
 		t.Errorf("stderr = %q, want the stamp failure named", errb.String())
 	}
 	if dirty, err := dirtyOutsidePaths(root); err != nil || dirty {

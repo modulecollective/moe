@@ -338,8 +338,7 @@ func provHops(edges []provEdge, self string, gone map[string]bool, choreGone boo
 
 // spawnWhy recovers the reason a spawner recorded for the run it opened.
 // Today that means a pulse: its survey canvas's `## Gate` fence carries
-// one spec per run it asked for — loose, or inline at a thread position
-// — each with the `why` the operator would otherwise have to reconstruct
+// one spec per run it asked for, each with the `why` the operator would otherwise have to reconstruct
 // from the journal.
 //
 // Returns "" for every shape that can't answer — a non-pulse spawner, a
@@ -354,7 +353,7 @@ func spawnWhy(root, spawner, childSlug string) string {
 	if err != nil {
 		return ""
 	}
-	specs := gate.specs()
+	specs := gate.Loose
 	for _, s := range specs {
 		if s.Slug == "" {
 			continue
@@ -362,7 +361,11 @@ func spawnWhy(root, spawner, childSlug string) string {
 		// The harness dates a slug on collision ("foo" → "foo-2026-07-20"),
 		// so an exact match is the common case and a dated suffix is the
 		// collision case.
-		if s.Slug == childSlug || strings.HasPrefix(childSlug, s.Slug+"-") {
+		slug := s.Slug
+		if _, bare, qualified := strings.Cut(slug, "/"); qualified {
+			slug = bare
+		}
+		if slug == childSlug || strings.HasPrefix(childSlug, slug+"-") {
 			return strings.TrimSpace(s.Why)
 		}
 	}

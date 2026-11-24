@@ -1,34 +1,9 @@
 package cli
 
 import (
-	"io"
 	"strings"
 	"testing"
-	"time"
-
-	"github.com/modulecollective/moe/internal/run"
 )
-
-// TestRideModeForAnswer pins the bang-to-mode ladder. The non-riding
-// forms carry no mode at all: there is no chain in flight to describe.
-// `!!!!` is not a rung — it reads as an unknown answer, same as any
-// other typo.
-func TestRideModeForAnswer(t *testing.T) {
-	for _, tc := range []struct {
-		answer string
-		want   rideMode
-	}{
-		{"!", rideNone},
-		{"!code", rideNone},
-		{"!!", rideNone},
-		{"!!!", rideStatic},
-		{"!!!!", rideNone},
-	} {
-		if got := rideModeForAnswer(tc.answer); got != tc.want {
-			t.Errorf("rideModeForAnswer(%q) = %v, want %v", tc.answer, got, tc.want)
-		}
-	}
-}
 
 // TestWithRideModeRestores: a prompt loop that dispatches two cascades
 // in one session must not leak the first answer's consent into the
@@ -43,9 +18,9 @@ func TestWithRideModeRestores(t *testing.T) {
 			t.Fatalf("mode = %v inside, want dynamic", currentRideMode)
 		}
 		func() {
-			defer withRideMode(rideStatic)()
-			if currentRideMode != rideStatic {
-				t.Fatalf("nested mode = %v, want static", currentRideMode)
+			defer withRideMode(rideNone)()
+			if currentRideMode != rideNone {
+				t.Fatalf("nested mode = %v, want none", currentRideMode)
 			}
 		}()
 		if currentRideMode != rideDynamic {
@@ -66,9 +41,9 @@ func TestRideModeContextLine(t *testing.T) {
 		t.Errorf("context line outside a sweep = %q, want empty", got)
 	}
 	func() {
-		defer withRideMode(rideStatic)()
+		defer withRideMode(rideNone)()
 		if got := rideModeContextLine(); got != "" {
-			t.Errorf("static context line = %q, want empty — a `!!!` ride sweeps nothing", got)
+			t.Errorf("bang-walk context line = %q, want empty — a bang sweeps nothing", got)
 		}
 	}()
 	func() {
@@ -77,37 +52,10 @@ func TestRideModeContextLine(t *testing.T) {
 		if !strings.Contains(got, "dynamic") {
 			t.Errorf("dynamic context line = %q, want the mode named", got)
 		}
-		if !strings.Contains(got, "kick") {
-			t.Errorf("dynamic context line = %q, want the self-kick license named", got)
+		if !strings.Contains(got, "`next`") {
+			t.Errorf("dynamic context line = %q, want the one pick named", got)
 		}
 	}()
-}
-
-// TestPulseKickoffCarriesRideLineWithNothingChained pins the *wiring*,
-// not the renderer. The line used to hang off chainStateBlock, which
-// renders only for an active chain of two or more members — so a sweep
-// over a board of loose parked runs, the ordinary case, never saw it.
-func TestPulseKickoffCarriesRideLineWithNothingChained(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	seedRun(t, root, "moe", "lone-run", "sdlc", run.StatusInProgress, time.Now().Local(), nil)
-
-	if got := chainStateBlock(mustPulseScan(t, root), "moe"); got != "" {
-		t.Fatalf("fixture wants no chain block, got %q", got)
-	}
-	func() {
-		defer withRideMode(rideDynamic)()
-		got, _ := pulseKickoffFromScan(mustPulseScan(t, root), "moe", "pulse-x", io.Discard)
-		if !strings.Contains(got, "a **dynamic** sweep") {
-			t.Errorf("dynamic sweep line missing from the kickoff:\n%s", got)
-		}
-	}()
-	// A hand-typed sweep starts nothing, and a block saying so is
-	// context the agent can't act on.
-	got, _ := pulseKickoffFromScan(mustPulseScan(t, root), "moe", "pulse-x", io.Discard)
-	if strings.Contains(got, "**dynamic** sweep") {
-		t.Errorf("kickoff claims a dynamic sweep outside one:\n%s", got)
-	}
 }
 
 // TestConsentTrailerValueTracksTheWalk: the flag the push stamp gates
@@ -150,9 +98,9 @@ func TestSpawnConsentPairsWithTheSpawnEdge(t *testing.T) {
 		t.Errorf("spawnConsent with a spawner = %q, want \"none\"", got)
 	}
 	func() {
-		defer withRideMode(rideStatic)()
-		if got := spawnConsent("moe/pulse-1"); got != "static" {
-			t.Errorf("spawnConsent inside a static ride = %q, want \"static\"", got)
+		defer withRideMode(rideDynamic)()
+		if got := spawnConsent("moe/pulse-1"); got != "dynamic" {
+			t.Errorf("spawnConsent inside a dynamic ride = %q, want \"dynamic\"", got)
 		}
 	}()
 }

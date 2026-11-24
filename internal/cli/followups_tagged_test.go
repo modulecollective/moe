@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/modulecollective/moe/internal/git/gittest"
+	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
@@ -92,7 +93,7 @@ func TestSDLCBlockedTurnExtractsTaggedFollowups(t *testing.T) {
 				gittest.Run(t, root, "add", "-A")
 				gittest.Run(t, root, "commit", "-m", "seed prior canvases")
 			}
-			defer withRideMode(rideStatic)()
+			defer withRideMode(rideDynamic)()
 			var out bytes.Buffer
 			if code := openSdlcStage(stage, "tele", md.ID, true, &out, &out); code != 0 {
 				t.Fatalf("%s exit %d: %s", stage, code, &out)
@@ -133,7 +134,7 @@ func TestSDLCBlockedTurnExtractsTaggedFollowups(t *testing.T) {
 				t.Fatalf("receipt=%s/%s %v", p, id, err)
 			}
 			log := gitLog(t, root, "--format=%B", "--grep=^Open run tele/required-fix$")
-			for _, want := range []string{"MoE-From-Run: tele/" + md.ID, "MoE-Followup-Key: tele/" + md.ID + "/tele/required-fix", "MoE-Consent: static"} {
+			for _, want := range []string{"MoE-From-Run: tele/" + md.ID, "MoE-Followup-Key: tele/" + md.ID + "/tele/required-fix", "MoE-Consent: dynamic"} {
 				if !strings.Contains(log, want) {
 					t.Fatalf("missing %q: %s", want, log)
 				}
@@ -143,7 +144,7 @@ func TestSDLCBlockedTurnExtractsTaggedFollowups(t *testing.T) {
 			if paths := gitLog(t, root, "-1", "--format=", "--name-only"); strings.TrimSpace(paths) != run.FollowupsPath("tele", md.ID) {
 				t.Fatalf("audit paths=%q", paths)
 			}
-			if msg := gitLog(t, root, "-1", "--format=%B"); !strings.Contains(msg, "MoE-Consent: static") {
+			if msg := gitLog(t, root, "-1", "--format=%B"); !strings.Contains(msg, "MoE-Consent: dynamic") {
 				t.Fatalf("audit consent=%s", msg)
 			}
 			prompt, err := os.ReadFile(os.Getenv("MOE_TEST_TAGGED_PROMPT"))
@@ -516,7 +517,17 @@ func TestBlockedSourceTaggedFollowupPulseHandoff(t *testing.T) {
 	if _, err := run.Load(root, "tele", "required-fix"); err != nil {
 		t.Fatalf("idea absent before pulse: %v", err)
 	}
-	if code := runPulseSurvey(root, "tele", "", nil, &out, &out); code != 0 {
+	if err := project.EnsureRoot(root, ""); err != nil {
+		t.Fatal(err)
+	}
+	// Promotion is the pick's, so the survey names the idea.
+	prevOpen := openPulse
+	openPulse = func(projectID, runID string, _ bool, _ *pulseInterrupt, _, _ io.Writer) surveyOutcome {
+		writePulseGate(t, root, projectID, runID, `{"status":"ok","next":{"run":"tele/required-fix","why":"the prerequisite"}}`)
+		return surveyOutcome{code: 0, agentStarted: true}
+	}
+	t.Cleanup(func() { openPulse = prevOpen })
+	if code := runPulseSurvey(root, project.RootID, "", nil, &out, &out); code != 0 {
 		t.Fatalf("quiet non-dynamic pulse %d: %s", code, &out)
 	}
 	idea, err := run.Load(root, "tele", "required-fix")
@@ -524,7 +535,7 @@ func TestBlockedSourceTaggedFollowupPulseHandoff(t *testing.T) {
 		t.Fatalf("non-dynamic pulse moved idea: %+v %v", idea, err)
 	}
 	defer withRideMode(rideDynamic)()
-	if code := runPulseSurvey(root, "tele", "", nil, &out, &out); code != 1 || !strings.Contains(out.String(), "design gate not satisfied; parked at design") {
+	if code := runPulseSurvey(root, project.RootID, "", nil, &out, &out); code != 1 || !strings.Contains(out.String(), "design gate not satisfied; parked at design") {
 		t.Fatalf("quiet dynamic pulse should park at the prerequisite design gate, exit %d: %s", code, &out)
 	}
 	idea, err = run.Load(root, "tele", "required-fix")

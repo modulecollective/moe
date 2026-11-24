@@ -14,7 +14,7 @@ func TestHeartbeatReplacementWaitsForSwept(t *testing.T) {
 			name = "rex"
 		}
 		t.Run(name, func(t *testing.T) {
-			gate := &orderingHeartbeat{fakeHeartbeat: fakeHeartbeat{due: []string{"alpha"}}, entered: make(chan struct{}), release: make(chan struct{})}
+			gate := &orderingHeartbeat{fakeHeartbeat: fakeHeartbeat{due: []string{"_cabinet"}}, entered: make(chan struct{}), release: make(chan struct{})}
 			root := t.TempDir()
 			var s *Server
 			if remote {
@@ -33,15 +33,15 @@ func TestHeartbeatReplacementWaitsForSwept(t *testing.T) {
 			case <-time.After(5 * time.Second):
 				t.Fatal("Swept never entered")
 			}
-			old, _ := s.children.get("heartbeat:alpha")
-			if err := os.WriteFile(sweepRunPath(root, "alpha"), []byte("sentinel"), 0600); err != nil {
+			old, _ := s.children.get("heartbeat:_cabinet")
+			if err := os.WriteFile(sweepRunPath(root, "_cabinet"), []byte("sentinel"), 0600); err != nil {
 				t.Fatal(err)
 			}
 			s.heartbeatTick()
-			if current, _ := s.children.get("heartbeat:alpha"); current != old {
+			if current, _ := s.children.get("heartbeat:_cabinet"); current != old {
 				t.Fatal("replaced child before Swept returned")
 			}
-			if body, _ := os.ReadFile(sweepRunPath(root, "alpha")); string(body) != "sentinel" {
+			if body, _ := os.ReadFile(sweepRunPath(root, "_cabinet")); string(body) != "sentinel" {
 				t.Fatal("replacement cleared emit file before Swept returned")
 			}
 			release()
@@ -51,7 +51,7 @@ func TestHeartbeatReplacementWaitsForSwept(t *testing.T) {
 				t.Fatal("Swept completion never settled")
 			}
 			s.heartbeatTick()
-			next, _ := s.children.get("heartbeat:alpha")
+			next, _ := s.children.get("heartbeat:_cabinet")
 			if next == old {
 				t.Fatal("settled child held replacement")
 			}
@@ -70,10 +70,10 @@ func TestRexRecordedIdentitySurvivesDiscoveryOutage(t *testing.T) {
 	root := t.TempDir()
 	seedStartupRexSession(t, root)
 	moe, argv := argvRecorder(t, 0)
-	s := newTestServer(t, Options{Root: root, MoeBin: moe, Heartbeat: &fakeHeartbeat{due: []string{"alpha"}}})
+	s := newTestServer(t, Options{Root: root, MoeBin: moe, Heartbeat: &fakeHeartbeat{due: []string{"_cabinet"}}})
 	s.selectHost()
 	s.heartbeatTick()
-	if _, ok := s.children.get("heartbeat:alpha"); ok || argv() != "" {
+	if _, ok := s.children.get("heartbeat:_cabinet"); ok || argv() != "" {
 		t.Fatal("discovery outage dispatched beside recorded Rex work")
 	}
 	if fake.called("new ") || fake.called("run ") {
@@ -101,7 +101,7 @@ func TestHeartbeatReplacementWaitsForHooks(t *testing.T) {
 				name = "rex/" + hook
 			}
 			t.Run(name, func(t *testing.T) {
-				gate := &fakeHeartbeat{due: []string{"alpha"}}
+				gate := &fakeHeartbeat{due: []string{"_cabinet"}}
 				var s *Server
 				if remote {
 					fake := newFakeRex(t)
@@ -128,16 +128,16 @@ func TestHeartbeatReplacementWaitsForHooks(t *testing.T) {
 				case <-time.After(5 * time.Second):
 					t.Fatal("hook never entered")
 				}
-				old, _ := s.children.get("heartbeat:alpha")
+				old, _ := s.children.get("heartbeat:_cabinet")
 				if exited, _ := old.snapshot(); !exited {
 					t.Fatal("hook preceded exit publication")
 				}
-				path := sweepRunPath(s.opts.Root, "alpha")
+				path := sweepRunPath(s.opts.Root, "_cabinet")
 				if err := os.WriteFile(path, []byte("sentinel"), 0600); err != nil {
 					t.Fatal(err)
 				}
 				s.heartbeatTick()
-				if current, _ := s.children.get("heartbeat:alpha"); current != old {
+				if current, _ := s.children.get("heartbeat:_cabinet"); current != old {
 					t.Fatal("replacement overtook hook")
 				}
 				if body, _ := os.ReadFile(path); string(body) != "sentinel" {
@@ -146,7 +146,7 @@ func TestHeartbeatReplacementWaitsForHooks(t *testing.T) {
 				if len(gate.sweptList()) != 0 {
 					t.Fatal("bookkeeping overtook hook")
 				}
-				if c, err := s.children.spawn("heartbeat:alpha", "/bin/true", nil, s.opts.Root, nil); c != nil || err == nil {
+				if c, err := s.children.spawn("heartbeat:_cabinet", "/bin/true", nil, s.opts.Root, nil); c != nil || err == nil {
 					t.Fatal("registry admitted replacement before hook")
 				}
 				release()
@@ -156,7 +156,7 @@ func TestHeartbeatReplacementWaitsForHooks(t *testing.T) {
 					t.Fatal("child never settled")
 				}
 				s.heartbeatTick()
-				next, _ := s.children.get("heartbeat:alpha")
+				next, _ := s.children.get("heartbeat:_cabinet")
 				if next == old {
 					t.Fatal("settled child held replacement")
 				}
@@ -176,7 +176,7 @@ func TestHeartbeatReplacementWaitsForHooks(t *testing.T) {
 func TestImmediateExitWaitsForStartRegistration(t *testing.T) {
 	for _, remote := range []bool{false, true} {
 		t.Run(map[bool]string{false: "local", true: "rex"}[remote], func(t *testing.T) {
-			gate := &fakeHeartbeat{due: []string{"alpha"}}
+			gate := &fakeHeartbeat{due: []string{"_cabinet"}}
 			var s *Server
 			var fake *fakeRex
 			if remote {
@@ -195,7 +195,7 @@ func TestImmediateExitWaitsForStartRegistration(t *testing.T) {
 			tickDone := make(chan struct{})
 			go func() { s.heartbeatTick(); close(tickDone) }()
 			<-entered
-			c, _ := s.children.get("heartbeat:alpha")
+			c, _ := s.children.get("heartbeat:_cabinet")
 			if exited, _ := c.snapshot(); exited || len(gate.sweptList()) != 0 {
 				t.Fatal("observer overtook start callback")
 			}
@@ -210,7 +210,7 @@ func TestImmediateExitWaitsForStartRegistration(t *testing.T) {
 				t.Fatal("immediate exit did not settle")
 			}
 			s.activity.mu.Lock()
-			row := *s.activity.projects["alpha"]
+			row := *s.activity.projects["_cabinet"]
 			s.activity.mu.Unlock()
 			if !row.started.IsZero() || row.sweptAt.IsZero() || !row.clean || len(gate.sweptList()) != 1 {
 				t.Fatal("immediate exit lost start or completion")

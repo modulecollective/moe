@@ -138,34 +138,6 @@ func TestRunPageOmitsConsentWhenUnrecorded(t *testing.T) {
 	}
 }
 
-// TestAgentMarkPrefersTheSpawnClaim: a run can be both machine-opened
-// and machine-chained. One badge carries both, and the stronger claim —
-// how the run came to exist — wins the hover.
-func TestAgentMarkPrefersTheSpawnClaim(t *testing.T) {
-	cases := []struct {
-		name      string
-		row       dash.Row
-		wantBadge bool
-		wantTitle string
-	}{
-		{"operator run", dash.Row{}, false, ""},
-		{"spawned", dash.Row{Agent: true}, true, "opened by the machine"},
-		{"groomed edge", dash.Row{EdgeAgent: true, EdgeConsent: "static"}, true,
-			"chained here by a pulse groom (static ride)"},
-		{"groomed edge, consent unrecorded", dash.Row{EdgeAgent: true}, true,
-			"chained here by a pulse groom"},
-		{"both", dash.Row{Agent: true, EdgeAgent: true, EdgeConsent: "dynamic"}, true,
-			"opened by the machine"},
-	}
-	for _, tc := range cases {
-		gotBadge, gotTitle := agentMark(tc.row)
-		if gotBadge != tc.wantBadge || gotTitle != tc.wantTitle {
-			t.Errorf("%s: agentMark = (%v, %q), want (%v, %q)",
-				tc.name, gotBadge, gotTitle, tc.wantBadge, tc.wantTitle)
-		}
-	}
-}
-
 // TestDashBadgesAgentRows: the headline requirement — the operator can
 // see at a glance what the agent added, on the board itself. The badge
 // is independent of nesting: a spawned run whose spawner isn't on the
@@ -175,8 +147,6 @@ func TestDashBadgesAgentRows(t *testing.T) {
 	gather := func(string) ([]dash.Row, int, int, []int, error) {
 		return []dash.Row{
 			{Project: "p", Run: "spawned", Bucket: dash.BucketActiveRuns, When: now, Agent: true},
-			{Project: "p", Run: "groomed", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Minute),
-				Chained: true, EdgeAgent: true, EdgeConsent: "static"},
 			{Project: "p", Run: "by-hand", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Hour)},
 		}, 1, 1, nil, nil
 	}
@@ -187,12 +157,11 @@ func TestDashBadgesAgentRows(t *testing.T) {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
 	}
 	body := rr.Body.String()
-	if got := strings.Count(body, `class="badge agent"`); got != 2 {
-		t.Errorf("agent badges = %d, want 2 (the operator's own run stays unbadged)\n%s", got, body)
+	if got := strings.Count(body, `class="badge agent"`); got != 1 {
+		t.Errorf("agent badges = %d, want 1 (the operator's own run stays unbadged)\n%s", got, body)
 	}
 	for _, want := range []string{
 		`title="opened by the machine"`,
-		`title="chained here by a pulse groom (static ride)"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("dash missing %q", want)

@@ -164,7 +164,7 @@ canvas=$(printf '%s' "$prompt" | awk '/Your canvas for this document is the sing
 ticks=$(printf '\140\140\140')
 case "$canvas" in
   */documents/pulse/content.md)
-    printf '%s\n' '# Pulse' '' '## Gate' '' "${ticks}json" '{"status":"ok","threads":[{"runs":[{"slug":"tagged-fix","title":"Apply the mechanical fix","why":"captured followup clears the bar"}]}]}' "$ticks" > "$canvas"
+    printf '%s\n' '# Pulse' '' '## Gate' '' "${ticks}json" '{"status":"ok","loose":[{"slug":"moe/tagged-fix","title":"Apply the mechanical fix","why":"captured followup clears the bar"}],"next":{"run":"moe/tagged-fix","why":"captured followup clears the bar"}}' "$ticks" > "$canvas"
     exit 0
     ;;
   */documents/design/content.md)
@@ -257,7 +257,7 @@ func TestStageCommitsStampConsentOnlyInsideAWalk(t *testing.T) {
 		want string
 	}{
 		{name: "operator", ride: false},
-		{name: "walk", ride: true, want: "MoE-Consent: static"},
+		{name: "walk", ride: true, want: "MoE-Consent: dynamic"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := newTestBureaucracy(t)
@@ -270,7 +270,7 @@ func TestStageCommitsStampConsentOnlyInsideAWalk(t *testing.T) {
 				t.Fatal(err)
 			}
 			if tc.ride {
-				t.Cleanup(withRideMode(rideStatic))
+				t.Cleanup(withRideMode(rideDynamic))
 			}
 
 			check := func(what string) {

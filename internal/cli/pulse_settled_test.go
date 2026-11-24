@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
 // seedRun writes a run.json (and optional canvases) straight to disk —
@@ -140,9 +141,10 @@ func TestPulseKickoffCarriesSettledBlock(t *testing.T) {
 	t.Parallel()
 	root := parallelBureaucracy(t)
 	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "moe")
 	seedRun(t, root, "moe", "settled-drop", "sdlc", run.StatusClosed, time.Now().Local(), nil)
 
-	got, _ := pulseKickoffFromScan(mustPulseScan(t, root), "moe", "pulse-x", io.Discard)
+	got := pulseKickoffFromScan(mustPulseScan(t, root), root, "pulse-x", io.Discard)
 	if !strings.HasPrefix(got, pulseKickoff) {
 		t.Fatal("kickoff no longer leads with the static prompt")
 	}

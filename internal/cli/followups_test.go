@@ -98,7 +98,7 @@ func TestParseFollowupsRejectsInvalidWorkflowTags(t *testing.T) {
 	}{
 		{"unknown", "missing-workflow"},
 		{"non-chainable", "idea"},
-		{"no-stages", chainWorkflow},
+		{"no-stages", "chain"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := []byte("- [ ] `cleanup-foo` (" + tc.tag + ") — Clean up foo\n")

@@ -103,7 +103,7 @@ func reviewGateEscalated(canvas string) bool {
 // turn has answered it (an operator's hand kickback to build or
 // design), the run waits for review, not at it. An undelivered note
 // releases it for one turn, the same release a design-only park takes.
-func reviewLoopHold(root, threadRoot string, md *run.Metadata, groomed groomResult) string {
+func reviewLoopHold(root string, md *run.Metadata) string {
 	if md.Workflow != "sdlc" {
 		return ""
 	}
@@ -115,7 +115,7 @@ func reviewLoopHold(root, threadRoot string, md *run.Metadata, groomed groomResu
 		return ""
 	}
 	reason := reviewLoopSpent(root, md, canvas)
-	if reason == "" || pendingInputOnThread(root, threadRoot, groomed) {
+	if reason == "" || pendingInputOnRun(root, md) {
 		return ""
 	}
 	return "is parked at a blocked review: " + reason + " — answer its question, kick it back by hand, or close it"

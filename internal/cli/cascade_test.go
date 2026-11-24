@@ -219,7 +219,7 @@ func TestCascadeFromGateRunsBetweenStartAndDestination(t *testing.T) {
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("build", "push", false, false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "push", false, md, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
 	}
@@ -278,7 +278,7 @@ func TestCascadeFromGateStopsWhenStageGateUnsatisfied(t *testing.T) {
 	t.Cleanup(func() { openSdlcStage = prev })
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("review", "push", false, false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("review", "push", false, md, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("cascade exit=%d, want 1; stderr=%q", code, stderr.String())
 	}
@@ -304,7 +304,7 @@ func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("build", "", false, false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "", false, md, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
 	}
@@ -414,7 +414,7 @@ func TestCascadeFromGateStopsOnFailure(t *testing.T) {
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("build", "push", false, false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "push", false, md, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("cascade exit=%d, want 1; stderr=%q", code, stderr.String())
 	}
@@ -437,7 +437,7 @@ func TestCascadeFromGateStopsOnInterrupt(t *testing.T) {
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("build", "", false, false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "", false, md, &stdout, &stderr)
 	if code != exitInterrupted {
 		t.Fatalf("cascade exit=%d, want %d (exitInterrupted); stderr=%q", code, exitInterrupted, stderr.String())
 	}
@@ -469,7 +469,7 @@ func TestCascadeFromGateNoOpBehindStart(t *testing.T) {
 
 	var stdout, stderr bytes.Buffer
 	// startStage=code, destination=design — design is behind code.
-	res, code := cascadeFromGate("build", "design", false, false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "design", false, md, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("no-op cascade exit=%d, want 0; stderr=%q", code, stderr.String())
 	}
@@ -490,7 +490,7 @@ func TestCascadeFromGateNoOpDestinationEqualsStart(t *testing.T) {
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("build", "build", false, false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "build", false, md, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("destination=start cascade exit=%d, want 0", code)
 	}
@@ -511,7 +511,7 @@ func TestCascadeFromGateOneStepDispatchesStartStageOnly(t *testing.T) {
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("build", "", true, false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "", true, md, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade exit=%d stderr=%q", code, stderr.String())
 	}
@@ -767,9 +767,6 @@ func TestPromptStageNextStageShowsCascadeLegend(t *testing.T) {
 	if !strings.Contains(stdout.String(), "!! = ship this run") {
 		t.Fatalf("expected !! ship-this-run legend in stdout, got: %q", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "!!! = ship + ride the chain") {
-		t.Fatalf("expected !!! ride-the-chain legend in stdout, got: %q", stdout.String())
-	}
 	// The cascade-extras line is reserved for the genuinely multi-char
 	// forms now; bare `!` lives in the main legend instead. Guards
 	// against re-merging the old "!=advance one stage" prefix into the
@@ -929,8 +926,8 @@ func TestPromptPushNextStageShowsBangBangLegend(t *testing.T) {
 	// The route in parentheses is what `!!` will actually do — the
 	// project default, since the bangs carry no flag. A tempdir root has
 	// no project.json, which reads as the pr default.
-	if !strings.Contains(stdout.String(), "!! = ship this run (pr) · !!! = ship + ride the chain") {
-		t.Fatalf("expected !! / !!! legend at push gate, got: %q", stdout.String())
+	if !strings.Contains(stdout.String(), "!! = ship this run (pr)") {
+		t.Fatalf("expected !! legend at push gate, got: %q", stdout.String())
 	}
 }
 
@@ -946,7 +943,7 @@ func TestCascadeFromGateHeadlessRecoveryFailedStops(t *testing.T) {
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("build", "", false, false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "", false, md, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("cascade exit=%d, want 1 (recovery gave up); stderr=%q", code, stderr.String())
 	}
@@ -983,7 +980,7 @@ func TestCascadeFromGateHeadlessCleanRecoveryRetriesAndShips(t *testing.T) {
 			md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 			var stdout, stderr bytes.Buffer
-			res, code := cascadeFromGate("build", "", false, false, md, &stdout, &stderr)
+			res, code := cascadeFromGate("build", "", false, md, &stdout, &stderr)
 			if code != 0 {
 				t.Fatalf("cascade exit=%d, want 0 (clean recovery then ship); stderr=%q", code, stderr.String())
 			}
@@ -1049,7 +1046,7 @@ func TestCascadeFromGateHeadlessRetryRedefersStopsAtBound(t *testing.T) {
 	md := &run.Metadata{ID: "fix-it", Project: "tele", Workflow: "sdlc", Status: run.StatusInProgress}
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("build", "", false, false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "", false, md, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade exit=%d, want 0 (both recoveries exited cleanly); stderr=%q", code, stderr.String())
 	}

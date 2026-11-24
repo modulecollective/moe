@@ -42,24 +42,24 @@ func TestRexInvalidEvidenceCannotAcknowledge(t *testing.T) {
 	fake.reply("run", `{"block_ids":["block:A"]}`, 0)
 	fake.reply("wait", `{}`, 0)
 	fake.reply("block-call", `{"last_exit":{}}`, 0)
-	fake.reply("block-ls", `{"blocks":[{"block_id":"block:A","label":"heartbeat:alpha"}]}`, 0)
-	gate := &fakeHeartbeat{due: []string{"alpha"}}
+	fake.reply("block-ls", `{"blocks":[{"block_id":"block:A","label":"heartbeat:_cabinet"}]}`, 0)
+	gate := &fakeHeartbeat{due: []string{"_cabinet"}}
 	s := rexServer(t, fake, Options{Root: t.TempDir(), MoeBin: "/bin/true", Heartbeat: gate})
 	s.heartbeatTick()
 	waitFor(t, "invalid exit readback", func() bool { return fake.called("block call") })
 	testRex(s.children).cancel()
 	waitRexWorkers(t, testRex(s.children))
-	c, _ := s.children.get("heartbeat:alpha")
+	c, _ := s.children.get("heartbeat:_cabinet")
 	if exited, _ := c.snapshot(); exited || len(gate.sweptList()) != 0 || fake.called("block rename") || fake.called("block close") {
 		t.Fatal("incomplete exit became a result")
 	}
 }
 
 func TestRexOwnedLabelsValidateBeforeAdoption(t *testing.T) {
-	for _, label := range []string{"heartbeat:alpha", "heartbeat:", "heartbeat:../outside", "heartbeat:UPPER", "done:heartbeat:../outside"} {
+	for _, label := range []string{"heartbeat:_cabinet", "heartbeat:", "heartbeat:../outside", "heartbeat:UPPER", "done:heartbeat:../outside"} {
 		t.Run(label, func(t *testing.T) {
 			fake := newFakeRex(t)
-			fake.reply("block-ls", `{"blocks":[{"block_id":"block:A","label":"heartbeat:alpha"},{"block_id":"block:B","label":"`+label+`"}]}`, 0)
+			fake.reply("block-ls", `{"blocks":[{"block_id":"block:A","label":"heartbeat:_cabinet"},{"block_id":"block:B","label":"`+label+`"}]}`, 0)
 			s := rexServer(t, fake, Options{Root: t.TempDir(), MoeBin: "/bin/true"})
 			if err := testRex(s.children).adopt(); err == nil {
 				t.Fatal("invalid or duplicate owned label accepted")
@@ -67,7 +67,7 @@ func TestRexOwnedLabelsValidateBeforeAdoption(t *testing.T) {
 			if len(s.children.all) != 0 || fake.called("wait ") {
 				t.Fatal("listing partially adopted")
 			}
-			if _, err := testRex(s.children).findLabel("heartbeat:alpha"); err == nil {
+			if _, err := testRex(s.children).findLabel("heartbeat:_cabinet"); err == nil {
 				t.Fatal("launch readback accepted ambiguous listing")
 			}
 		})
@@ -82,7 +82,7 @@ func TestRexCommandIDsRequired(t *testing.T) {
 			h := newRexHost(fake.bin, t.TempDir(), io.Discard)
 			defer h.cancel()
 			h.session = "session:S"
-			if block, err := h.launch("heartbeat:alpha", []string{"/bin/true"}); block != "" || err == nil {
+			if block, err := h.launch("heartbeat:_cabinet", []string{"/bin/true"}); block != "" || err == nil {
 				t.Fatalf("invalid reply accepted: %q, %v", block, err)
 			}
 			if fake.called("new ") || fake.called("ls ") {
@@ -96,7 +96,7 @@ func TestRexCommandIDsRequired(t *testing.T) {
 			fake.reply("new", reply, 0)
 			h := newRexHost(fake.bin, t.TempDir(), io.Discard)
 			defer h.cancel()
-			if _, err := h.launch("heartbeat:alpha", []string{"/bin/echo", "agent-work"}); err == nil {
+			if _, err := h.launch("heartbeat:_cabinet", []string{"/bin/echo", "agent-work"}); err == nil {
 				t.Fatal("invalid creation accepted")
 			}
 			if fake.called("run ") || h.sessionID() != "" {
@@ -124,7 +124,7 @@ func TestRexBootstrapPersistencePrecedesWork(t *testing.T) {
 	h.session = "session:OLD"
 	fake.reply("run@session:OLD", "", 1)
 	fake.reply("ls", `{"sessions":[]}`, 0)
-	if _, err := h.launch("heartbeat:alpha", []string{"/bin/echo", "agent-work"}); err == nil {
+	if _, err := h.launch("heartbeat:_cabinet", []string{"/bin/echo", "agent-work"}); err == nil {
 		t.Fatal("failed persistence accepted")
 	}
 	if h.sessionID() != "session:OLD" || h.candidate != "session:NEW" || fake.called("run --json --focus=false --keep-open -s session:NEW") {
@@ -135,7 +135,7 @@ func TestRexBootstrapPersistencePrecedesWork(t *testing.T) {
 	}
 	fake.hold("run@session:NEW")
 	result := make(chan error, 1)
-	go func() { _, err := h.launch("heartbeat:alpha", []string{"/bin/echo", "agent-work"}); result <- err }()
+	go func() { _, err := h.launch("heartbeat:_cabinet", []string{"/bin/echo", "agent-work"}); result <- err }()
 	t.Cleanup(func() { fake.release("run@session:NEW"); <-result })
 	waitFor(t, "labelled run after persistence", func() bool { return fake.called("run --json --focus=false --keep-open -s session:NEW") })
 	if body, _ := os.ReadFile(rexSessionPath(root)); string(body) != "session:NEW\n" {
@@ -161,7 +161,7 @@ func TestRexIdentityReadFailuresHoldAndRecover(t *testing.T) {
 			} else if err := os.WriteFile(rexSessionPath(root), nil, 0600); err != nil {
 				t.Fatal(err)
 			}
-			gate := &fakeHeartbeat{quiet: []string{"alpha"}}
+			gate := &fakeHeartbeat{quiet: []string{"_cabinet"}}
 			s := newTestServer(t, Options{Root: root, MoeBin: "/bin/true", Heartbeat: gate})
 			s.selectHost()
 			s.heartbeatTick()
@@ -172,10 +172,10 @@ func TestRexIdentityReadFailuresHoldAndRecover(t *testing.T) {
 				t.Fatal(err)
 			}
 			seedStartupRexSession(t, root)
-			fake.reply("block-ls", `{"blocks":[{"block_id":"block:A","label":"heartbeat:alpha"}]}`, 0)
+			fake.reply("block-ls", `{"blocks":[{"block_id":"block:A","label":"heartbeat:_cabinet"}]}`, 0)
 			fake.hold("wait")
 			s.heartbeatTick()
-			if _, ok := s.children.get("heartbeat:alpha"); !ok || s.activity.snapshot(time.Now()).HostError != "" {
+			if _, ok := s.children.get("heartbeat:_cabinet"); !ok || s.activity.snapshot(time.Now()).HostError != "" {
 				t.Fatal("idle recovery did not adopt and clear hold")
 			}
 		})
@@ -263,7 +263,7 @@ func TestRexRecordedIdentityRetriesMissingDiscovery(t *testing.T) {
 			}
 			root := t.TempDir()
 			seedStartupRexSession(t, root)
-			gate := &fakeHeartbeat{quiet: []string{"alpha"}}
+			gate := &fakeHeartbeat{quiet: []string{"_cabinet"}}
 			s := newTestServer(t, Options{Root: root, MoeBin: "/bin/true", Heartbeat: gate})
 			s.selectHost()
 			s.heartbeatTick()
@@ -272,10 +272,10 @@ func TestRexRecordedIdentityRetriesMissingDiscovery(t *testing.T) {
 			}
 			useRexBin(t, fake.bin)
 			fake.reply("whoami", `{"instance_id":"i-1"}`, 0)
-			fake.reply("block-ls", `{"blocks":[{"block_id":"block:A","label":"heartbeat:alpha"}]}`, 0)
+			fake.reply("block-ls", `{"blocks":[{"block_id":"block:A","label":"heartbeat:_cabinet"}]}`, 0)
 			fake.hold("wait")
 			s.heartbeatTick()
-			if _, ok := s.children.get("heartbeat:alpha"); !ok || s.activity.snapshot(time.Now()).HostError != "" {
+			if _, ok := s.children.get("heartbeat:_cabinet"); !ok || s.activity.snapshot(time.Now()).HostError != "" {
 				t.Fatal("idle discovery recovery did not adopt existing work")
 			}
 		})
@@ -294,7 +294,7 @@ func TestRexLostRunReplyRecovery(t *testing.T) {
 			}
 			fake.hold("run")
 			fake.hold("wait")
-			gate := &fakeHeartbeat{due: []string{"alpha"}}
+			gate := &fakeHeartbeat{due: []string{"_cabinet"}}
 			s := rexServer(t, fake, Options{Root: t.TempDir(), MoeBin: "/bin/true", Heartbeat: gate})
 			tickDone := make(chan struct{})
 			go func() { s.heartbeatTick(); close(tickDone) }()
@@ -304,14 +304,14 @@ func TestRexLostRunReplyRecovery(t *testing.T) {
 			case "later tick":
 				fake.reply("block-ls", "", 1)
 			case "duplicate label":
-				if err := os.WriteFile(filepath.Join(fake.dir, "blocks", "block:B"), []byte("heartbeat:alpha"), 0600); err != nil {
+				if err := os.WriteFile(filepath.Join(fake.dir, "blocks", "block:B"), []byte("heartbeat:_cabinet"), 0600); err != nil {
 					t.Fatal(err)
 				}
 			}
 			fake.release("run")
 			<-tickDone
 			if mode != "readback" {
-				if _, ok := s.children.get("heartbeat:alpha"); ok {
+				if _, ok := s.children.get("heartbeat:_cabinet"); ok {
 					t.Fatal("uncertain readback registered a child")
 				}
 			}
@@ -323,7 +323,7 @@ func TestRexLostRunReplyRecovery(t *testing.T) {
 				return
 			}
 			fake.reply("block-ls", `{"blocks":[]}`, 0)
-			path := sweepRunPath(s.opts.Root, "alpha")
+			path := sweepRunPath(s.opts.Root, "_cabinet")
 			if err := os.WriteFile(path, []byte("sentinel"), 0600); err != nil {
 				t.Fatal(err)
 			}
@@ -331,7 +331,7 @@ func TestRexLostRunReplyRecovery(t *testing.T) {
 			if body, _ := os.ReadFile(path); string(body) != "sentinel" {
 				t.Fatal("recovery erased the running job emit file")
 			}
-			c, ok := s.children.get("heartbeat:alpha")
+			c, ok := s.children.get("heartbeat:_cabinet")
 			if !ok || testBlock(s.children, c) != "block:A" || fake.count("run ") != 1 {
 				t.Fatalf("lost reply duplicated or lost job: %q", fake.calls())
 			}

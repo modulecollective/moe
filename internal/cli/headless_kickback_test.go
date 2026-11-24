@@ -233,7 +233,7 @@ func TestCascadeFromGateHeadlessReviewRecoversAndShips(t *testing.T) {
 	pushCaptured := stubPushFromCascade(t, 0, nil)
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("review", "", false, false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("review", "", false, md, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade code=%d, want 0; stderr=%q", code, stderr.String())
 	}

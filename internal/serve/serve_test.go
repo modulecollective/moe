@@ -619,7 +619,7 @@ func TestDashRendersConnectorClasses(t *testing.T) {
 	gather := func(string) ([]dash.Row, int, int, []int, error) {
 		return []dash.Row{
 			{Project: "p", Run: "head", Bucket: dash.BucketActiveRuns, When: now},
-			{Project: "p", Run: "next", Bucket: dash.BucketActiveRuns, When: now.Add(-30 * time.Minute), Chained: true},
+			{Project: "p", Run: "next", Bucket: dash.BucketActiveRuns, When: now.Add(-30 * time.Minute)},
 			{Project: "p", Run: "child", Bucket: dash.BucketActiveRuns, When: now.Add(-time.Hour), Depth: 1},
 			{Project: "p", Run: "grandchild", Bucket: dash.BucketActiveRuns, When: now.Add(-90 * time.Minute), Depth: 2},
 		}, 1, 1, nil, nil
@@ -629,12 +629,6 @@ func TestDashRendersConnectorClasses(t *testing.T) {
 	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/", nil))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
-	}
-	// A chain member is flush-left `chained` with no depth class; a lineage
-	// row is `nested` plus a per-depth class, so the stylesheet can indent
-	// depth 2 past depth 1.
-	if got := strings.Count(rr.Body.String(), `class="row chained"`); got != 1 {
-		t.Errorf("want one flush chained row, got %d\n%s", got, rr.Body.String())
 	}
 	if got := strings.Count(rr.Body.String(), `class="row nested depth1"`); got != 1 {
 		t.Errorf("want one depth-1 nested row, got %d\n%s", got, rr.Body.String())

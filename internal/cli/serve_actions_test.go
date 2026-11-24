@@ -56,7 +56,7 @@ func TestLookupServeWorkflowUIOperatorPaced(t *testing.T) {
 // so the head page offers no mark even though the operator can close
 // and kick it from the CLI.
 func TestLookupServeWorkflowUIUndeclared(t *testing.T) {
-	for _, wf := range []string{"chat", "idea", "pulse", chainWorkflow, "nope"} {
+	for _, wf := range []string{"chat", "idea", "pulse", "chain", "nope"} {
 		if _, ok := lookupServeWorkflowUI(wf); ok {
 			t.Errorf("workflow %q should have no serve declaration", wf)
 		}
@@ -76,7 +76,7 @@ func TestServeTagWorkflows(t *testing.T) {
 // reachable through the registry serve's CloseRun callback dispatches
 // by; idea's bespoke close stays out.
 func TestCloseRegistrationsCoverCloseCommandWorkflows(t *testing.T) {
-	for _, wf := range []string{"sdlc", "chat", "chain", "pulse"} {
+	for _, wf := range []string{"sdlc", "chat", "pulse"} {
 		if _, ok := lookupCloseRegistration(wf); !ok {
 			t.Errorf("workflow %q registered closeCommand but has no close registration", wf)
 		}

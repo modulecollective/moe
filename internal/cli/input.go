@@ -319,7 +319,7 @@ func pendingInputBlock(sc *pulseScan, projectID string) string {
 		"next successful turn, once. It holds nothing and licenses nothing beyond that.\n")
 	if len(pending) > 0 {
 		b.WriteString("\nWaiting for a turn to pick up — the operator is pushing these runs " +
-			"forward, so don't park one \"awaiting input\", and don't relay the text: " +
+			"forward, so don't treat one as waiting on input, and don't relay the text: " +
 			"the run's own turn receives it in full.\n")
 		for _, w := range pending {
 			fmt.Fprintf(&b, "- `%s/%s` — %s\n", w.Project, w.Run, w.Entry.FirstLine())
@@ -328,24 +328,19 @@ func pendingInputBlock(sc *pulseScan, projectID string) string {
 	if len(open) > 0 {
 		b.WriteString("\nAsked and unanswered — do not ask these again, and do not ask a second " +
 			"question on the same run. An unanswered question stops nothing: if the answer " +
-			"has to precede the work, park the thread and name the question in the reason.\n")
+			"has to precede the work, do not pick that run as `next`.\n")
 		for _, w := range open {
 			fmt.Fprintf(&b, "- `%s/%s` — %s\n", w.Project, w.Run, w.Entry.Question)
 		}
 	}
-	b.WriteString("\nTo ask one, write a thread entry as " +
-		"`{\"run\": \"<slug>\", \"ask\": \"…?\"}` — an existing run at its own position, one " +
-		"prose question, at most one open per run. Ask only where the operator's prose would " +
-		"change what the work builds. If what you need is an operator *act* — close the run, " +
-		"tag an idea, change the project's mode — write a plain `park` naming that act " +
-		"instead: no answer can discharge it.\n")
+	b.WriteString("\nIf what you need is an operator *act* or answer, say so in the report; " +
+		"do not pick a run that is waiting on it.\n")
 	return b.String()
 }
 
-// dropTaggedIdeas drops the entries sitting on a tagged idea. A dynamic
-// sweep promotes every tagged idea itself, and the promotion carries the
-// note onto the destination run, so the note is not the survey's to
-// weigh.
+// dropTaggedIdeas drops the entries sitting on a tagged idea. Promotion
+// carries the note onto the destination run, so the note is not the
+// survey's to weigh.
 func dropTaggedIdeas(sc *pulseScan, waiting []input.Waiting) []input.Waiting {
 	var out []input.Waiting
 	for _, w := range waiting {

@@ -84,12 +84,11 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	// mutually exclusive (both claim the first-stage seed).
 	park := fs.Bool("park", false, "open the run and stop: print the next-stage hint instead of prompting to run it")
 	seed := fs.Bool("seed", false, "pop $EDITOR on a stub and open the run with the edited body as its first-stage seed (mutually exclusive with --from-idea)")
-	ship := fs.Bool("ship", false, "open the run and cascade every stage headless to the ship (the flag twin of !! at the chain prompt; mutually exclusive with --park/--chain)")
-	chain := fs.Bool("chain", false, "open the run, ship it, and ride the chain it heads (the flag twin of !!!; mutually exclusive with --park/--ship)")
+	ship := fs.Bool("ship", false, "open the run and cascade every stage headless to the ship (the flag twin of !! at the chain prompt; mutually exclusive with --park)")
 	fs.Usage = func() {
 		if workflowName == sdlcWorkflow {
-			moePrintf(stderr, "usage: moe %s new [--workspace <project>/<name>] [--agent <name>] [--seed] [--park|--ship|--chain] <project>/<slug>\n", workflowName)
-			moePrintf(stderr, "       moe %s new [--workspace <project>/<name>] [--agent <name>] [--park|--ship|--chain] --from-idea <project>/<slug>\n", workflowName)
+			moePrintf(stderr, "usage: moe %s new [--workspace <project>/<name>] [--agent <name>] [--seed] [--park|--ship] <project>/<slug>\n", workflowName)
+			moePrintf(stderr, "       moe %s new [--workspace <project>/<name>] [--agent <name>] [--park|--ship] --from-idea <project>/<slug>\n", workflowName)
 			fs.PrintDefaults()
 		} else {
 			moePrintf(stderr, "usage: moe %s new [--agent <name>] [--seed] [--park] <project>/<slug>\n", workflowName)
@@ -97,7 +96,7 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 			public := flag.NewFlagSet(fs.Name(), flag.ContinueOnError)
 			public.SetOutput(stderr)
 			fs.VisitAll(func(f *flag.Flag) {
-				if f.Name != "workspace" && f.Name != "ship" && f.Name != "chain" {
+				if f.Name != "workspace" && f.Name != "ship" {
 					public.Var(f.Value, f.Name, f.Usage)
 					public.Lookup(f.Name).DefValue = f.DefValue
 				}
@@ -108,13 +107,9 @@ func runNew(workflowName string, args []string, stdout, stderr io.Writer) int {
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
-	// One bang answer out of the ladder, or "" for no cascade tail. ok is
-	// false only when the operator typed more than one — the levels are a
-	// ladder, not a set.
-	cascade, ok := cascadeAnswerFromFlags(false /*once*/, "" /*to*/, *ship, *chain)
-	if !ok {
-		moePrintf(stderr, "%s new: --ship and --chain are one ladder — pick one\n", workflowName)
-		return 2
+	cascade := ""
+	if *ship {
+		cascade = "!!"
 	}
 	if *seed && *fromIdea != "" {
 		moePrintf(stderr, "%s new: --seed and --from-idea are mutually exclusive (both seed the first stage)\n", workflowName)

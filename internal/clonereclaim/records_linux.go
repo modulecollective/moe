@@ -18,6 +18,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runowner"
 )
@@ -176,7 +177,7 @@ func physicalIdentity(h *runowner.Handle, durable bool) (Identity, *os.File, err
 	if h == nil || !h.Owns(h.Root, h.Project, h.Run) {
 		return id, nil, errors.New("clone reclamation requires held run ownership")
 	}
-	if !filepath.IsAbs(h.Root) || filepath.Clean(h.Root) != h.Root || !run.ValidID(h.Project) || !run.ValidID(h.Run) {
+	if !filepath.IsAbs(h.Root) || filepath.Clean(h.Root) != h.Root || !project.ValidID(h.Project) || !run.ValidID(h.Run) {
 		return id, nil, errors.New("invalid canonical run identity")
 	}
 	root, err := openAbsoluteDir(h.Root)

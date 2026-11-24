@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"strings"
 	"time"
 
@@ -78,19 +77,8 @@ func ciRepairEligibilityExcept(sc *pulseScan, p ownedPRChecks, ownBranch string)
 			return nil, "held by safe mode; an undelivered operator note can authorize repair"
 		}
 	}
-	// Pushed children are normally absent from the live chain graph. Restore
-	// only this endpoint for the staging/reap checks, without rewiring it.
-	byKey := maps.Clone(sc.byKey)
-	live := *md
-	live.Status = run.StatusInProgress
-	byKey[p.Run] = &live
-	graph := run.NewChainGraph(sc.idx, byKey)
-	sw := groomSweep{graph: graph, byKey: byKey}
-	if fence := sw.stagingFenced(p.Run); fence != "" {
-		return nil, "held by staging fence " + fence
-	}
-	if hold := reapHeldThread(graph.Root(p.Run), byKey, graph, sc.idx); hold != "" {
-		return nil, hold
+	if why := reapHeldReason(md, sc.idx.LastOperatorActivity[p.Run]); why != "" {
+		return nil, "is held — " + why
 	}
 	if stage := openSessionStageExcept(sc.root, md, ownBranch); stage != "" {
 		return nil, "run has an open session at " + stage
@@ -150,8 +138,8 @@ func claimCIRepair(root string, observed ownedPRChecks, reserved ...*session.Ses
 	return md, err
 }
 
-func kickCIRepair(root, key string, groomed groomResult, stdout, stderr io.Writer) int {
-	observed, ok := repairEvidence(groomed.prChecks, key)
+func kickCIRepair(root, key string, prChecks []ownedPRChecks, stdout, stderr io.Writer) int {
+	observed, ok := repairEvidence(prChecks, key)
 	if !ok {
 		moePrintf(stderr, "pulse: CI repair %s skipped — no actionable survey evidence\n", key)
 		return 0

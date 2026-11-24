@@ -536,7 +536,7 @@ func controlAtDecision(root string, md *run.Metadata, stage string, blocked bool
 func finishWalk(root string, md *run.Metadata, stage string, stdout, stderr io.Writer) func() int {
 	return func() int {
 		if stage == "push" {
-			return promptPushCascadeShip(md, false, rideModeForAnswer("!!"), stdout, stderr)
+			return promptPushCascadeShip(md, stdout, stderr)
 		}
 		return dispatchCascade("!!", stage, root, md, stdout, stderr)
 	}

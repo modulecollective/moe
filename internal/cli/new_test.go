@@ -588,7 +588,7 @@ func TestRunNewShipCascadesToShip(t *testing.T) {
 }
 
 // The consent ladder on `new` is the same ladder the stage verbs
-// carry: --ship / --chain map to `!!` / `!!!`, and
+// carry: --ship maps to `!!`, and
 // the mode each answer sets is what the stages actually run under. The
 // stub records currentRideMode from inside the cascade, which is the
 // seam that matters — a flag that opened the run and cascaded but
@@ -599,7 +599,6 @@ func TestRunNewCascadeLadderCarriesConsent(t *testing.T) {
 		want rideMode
 	}{
 		{flag: "--ship", want: rideNone},
-		{flag: "--chain", want: rideStatic},
 	} {
 		t.Run(tc.flag, func(t *testing.T) {
 			root := newTestBureaucracy(t)
@@ -637,32 +636,10 @@ func TestRunNewCascadeLadderCarriesConsent(t *testing.T) {
 	}
 }
 
-// The ladder is a ladder, not a set of composable modifiers — two of
-// its rungs at once is a usage error, refused before any open commit.
-func TestRunNewCascadeLadderRungsMutuallyExclusive(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	trailerstest.SeedProject(t, root, "tele")
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-
-	var out, errb bytes.Buffer
-	code := runNew("sdlc", []string{"--ship", "--chain", "tele/two-rungs"}, &out, &errb)
-	if code != 2 {
-		t.Fatalf("expected usage exit (2), got %d stderr=%q", code, errb.String())
-	}
-	if !strings.Contains(errb.String(), "one ladder") {
-		t.Errorf("expected the ladder error, got: %q", errb.String())
-	}
-	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "two-rungs")); !os.IsNotExist(err) {
-		t.Errorf("usage error must mint nothing; run dir exists (err=%v)", err)
-	}
-}
-
 // --park is the opposite tail to every rung, not just --ship, and the
 // message names the rung the operator actually typed.
 func TestRunNewParkExcludesEveryCascadeRung(t *testing.T) {
-	for _, flag := range []string{"--ship", "--chain"} {
+	for _, flag := range []string{"--ship"} {
 		t.Run(flag, func(t *testing.T) {
 			root := newTestBureaucracy(t)
 			markBureaucracy(t, root)
@@ -845,7 +822,7 @@ func TestRunNewHelpMatchesWorkflowOptions(t *testing.T) {
 					}
 				}
 			}
-			for _, name := range []string{"workspace", "ship", "chain"} {
+			for _, name := range []string{"workspace", "ship"} {
 				description := "\n  -" + name
 				if name != "workspace" {
 					description += "\n"
@@ -863,7 +840,7 @@ func TestRunNewHelpMatchesWorkflowOptions(t *testing.T) {
 // TestRunNewFromIdeaDoesNotCarryDesignOnly: the design-only tag is a
 // licence written for the machine. `--from-idea` is the hand-shaping
 // door — the operator picked the destination and is seeding the run
-// now — and its --park/--ship/--chain rung is typed consent that
+// now — and its --park/--ship rung is typed consent that
 // outranks it. Copying the bit here would hold a run the operator
 // opened themselves, and would render the design-only paragraph into an
 // interactive design session.

@@ -78,7 +78,7 @@ func TestCascadeHonorsCloseNomination(t *testing.T) {
 	pushCaptured := stubPushFromCascade(t, 0, nil)
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("build", "", false, false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "", false, md, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("cascade exit=%d, want 0; stderr=%q", code, stderr.String())
 	}
@@ -124,7 +124,7 @@ func TestCascadeCloseNominationFailureLeavesRunOpen(t *testing.T) {
 	stubGroupCloseCommand(t, "sdlc", 1)
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("build", "", false, false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("build", "", false, md, &stdout, &stderr)
 	if code != 1 {
 		t.Fatalf("cascade exit=%d, want 1; stderr=%q", code, stderr.String())
 	}
@@ -163,7 +163,7 @@ func TestCascadeCloseNominationReallyCloses(t *testing.T) {
 	t.Cleanup(func() { openSdlcStage = prev })
 
 	var stdout, stderr bytes.Buffer
-	if _, code := cascadeFromGate("build", "", false, false, md, &stdout, &stderr); code != 0 {
+	if _, code := cascadeFromGate("build", "", false, md, &stdout, &stderr); code != 0 {
 		t.Fatalf("cascade exit=%d, want 0; stderr=%q", code, stderr.String())
 	}
 	reloaded, err := run.Load(root, "tele", "already-done")

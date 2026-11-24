@@ -170,15 +170,8 @@ type Row struct {
 	// 0 for a top-level row, 1 for a completed spawned run (a tailed
 	// pulse) re-attached under its spawner, 2+ for deeper spawn lineage
 	// (a reflect under a pulse under its sdlc run). The renderer indents
-	// by Depth and draws a "↳" connector for Depth ≥ 1. Depth is lineage
-	// only; chain membership is Chained.
+	// by Depth and draws a "↳" connector for Depth ≥ 1.
 	Depth int
-	// Chained is true for an active row that follows its chain parent in
-	// the grouped ACTIVE order. Chain members render flush-left with a
-	// "→" connector rather than indented — a chain is a sequence of peer
-	// stages, not a lineage ladder, so it gets its own glyph instead of
-	// borrowing Depth's.
-	Chained bool
 	// Agent is true when the run was machine-opened — it carries a
 	// MoE-Spawned-By edge. Independent of Depth: nesting disappears when
 	// the spawner is off-board (pruned, capped out of COMPLETED), but the
@@ -186,18 +179,6 @@ type Row struct {
 	// question is "what did the agent add". Historically sound from day
 	// one, because only machine verbs have ever written spawned_by.
 	Agent bool
-	// EdgeAgent is true when the chain edge that placed this row after
-	// its parent was written by a pulse groom rather than an operator
-	// `chain edit`; EdgeConsent carries that groom's ride level. Set on
-	// any row that has a chain edge worth attributing: a Chained member,
-	// a chain head's member list, or a head whose parent has settled —
-	// that last one carries no arrow, but the edge is still the
-	// machine's or the operator's doing.
-	//
-	// Both are empty/false for edges older than the MoE-Consent trailer.
-	// That is *unknown*, not operator — don't render it as one.
-	EdgeAgent   bool
-	EdgeConsent string
 	// Control is the live and control overlay for a run row: owner phase,
 	// hold and pending request ("handed off · waiting for operator"),
 	// observed when the row was gathered. Empty when there is nothing
@@ -348,7 +329,6 @@ func BuildRows(in Inputs) ([]Row, error) {
 		}
 		return rows[i].When.After(rows[j].When)
 	})
-	groupActiveChains(rows, in.Index, byRunKey)
 	rows = nestSpawnedRuns(rows, in.Index)
 	rows = nestPromotedIdeas(rows, in.Index)
 	// Intents ride in from Inputs (not classify — they carry a title read
@@ -415,174 +395,6 @@ func BuildRows(in Inputs) ([]Row, error) {
 		rows = append(rows[:insert], append(choreRows, rows[insert:]...)...)
 	}
 	return rows, nil
-}
-
-// edgeAttribution reports whether a pulse groom placed the parent→child
-// chain edge, and under which ride. A miss is "unknown" — the edge
-// predates the MoE-Consent trailer, or an operator placed it — and both
-// callers render it the same way: as nothing.
-func edgeAttribution(idx *run.JournalIndex, parent, child string) (bool, string) {
-	consent, ok := idx.EdgeConsent[parent+" "+child]
-	return ok, consent
-}
-
-// groupActiveChains reorders the ACTIVE bucket so each chain renders as
-// a contiguous, head-first block, marks the following members so the
-// renderer can draw a connector, and reattaches the textual
-// "· chained → X" hint only for edges adjacency doesn't already show
-// (a fan-in's second parent, or a child that fell out of the active
-// set). A unit head whose chain parent has already settled gets a
-// "· chained after X (merged)" hint and no connector. BACKLOG and
-// COMPLETED rows keep their recency order.
-//
-// rows must already be bucket-then-recency sorted, so the ACTIVE bucket
-// is the leading run of BucketActiveRuns rows.
-func groupActiveChains(rows []Row, idx *run.JournalIndex, byKey map[string]*run.Metadata) {
-	n := 0
-	for n < len(rows) && rows[n].Bucket == BucketActiveRuns {
-		n++
-	}
-	if n == 0 {
-		return
-	}
-	active := rows[:n]
-	keyOf := func(r Row) string { return r.Project + "/" + r.Run }
-
-	// The unit ordering is shared with `chain edit` via run.ChainGraph
-	// — active rows arrive recency-sorted, so the items feed it in order.
-	items := make([]run.ChainOrderItem, n)
-	rowByKey := make(map[string]Row, n)
-	for i, r := range active {
-		k := keyOf(r)
-		items[i] = run.ChainOrderItem{Key: k, When: r.When}
-		rowByKey[k] = r
-	}
-	graph := run.NewChainGraph(idx, byKey)
-	units := graph.Units(items)
-
-	// Emit units head-first. A run past the head of a multi-run unit is
-	// marked Chained, so the renderer draws a flush "→" connector — the
-	// stages are peers rather than a lineage, so they don't indent and
-	// don't touch Depth. A parent whose live child follows it in the
-	// unit has that edge shown adjacently, so it skips the textual hint
-	// below; every other consecutive pair came from the childOf walk, so
-	// "has a successor in its unit" is exactly that set.
-	//
-	// A unit head whose parent has already settled gets the note and no
-	// arrow. The edge outlives its parent and is worth naming, but the
-	// arrow is adjacency-only — it means "chained after the row directly
-	// above", and a settled parent is never that row, because it isn't
-	// an active row at all. An arrow there attaches the head to whatever
-	// unrelated unit floats above it, reading as membership in a thread
-	// the operator may have explicitly pulled it out of. Settled
-	// predecessors are words.
-	shownEdge := make(map[string]bool)
-	i := 0
-	for _, u := range units {
-		for pos, k := range u {
-			row := rowByKey[k]
-			if len(u) >= 2 && pos > 0 {
-				row.Chained = true
-				row.EdgeAgent, row.EdgeConsent = edgeAttribution(idx, u[pos-1], k)
-			}
-			if pos == 0 {
-				if p := graph.TerminalParentOf(k); p != "" {
-					row.Note += settledChainHint(p, byKey[p])
-					row.EdgeAgent, row.EdgeConsent = edgeAttribution(idx, p, k)
-				}
-			}
-			active[i] = row
-			i++
-			if pos+1 < len(u) {
-				shownEdge[k] = true
-			}
-		}
-	}
-
-	// Reattach the textual hint for every active parent whose edge
-	// adjacency doesn't already show.
-	for i := range active {
-		if k := keyOf(active[i]); !shownEdge[k] {
-			active[i].Note += chainHint(idx, byKey[k], byKey)
-		}
-	}
-}
-
-// nestSpawnedRuns threads every completed machine-spawned run (one whose
-// SpawnedBy resolves to another dashboard row) under its spawner, so a
-// run the pulse minted renders as lineage on the sweep that spawned it
-// rather than as a standalone completed row that eats a history slot.
-// General on the edge, not gated on workflow. (Survey runs themselves
-// open top-level — see pulseSurvey — so a sweep folds nowhere; sweeps
-// recorded before that change still carry the edge and keep folding.)
-//
-// A folding row attaches to the nearest top-level ancestor, not just its
-// direct spawner: the SpawnedBy chain is walked upward past ancestors
-// that themselves fold, so a two-hop chain (sdlc-run → pulse → reflect)
-// nests both descendants under the sdlc run rather than dropping the
-// grandchild. Rendering is uniform: the parent followed by its
-// descendants as nested rows in lineage (DFS) order — direct children
-// newest-first, each immediately followed by its own subtree, Depth
-// rising one level per generation — every descendant normalised into
-// the parent's bucket so a still-active parent and its already-closed
-// pulse render in one section.
-//
-// Only completed rows fold. A spawned run that is still open — say a
-// run the sweep kicked whose ride is still walking it — classifies into
-// BucketActiveRuns and stays a top-level ACTIVE row; folding it under a
-// (completed or pushed) parent would hide the very thing the operator is
-// meant to see.
-// But every on-board spawn edge renders either way: an open child's
-// direct spawner gains the same " · spawned → <project>/<slug>" hint on
-// its own row (one per open child, newest-first) while the child runs,
-// which is exactly when clicking through to it is most useful. The two
-// mechanisms are mutually exclusive per child — a child either folds or
-// is hinted — so an edge never renders twice.
-//
-// A row whose spawner chain doesn't resolve to an on-board top-level
-// ancestor — spawner pruned, a standalone `moe pulse new` with no
-// spawner, or a data cycle in SpawnedBy — is left as a normal top-level
-// row. Nested rows never count against CompletedCap — the cap is applied
-// over top-level rows in Render / the serve view.
-//
-// One class of child renders as flow rather than lineage: a run spawned
-// by a chain member. Only historically recorded sweeps hit this path —
-// pulseSurvey no longer stamps the edge — but those carry exactly it: a
-// tail sweep spawned by the run it fired after reads as the next thing
-// that happened on that chain,
-// not as something hanging off it — so it takes the flush "→" connector
-// its neighbours wear instead of the "↳" ladder. That is a Chained
-// mark, not a Depth change: the row stays inside its spawner's block, so
-// the completed cap still admits or evicts the pair together and every
-// walk that keys on Depth is untouched. Both renderers already prefer
-// Chained over Depth, so the glyph swap costs one flag.
-//
-// Only the *direct* children of a chain member splice. A reflect the
-// sweep parked hangs off the sweep, which is not on any chain, so it
-// keeps its ladder rung — and a sweep spawned outside a chain entirely
-// (a manual `moe pulse new`, an unchained ship) keeps today's fold.
-//
-// Returns a new slice: folding rows are pulled from their natural slots
-// and re-emitted under their ancestor, preserving the incoming bucket-
-// then-recency order for every unaffected row.
-// chainMembership is the set of runs that appear on a recorded chain, at
-// either end of an edge. Deliberately the raw trailer state rather than
-// run.ChainGraph's live edge set: ChainGraph drops edges to settled
-// children so a ride's ordering can't resurrect finished work, which is
-// right for every question about what runs next and wrong for the only
-// question asked here — where a finished run *sat* while the ride walked
-// it. A cleared edge ("" value) names no child and puts neither end on a
-// chain.
-func chainMembership(idx *run.JournalIndex) map[string]bool {
-	on := make(map[string]bool, len(idx.ChainedChild)*2)
-	for parent, child := range idx.ChainedChild {
-		if child == "" {
-			continue
-		}
-		on[parent] = true
-		on[child] = true
-	}
-	return on
 }
 
 func nestSpawnedRuns(rows []Row, idx *run.JournalIndex) []Row {
@@ -673,34 +485,12 @@ func nestSpawnedRuns(rows []Row, idx *run.JournalIndex) []Row {
 	if len(directChildren) == 0 && len(openKids) == 0 {
 		return rows
 	}
-	// splices reports whether child row ci renders as chain flow rather
-	// than lineage — its direct spawner sits on a chain. Recorded edges,
-	// not live ones: by the time a ride's tail sweep is on the board every
-	// member it rode has settled, and the live edge set drops those.
-	onChain := chainMembership(idx)
-	splices := func(ci int) bool { return onChain[idx.SpawnedBy[rows[ci].Project+"/"+rows[ci].Run]] }
 	out := make([]Row, 0, len(rows))
 	var emitSubtree func(i int, bucket Bucket, depth int)
 	emitSubtree = func(i int, bucket Bucket, depth int) {
-		// Spliced children lead: they read as "and then this happened",
-		// so anything else hanging off the same spawner has to come after
-		// or the arrow points at the wrong row.
-		kids := directChildren[i]
-		ordered := make([]int, 0, len(kids))
-		for _, ci := range kids {
-			if splices(ci) {
-				ordered = append(ordered, ci)
-			}
-		}
-		for _, ci := range kids {
-			if !splices(ci) {
-				ordered = append(ordered, ci)
-			}
-		}
-		for _, ci := range ordered {
+		for _, ci := range directChildren[i] {
 			m := rows[ci]
 			m.Depth = depth
-			m.Chained = splices(ci)
 			m.Bucket = bucket
 			m.Note += openHints(ci)
 			out = append(out, m)
@@ -983,14 +773,6 @@ func classify(md *run.Metadata, byRunKey map[string]*run.Metadata, idx *run.Jour
 			runningDoc := winningRunningDoc(openSessionDocs, dec.Stage)
 			return BucketActiveRuns, prefix + dec.Stage + openSessionMarker(runningDoc, dec.Stage), dec.Stage, runningDoc
 		}
-		if md.Workflow == ChainWorkflow && run.ChainChildLive(idx.ChainedChild[runKey], byRunKey) {
-			// A loaded chain head. It is trivially "done" (it has no
-			// stages at all), but the operator verb is kick — close
-			// would drop the batch's collection point without riding
-			// it. A spent or empty head falls through to `close?`,
-			// which is honest: there's nothing left to ride.
-			return BucketActiveRuns, prefix + "parked · kick?", "done", ""
-		}
 		// The run has walked every stage but isn't terminal yet — it
 		// still needs an operator action (`moe <wf> close`) to land in
 		// COMPLETED. Keep it in ACTIVE with a `· close?` action hint,
@@ -1001,34 +783,6 @@ func classify(md *run.Metadata, byRunKey map[string]*run.Metadata, idx *run.Jour
 	}
 	runningDoc := winningRunningDoc(openSessionDocs, dec.Stage)
 	return BucketActiveRuns, prefix + dec.Stage + openSessionMarker(runningDoc, dec.Stage), dec.Stage, runningDoc
-}
-
-// chainHint renders the trailing " · chained → <project>/<slug>"
-// action hint for an in-progress run whose live chain edge points at
-// an unresolved child. Returns "" when there's no edge, the child slug
-// is malformed, the child is missing from disk, or the child is in a
-// terminal state (Decision 1 — terminal children are filtered at read
-// time).
-func chainHint(idx *run.JournalIndex, md *run.Metadata, byRunKey map[string]*run.Metadata) string {
-	childKey := idx.ChainedChild[md.Project+"/"+md.ID]
-	if !run.ChainChildLive(childKey, byRunKey) {
-		return ""
-	}
-	return " · chained → " + childKey
-}
-
-// settledChainHint renders the note for a row whose chain parent has
-// already settled — the incoming half of chainHint, which only ever
-// names live outgoing edges.
-//
-// Words rather than a "←" glyph: the rows around it already carry "→"
-// connectors, and two arrows pointing opposite ways on the same board
-// invite reading one of them backwards.
-func settledChainHint(parentKey string, parent *run.Metadata) string {
-	if parent == nil {
-		return ""
-	}
-	return " · chained after " + parentKey + " (" + parent.Status + ")"
 }
 
 // winningRunningDoc picks the open-session doc that "wins" the row's
@@ -1307,15 +1061,8 @@ func nestPrefix(depth int) string {
 	return strings.Repeat("  ", depth-1) + "↳ "
 }
 
-// rowPrefix is what a row carries in front of its slug. A chained row
-// gets a flush "→" — it follows the row above in a planned sequence, not
-// under it — while lineage keeps the indented "↳" ladder. In monospace
-// the connector *is* the indent, so the distinct glyph is what separates
-// the two relationships on the CLI.
+// rowPrefix is what a row carries in front of its slug: the lineage ladder.
 func rowPrefix(r Row) string {
-	if r.Chained {
-		return "→ "
-	}
 	return nestPrefix(r.Depth)
 }
 

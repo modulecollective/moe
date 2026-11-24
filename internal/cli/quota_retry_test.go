@@ -139,7 +139,7 @@ func TestClockSurveyQuotaDisposalAndRestart(t *testing.T) {
 				return quota(99, reset), nil
 			}
 			var log bytes.Buffer
-			code, interrupted := runPulse(root, "tele", "", io.Discard, &log)
+			code, interrupted := runPulse(root, "", io.Discard, &log)
 			want := exitQuotaDeferred
 			if unavailable {
 				want = 1
@@ -152,7 +152,7 @@ func TestClockSurveyQuotaDisposalAndRestart(t *testing.T) {
 				t.Fatalf("runs=%v err=%v: %s", mds, err, &log)
 			}
 			md := mds[0]
-			body, err := os.ReadFile(filepath.Join(root, run.ContentPath("tele", md.ID, pulseDoc)))
+			body, err := os.ReadFile(filepath.Join(root, run.ContentPath(project.RootID, md.ID, pulseDoc)))
 			if err != nil || !strings.Contains(string(body), "No survey started") || strings.Contains(string(body), "agent fills") {
 				t.Fatalf("canvas=%s err=%v", body, err)
 			}
@@ -173,14 +173,14 @@ func TestClockSurveyQuotaDisposalAndRestart(t *testing.T) {
 				}
 				return
 			}
-			token := "tele/" + md.ID
+			token := project.RootID + "/" + md.ID
 			retry, ok := idx.QuotaRetries[token]
 			if !ok || !retry.NotBefore.Equal(reset.Add(cooldownResetSlack)) || len(retry.Targets) != 1 || retry.Targets[0].Stage != pulseDoc {
 				t.Fatalf("retry=%+v", retry)
 			}
 			g := newHeartbeatGate(root)
 			sc := mustPulseScan(t, root)
-			p, err := project.Load(root, "tele")
+			p, err := project.Load(root, project.RootID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -188,11 +188,11 @@ func TestClockSurveyQuotaDisposalAndRestart(t *testing.T) {
 				t.Fatalf("future retry: due=%v %s", due, why)
 			}
 			// The retry leg outranks a clean cursor and needs no parked run.
-			g.Swept("tele", true)
+			g.Swept(project.RootID, true)
 			if due, _, why := g.projectDue(sc, p, map[string]bool{}, 0, retry.NotBefore); !due {
 				t.Fatalf("due retry hidden: %s", why)
 			}
-			if due, held, _ := g.projectDue(sc, p, map[string]bool{"tele": true}, 0, retry.NotBefore); due || !held {
+			if due, held, _ := g.projectDue(sc, p, map[string]bool{project.RootID: true}, 0, retry.NotBefore); due || !held {
 				t.Fatal("retry ignored occupancy")
 			}
 			p.Mode = string(project.ModePaused)
@@ -205,7 +205,7 @@ func TestClockSurveyQuotaDisposalAndRestart(t *testing.T) {
 			openPulse = func(projectID, runID string, _ bool, _ *pulseInterrupt, _, _ io.Writer) surveyOutcome {
 				return surveyOutcome{code: 1, agentStarted: true}
 			}
-			if code, _ := runPulse(root, "tele", "", io.Discard, &log); code != 1 {
+			if code, _ := runPulse(root, "", io.Discard, &log); code != 1 {
 				t.Fatalf("failed retry code=%d", code)
 			}
 			idx, _ = run.BuildJournalIndex(root)
@@ -217,7 +217,7 @@ func TestClockSurveyQuotaDisposalAndRestart(t *testing.T) {
 				return surveyOutcome{agentStarted: true}
 			}
 			t.Cleanup(func() { openPulse = prevOpen })
-			if code, _ := runPulse(root, "tele", "", io.Discard, &log); code != 0 {
+			if code, _ := runPulse(root, "", io.Discard, &log); code != 0 {
 				t.Fatalf("clean retry code=%d: %s", code, &log)
 			}
 			idx, _ = run.BuildJournalIndex(root)
@@ -366,80 +366,6 @@ type quotaTestAgent struct {
 }
 
 func (a *quotaTestAgent) ExecuteOneShot(r agent.OneShotRequest) (string, error) { return a.exec(r) }
-
-func TestClockRideDefersOneThreadAndRunsAnotherBackend(t *testing.T) {
-	for _, failure := range []bool{false, true} {
-		t.Run(map[bool]string{false: "deferred", true: "mixed failure"}[failure], func(t *testing.T) {
-			root := newTestBureaucracy(t)
-			markBureaucracy(t, root)
-			seedSdlcOneShotProject(t, root, "moe")
-			t.Setenv("MOE_HOME", root)
-			t.Setenv("MOE_FORCE_AGENT", "")
-			t.Chdir(root)
-			defer withClockInvoked()()
-			defer withRideMode(rideDynamic)()
-			minted := groomFixture(t, root, "blocked", "behind-blocked", "healthy")
-			for _, slug := range []string{"blocked", "behind-blocked", "healthy"} {
-				md, _ := run.Load(root, "moe", minted[slug])
-				md.Agent = "quota-blocked"
-				if slug == "healthy" {
-					md.Agent = "quota-healthy"
-				}
-				if err := run.Save(root, md); err != nil {
-					t.Fatal(err)
-				}
-			}
-			gittest.Run(t, root, "add", "projects/moe/runs")
-			gittest.Run(t, root, "commit", "-m", "choose backends")
-			groomed := groomChains(root, "moe", "pulse-groom", []groomGroup{{Runs: runsFrom("blocked", "behind-blocked")}, {Runs: runsFrom("healthy")}}, nil, io.Discard)
-			var executed []string
-			a := &quotaTestAgent{exec: func(r agent.OneShotRequest) (string, error) {
-				doc := filepath.Base(r.SessionCwd)
-				executed = append(executed, doc)
-				if failure {
-					return "", errors.New("real agent failure")
-				}
-				if doc == "build" {
-					writeStampedBuild(t, r.Root, &run.Metadata{Project: "moe", ID: minted["healthy"]})
-					return "", nil
-				}
-				return "", os.WriteFile(filepath.Join(r.Root, run.ContentPath("moe", minted["healthy"], doc)), []byte("# Completed "+doc+"\n"), 0644)
-			}}
-			agent.Register("quota-healthy", a)
-			agent.Register("quota-blocked", a)
-			t.Cleanup(func() { agent.Unregister("quota-healthy"); agent.Unregister("quota-blocked") })
-			prev := readStageQuota
-			var reads []string
-			readStageQuota = func(_ context.Context, name, _ string, _ []string) (agent.Quota, error) {
-				reads = append(reads, name)
-				if name == "quota-blocked" {
-					return quota(99, time.Now().Add(time.Hour)), nil
-				}
-				return quota(94, time.Time{}), nil
-			}
-			t.Cleanup(func() { readStageQuota = prev })
-			prevGate := checkCascadeStageGate
-			checkCascadeStageGate = func(*Workflow, *run.Metadata, string, io.Writer) (bool, int) { return true, 0 }
-			t.Cleanup(func() { checkCascadeStageGate = prevGate })
-			stubPushFromCascade(t, 0, nil)
-			var out bytes.Buffer
-			code := pulseSelfKick(root, groomed, &out, &out)
-			want, turns := exitQuotaDeferred, 3
-			if failure {
-				want, turns = 1, 1
-			}
-			if code != want || len(executed) != turns || len(reads) != turns+1 || reads[0] != "quota-blocked" || reads[1] != "quota-healthy" {
-				t.Fatalf("code=%d executed=%v reads=%v: %s", code, executed, reads, &out)
-			}
-			if !strings.Contains(out.String(), "deferred for quota") {
-				t.Fatalf("cascade misreported deferral: %s", &out)
-			}
-			if stage := openSessionStage(root, groomed.byKey["moe/"+minted["blocked"]]); stage != "" {
-				t.Fatalf("blocked reservation survived at %s", stage)
-			}
-		})
-	}
-}
 
 func TestCIRepairClaimsAfterQuotaAdmission(t *testing.T) {
 	for _, scenario := range []string{"blocked", "review blocked", "occupied", "moved"} {

@@ -88,7 +88,7 @@ func TestVerbsRefuseARunAnotherInvocationOwns(t *testing.T) {
 			return code
 		},
 		"chain-kick": func(stdout, stderr io.Writer) int {
-			return chainKickRun(root, "moe", "held", rideStatic, false, stdout, stderr)
+			return rideRun(root, "moe", "held", rideDynamic, false, stdout, stderr)
 		},
 	} {
 		t.Run(name, func(t *testing.T) {

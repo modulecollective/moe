@@ -975,31 +975,9 @@ type JournalIndex struct {
 	LastActivity map[string]time.Time
 	// LastOperatorActivity is the latest commit the machine did not
 	// write that names the run: a run-scoped commit carrying neither
-	// MoE-Consent nor MoE-Spawned-By, or an equally unstamped chain
-	// commit naming the run as an edge endpoint. Same key, same
-	// first-commit-wins rule, and a missing key reads as the zero time —
-	// "nobody has touched this run by hand".
-	//
-	// The chain arm is why this is not a strict narrowing of
-	// LastActivity: `moe chain edit` and `moe chain clear` are operator
-	// acts that move a thread, and they commit without a MoE-Run trailer
-	// (one edit touches several parents), so a run's operator time can
-	// postdate its own LastActivity. Nothing compares the two —
-	// threadOperatorTouch (pulse_kick.go) is this map's only consumer,
-	// and LastActivity stays what the age surfaces mean by it: work
-	// landing on the run, not thread bookkeeping.
-	//
-	// The exclusion is machineAuthored's (heartbeat.go), which is what
-	// the quiet window already calls operator-authored, so absence of
-	// both stamps folds to "operator" here exactly as it does there.
-	// The reap hold's release rule is the consumer that needs the
-	// narrowing: the reap's own tombstone is a run-scoped journal commit
-	// landing after the note it writes, so a plain LastActivity
-	// comparison would release the hold in the tick that armed it.
-	//
-	// Only as good as the stamps, same as machineAuthored: an unstamped
-	// machine emit site reads as the operator here. walkConsent
-	// (ridemode.go) is the discipline that keeps that honest.
+	// MoE-Consent nor MoE-Spawned-By. Same key, same first-commit-wins
+	// rule, and a missing key reads as the zero time — "nobody has touched
+	// this run by hand".
 	LastOperatorActivity map[string]time.Time
 	// PromotedTo maps "<project>/<slug>" → MoE-Promoted-To trailer
 	// value (`<project>/<runID>`) recorded on the most recent commit
@@ -1048,23 +1026,6 @@ type JournalIndex struct {
 	// keep it off the completed-history cap. The pulse a close/push tails is
 	// its first consumer.
 	SpawnedBy map[string]string
-	// ChainedChild maps "<project>/<slug>" of a parent run to
-	// "<project>/<slug>" of its currently-live chained child, or
-	// to "" if the most recent chain-related commit cleared the
-	// parent's edge. Absent keys mean the parent has never had a
-	// chain trailer. Three-valued by design so a newer chain-clear
-	// commit blocks an older chain-edit from re-asserting an edge —
-	// the entry pins the verdict either way.
-	//
-	// Read-side rule for "is this parent currently chained?":
-	// `v, ok := ChainedChild[parent]; ok && v != ""`. Built from
-	// MoE-Chained-To / MoE-Chained-To-Removed trailers, walked HEAD-
-	// first; first commit touching a parent decides its live state.
-	// Within one commit, MoE-Chained-To beats MoE-Chained-To-Removed
-	// for the same parent (a `chain edit` save naturally pairs a
-	// remove of the prior edge with the add of the new one, and the
-	// add is the survivor).
-	ChainedChild map[string]string
 	// SpawnConsent maps "<project>/<slug>" of a machine-opened run → the
 	// MoE-Consent value on its open commit ("none" | "static" |
 	// "dynamic"): the ride level the operator had licensed when the
@@ -1103,21 +1064,10 @@ type JournalIndex struct {
 	PromoteConsent map[string]string
 	// PushConsent maps "<project>/<slug>" → the MoE-Consent value on the
 	// run's push record — the consent level the ladder shipped under.
-	// Present only when a machine walk (a bang cascade, a chain kick)
+	// Present only when a machine walk (a bang cascade, a pulse ride)
 	// drove the push; an operator `moe push` stamps nothing. Same
 	// absence-is-unknown rule as SpawnConsent.
 	PushConsent map[string]string
-	// EdgeConsent maps a live chain edge — keyed "<parent> <child>" with
-	// both legs qualified, the pair shape splitChainPair reads — to the
-	// MoE-Consent value of the commit that placed it. Present only for
-	// edges a pulse groom placed and that no later commit has re-decided.
-	//
-	// Populated inside the same HEAD-first walk that decides
-	// ChainedChild, so attribution follows the identical latest-wins
-	// discipline: an edge re-placed by a later operator `chain edit`
-	// loses its machine attribution, because the operator's commit is
-	// the one that decides the parent and it carries no consent.
-	EdgeConsent map[string]string
 	// ChoreByRun maps "<project>/<slug>" to "<project>/<chore>" for
 	// runs opened by `moe chore open`.
 	ChoreByRun map[string]string
@@ -1228,16 +1178,11 @@ type journalMemoEntry struct {
 
 // buildJournalIndex is the uncached walk BuildJournalIndex memoizes.
 func buildJournalIndex(root string) (*JournalIndex, error) {
-	// Two --grep patterns are OR'd by default. The widening pulls in
-	// chain-edit / chain-clear commits, which carry no MoE-Run trailer
-	// (one edit touches several parents — no single canonical run to
-	// scope it to) and would otherwise be invisible to the existing
-	// MoE-Run-only filter.
+	// --grep patterns are OR'd by default.
 	out, err := git.Output(root,
 		"log",
 		"--grep", "^MoE-Run: ",
 		"--grep", "^MoE-Chore",
-		"--grep", "^MoE-Chained-To",
 		"--grep", "^MoE-Quota-Retry:",
 		"--format=%ct%x00%B%x1e",
 	)
@@ -1272,17 +1217,6 @@ type journalCommit struct {
 	choreTouched []string
 	ciRepair     *CIRepairAttempt
 	quotaRetry   *QuotaRetry
-	// Per-commit chain verdicts. chainAdd wins over chainRemove for the
-	// same parent within one commit (an edit save pairs a remove of the
-	// prior edge with an add of the new one; the new edge is the live
-	// state). First add wins on duplicate Chained-To lines for the same
-	// parent — linear-chain invariant says there should only be one,
-	// but pick a deterministic survivor regardless.
-	chainAdd, chainRemove map[string]string
-	// Both endpoints of every chain line on this commit, in the
-	// qualified "<project>/<slug>" form the run-scoped maps key by.
-	// Duplicates are harmless — every fold below is first-wins.
-	chainEndpoints []string
 }
 
 // runKey is the qualified key the run-scoped maps use. Slugs are only
@@ -1377,30 +1311,6 @@ func parseJournalCommit(record string) (c journalCommit, ok bool, err error) {
 			if touched := strings.TrimSpace(v); touched != "" {
 				c.choreTouched = append(c.choreTouched, touched)
 			}
-		case "MoE-Chained-To-Removed":
-			parent, child, ok := splitChainPair(v)
-			if !ok {
-				continue
-			}
-			c.chainEndpoints = append(c.chainEndpoints, parent, child)
-			if c.chainRemove == nil {
-				c.chainRemove = make(map[string]string)
-			}
-			if _, dup := c.chainRemove[parent]; !dup {
-				c.chainRemove[parent] = ""
-			}
-		case "MoE-Chained-To":
-			parent, child, ok := splitChainPair(v)
-			if !ok {
-				continue
-			}
-			c.chainEndpoints = append(c.chainEndpoints, parent, child)
-			if c.chainAdd == nil {
-				c.chainAdd = make(map[string]string)
-			}
-			if _, dup := c.chainAdd[parent]; !dup {
-				c.chainAdd[parent] = child
-			}
 		}
 	}
 	return c, true, nil
@@ -1449,8 +1359,6 @@ func newJournalWalk() *journalWalk {
 			OpenConsent:          make(map[string]string),
 			PromoteConsent:       make(map[string]string),
 			PushConsent:          make(map[string]string),
-			ChainedChild:         make(map[string]string),
-			EdgeConsent:          make(map[string]string),
 			ChoreByRun:           make(map[string]string),
 			ChoreTouched:         make(map[string]time.Time),
 			ChoreSkipped:         make(map[string]time.Time),
@@ -1465,7 +1373,6 @@ func newJournalWalk() *journalWalk {
 // MoE-Run trailer, so their steps run before the slug gate; everything
 // after it is run-scoped.
 func (w *journalWalk) fold(c *journalCommit) {
-	w.foldChain(c)
 	w.foldChores(c)
 	w.foldQuota(c)
 	if c.slug == "" {
@@ -1475,45 +1382,6 @@ func (w *journalWalk) fold(c *journalCommit) {
 	w.foldActivity(c)
 	w.foldProvenance(c)
 	w.foldTurns(c)
-}
-
-func (w *journalWalk) foldChain(c *journalCommit) {
-	idx := w.idx
-	for parent, child := range c.chainAdd {
-		if _, decided := idx.ChainedChild[parent]; decided {
-			continue
-		}
-		idx.ChainedChild[parent] = child
-		// Attribution rides the same decision: only the commit that
-		// wins the parent gets to say who placed the edge. An
-		// unstamped (operator) commit therefore leaves no entry, and
-		// an older groom underneath it can't re-assert one.
-		if c.consent != "" {
-			idx.EdgeConsent[parent+" "+child] = c.consent
-		}
-	}
-	for parent := range c.chainRemove {
-		if _, decided := idx.ChainedChild[parent]; decided {
-			continue
-		}
-		idx.ChainedChild[parent] = ""
-	}
-	// A chain commit the machine did not stamp is `moe chain edit`
-	// or `moe chain clear` — the operator rearranging the board by
-	// hand — so it counts as a touch on every run it names. Chain
-	// commits carry no MoE-Run trailer, so without this the one
-	// operator act that plainly moves a thread would leave
-	// LastOperatorActivity untouched, and the reap hold would keep
-	// holding a thread the operator had just reordered. Same
-	// exclusion and same first-wins rule as foldActivity's run-scoped
-	// arm.
-	if c.operatorAuthored() {
-		for _, key := range c.chainEndpoints {
-			if _, ok := idx.LastOperatorActivity[key]; !ok {
-				idx.LastOperatorActivity[key] = c.when
-			}
-		}
-	}
 }
 
 func (w *journalWalk) foldChores(c *journalCommit) {
@@ -1726,24 +1594,6 @@ func (w *journalWalk) finish() *JournalIndex {
 // Document: push is stage traffic on the way there.
 func isPushRecordSubject(subject string) bool {
 	return strings.HasPrefix(subject, "push: ") || strings.HasPrefix(subject, "sync: ")
-}
-
-// splitChainPair splits a MoE-Chained-To / -Removed trailer value into
-// its parent and child halves. The wire format is two whitespace-
-// separated "<project>/<slug>" tokens (project leg required since
-// slugs are per-project unique, not bureaucracy-unique). Returns
-// ok=false on malformed input — caller should ignore the line rather
-// than fail the whole index build, the same posture other trailer
-// parsing here takes.
-func splitChainPair(v string) (parent, child string, ok bool) {
-	f := strings.Fields(v)
-	if len(f) != 2 {
-		return "", "", false
-	}
-	if !strings.Contains(f[0], "/") || !strings.Contains(f[1], "/") {
-		return "", "", false
-	}
-	return f[0], f[1], true
 }
 
 // LastFileActivity returns the committer time of the most recent commit

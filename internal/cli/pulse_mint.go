@@ -4,153 +4,58 @@ import (
 	"errors"
 	"io"
 	"regexp"
-	"sort"
 	"strings"
 
 	"github.com/modulecollective/moe/internal/dash"
-	"github.com/modulecollective/moe/internal/input"
+	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
-// applyPulseGate opens every run the gate's specs describe and hands
-// back the groom groups its threads imply. Two walks over one minter, in
-// document order — `loose` first, then each thread's `runs` — so a slug
-// proposed twice in one gate hits the dedupe rather than minting a dated
-// sibling.
-//
-// Both spellings of a thread entry reach the minter: an object spec
-// mints, and a string names a parked run — which may be a tagged idea,
-// and then promotion is what "opens" it. Only the string that resolves
-// to nothing promotable travels on as a slug for the groom.
-//
-// A minted run travels onward as its own run id rather than as a name in
-// a shared namespace. That is the whole of the alias map's replacement:
-// the gate's two lists used to name each other by slug, so the mapping
-// had to exist, and every write into it was last-write-wins.
+// applyPulseGate opens the runs the gate's `loose` list describes, each in
+// the project its slug names, and returns the ids it minted keyed by the
+// slug the survey wrote, so `next` can name a run this same gate opened.
 //
 // Warn-only throughout: a spec that can't be minted drops with a stderr
-// line and the rest of the sweep carries on. The report and filings are
-// already durable, so a failed mint is a spawn-by-hand-later, not a lost
-// sweep.
-func applyPulseGate(root, projectID, pulseSlug string, gate pulseGate, stdout, stderr io.Writer) []groomGroup {
-	m := &pulseMinter{root: root, projectID: projectID, pulseSlug: pulseSlug}
+// line, and the report and filings are already durable.
+func applyPulseGate(root, pulseSlug string, gate pulseGate, stdout, stderr io.Writer) map[string]string {
+	minted := map[string]string{}
+	minters := map[string]*pulseMinter{}
+	spawnedBy := project.RootID + "/" + pulseSlug
 	for _, spec := range gate.Loose {
-		m.mint(spec, stdout, stderr)
-	}
-	groups := make([]groomGroup, 0, len(gate.Threads))
-	for _, th := range gate.Threads {
-		grp := groomGroup{Onto: th.Onto, Head: th.Head, Park: th.Park}
-		repair := false
-		for _, entry := range th.Runs {
-			repair = repair || entry.Repair != ""
+		target := spec.Slug
+		if strings.TrimSpace(spec.Chore) != "" {
+			target = spec.Chore
 		}
-		if repair {
-			if len(th.Runs) != 1 || th.Onto != "" || th.Head != "" {
-				moePrintf(stderr, "pulse: CI repair must be a singleton group without onto or head — skipping\n")
-				continue
-			}
-			grp.Repair = th.Runs[0].Existing
-			groups = append(groups, grp)
+		projectID, bare, err := splitProjectRun(strings.TrimSpace(target))
+		if err != nil {
+			moePrintf(stderr, "pulse: spawn: entry %q must be <project>/<slug> — skipping\n", target)
 			continue
 		}
-		for _, entry := range th.Runs {
-			if entry.Spec == nil {
-				// A string entry names "any parked run in the project", and a
-				// tagged idea is one — the survey that nominated all three
-				// parked ideas on 2026-08-13 spelled every entry this way and
-				// the groom dropped all three, because resolveMember admits
-				// only chainable runs. So promotion gets its turn here too:
-				// the grammar offers two spellings and both have to work.
-				// Anything that isn't a promotable idea falls through to the
-				// slug it always was — an ordinary parked run is the common
-				// case and stays the groom's to resolve.
-				if id, _ := m.promoteIfTaggedIdea(entry.Existing, pulseRunSpec{Why: "named at a thread position"}, true /*atThread*/, stdout, stderr); id != "" {
-					grp.Runs = append(grp.Runs, groomMember{mintedID: id})
-					// A ping lands only on a run that already existed when the
-					// survey wrote the gate. A promotion mints a different
-					// run than the one the question was written against, so
-					// the ask drops with a line rather than landing somewhere
-					// the survey never looked.
-					if entry.Ask != "" {
-						moePrintf(stderr, "pulse: input: %s promoted to %s — question dropped\n", entry.Existing, id)
-					}
-					continue
-				}
-				grp.Runs = append(grp.Runs, groomMember{slug: entry.Existing})
-				if entry.Ask != "" {
-					askThreadEntry(root, projectID, pulseSlug, entry.Existing, entry.Ask, stderr)
-				}
-				continue
-			}
-			// Design-only is loose-only. Such a root is unsettled by
-			// definition until the operator advances it, so heading a
-			// thread with one would strand every member behind an
-			// unwritten design — the exact shape the held-head groom
-			// exists to undo, proposed on purpose. Skipped here rather
-			// than in mint because only the caller knows the position.
-			if entry.Spec.DesignOnly {
-				moePrintf(stderr, "pulse: spawn: entry %q asks for design_only at a thread position — a design-only root strands the runs behind it; put it in loose. Skipping\n", entry.Spec.Slug)
-				continue
-			}
-			// Mint in place. A spec that fails leaves a hole in the order
-			// rather than shifting the rest — the warn line names it, and
-			// the runs around it keep the positions the survey gave them.
-			if id := m.mint(*entry.Spec, stdout, stderr); id != "" {
-				grp.Runs = append(grp.Runs, groomMember{mintedID: id})
-			}
+		if projectID == project.RootID {
+			moePrintf(stderr, "pulse: spawn: entry %q names the root project, which has no source — skipping\n", target)
+			continue
 		}
-		groups = append(groups, grp)
-	}
-	return groups
-}
-
-// promoteTaggedIdeas promotes every live tagged idea the gate left
-// unpromoted. It is the harness's half of what a workflow tag means
-// under dynamic consent: the tag is the operator saying "start this",
-// so whether it starts is not the survey's call. The survey can still
-// order one (name it at a thread position) or hold it (a `park` on that
-// thread) — both through applyPulseGate, which runs first, so an idea
-// the gate already promoted has left the scan by the time this looks.
-//
-// Promotion used to wait on the survey naming the idea, and two sweeps
-// on 2026-11-15 read the tag commits and named nothing. A default that
-// needs the survey to spend confidence drifts toward stillness — the
-// lesson pulseSelfKick learned one layer down.
-//
-// Every promotion goes through promoteIfTaggedIdea, the seam both gate
-// grammars share, so the destination is the ordinary machine spawn the
-// kick floor admits. Id order keeps a multi-idea sweep deterministic.
-// Warn-only like the rest of the sweep: a failed scan or a refused
-// promotion costs a stderr line — including an idea whose slug a second
-// live run already holds, which the seam leaves its caller to name — and
-// the next dynamic sweep tries again.
-//
-// Only under dynamic consent, the one door to machine-rooted motion: a
-// hand-typed `moe pulse new` keeps promoting only what its gate names.
-func promoteTaggedIdeas(root, projectID, pulseSlug string, stdout, stderr io.Writer) {
-	if currentRideMode != rideDynamic {
-		return
-	}
-	mds, err := run.Scan(root)
-	if err != nil {
-		moePrintf(stderr, "pulse: promote: scan runs for %s: %v\n", projectID, err)
-		return
-	}
-	var ids []string
-	for _, md := range mds {
-		if md.Project == projectID && md.Workflow == dash.IdeaWorkflow && md.Status == run.StatusInProgress && md.PromoteTo != "" {
-			ids = append(ids, md.ID)
+		if err := requireProject(root, projectID); err != nil {
+			moePrintf(stderr, "pulse: spawn: entry %q: %v — skipping\n", target, err)
+			continue
+		}
+		m := minters[projectID]
+		if m == nil {
+			m = &pulseMinter{root: root, projectID: projectID, spawnedBy: spawnedBy}
+			minters[projectID] = m
+		}
+		if strings.TrimSpace(spec.Chore) != "" {
+			spec.Chore = bare
+		} else {
+			spec.Slug = bare
+		}
+		if id := m.mint(spec, stdout, stderr); id != "" {
+			minted[projectID+"/"+bare] = id
 		}
 	}
-	sort.Strings(ids)
-	m := &pulseMinter{root: root, projectID: projectID, pulseSlug: pulseSlug}
-	for _, id := range ids {
-		if _, dup := m.promoteIfTaggedIdea(id, pulseRunSpec{}, false /*atThread*/, stdout, stderr); dup {
-			sayWhyTaggedIdeaStayed(root, projectID, id, stderr)
-		}
-	}
+	return minted
 }
 
 // sayWhyTaggedIdeaStayed names the live run that kept a tagged idea from
@@ -178,37 +83,6 @@ func sayWhyTaggedIdeaStayed(root, projectID, id string, stderr io.Writer) {
 		projectID, id, strings.Join(siblings, ", "), projectID, id)
 }
 
-// askThreadEntry opens the survey's ping on the run sitting at this
-// thread position. Warn-only, like everything else in applyPulseGate: a
-// refused ask costs the operator a stderr line and the next sweep's
-// attention, nothing more.
-//
-// It holds nothing, deliberately. A survey that needs the answer before
-// the work writes the thread's `park` too — the two are separate acts,
-// so a question the work need not wait for is still askable.
-//
-// The refusals are the design's scope fence made mechanical. A chain
-// placeholder has no agent turn to deliver the answer to, so it is not
-// somewhere a question can usefully live; input.Ask covers the rest —
-// a terminal run, an empty question, a run that already has one open.
-func askThreadEntry(root, projectID, pulseSlug, slug, question string, stderr io.Writer) {
-	md, err := run.Load(root, projectID, slug)
-	if err != nil {
-		moePrintf(stderr, "pulse: input: %s/%s: %v\n", projectID, slug, err)
-		return
-	}
-	if md.Workflow == chainWorkflow {
-		moePrintf(stderr, "pulse: input: %s/%s is a chain head — no stage to deliver an answer to; question dropped\n", projectID, slug)
-		return
-	}
-	e, err := input.Ask(root, projectID, slug, projectID+"/"+pulseSlug, question, walkConsent())
-	if err != nil {
-		moePrintf(stderr, "pulse: input: %s/%s: %v\n", projectID, slug, err)
-		return
-	}
-	moePrintf(stderr, "pulse: input: asked %s/%s#%d — %s\n", projectID, slug, e.ID, e.Question)
-}
-
 // pulseMinter opens the runs one sweep's gate asks for. It holds the
 // live-slug dedupe set across the whole gate, scanning once on first
 // use, and claims each base it mints so a repeat proposal in the same
@@ -216,7 +90,8 @@ func askThreadEntry(root, projectID, pulseSlug, slug, question string, stderr io
 type pulseMinter struct {
 	root      string
 	projectID string
-	pulseSlug string
+	// spawnedBy is the sweep's qualified run, the lineage every mint carries.
+	spawnedBy string
 	live      []string
 	scanned   bool
 	broken    bool
@@ -244,8 +119,7 @@ type pulseMinter struct {
 // through the same seam as `--from-idea`. Untagged ideas remain behind a
 // structural human-triage fence. Every other live match still skips.
 func (m *pulseMinter) mint(s pulseRunSpec, stdout, stderr io.Writer) string {
-	projectID, pulseSlug := m.projectID, m.pulseSlug
-	spawnedBy := projectID + "/" + pulseSlug
+	projectID, spawnedBy := m.projectID, m.spawnedBy
 
 	// A chore nomination names a registration, not a slug to mint, so it
 	// dispatches ahead of the slug validation the sdlc path applies.
@@ -365,7 +239,7 @@ func (m *pulseMinter) nominateChore(name string, s pulseRunSpec, stderr io.Write
 // `--from-idea` uses. Everything else already has this work in flight
 // and skips.
 func (m *pulseMinter) promoteOrSkip(slug string, s pulseRunSpec, stdout, stderr io.Writer) string {
-	id, dup := m.promoteIfTaggedIdea(slug, s, false /*atThread*/, stdout, stderr)
+	id, dup := m.promoteIfTaggedIdea(slug, s, stdout, stderr)
 	if dup {
 		moePrintf(stderr, "pulse: spawn: %s already has a live run for %q — skipping\n", m.projectID, slug)
 	}
@@ -386,12 +260,8 @@ func (m *pulseMinter) promoteOrSkip(slug string, s pulseRunSpec, stdout, stderr 
 // here. Every other refusal (an unreadable scan, an untagged idea, an
 // unusable tag, a design-only idea at a thread position, a failed
 // promotion) has already warned by the time this returns "".
-//
-// atThread says the caller is applyPulseGate's string-entry branch,
-// which is a position a design-only root can't hold.
-func (m *pulseMinter) promoteIfTaggedIdea(slug string, s pulseRunSpec, atThread bool, stdout, stderr io.Writer) (id string, dup bool) {
-	projectID, pulseSlug := m.projectID, m.pulseSlug
-	spawnedBy := projectID + "/" + pulseSlug
+func (m *pulseMinter) promoteIfTaggedIdea(slug string, s pulseRunSpec, stdout, stderr io.Writer) (id string, dup bool) {
+	projectID, spawnedBy := m.projectID, m.spawnedBy
 
 	matches, err := matchingLiveRuns(m.root, projectID, slug)
 	if err != nil {
@@ -407,17 +277,8 @@ func (m *pulseMinter) promoteIfTaggedIdea(slug string, s pulseRunSpec, atThread 
 		return "", false
 	}
 	wf, lookupErr := LookupWorkflow(idea.PromoteTo)
-	if lookupErr != nil || !chainableWorkflow(idea.PromoteTo) || len(wf.Stages()) == 0 {
+	if lookupErr != nil || !operatorCascades(idea.PromoteTo) || len(wf.Stages()) == 0 {
 		moePrintf(stderr, "pulse: spawn: idea %s/%s has unusable workflow tag %q — skipping\n", projectID, idea.ID, idea.PromoteTo)
-		return "", false
-	}
-	// The same rule a `design_only` spec gets at a thread position, on
-	// the tag that carries the bit instead: the promoted root is
-	// unsettled by definition until the operator advances it, so every
-	// member behind it would strand. The next sweep may propose the idea
-	// loose, which is where design-only work belongs.
-	if idea.DesignOnly && atThread {
-		moePrintf(stderr, "pulse: spawn: idea %s/%s is tagged design-only and was named at a thread position — a design-only root strands the runs behind it; put it in loose. Skipping\n", projectID, idea.ID)
 		return "", false
 	}
 	// A spec that asks for design_only on a plain-tagged idea is trying

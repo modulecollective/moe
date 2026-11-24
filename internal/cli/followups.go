@@ -166,7 +166,7 @@ func validatePromoteTag(tag string) error {
 	if err != nil {
 		return fmt.Errorf("workflow tag %q is not registered", tag)
 	}
-	if !chainableWorkflow(tag) || len(wf.Stages()) == 0 {
+	if !operatorCascades(tag) || len(wf.Stages()) == 0 {
 		return fmt.Errorf("workflow tag %q is not a staged, chainable workflow", tag)
 	}
 	return nil

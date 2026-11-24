@@ -11,39 +11,27 @@ import (
 	"strings"
 
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
-// The pulse workflow is the level-3 "gather" primitive: a headless,
-// read-only sweep of one project that files followup entries (→ ideas
-// via the existing harvest) and writes a short report whose gate may
-// spawn parked fix runs and groom queued work into lanes. It has no
-// push — the artifact is the filed followups plus the canvas report.
+// The pulse is the bureaucracy's one survey. It runs in the root project,
+// reads every project's board and canonical source, files followups with
+// the existing `<project>/` routing, opens runs, and names the one run to
+// ride next with a written reason. It has no push: the artifact is the
+// filed followups plus the canvas report.
 //
-// A pulse is more than the survey. Every invocation does three things:
+// Every invocation opens each due chore's run (never executing one),
+// reconciles pushed runs against GitHub so an out-of-band merge reads as
+// `merged` before the survey looks, and then surveys. A clean survey
+// closes itself. A failed one stays on the dash's ACTIVE list, and nothing
+// blocks the next.
 //
-//   - Always: open every due chore's run for the project (never execute
-//     one) via openChoreInProcess. Automation acts on standing intent —
-//     a chore the operator authored — but never makes a fresh decision.
-//   - Always: reconcile the project's pushed runs against GitHub
-//     (reconcileAtPulse), so a PR merged out of band reads as `merged`
-//     before the survey looks at its delta.
-//   - Every time: the survey — a blocking, headless stage that opens a
-//     run, sweeps, files followups, writes its report, and auto-closes
-//     itself on a clean exit. A failed or abandoned sweep leaves its run
-//     open on the dash's ACTIVE list for a human to look at, but nothing
-//     blocks the next survey — visible junk over invisible absence.
-//
-// Nothing fires a pulse in-process. Run-traffic verbs used to tail one
-// at their chain's momentary tail, which meant a kicked ride's own tail
-// re-entered the sweep and re-walked a board the outer kick loop was
-// already walking. The pulse is now started only by a verb: `moe pulse
-// new <project>` by hand, and `--dynamic` is the consent rung that makes
-// it the verb a clock can call — grooming may kick what it grooms. `moe
-// serve --dynamic` hosts the clock (see internal/serve/heartbeat.go),
-// and an external cron can call the same verb.
+// Only a verb starts a pulse: `moe pulse new` by hand, and `--dynamic` is
+// the consent rung a clock calls. `moe serve --dynamic` hosts that clock
+// (internal/serve/heartbeat.go).
 const (
 	pulseWorkflow = "pulse"
 	// pulseDoc is the single stage's document id. The survey canvas
@@ -53,7 +41,7 @@ const (
 
 // pulseCanvasSkeleton is the fixed structural shape the survey canvas
 // opens with. The agent fills the sections in place. The gate's grammar
-// — loose runs, threads, the bars each is held to — is taught
+// — loose runs, next, the bars each is held to — is taught
 // in the stage fragment, not restated here.
 const pulseCanvasSkeleton = `# Pulse
 
@@ -75,17 +63,16 @@ const pulseCanvasSkeleton = `# Pulse
 
 ## Gate
 
-(agent fills: a fenced json block — set "status" once the survey concluded, and optionally "loose": [...] and "threads": [...]. This placeholder has no fence, so a no-op turn leaves the gate detectably unfilled.)
+(agent fills: a fenced json block — set "status" once the survey concluded, and optionally "loose": [...] and "next": {...}. This placeholder has no fence, so a no-op turn leaves the gate detectably unfilled.)
 `
 
 func init() {
-	g := NewCommandGroup(pulseWorkflow, "pulse workflow — project sweeps and optional work dispatch")
-	// `moe pulse new <project>` is the manual whole-pulse kick (and the
-	// external-cron entry point): chore auto-open plus the survey, both
-	// headless.
+	g := NewCommandGroup(pulseWorkflow, "pulse workflow — the bureaucracy-wide survey and the one next run")
+	// `moe pulse new` is the manual whole-pulse kick (and the external-cron
+	// entry point): chore auto-open plus the survey, both headless.
 	g.Register(&Command{
 		Name:    "new",
-		Summary: "run the whole pulse for a project: open due chores, then a headless survey",
+		Summary: "run the pulse: open due chores, then a headless survey of every project",
 		Run:     runPulseNew,
 	})
 	// The pulse has no stage-opener verb. A sweep is machine-paced:
@@ -136,9 +123,13 @@ func init() {
 // "scanning — Ctrl-C to skip" banner prints up front, before the run is
 // minted, so the operator knows the skip window is live from the start.
 // The second return is whether the operator interrupted the sweep.
-func runPulse(root, projectID, emitRun string, stdout, stderr io.Writer) (int, bool) {
+func runPulse(root, emitRun string, stdout, stderr io.Writer) (int, bool) {
+	if err := project.EnsureRoot(root, trailers.Block{Consent: walkConsent()}.String()); err != nil {
+		moePrintf(stderr, "pulse: create root project: %v\n", err)
+		return 1, false
+	}
 	if clockInvoked {
-		q, err := newPulseQuotaRetries(root, projectID)
+		q, err := newPulseQuotaRetries(root, project.RootID)
 		if err != nil {
 			moePrintf(stderr, "pulse: read quota retries: %v\n", err)
 			return 1, false
@@ -149,10 +140,12 @@ func runPulse(root, projectID, emitRun string, stdout, stderr io.Writer) (int, b
 	}
 	pi := installPulseInterrupt()
 	defer pi.Close()
-	moePrintf(stderr, "pulse: scanning %s — Ctrl-C to skip\n", projectID)
-	autoOpenDueChores(root, projectID, pi, stderr)
-	reconcileAtPulse(root, projectID, pi, stdout, stderr)
-	code := runPulseSurvey(root, projectID, emitRun, pi, stdout, stderr)
+	moePrintf(stderr, "pulse: scanning — Ctrl-C to skip\n")
+	for _, projectID := range pulseProjects(root, stderr) {
+		autoOpenDueChores(root, projectID, pi, stderr)
+		reconcileAtPulse(root, projectID, pi, stdout, stderr)
+	}
+	code := runPulseSurvey(root, project.RootID, emitRun, pi, stdout, stderr)
 	if code == 0 && !pi.interrupted() && clockInvoked && clockQuota != nil {
 		if err := clockQuota.finish(); err != nil {
 			moePrintf(stderr, "pulse: resolve quota retries: %v\n", err)
@@ -160,6 +153,25 @@ func runPulse(root, projectID, emitRun string, stdout, stderr io.Writer) (int, b
 		}
 	}
 	return code, pi.interrupted()
+}
+
+// pulseProjects lists the projects a sweep acts on: every registered one
+// but the root, less any the clock must leave alone. Mode binds the clock,
+// so a hand-typed sweep covers paused projects too.
+func pulseProjects(root string, stderr io.Writer) []string {
+	mds, _, err := project.List(root)
+	if err != nil {
+		moePrintf(stderr, "pulse: list projects: %v\n", err)
+		return nil
+	}
+	var out []string
+	for _, md := range mds {
+		if md.ID == project.RootID || (clockInvoked && project.ModeOf(md) == project.ModePaused) {
+			continue
+		}
+		out = append(out, md.ID)
+	}
+	return out
 }
 
 // reconcileAtPulse asks GitHub about this project's pushed runs and
@@ -388,16 +400,20 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 		// the heartbeat spawned the sweep (stderr goes to serve's logs),
 		// and the whole point when the operator typed `moe pulse new`.
 		moePrintf(stderr, "hint: moe pulse close %s/%s   (end this sweep; filings still harvest)\n", projectID, md.ID)
-		moePrintf(stderr, "hint: moe pulse new %s   (run a fresh one)\n", projectID)
+		moePrintln(stderr, "hint: moe pulse new   (run a fresh one)")
 		return 1
 	}
-	// Mint, then groom, then kick. The order is the design's: the graph
-	// can only be stamped once every run in it exists, and a kick must
-	// not start until the thread it names has stopped moving.
-	groups := applyPulseGate(root, projectID, md.ID, gate, stdout, stderr)
-	promoteTaggedIdeas(root, projectID, md.ID, stdout, stderr)
-	groomed := groomChains(root, projectID, md.ID, groups, survey.chainEdges, stderr)
-	groomed.prChecks = survey.prChecks
+	// Mint, then resolve the pick against the board the mints produced.
+	minted := applyPulseGate(root, md.ID, gate, stdout, stderr)
+	var pick *pulsePick
+	if gate.Next != nil {
+		sc, ok := newPulseScan(root)
+		if !ok {
+			moePrintf(stderr, "pulse: could not read the board — not resolving next\n")
+		} else {
+			pick = planPick(sc, gate.Next, minted, survey.prChecks)
+		}
+	}
 
 	// Clean sweep: auto-close the run so the next sweep starts from a
 	// clean board. Route through the registered close (subject +
@@ -410,21 +426,16 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 	// It fails the invocation and stops the kick: retry accounting needs
 	// a durable closed survey before it may discharge observed tokens.
 	//
-	// A dynamic sweep also stamps the kick order it is about to walk onto
-	// its own canvas, riding the close's cleanup so the section and the
-	// status flip are one commit — the same fold disposePulseRun's skip
-	// note proved out, and for the same reason: a stamp in its own commit
-	// could fail while the close succeeded, leaving the closed report
-	// silent about the queue. That silence is what three runs in four
-	// days had to reconstruct by hand.
-	var kickSection func(body []byte) []byte
+	// A dynamic sweep also stamps its pick onto its own canvas, riding the
+	// close's cleanup so the section and the status flip are one commit.
+	var nextSection func(body []byte) []byte
 	if currentRideMode == rideDynamic {
-		section := renderKickSection(planKick(root, groomed))
-		kickSection = func(body []byte) []byte {
+		section := renderNextSection(pick)
+		nextSection = func(body []byte) []byte {
 			return []byte(strings.TrimRight(string(body), "\n") + "\n\n" + section)
 		}
 	}
-	if err := closePulseRunStamped(root, projectID, md.ID, "kick section", kickSection, stderr); err != nil {
+	if err := closePulseRunStamped(root, projectID, md.ID, "next section", nextSection, stderr); err != nil {
 		moePrintf(stderr, "pulse: auto-close %s/%s: %v\n", projectID, md.ID, err)
 		return 1
 	}
@@ -448,7 +459,7 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 	// Every ride this sweep roots names it as its parent.
 	currentSweep = projectID + "/" + md.ID
 	defer func() { currentSweep = "" }()
-	return pulseSelfKick(root, groomed, stdout, stderr)
+	return pulseRide(root, pick, survey.prChecks, stdout, stderr)
 }
 
 // closePulseRunStamped closes a pulse run through the registered close —
@@ -585,11 +596,11 @@ var openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt,
 	out := surveyOutcome{}
 	out.code = runStageSession(projectID, runID, pulseDoc,
 		stageSessionOpts{
-			ValidateEntry:          inProgressSessionEntry(pulseWorkflow),
-			NeedsSandbox:           true,
-			EnforceSandboxBoundary: true,
-			Headless:               headless,
-			OnAgentStart:           func() { out.agentStarted = true },
+			ValidateEntry: inProgressSessionEntry(pulseWorkflow),
+			// No clone: the survey reads each project's canonical checkout
+			// by absolute path, and writes only its own run documents.
+			Headless:     headless,
+			OnAgentStart: func() { out.agentStarted = true },
 			// Deferred so the context blocks render against the session
 			// worktree, the copy runStageSession hands the builder.
 			InitialPromptBuilder: func(workRoot string) (string, error) {
@@ -600,9 +611,12 @@ var openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt,
 				if !ok {
 					return "", errors.New("pulse: could not read survey state")
 				}
-				prompt, edges := pulseKickoffFromScan(sc, projectID, runID, stderr)
-				out.prChecks = sc.prChecks(projectID, stderr)
-				out.chainEdges = edges
+				canonical, err := findRoot(stderr)
+				if err != nil {
+					return "", err
+				}
+				prompt := pulseKickoffFromScan(sc, canonical, runID, stderr)
+				out.prChecks = sc.allPRChecks(stderr)
 				return prompt, nil
 			},
 			CanvasSkeleton: pulseCanvasSkeleton,
@@ -618,58 +632,50 @@ type surveyOutcome struct {
 	// and the just-minted run is disposed, while a started turn leaves a
 	// canvas worth a human's eyes no matter how it ended.
 	agentStarted bool
-	// chainEdges is the live chain edge set as the agent saw it at
-	// kickoff — the picture its ordering opinion was formed against. nil
-	// when the kickoff couldn't read it, which reads as "no snapshot" and
-	// skips the drift check rather than refusing to groom.
-	chainEdges map[string]string
-	prChecks   []ownedPRChecks
+	prChecks     []ownedPRChecks
 }
 
 func runPulseNew(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("pulse new", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	dynamic := fs.Bool("dynamic", false, "start eligible parked threads and nominated CI repairs when the sweep finishes")
+	dynamic := fs.Bool("dynamic", false, "ride the run the survey picks as next when the sweep finishes")
 	// The clock's signature. Serve's heartbeat spawns a command otherwise
 	// spelled exactly like the operator's, and the per-project mode caps
 	// the clock rather than the operator — so the child has to say which
 	// one it is. Nothing else passes it.
-	heartbeat := fs.Bool("heartbeat", false, "the clock invoked this sweep; the project's mode binds it")
+	heartbeat := fs.Bool("heartbeat", false, "the clock invoked this sweep; each project's mode binds it")
 	// The spawner's channel back: `moe serve` passes a path here and reads
 	// the run the sweep opened out of it, so /serve can link a sweep to
 	// the pulse run it minted. Nothing else passes it.
 	emitRun := fs.String("emit-run", "", "write the run this sweep opens to `path` (one line, bare slug)")
 	prChecks := fs.String("pr-checks", "", "heartbeat PR observation (internal)")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe pulse new [--dynamic] <project>")
+		moePrintln(stderr, "usage: moe pulse new [--dynamic]")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Runs the whole pulse for a project: opens every due chore's run")
-		moePrintln(stderr, "without executing stages, then runs a headless read-only survey that")
-		moePrintln(stderr, "files followups, writes a report, and may spawn and groom parked runs.")
+		moePrintln(stderr, "Runs the pulse for the whole bureaucracy: opens every due chore's run")
+		moePrintln(stderr, "without executing stages, then runs a headless read-only survey of every")
+		moePrintln(stderr, "project that files followups, writes a report and may open runs.")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Without --dynamic the sweep is pure curation: everything it grooms")
-		moePrintln(stderr, "parks. With it, the sweep starts eligible parked threads and nominated")
-		moePrintln(stderr, "CI repairs on existing pushed PRs when it finishes — the consent")
-		moePrintln(stderr, "`moe serve --dynamic` stands behind.")
+		moePrintln(stderr, "Without --dynamic the sweep starts nothing. With it, the sweep rides the")
+		moePrintln(stderr, "one run it names as next, the consent `moe serve --dynamic` stands behind.")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "--heartbeat is serve's own marker on the sweeps its clock spawns:")
-		moePrintln(stderr, "those obey the project's mode (`moe project mode`). A sweep you")
+		moePrintln(stderr, "those obey each project's mode (`moe project mode`). A sweep you")
 		moePrintln(stderr, "type is your consent and ignores the mode — don't pass it by hand.")
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
 	}
-	if fs.NArg() != 1 {
+	if fs.NArg() == 1 {
+		moePrintf(stderr, "pulse new: there is one pulse now — run `moe pulse new` with no project (it surveys %s too)\n", fs.Arg(0))
+		return 2
+	}
+	if fs.NArg() != 0 {
 		fs.Usage()
 		return 2
 	}
-	projectID := fs.Arg(0)
 	root, err := findRoot(stderr)
 	if err != nil {
-		return 1
-	}
-	if err := requireProject(root, projectID); err != nil {
-		moePrintf(stderr, "pulse new: %v\n", err)
 		return 1
 	}
 	// --dynamic is the whole flag: it hands this invocation to the machine
@@ -700,7 +706,7 @@ func runPulseNew(args []string, stdout, stderr io.Writer) int {
 	}
 	// The pulse is the verb here, so a skip is the verb's own outcome:
 	// exit 130.
-	code, interrupted := runPulse(root, projectID, *emitRun, stdout, stderr)
+	code, interrupted := runPulse(root, *emitRun, stdout, stderr)
 	if interrupted {
 		return exitInterrupted
 	}

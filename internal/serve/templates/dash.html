@@ -23,7 +23,7 @@
     {{if .Active}}
     <ul class="rows">
       {{range .Active}}
-      <li class="row{{if .Chained}} chained{{else if .Depth}} nested depth{{.Depth}}{{end}}">
+      <li class="row{{if .Depth}} nested depth{{.Depth}}{{end}}">
         <a class="slug" href="/run/{{.Project}}/{{.Run}}">{{.Project}}/{{.Run}}</a>
         <span class="when">{{.When}}</span>
         <span class="note">{{.Note}}</span>

@@ -2682,7 +2682,7 @@ func TestCascadeShipStepFollowsProjectShip(t *testing.T) {
 			md := f.reloadRun()
 			mainBefore := f.originHead()
 			var stdout, stderr bytes.Buffer
-			steps, shipped, code := cascadeShipStep("sdlc", md, false, &stdout, &stderr)
+			steps, shipped, code := cascadeShipStep("sdlc", md, &stdout, &stderr)
 			if code != 0 || !shipped {
 				t.Fatalf("cascadeShipStep: code=%d shipped=%v steps=%+v\nstdout=%s\nstderr=%s",
 					code, shipped, steps, stdout.String(), stderr.String())

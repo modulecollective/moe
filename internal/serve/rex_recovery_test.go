@@ -64,12 +64,12 @@ func TestRexHeartbeatRecoversKilledSession(t *testing.T) {
 			fake.reply("wait", `{"exit_code":1}`, 1)
 			fake.hold("wait")
 			moe, localArgv := argvRecorder(t, 0)
-			gate := &fakeHeartbeat{due: []string{"alpha"}}
+			gate := &fakeHeartbeat{due: []string{"_cabinet"}}
 			var log syncBuf
 			s := rexServer(t, fake, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), MoeBin: moe, Heartbeat: gate, Logger: &log})
 
 			s.heartbeatTick()
-			first, ok := s.children.get("heartbeat:alpha")
+			first, ok := s.children.get("heartbeat:_cabinet")
 			if !ok {
 				t.Fatal("initial sweep was not registered")
 			}
@@ -98,7 +98,7 @@ func TestRexHeartbeatRecoversKilledSession(t *testing.T) {
 			waitFor(t, "failure backoff", func() bool {
 				s.heartbeat.mu.Lock()
 				defer s.heartbeat.mu.Unlock()
-				return s.heartbeat.skip["alpha"] == 1
+				return s.heartbeat.skip["_cabinet"] == 1
 			})
 			before = len(fake.calls())
 			s.heartbeatTick()
@@ -129,7 +129,7 @@ func TestRexHeartbeatRecoversKilledSession(t *testing.T) {
 			fake.reply("run@session:NEW", `{"block_ids":["block:B2"]}`, 0)
 			fake.reply("wait", `{"exit_code":1}`, 1)
 			s.heartbeatTick()
-			recovered, ok := s.children.get("heartbeat:alpha")
+			recovered, ok := s.children.get("heartbeat:_cabinet")
 			if !ok || recovered == first || testBlock(s.children, recovered) != "block:B2" {
 				t.Fatalf("replacement sweep = %#v", recovered)
 			}
@@ -143,9 +143,9 @@ func TestRexHeartbeatRecoversKilledSession(t *testing.T) {
 			waitFor(t, "second failure backoff", func() bool {
 				s.heartbeat.mu.Lock()
 				defer s.heartbeat.mu.Unlock()
-				return s.heartbeat.fails["alpha"] == 2
+				return s.heartbeat.fails["_cabinet"] == 2
 			})
-			s.heartbeat.record("alpha", false)
+			s.heartbeat.record("_cabinet", false)
 			fake.reply("run@session:NEW", `{"block_ids":["block:B3"]}`, 0)
 			s.heartbeatTick()
 			waitFor(t, "third sweep completion", func() bool { return len(gate.sweptList()) == 3 })
@@ -157,7 +157,7 @@ func TestRexHeartbeatRecoversKilledSession(t *testing.T) {
 				}
 				// The session serve replaced is the sweep's; nothing else
 				// is launched into it.
-				if strings.HasPrefix(call, "run ") && !strings.Contains(call, " --label heartbeat:alpha ") {
+				if strings.HasPrefix(call, "run ") && !strings.Contains(call, " --label heartbeat:_cabinet ") {
 					t.Fatalf("rex launched %q beside the sweep", call)
 				}
 			}
@@ -179,16 +179,16 @@ func TestRexLaunchRecoversMissingSession(t *testing.T) {
 	h.session = "session:S"
 	fake.reply("run@session:NEW", `{"block_ids":["block:B1"]}`, 0)
 	argv := []string{"/bin/echo", "two words"}
-	block, err := h.launch("heartbeat:alpha", argv)
+	block, err := h.launch("heartbeat:_cabinet", argv)
 	if err != nil || block != "block:B1" {
 		t.Fatalf("launch = %q, %v", block, err)
 	}
 	want := []string{
-		"run --json --focus=false --keep-open -s session:S --label heartbeat:alpha --cwd " + root + " -- /bin/echo two words",
+		"run --json --focus=false --keep-open -s session:S --label heartbeat:_cabinet --cwd " + root + " -- /bin/echo two words",
 		"ls --json",
 		"new moe --json --keep-open --cwd " + root + " --window bootstrap -- /usr/bin/true",
 		"block close block:B1",
-		"run --json --focus=false --keep-open -s session:NEW --label heartbeat:alpha --cwd " + root + " -- /bin/echo two words",
+		"run --json --focus=false --keep-open -s session:NEW --label heartbeat:_cabinet --cwd " + root + " -- /bin/echo two words",
 	}
 	if !slices.Equal(fake.calls(), want) {
 		t.Errorf("calls = %q; want %q", fake.calls(), want)
@@ -234,7 +234,7 @@ func TestRexLaunchUncertaintyPreservesSession(t *testing.T) {
 			h := newRexHost(fake.bin, root, io.Discard)
 			t.Cleanup(h.cancel)
 			h.session = "session:S"
-			if block, err := h.launch("heartbeat:alpha", []string{"/bin/true"}); err == nil || block != "" {
+			if block, err := h.launch("heartbeat:_cabinet", []string{"/bin/true"}); err == nil || block != "" {
 				t.Fatalf("launch = %q, %v; want unresolved", block, err)
 			}
 			body, err := os.ReadFile(rexSessionPath(root))
@@ -258,11 +258,11 @@ func TestRexRecoveryCreationFailureIsBounded(t *testing.T) {
 	installTestRex(cs, newRexHost(fake.bin, t.TempDir(), io.Discard))
 	t.Cleanup(func() { testRex(cs).cancel(); waitRexWorkers(t, testRex(cs)) })
 	testRex(cs).session = "session:S"
-	c, err := cs.spawn("heartbeat:alpha", "/bin/true", nil, testRex(cs).root, io.Discard)
+	c, err := cs.spawn("heartbeat:_cabinet", "/bin/true", nil, testRex(cs).root, io.Discard)
 	if c != nil || err == nil || testRex(cs).sessionID() != "session:S" {
 		t.Fatalf("spawn = %v, %v, session = %q", c, err, testRex(cs).sessionID())
 	}
-	if _, ok := cs.get("heartbeat:alpha"); ok {
+	if _, ok := cs.get("heartbeat:_cabinet"); ok {
 		t.Fatal("registered a phantom child")
 	}
 	if got := fake.calls(); len(got) != 6 || got[0] != "block ls --json -s session:S" || got[1] != "ls --json" || !strings.HasPrefix(got[4], "new moe ") || got[5] != "block ls --json -s session:S" {
@@ -274,81 +274,6 @@ func TestRexRecoveryCreationFailureIsBounded(t *testing.T) {
 	fake.reply("block-call", "", 1)
 	if _, err := testRex(cs).waitExit("block:old-live"); !errors.Is(err, errRexBlockGone) {
 		t.Fatalf("old watcher after failed replacement = %v", err)
-	}
-}
-
-func TestRexHeartbeatRetriesReplacementThroughAnotherProject(t *testing.T) {
-	fake := newFakeRex(t)
-	fake.reply("block-close", "", 1)
-	fake.reply("block-ls", "", 1)
-	fake.reply("block-call", "", 1)
-	fake.reply("wait", "", 1)
-	fake.reply("run", "", 1)
-	fake.reply("ls", `{"sessions":[]}`, 0)
-	fake.reply("new", "", 1)
-	moe, localArgv := argvRecorder(t, 0)
-	gate := &fakeHeartbeat{due: []string{"alpha"}}
-	s := rexServer(t, fake, Options{Root: t.TempDir(), MoeBin: moe, Heartbeat: gate})
-	for _, project := range []string{"alpha", "beta"} {
-		id := heartbeatChildPrefix + project
-		c := &child{id: id, done: make(chan struct{}), exitErr: errRexBlockGone}
-		close(c.done)
-		c.settled = c.done
-		testRex(s.children).jobs[c] = "block:" + project
-		s.children.all[id] = c
-	}
-	alpha, _ := s.children.get("heartbeat:alpha")
-	beta, _ := s.children.get("heartbeat:beta")
-
-	// Both old children have completed and exhausted their backoff.
-	// Alpha clears its retained block, but replacement creation fails.
-	s.heartbeatTick()
-	if got, _ := s.children.get("heartbeat:alpha"); got != alpha || testBlock(s.children, alpha) != "" {
-		t.Fatalf("failed creation replaced alpha or kept its vanished block: %#v", got)
-	}
-	// Alpha is now paused/not due. An outage must still hold beta's
-	// retained block, even though the preceding launch proved absence.
-	gate.due = []string{"beta"}
-	fake.reply("new", `{"session_id":"session:NEW","initial_windows":[{"block_ids":["block:new"]}]}`, 0)
-	fake.reply("ls", "", 1)
-	before := len(fake.calls())
-	s.heartbeatTick()
-	if testBlock(s.children, beta) != "block:beta" {
-		t.Fatal("uncertain cleanup discarded beta's handle")
-	}
-	for _, call := range fake.calls()[before:] {
-		if strings.HasPrefix(call, "new ") || strings.HasPrefix(call, "run ") {
-			t.Fatalf("uncertain cleanup reached launch: %q", fake.calls()[before:])
-		}
-	}
-
-	// Once absence can be confirmed again, beta's next eligible tick
-	// must recover the host without alpha ever being offered again.
-	fake.reply("ls", `{"sessions":[]}`, 0)
-	fake.reply("block-ls@session:NEW", `{"blocks":[]}`, 0)
-	fake.reply("run@session:NEW", `{"block_ids":["block:new"]}`, 0)
-	fake.reply("wait", `{"exit_code":1}`, 1)
-	s.heartbeatTick()
-	waitRexWorkers(t, testRex(s.children))
-	recovered, _ := s.children.get("heartbeat:beta")
-	if recovered == beta || testBlock(s.children, recovered) != "block:new" || testRex(s.children).sessionID() != "session:NEW" {
-		t.Fatalf("beta did not recover the host: child = %#v, session = %q; calls = %q",
-			recovered, testRex(s.children).sessionID(), fake.calls())
-	}
-	if got, _ := s.children.get("heartbeat:alpha"); got != alpha {
-		t.Fatal("recovery depended on redispatching alpha")
-	}
-	if body, err := os.ReadFile(rexSessionPath(s.opts.Root)); err != nil || string(body) != "session:NEW\n" {
-		t.Fatalf("replacement session file = %q, %v", body, err)
-	}
-	news := 0
-	for _, call := range fake.calls() {
-		if strings.HasPrefix(call, "new ") {
-			news++
-		}
-	}
-	if news != 2 || localArgv() != "" {
-		t.Fatalf("new = %d, local argv = %q; calls = %q", news, localArgv(), fake.calls())
 	}
 }
 

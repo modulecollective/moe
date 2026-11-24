@@ -123,7 +123,7 @@ func TestPushResumesStrandedMergeRecord(t *testing.T) {
 
 	// Strand under a machine walk so the record carries MoE-Consent...
 	strand := func() {
-		defer withRideMode(rideStatic)()
+		defer withRideMode(rideDynamic)()
 		if _, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID); code == 0 {
 			t.Fatalf("expected the stranding push to fail; stderr=%s", stderr)
 		}

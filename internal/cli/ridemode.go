@@ -5,51 +5,28 @@ import "github.com/modulecollective/moe/internal/project"
 // Ride modes are consent vocabulary: what the invocation licensed the
 // machine to do beyond the verb the operator typed.
 //
-// `!!!` (and `moe chain kick`) is the **static** ride: ship this run and
-// walk the chain as it stands. It sweeps nothing — no verb fires a pulse
-// in-process any more — so what the operator saw at kick time is what
-// runs, by construction.
-//
 // `moe pulse new --dynamic` is the **dynamic** rung, and means one thing:
-// *the machine may run things beyond what you see right now.* A sweep
-// under it kicks the parked threads on the board. `moe serve --dynamic`
-// is the standing spelling of that consent, and every kick a sweep roots
-// inherits it.
+// *the machine may start work you did not name.* A sweep under it rides the
+// one run it picks. `moe serve --dynamic` is the standing spelling of that
+// consent. A bang is a walk at rideNone: the operator named the run.
 //
-// The mode is a property of the *invocation*, not of any one call in
-// the stack: one `moe` process is one operator verb carrying one
-// consent level, and every hop of a ride inherits it. So it is held as
-// process state rather than threaded through push options, close
-// commands and the chain-kick body — four plumbing seams for a value
-// that can never legitimately differ between them.
-//
-// Its consumers are the pulse's self-kick gate and the survey's context
-// line, plus the consent trailers every machine-written commit carries.
-// maybeRideChain, `chain edit`, kick and every other chain mechanic
-// never read it — the mode gates the sweep; the chain itself doesn't
-// care. That is also why `rideChain bool` still threads the cascade
-// unchanged: "does this ride at all" is a different question from
-// "may the machine start more".
+// The mode is a property of the *invocation*, not of any one call in the
+// stack: one `moe` process is one operator verb carrying one consent level.
+// So it is held as process state rather than threaded through push options
+// and close commands.
 type rideMode int
 
 const (
-	// rideNone: no ride in flight — a bare push, `!`, `!<stage>`, `!!`,
-	// or a hand-typed `moe pulse new`. A sweep here is pure curation:
-	// nothing it places can move until someone kicks the thread it
-	// landed on.
+	// rideNone: a bare push, `!`, `!<stage>`, `!!`, or a hand-typed
+	// `moe pulse new`, which opens work and starts none of it.
 	rideNone rideMode = iota
-	// rideStatic: `!!!` / `moe chain kick`. Ship and ride the chain as
-	// it stands; a sweep under it starts nothing.
-	rideStatic
-	// rideDynamic: `moe pulse new --dynamic` (the heartbeat's own child),
-	// and every kick a sweep roots itself. Self-kick is live.
+	// rideDynamic: `moe pulse new --dynamic` (the heartbeat's own child)
+	// and the one ride a sweep starts.
 	rideDynamic
 )
 
 func (m rideMode) String() string {
 	switch m {
-	case rideStatic:
-		return "static"
 	case rideDynamic:
 		return "dynamic"
 	default:
@@ -69,7 +46,7 @@ var currentRideMode = rideNone
 // so the zero value stands" (a bare operator `moe push`). currentRideMode
 // alone can't: both read rideNone. Every withRideMode entry point is a
 // machine-walk entry, so the flag is exactly "did a bang answer or a
-// chain kick hand this invocation to the machine".
+// sweep hand this invocation to the machine".
 var rideWalkActive = false
 
 // withRideMode sets the process ride mode and returns the restore.
@@ -83,7 +60,7 @@ func withRideMode(m rideMode) func() {
 // clockInvoked says the heartbeat spawned this process, rather than the
 // operator typing its command. It is the one thing per-project modes
 // bind on: the mode caps what the *clock* may start, and everything the
-// operator types — bangs, stage verbs, chain kicks, and a hand-typed
+// operator types — bangs, stage verbs, and a hand-typed
 // `moe pulse new --dynamic` — runs in every mode.
 //
 // It needs its own bit because the heartbeat's child is spelled exactly
@@ -167,10 +144,8 @@ func rideModeContextLine() string {
 		return ""
 	}
 	return "This is a **dynamic** sweep: the operator armed a clock that licensed the machine to start " +
-		"work. Every kickable parked thread on the board gets its own kick when this sweep finishes — " +
-		"the ones you groom and the ones already sitting in order — unless you park it. That is real " +
-		"motion with no human look in between, so hold the ordering bar accordingly and write a " +
-		"`\"park\"` line for any thread the operator should see first."
+		"work. The one run you name in `next` rides when this sweep finishes, with no human look in between, " +
+		"and nothing else starts. Omit `next` if nothing should."
 }
 
 // projectModeContextLine tells a clock-invoked sweep that the project it
@@ -186,21 +161,8 @@ func projectModeContextLine(root, projectID string) string {
 	if mode, err := project.ReadMode(root, projectID); err != nil || mode != project.ModeSafe {
 		return ""
 	}
-	return "This project is in **safe** mode: the clock may sweep it, but the kick will start only threads " +
-		"carrying an explicit operator mark — an advance marker, a chore's standing intent, a workflow " +
-		"tag on the idea a run was promoted from, or an undelivered note on any run in the thread (a " +
-		"`moe input add` note or an answered question, consumed once a turn delivers it). Everything " +
-		"else you groom is held with a reason and waits for the operator. Groom the board as you " +
-		"normally would; just don't count on an unmarked thread moving before someone looks at it."
-}
-
-// rideModeForAnswer maps a chain-prompt bang answer to its mode. Only
-// `!!!` rides; `!`, `!<stage>` and `!!` do not, so there is no chain in
-// flight to describe. No typed answer reaches rideDynamic — that rung is
-// the pulse verb's `--dynamic`, said at the door a clock knocks on.
-func rideModeForAnswer(answer string) rideMode {
-	if answer == "!!!" {
-		return rideStatic
-	}
-	return rideNone
+	return "This project is in **safe** mode: a `next` here starts only if the run carries an explicit " +
+		"operator mark — an advance marker, a chore's standing intent, a workflow tag on the idea it was " +
+		"promoted from, or an undelivered note (a `moe input add` note or an answered question, consumed " +
+		"once a turn delivers it). An unmarked pick is held with a reason and waits for the operator."
 }

@@ -260,10 +260,6 @@ section h2 .count {
   border-bottom: 1px solid var(--hairline);
 }
 .row:last-child { border-bottom: none; }
-/* A chained row follows the one above in a planned sequence — a peer, not
-   a child — so it stays flush left and carries "→" rather than the "↳"
-   lineage ladder below. */
-.row.chained::before { content: "→"; color: var(--muted); flex-shrink: 0; }
 .row.nested { padding-left: 1.5rem; }
 /* Spawn lineage nests deeper than one level (sdlc run → pulse → reflect);
    each generation steps right so the ladder reads as a hierarchy. */
@@ -470,8 +466,8 @@ form.new-run button:hover, form.new-run button:focus {
    selectors are child-scoped: on the run page that section also holds
    the rendered canvas bodies (`.doc`), whose own markdown lists must
    not inherit the row shape. */
-.canvases > ul, .chain-members ul, .provenance ul, .traces ul { list-style: none; padding: 0; margin: 0; }
-.canvases > ul > li, .chain-members li, .provenance li, .traces li {
+.canvases > ul, .provenance ul, .traces ul { list-style: none; padding: 0; margin: 0; }
+.canvases > ul > li, .provenance li, .traces li {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem 0.75rem;
@@ -481,8 +477,8 @@ form.new-run button:hover, form.new-run button:focus {
   color: var(--muted);
   border-bottom: 1px solid var(--hairline);
 }
-.canvases > ul > li:last-child, .chain-members li:last-child, .provenance li:last-child, .traces li:last-child { border-bottom: none; }
-.canvases > ul > li .slug, .chain-members li .slug, .provenance li .slug, .traces li .slug { color: var(--fg); }
+.canvases > ul > li:last-child, .provenance li:last-child, .traces li:last-child { border-bottom: none; }
+.canvases > ul > li .slug, .provenance li .slug, .traces li .slug { color: var(--fg); }
 /* The descent arrow that joins each hop to the one above it. */
 .provenance .arrow { color: var(--muted); }
 /* The recorded reason wraps onto its own full-width line, indented past

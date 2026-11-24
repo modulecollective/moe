@@ -18,12 +18,12 @@ func TestQuotaDeferralCompletionAcrossHosts(t *testing.T) {
 		t.Run(host, func(t *testing.T) {
 			root := t.TempDir()
 			gittest.InitAt(t, root)
-			payload, err := json.Marshal(run.QuotaRetry{Project: "alpha", Token: "alpha/pulse", NotBefore: time.Now().Add(time.Hour).UTC(), Targets: []run.QuotaTarget{{Project: "alpha", Run: "work", Stage: "code", Backend: "codex", Reason: "spent"}}})
+			payload, err := json.Marshal(run.QuotaRetry{Project: "_cabinet", Token: "_cabinet/pulse", NotBefore: time.Now().Add(time.Hour).UTC(), Targets: []run.QuotaTarget{{Project: "_cabinet", Run: "work", Stage: "code", Backend: "codex", Reason: "spent"}}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			gittest.Run(t, root, "commit", "--allow-empty", "-m", "quota retry\n\n"+trailers.Block{Run: "pulse", Project: "alpha", Workflow: "pulse", Consent: "dynamic", QuotaRetry: string(payload)}.String())
-			gate := &fakeHeartbeat{due: []string{"alpha"}}
+			gittest.Run(t, root, "commit", "--allow-empty", "-m", "quota retry\n\n"+trailers.Block{Run: "pulse", Project: "_cabinet", Workflow: "pulse", Consent: "dynamic", QuotaRetry: string(payload)}.String())
+			gate := &fakeHeartbeat{due: []string{"_cabinet"}}
 			var log syncBuf
 			var s *Server
 			var fake *fakeRex
@@ -35,7 +35,7 @@ func TestQuotaDeferralCompletionAcrossHosts(t *testing.T) {
 				fake.reply("run", `{"block_ids":["block:A"]}`, 0)
 				fake.reply("wait", `{"exit_code":76}`, 1)
 				fake.reply("capture", "quota exhausted", 0)
-				fake.reply("block-ls", `{"blocks":[{"block_id":"block:A","label":"heartbeat:alpha"}]}`, 0)
+				fake.reply("block-ls", `{"blocks":[{"block_id":"block:A","label":"heartbeat:_cabinet"}]}`, 0)
 				s = rexServer(t, fake, Options{Root: root, MoeBin: "/bin/true", Heartbeat: gate, Logger: &log})
 			}
 			var notifications atomic.Int32
@@ -43,8 +43,8 @@ func TestQuotaDeferralCompletionAcrossHosts(t *testing.T) {
 			// Exercise both ordinary pacing and pre-existing failure history.
 			wantHistory := 0
 			if host != "local" {
-				s.heartbeat.record("alpha", true)
-				s.heartbeat.record("alpha", true)
+				s.heartbeat.record("_cabinet", true)
+				s.heartbeat.record("_cabinet", true)
 				wantHistory = 2
 			}
 			if host == "adopted rex" {
@@ -52,11 +52,11 @@ func TestQuotaDeferralCompletionAcrossHosts(t *testing.T) {
 					t.Fatal(err)
 				}
 			} else {
-				if _, err := s.children.spawn("heartbeat:alpha", s.opts.MoeBin, nil, root, io.Discard); err != nil {
+				if _, err := s.children.spawn("heartbeat:_cabinet", s.opts.MoeBin, nil, root, io.Discard); err != nil {
 					t.Fatal(err)
 				}
 			}
-			c, ok := s.children.get("heartbeat:alpha")
+			c, ok := s.children.get("heartbeat:_cabinet")
 			if !ok {
 				t.Fatal("no child")
 			}
@@ -67,7 +67,7 @@ func TestQuotaDeferralCompletionAcrossHosts(t *testing.T) {
 			if !quotaDeferred(c.exitErr) || notifications.Load() != 0 {
 				t.Fatalf("exit=%v notifications=%d", c.exitErr, notifications.Load())
 			}
-			if s.heartbeat.fails["alpha"] != wantHistory || s.heartbeat.skip["alpha"] != wantHistory {
+			if s.heartbeat.fails["_cabinet"] != wantHistory || s.heartbeat.skip["_cabinet"] != wantHistory {
 				t.Fatalf("failure history changed: %v %v", s.heartbeat.fails, s.heartbeat.skip)
 			}
 			if host == "adopted rex" {

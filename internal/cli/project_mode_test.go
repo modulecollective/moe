@@ -176,20 +176,6 @@ func TestOperatorMarkedAdmitsAnAdvancedRun(t *testing.T) {
 	}
 }
 
-// TestOperatorMarkedAdmitsAChoreRootedRun: the seed is the chore's
-// operator-authored prompt.md, so standing intent is an operator mark by
-// construction. Its own leg because openChoreInProcess is the one
-// machine-open path that stamps no SpawnedBy — the shape that stranded a
-// judged chore on 2026-07-22, and the one safe would strand again if the
-// admit only looked at lineage.
-func TestOperatorMarkedAdmitsAChoreRootedRun(t *testing.T) {
-	root, threadRoot, groomed, _ := choreKickFixture(t)
-
-	if !operatorMarked(root, groomed.byKey[threadRoot], groomed.mds, groomed.idx) {
-		t.Error("a chore's prompt.md is standing operator intent and must admit")
-	}
-}
-
 // TestOperatorMarkedAdmitsARunPromotedFromATaggedIdea is the subtlest of
 // the legs: the mark was spent before the run existed. The tag licensed
 // the work, a sweep promoted the idea, and the destination run carries no
@@ -340,78 +326,6 @@ func TestUnpausingSummonsASweepOffItsOwnCommit(t *testing.T) {
 
 // --- the kick ---------------------------------------------------------
 
-// planFor builds the kick plan a sweep over root's board would walk.
-func planFor(t *testing.T, root string) kickPlan {
-	t.Helper()
-	sc := mustPulseScan(t, root)
-	return planKick(root, groomResult{
-		byKey: sc.byKey, mds: sc.mds, graph: sc.graph, idx: sc.idx, projectID: "moe",
-	})
-}
-
-// holdFor returns one root's hold in a plan, or "" when it is queued.
-func holdFor(t *testing.T, plan kickPlan, rootKey string) string {
-	t.Helper()
-	for _, step := range plan.Steps {
-		if step.Root == rootKey {
-			return step.Hold
-		}
-	}
-	t.Fatalf("plan has no step for %s: %+v", rootKey, plan.Steps)
-	return ""
-}
-
-// TestKickUnderSafeHoldsAnUnmarkedRoot: the kick's admit and the parked
-// leg's pre-ask are one predicate, so what the tick declined to offer is
-// also what a sweep that got there anyway declines to start.
-func TestKickUnderSafeHoldsAnUnmarkedRoot(t *testing.T) {
-	root := quietFixture(t)
-	key := "moe/" + groomFixture(t, root, "fix-a")["fix-a"]
-	setMode(t, root, "moe", project.ModeSafe)
-
-	// Typed, the mode is not consulted at all: the operator saying "sweep
-	// and start things" is consent, whatever the standing config says.
-	if got := holdFor(t, planFor(t, root), key); got != "" {
-		t.Errorf("a hand-typed sweep read the mode: %q", got)
-	}
-
-	asClock(func() {
-		if got := holdFor(t, planFor(t, root), key); !strings.Contains(got, "safe mode") {
-			t.Errorf("hold = %q, want the safe-mode reason", got)
-		}
-	})
-}
-
-// TestKickUnderSafeStartsAMarkedRoot: safe is a filter, not a stop.
-func TestKickUnderSafeStartsAMarkedRoot(t *testing.T) {
-	root := quietFixture(t)
-	id := groomFixture(t, root, "fix-a")["fix-a"]
-	advanceRun(t, root, id, "design")
-	setMode(t, root, "moe", project.ModeSafe)
-
-	asClock(func() {
-		if got := holdFor(t, planFor(t, root), "moe/"+id); got != "" {
-			t.Errorf("an advanced root was held under safe: %q", got)
-		}
-	})
-}
-
-// TestKickUnderPausedStartsNothing covers the mode flip that lands
-// inside the gate→child window: the gate decided to sweep, the operator
-// paused the project, and the child that arrives afterwards obeys.
-func TestKickUnderPausedStartsNothing(t *testing.T) {
-	root := quietFixture(t)
-	id := groomFixture(t, root, "fix-a")["fix-a"]
-	advanceRun(t, root, id, "design")
-	setMode(t, root, "moe", project.ModePaused)
-
-	asClock(func() {
-		if got := holdFor(t, planFor(t, root), "moe/"+id); !strings.Contains(got, "paused mode") {
-			t.Errorf("hold = %q, want the paused reason even for a marked root", got)
-		}
-	})
-}
-
 // TestSafeModeContextLineReachesOnlyTheClock: the survey is told what
 // its grooming can expect to start, and only when the mode actually
 // binds this invocation.
@@ -438,22 +352,6 @@ func TestSafeModeContextLineReachesOnlyTheClock(t *testing.T) {
 	asClock(func() {
 		if got := projectModeContextLine(root, "moe"); got != "" {
 			t.Errorf("auto is the ordinary state and earns no line: %q", got)
-		}
-	})
-}
-
-// TestKickSectionNamesTheModeHold: the canvas section and the stderr
-// skip line are one wording, so an operator reading a sweep's report
-// sees the same sentence the terminal would have shown.
-func TestKickSectionNamesTheModeHold(t *testing.T) {
-	root := quietFixture(t)
-	key := "moe/" + groomFixture(t, root, "fix-a")["fix-a"]
-	setMode(t, root, "moe", project.ModePaused)
-
-	asClock(func() {
-		section := renderKickSection(planFor(t, root))
-		if !strings.Contains(section, key+" — parked board, is held by paused mode") {
-			t.Errorf("kick section missing the mode hold:\n%s", section)
 		}
 	})
 }

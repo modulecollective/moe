@@ -284,7 +284,7 @@ func TestChatCloseRefusesTerminal(t *testing.T) {
 }
 
 func TestCloseHelpMatchesHarvesting(t *testing.T) {
-	for _, workflow := range []string{"sdlc", "chat", "pulse", "chain", "idea", "intent"} {
+	for _, workflow := range []string{"sdlc", "chat", "pulse", "idea", "intent"} {
 		t.Run(workflow, func(t *testing.T) {
 			var out, errb bytes.Buffer
 			if code := Run([]string{workflow, "close", "--help"}, &out, &errb); code != 2 || out.Len() != 0 {

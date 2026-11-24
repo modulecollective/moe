@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/run"
@@ -47,9 +46,9 @@ func TestRunProvenanceNamesTheSpawnerAndItsReason(t *testing.T) {
 	}
 	writePulseGateCanvas(t, root, "moe", "pulse-2026-07-20",
 		`{"status":"ok","loose":[{"slug":"fix-ci-red-main","title":"Fix CI","why":"TestX failing since abc123"}]}`)
-	spawnAndHead(t, root, "moe", "pulse-2026-07-20", "batch", []pulseRunSpec{
+	mintSpecs(root, "moe", "pulse-2026-07-20", []pulseRunSpec{
 		{Slug: "fix-ci-red-main", Title: "Fix CI", Why: "TestX failing since abc123"},
-	}, os.Stderr)
+	}, io.Discard, os.Stderr)
 
 	var child string
 	for _, id := range runsWithWorkflow(t, root, "moe", "sdlc") {
@@ -112,9 +111,9 @@ func TestRunProvenanceDeadEndChainStartsMidStory(t *testing.T) {
 	if _, err := run.New(root, "moe", run.Options{ID: "pulse-2026-07-20", Workflow: "pulse"}); err != nil {
 		t.Fatal(err)
 	}
-	spawnAndHead(t, root, "moe", "pulse-2026-07-20", "batch", []pulseRunSpec{
+	mintSpecs(root, "moe", "pulse-2026-07-20", []pulseRunSpec{
 		{Slug: "orphan-chain", Title: "Fix"},
-	}, io.Discard)
+	}, io.Discard, io.Discard)
 
 	var child string
 	for _, id := range runsWithWorkflow(t, root, "moe", "sdlc") {
@@ -167,9 +166,9 @@ func TestRunProvenanceUnlinksAPrunedMidChainRun(t *testing.T) {
 	if _, err := run.New(root, "moe", run.Options{ID: "pulse-2026-07-20", Workflow: "pulse"}); err != nil {
 		t.Fatal(err)
 	}
-	spawnAndHead(t, root, "moe", "pulse-2026-07-20", "batch", []pulseRunSpec{
+	mintSpecs(root, "moe", "pulse-2026-07-20", []pulseRunSpec{
 		{Slug: "mid-chain", Title: "Fix"},
-	}, io.Discard)
+	}, io.Discard, io.Discard)
 
 	var mid string
 	for _, id := range runsWithWorkflow(t, root, "moe", "sdlc") {
@@ -222,9 +221,9 @@ func TestRunProvenanceDegradesWithNoGateCanvas(t *testing.T) {
 	t.Parallel()
 	root := parallelProjectFixture(t)
 	// No writePulseGateCanvas call: the spawner has no canvas at all.
-	spawnAndHead(t, root, "moe", "pulse-2026-07-20", "batch", []pulseRunSpec{
+	mintSpecs(root, "moe", "pulse-2026-07-20", []pulseRunSpec{
 		{Slug: "fix-orphaned", Title: "Fix"},
-	}, io.Discard)
+	}, io.Discard, io.Discard)
 
 	var child string
 	for _, id := range runsWithWorkflow(t, root, "moe", "sdlc") {
@@ -275,32 +274,6 @@ func TestRunProvenanceOperatorOpenedRun(t *testing.T) {
 	}
 	if hops[0].Agent || hops[0].Consent != "" {
 		t.Errorf("hop = %+v, want no agent marker and no consent claim", hops[0])
-	}
-}
-
-// TestChainMembersCarryEdgeAttribution: a groomed batch's members each
-// know the machine placed them there. This is the second half of the
-// "what did the agent add" question — a run can be operator-opened and
-// still be sequenced by a pulse.
-func TestChainMembersCarryEdgeAttribution(t *testing.T) {
-	t.Parallel()
-	root := parallelProjectFixture(t)
-	head, _, _ := chainBatch(t, root)
-
-	members, err := chainMembers(root, "moe", head, time.Now().UTC())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(members) != 2 {
-		t.Fatalf("members = %+v, want 2", members)
-	}
-	for i, m := range members {
-		if !m.EdgeAgent {
-			t.Errorf("member %d (%s) EdgeAgent = false, want true — a groom placed it", i, m.Run)
-		}
-		if m.EdgeConsent != "none" {
-			t.Errorf("member %d (%s) EdgeConsent = %q, want \"none\"", i, m.Run, m.EdgeConsent)
-		}
 	}
 }
 

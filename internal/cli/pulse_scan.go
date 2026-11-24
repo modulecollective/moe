@@ -3,100 +3,161 @@ package cli
 import (
 	"fmt"
 	"io"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/modulecollective/moe/internal/chore"
+	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 )
 
 // pulseKickoff is the survey's first user turn (the whole `claude -p`
-// prompt in headless mode). The steering lives in the stage fragment;
-// this just points the agent at the job.
-const pulseKickoff = "Run the pulse for this project: a delta-first, read-only sweep. " +
+// prompt in headless mode). The steering lives in the stage fragment.
+const pulseKickoff = "Run the pulse for this bureaucracy: a delta-first, read-only survey of every project below. " +
 	"Survey what changed since the last pulse — the journal, twin-vs-code drift in the touched areas, the open backlog — " +
-	"file followup entries for work worth doing, and write the canvas report. Follow the stage guidance. A quiet pulse — " +
-	"\"nothing new since the last pulse\" — is a valid, successful report; never manufacture findings.\n\n" +
+	"file followup entries for work worth doing, using the `<project>/` prefix to route each, and write the canvas report. " +
+	"Follow the stage guidance. A quiet pulse — \"nothing new since the last pulse\" — is a valid, successful report; " +
+	"never manufacture findings.\n\n" +
 	"Close the canvas with the `## Gate` section (a ```json fence). Set \"status\" to a short word (e.g. \"ok\") once the " +
 	"survey actually ran and concluded — that is what tells the harness this was a real sweep, not a crashed no-op. " +
-	"The gate opens runs and orders them in one grammar: you write each run where it goes.\n\n" +
-	"A `\"loose\"` list holds runs to open with no ordering opinion — they park standalone. Each entry is an object: " +
-	"`{\"slug\": ..., \"title\": ..., \"why\": ..., \"design\": ...}`, defaulting to a `sdlc` fix run — the bar is mechanical, " +
-	"bounded, and verifiable, all three, and the stage guidance holds it. A `loose` entry may instead set " +
-	"`\"design_only\": true`, which opens the run, rides it one headless design turn and parks it for the operator — a " +
-	"lower bar for a shorter ride, and the one place a finding that needs judgment rather than a fix may go; the stage " +
-	"guidance holds that bar too. Either way, `why` is the one line the operator reads next to the verdict.\n\n" +
-	"A `\"threads\"` list holds runs in execution order, each thread attached after an existing run (`\"onto\"`), under a " +
-	"freshly named head (`\"head\"`), or self-rooted as its own thread (neither key). A thread's `\"runs\"` entry is either a **string** " +
-	"naming any parked run in the project — naming one chained elsewhere moves it — or an **object** in the same shape as a " +
-	"`loose` entry, which opens that run right at that position. This is where your ordering judgment goes; there is no prose " +
-	"ranking section. The bar is the spawn bar plus ordering conviction: would the operator kick these, in this order, " +
-	"unchanged? If the order is a guess, put the runs in `loose`. Under a dynamic sweep every kickable parked thread starts " +
-	"when the sweep finishes — the ones you groom and the ones already in order — so the field you write is `\"park\"`: one " +
-	"line naming why the operator should look at this thread first (an ordering you wouldn't defend, a speculative member, " +
-	"an irreversible or outward-facing surface). No park means it runs, and that includes a run you wrote to `loose`, which " +
-	"is a thread of one. `loose` says you have no ordering opinion; it does not say the work waits.\n\n" +
-	"Omitting both lists is the normal outcome; a followup is the default channel for everything that doesn't clear the bar. " +
-	"For failed checks on an owned pushed PR, nominate its existing run with " +
-	"`{\"run\":\"<exact-slug>\",\"repair\":\"ci\"}` alone in a thread group, without onto or head. " +
-	"The harness rechecks evidence and consent, claims a bounded attempt, then runs code, fresh test and review, and updates that PR. " +
+	"The gate says two things: what to open and what is next.\n\n" +
+	"A `\"loose\"` list holds runs to open. Each entry is an object: `{\"slug\": \"<project>/<slug>\", \"title\": ..., " +
+	"\"why\": ..., \"design\": ...}`, defaulting to a `sdlc` fix run — the bar is mechanical, bounded, and verifiable, all " +
+	"three, and the stage guidance holds it. An entry may instead set `\"design_only\": true`, which opens the run for one " +
+	"headless design turn when it is picked — a lower bar for a shorter ride, and the one place a finding that needs " +
+	"judgment rather than a fix may go.\n\n" +
+	"`\"next\"` names the one run to ride after this sweep, anywhere in the bureaucracy: " +
+	"`{\"run\": \"<project>/<slug>\", \"why\": \"<one line: why this before everything else>\"}`. It may be a parked run, " +
+	"a tagged idea (promoted when picked), or a run this gate's `loose` opens. Read what each parked run's canvas says it " +
+	"is waiting on, across projects, and pick the first thing that can actually move. Omit `next` when nothing should " +
+	"start. For failed checks on an owned pushed PR, name its existing run with `\"repair\": \"ci\"` added. The harness " +
+	"rechecks evidence and consent, claims a bounded attempt, then runs code, fresh test and review, and updates that PR. " +
 	"See the stage guidance."
 
-// pulseKickoffFromScan appends the harness-computed context to the
-// static kickoff: six blocks (GitHub, recently-settled runs, chain
-// state, advanced-and-left runs, openable judged chores, the input
-// channel) and two trailing lines (what this invocation licensed, and
-// what the project's standing mode does with that licence). The
-// survey's InitialPromptBuilder calls it with a scan of the session
-// worktree runStageSession hands the builder; every block reads that
-// one scan, so the blocks describe one consistent moment rather than
-// six successive ones. Best-effort throughout: a gather that fails
-// drops its own block rather than failing the sweep.
-func pulseKickoffFromScan(sc *pulseScan, projectID, runID string, stderr io.Writer) (string, map[string]string) {
+// pulseKickoffFromScan appends the harness-computed context to the static
+// kickoff: where each project's source lives, then one section per project
+// with a delta since the last pulse or live work. Every block reads the one
+// scan, so they all describe the same moment. A gather that fails drops its
+// own block rather than failing the sweep.
+func pulseKickoffFromScan(sc *pulseScan, canonicalRoot, runID string, stderr io.Writer) string {
 	blocks := []string{pulseKickoff}
-	if gh := pulseGitHubContext(sc, projectID, runID, stderr); gh != "" {
-		blocks = append(blocks, gh)
+	mds, _, err := project.List(sc.root)
+	if err != nil {
+		moePrintf(stderr, "pulse: list projects: %v\n", err)
 	}
-	if checks := renderOwnedPRChecks(sc, sc.prChecks(projectID, stderr)); checks != "" {
-		blocks = append(blocks, checks)
+	last := lastPulseAt(sc, project.RootID, runID)
+	var sources, paused, quiet []string
+	var sections []string
+	for _, p := range mds {
+		if p.ID != project.RootID {
+			sources = append(sources, fmt.Sprintf("- `%s`: %s", p.ID, filepath.Join(canonicalRoot, project.SubmoduleDir(p.ID))))
+		}
+		if clockInvoked && project.ModeOf(p) == project.ModePaused {
+			paused = append(paused, p.ID)
+			continue
+		}
+		var section []string
+		if pulseProjectActive(sc, p.ID, last, runID) {
+			section = projectKickoffBlocks(sc, p.ID, runID, stderr)
+		} else if judged := judgedChoresBlock(sc, p.ID); judged != "" {
+			section = []string{judged}
+		}
+		if len(section) == 0 {
+			quiet = append(quiet, p.ID)
+			continue
+		}
+		sections = append(sections, "# Project `"+p.ID+"`\n\n"+strings.Join(section, "\n\n"))
 	}
-	if settled := settledRunsBlock(sc, projectID); settled != "" {
-		blocks = append(blocks, settled)
+	if len(sources) > 0 {
+		blocks = append(blocks, "Project sources, the canonical checkouts. Read them by absolute path; they are read-only:\n"+
+			strings.Join(sources, "\n"))
 	}
-	if chains := chainStateBlock(sc, projectID); chains != "" {
-		blocks = append(blocks, chains)
+	if len(paused) > 0 {
+		blocks = append(blocks, "Paused, so left alone this sweep: "+strings.Join(paused, ", ")+".")
 	}
-	if advanced := advancedRunsBlock(sc, projectID); advanced != "" {
-		blocks = append(blocks, advanced)
+	if len(quiet) > 0 {
+		blocks = append(blocks, "No change since the last pulse and no live work: "+strings.Join(quiet, ", ")+".")
 	}
-	if judged := judgedChoresBlock(sc, projectID); judged != "" {
-		blocks = append(blocks, judged)
-	}
-	// The input record: what the operator has pushed at the board, what
-	// the board has asked them, and the bar for asking. Beside the chore
-	// block rather than after the ride line — both are "standing operator
-	// state this sweep has to account for", and neither depends on what
-	// this invocation licensed.
-	if inputs := pendingInputBlock(sc, projectID); inputs != "" {
-		blocks = append(blocks, inputs)
-	}
-	// Its own block, not a tail on the chain-state one: the line is about
-	// what this sweep may start, which is true whether or not the board
-	// happens to hold an active chain of two or more. Nested under the
-	// chain-state block it reached the agent only by coincidence.
+	blocks = append(blocks, sections...)
 	if ride := rideModeContextLine(); ride != "" {
 		blocks = append(blocks, ride)
 	}
-	// Beside it rather than folded into it: the ride line says what this
-	// invocation licensed, and this says what the project's standing mode
-	// does with that licence.
-	if mode := projectModeContextLine(sc.root, projectID); mode != "" {
-		blocks = append(blocks, mode)
+	return strings.Join(blocks, "\n\n")
+}
+
+// projectKickoffBlocks gathers one project's context blocks.
+func projectKickoffBlocks(sc *pulseScan, projectID, runID string, stderr io.Writer) []string {
+	var blocks []string
+	add := func(b string) {
+		if b != "" {
+			blocks = append(blocks, b)
+		}
 	}
-	// The chain edge set as the agent saw it. The sweep's ordering
-	// opinion is formed against exactly this picture, so it is what the
-	// apply step checks itself against before restructuring anything.
-	return strings.Join(blocks, "\n\n"), sc.graph.Edges()
+	if projectID != project.RootID {
+		add(pulseGitHubContext(sc, projectID, runID, stderr))
+		add(renderOwnedPRChecks(sc, sc.prChecks(projectID, stderr)))
+	}
+	add(settledRunsBlock(sc, projectID))
+	add(parkedRunsBlock(sc, projectID))
+	add(advancedRunsBlock(sc, projectID))
+	add(judgedChoresBlock(sc, projectID))
+	add(pendingInputBlock(sc, projectID))
+	add(projectModeContextLine(sc.root, projectID))
+	return blocks
+}
+
+// pulseProjectActive reports whether a project earns its blocks: something
+// landed since the last pulse, or it holds live work a pick could name.
+func pulseProjectActive(sc *pulseScan, projectID string, last time.Time, runID string) bool {
+	if last.IsZero() {
+		return true
+	}
+	for _, md := range sc.mds {
+		if md.Project != projectID || md.Workflow == pulseWorkflow || md.ID == runID {
+			continue
+		}
+		if sc.idx.LastActivity[md.Project+"/"+md.ID].After(last) {
+			return true
+		}
+		switch {
+		case md.Status == run.StatusPushed:
+			return true
+		case md.Status != run.StatusInProgress:
+		case operatorCascades(md.Workflow):
+			return true
+		case md.Workflow == dash.IdeaWorkflow && md.PromoteTo != "":
+			return true
+		}
+	}
+	return false
+}
+
+// parkedRunsBlock lists the runs a pick could name, each with what its own
+// canvas opens on. A dependency is prose on the blocked run's canvas, so
+// this is where the survey meets it.
+func parkedRunsBlock(sc *pulseScan, projectID string) string {
+	var lines []string
+	for _, key := range kickableRuns(sc, projectID) {
+		md := sc.byKey[key]
+		note := ""
+		if hold := kickFloorHold(sc.root, key, sc); hold != "" {
+			note = " — held: " + hold
+		}
+		lines = append(lines, fmt.Sprintf("- `%s` (%s)%s — %s", key, md.Workflow, note, settledRunTitle(sc.root, md)))
+	}
+	for _, md := range sc.mds {
+		if md.Project == projectID && md.Workflow == dash.IdeaWorkflow && md.Status == run.StatusInProgress && md.PromoteTo != "" {
+			lines = append(lines, fmt.Sprintf("- `%s/%s` (idea tagged %s) — %s", md.Project, md.ID, md.PromoteTo, settledRunTitle(sc.root, md)))
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return "Parked work a `next` could name. Before picking a run, read its canvas for anything it says it is waiting on:\n" +
+		strings.Join(lines, "\n")
 }
 
 // judgedChoresBlock lists the project's judged chores the survey could
@@ -137,8 +198,7 @@ func judgedChoresBlock(sc *pulseScan, projectID string) string {
 }
 
 // pulseScan is the one disk read a sweep's kickoff makes: the run scan
-// and the journal index, plus the by-key map and chain graph derived
-// from them.
+// and the journal index, plus the by-key map derived from them.
 //
 // Every context block wants some of this, and each used to take its own
 // copy — a scan and an index build per block per sweep, each describing
@@ -150,7 +210,6 @@ type pulseScan struct {
 	mds   []*run.Metadata
 	idx   *run.JournalIndex
 	byKey map[string]*run.Metadata
-	graph *run.ChainGraph
 
 	// chores memoizes the whole register's chore states, evaluated
 	// against this scan's runs and index. Loaded on the first ask rather
@@ -202,7 +261,7 @@ func newPulseScan(root string) (*pulseScan, bool) {
 	for _, md := range mds {
 		byKey[md.Project+"/"+md.ID] = md
 	}
-	return &pulseScan{root: root, mds: mds, idx: idx, byKey: byKey, graph: run.NewChainGraph(idx, byKey)}, true
+	return &pulseScan{root: root, mds: mds, idx: idx, byKey: byKey}, true
 }
 
 func (sc *pulseScan) prChecks(projectID string, stderr io.Writer) []ownedPRChecks {
@@ -212,10 +271,33 @@ func (sc *pulseScan) prChecks(projectID string, stderr io.Writer) []ownedPRCheck
 	if prs, ok := sc.ownedPRs[projectID]; ok {
 		return prs
 	}
-	prs := heartbeatPRChecks
-	if prs == nil {
+	var prs []ownedPRChecks
+	if heartbeatPRChecks != nil {
+		// The clock's observation covers every project; keep this one's.
+		for _, p := range heartbeatPRChecks {
+			if strings.HasPrefix(p.Run, projectID+"/") {
+				prs = append(prs, p)
+			}
+		}
+	} else {
 		prs = gatherOwnedPRChecks(sc, projectID, stderr)
 	}
 	sc.ownedPRs[projectID] = prs
 	return prs
+}
+
+// allPRChecks is every project's PR evidence, the set a `next` repair is
+// checked against.
+func (sc *pulseScan) allPRChecks(stderr io.Writer) []ownedPRChecks {
+	seen := map[string]bool{}
+	var out []ownedPRChecks
+	for _, md := range sc.mds {
+		if seen[md.Project] || md.Project == project.RootID {
+			continue
+		}
+		seen[md.Project] = true
+		out = append(out, sc.prChecks(md.Project, stderr)...)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Run < out[j].Run })
+	return out
 }

@@ -12,7 +12,7 @@ import (
 )
 
 func TestWorkflowCloseCommitFailureRetainsSourceAndEnvironment(t *testing.T) {
-	for _, workflow := range []string{"sdlc", "chat", "pulse", "chain"} {
+	for _, workflow := range []string{"sdlc", "chat", "pulse"} {
 		t.Run(workflow, func(t *testing.T) {
 			root := seedCloseFixture(t, "tele", "finish", workflow, run.StatusInProgress)
 			t.Setenv("MOE_HOME", root)
@@ -33,7 +33,7 @@ func TestWorkflowCloseCommitFailureRetainsSourceAndEnvironment(t *testing.T) {
 }
 
 func TestWorkflowCloseTeardownFailureKeepsTerminalTruthAndCache(t *testing.T) {
-	for _, workflow := range []string{"sdlc", "chat", "pulse", "chain"} {
+	for _, workflow := range []string{"sdlc", "chat", "pulse"} {
 		t.Run(workflow, func(t *testing.T) {
 			root := seedCloseFixture(t, "tele", "finish", workflow, run.StatusInProgress)
 			t.Setenv("MOE_HOME", root)

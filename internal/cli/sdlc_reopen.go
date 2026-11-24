@@ -57,10 +57,9 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 	// (`!!` / `!!!`). A reopened run mints seeded at design; the
 	// rungs ride it from there, exactly as `new --from-idea --chain`
 	// does for a promoted idea. Mutually exclusive with each other and --park.
-	ship := fs.Bool("ship", false, "open the run and cascade every stage headless to the ship (the flag twin of !! at the chain prompt; mutually exclusive with --park/--chain)")
-	chain := fs.Bool("chain", false, "open the run, ship it, and ride the chain it heads (the flag twin of !!!; mutually exclusive with --park/--ship)")
+	ship := fs.Bool("ship", false, "open the run and cascade every stage headless to the ship (the flag twin of !! at the chain prompt; mutually exclusive with --park)")
 	fs.Usage = func() {
-		moePrintln(stderr, "usage: moe sdlc reopen [--workspace <project>/<name> | --no-workspace] [--agent <name> | --no-agent] [--park|--ship|--chain] <project>/<slug>")
+		moePrintln(stderr, "usage: moe sdlc reopen [--workspace <project>/<name> | --no-workspace] [--agent <name> | --no-agent] [--park|--ship] <project>/<slug>")
 		moePrintln(stderr, "")
 		moePrintln(stderr, "Opens a fresh sdlc run seeded with the prior run's design canvas.")
 		moePrintln(stderr, "The prior run must be in a terminal status (closed, merged, or promoted);")
@@ -75,14 +74,9 @@ func runSDLCReopen(args []string, stdout, stderr io.Writer) int {
 		fs.Usage()
 		return 2
 	}
-	// One bang answer out of the ladder, or "" for no cascade tail. ok is
-	// false only when more than one rung was typed. The workflow is known
-	// at parse time (always sdlc), so preflightMintTail can run its full
-	// check here — unlike chore open.
-	cascade, ok := cascadeAnswerFromFlags(false /*once*/, "" /*to*/, *ship, *chain)
-	if !ok {
-		moePrintln(stderr, "sdlc reopen: --ship and --chain are one ladder — pick one")
-		return 2
+	cascade := ""
+	if *ship {
+		cascade = "!!"
 	}
 	if code := preflightMintTail("sdlc reopen", "sdlc", *park, cascade, stderr); code != 0 {
 		return code

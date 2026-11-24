@@ -136,7 +136,7 @@ func strandPRRecord(t *testing.T, f *prRecordFixture) (lift func(), stderr strin
 
 func TestPushPRRecordFailurePersistsExactPendingRecord(t *testing.T) {
 	f := newPRRecordFixture(t)
-	defer withRideMode(rideStatic)()
+	defer withRideMode(rideNone)()
 
 	lift, stderr := strandPRRecord(t, f)
 	defer lift()
@@ -151,7 +151,7 @@ func TestPushPRRecordFailurePersistsExactPendingRecord(t *testing.T) {
 	if p.URL != f.url {
 		t.Fatalf("pending URL: want %q, got %q", f.url, p.URL)
 	}
-	for _, want := range []string{"MoE-PR: " + f.url, "MoE-Consent: static"} {
+	for _, want := range []string{"MoE-PR: " + f.url, "MoE-Consent: none"} {
 		if !strings.Contains(p.Msg, want) {
 			t.Fatalf("pending message missing %q:\n%s", want, p.Msg)
 		}
@@ -175,7 +175,7 @@ func TestPushResumesPRRecordBeforeSynthesisOrGitHub(t *testing.T) {
 		lift, _ = strandPRRecord(t, f)
 	}()
 	lift()
-	defer withRideMode(rideStatic)()
+	defer withRideMode(rideNone)()
 	synthBefore := *f.synthCalls
 	ghBefore := f.ghCalls(t)
 
@@ -199,7 +199,7 @@ func TestPushResumesPRRecordBeforeSynthesisOrGitHub(t *testing.T) {
 		t.Fatalf("MoE-PR after recovery: want %q, got %q", f.url, got)
 	}
 	body := lastCommitMessage(t, f.root)
-	if !strings.Contains(body, "MoE-Consent: dynamic") || strings.Contains(body, "MoE-Consent: static") {
+	if !strings.Contains(body, "MoE-Consent: dynamic") || strings.Contains(body, "MoE-Consent: none") {
 		t.Fatalf("recovery did not preserve the shipping consent:\n%s", body)
 	}
 	if entries, err := git.Status(f.root); err != nil {
@@ -211,7 +211,7 @@ func TestPushResumesPRRecordBeforeSynthesisOrGitHub(t *testing.T) {
 
 func TestPushPRRecordRepeatedFailureKeepsMarker(t *testing.T) {
 	f := newPRRecordFixture(t)
-	defer withRideMode(rideStatic)()
+	defer withRideMode(rideNone)()
 	lift, _ := strandPRRecord(t, f)
 	defer lift()
 	path := prRecordPendingPath(f.root, f.reloadRun())
@@ -264,7 +264,7 @@ func TestPushPRRecordRemovalFailureKeepsMarkerUntilCleanup(t *testing.T) {
 	f := newPRRecordFixture(t)
 	lift, _ := strandPRRecord(t, f)
 	lift()
-	defer withRideMode(rideStatic)()
+	defer withRideMode(rideNone)()
 
 	origRemove := removePRRecordPending
 	removeCalls := 0
@@ -316,7 +316,7 @@ func TestPushPRRepairsMarkerlessPushedRun(t *testing.T) {
 	if err := os.WriteFile(prRecordPendingPath(f.root, md), []byte("not json\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	defer withRideMode(rideStatic)()
+	defer withRideMode(rideNone)()
 
 	stdout, stderr, code := f.runInRoot("sdlc", "push", "--pr", f.projectID+"/"+f.runID)
 	if code != 0 {

@@ -58,7 +58,7 @@ func TestJudgedChoreNominationOpensTheRun(t *testing.T) {
 	root := judgedChoreFixture(t)
 
 	var errb bytes.Buffer
-	m := &pulseMinter{root: root, projectID: "moe", pulseSlug: "pulse-one"}
+	m := &pulseMinter{root: root, projectID: "moe", spawnedBy: "moe/" + "pulse-one"}
 	id := m.mint(pulseRunSpec{Chore: "readme-update", Why: "the --dynamic flag landed and the README still lists three rungs"}, io.Discard, &errb)
 	if id == "" {
 		t.Fatalf("nomination opened nothing; stderr=%s", errb.String())
@@ -96,7 +96,7 @@ func TestJudgedChoreNominationOpensTheRun(t *testing.T) {
 func TestJudgedChoreNominationMapsOntoOpenRun(t *testing.T) {
 	root := judgedChoreFixture(t)
 
-	m := &pulseMinter{root: root, projectID: "moe", pulseSlug: "pulse-one"}
+	m := &pulseMinter{root: root, projectID: "moe", spawnedBy: "moe/" + "pulse-one"}
 	first := m.mint(pulseRunSpec{Chore: "readme-update", Why: "first"}, io.Discard, os.Stderr)
 	if first == "" {
 		t.Fatal("first nomination opened nothing")
@@ -120,7 +120,7 @@ func TestJudgedChoreNominationRefusesMechanicalChore(t *testing.T) {
 	root := judgedChoreFixture(t)
 
 	var errb bytes.Buffer
-	m := &pulseMinter{root: root, projectID: "moe", pulseSlug: "pulse-one"}
+	m := &pulseMinter{root: root, projectID: "moe", spawnedBy: "moe/" + "pulse-one"}
 	if id := m.mint(pulseRunSpec{Chore: "bump-deps", Why: "feels stale"}, io.Discard, &errb); id != "" {
 		t.Errorf("nomination opened %q; a mechanical chore is not nominable", id)
 	}
@@ -138,7 +138,7 @@ func TestJudgedChoreNominationRespectsCooldown(t *testing.T) {
 		"chore: skip moe/readme-update\n\nMoE-Chore-Skipped: moe/readme-update\n")
 
 	var errb bytes.Buffer
-	m := &pulseMinter{root: root, projectID: "moe", pulseSlug: "pulse-one"}
+	m := &pulseMinter{root: root, projectID: "moe", spawnedBy: "moe/" + "pulse-one"}
 	if id := m.mint(pulseRunSpec{Chore: "readme-update", Why: "landed again"}, io.Discard, &errb); id != "" {
 		t.Errorf("nomination opened %q inside the cooldown", id)
 	}
@@ -154,7 +154,7 @@ func TestJudgedChoreNominationWarnsOnFreshRunFields(t *testing.T) {
 	root := judgedChoreFixture(t)
 
 	var errb bytes.Buffer
-	m := &pulseMinter{root: root, projectID: "moe", pulseSlug: "pulse-one"}
+	m := &pulseMinter{root: root, projectID: "moe", spawnedBy: "moe/" + "pulse-one"}
 	if id := m.mint(pulseRunSpec{
 		Chore:    "readme-update",
 		Slug:     "readme-refresh",
@@ -203,7 +203,7 @@ func TestJudgedChoresBlockListsOnlyOpenableJudgedChores(t *testing.T) {
 	// Once the chore has an open run there is nothing to nominate, and
 	// with no other judged chore the block drops entirely — same as its
 	// sibling blocks.
-	m := &pulseMinter{root: root, projectID: "moe", pulseSlug: "pulse-one"}
+	m := &pulseMinter{root: root, projectID: "moe", spawnedBy: "moe/" + "pulse-one"}
 	if id := m.mint(pulseRunSpec{Chore: "readme-update", Why: "landed"}, io.Discard, os.Stderr); id == "" {
 		t.Fatal("nomination opened nothing")
 	}

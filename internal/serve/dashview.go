@@ -17,14 +17,12 @@ import (
 )
 
 // noteHintRE matches a machine lineage hint's connector and target
-// inside an already-HTML-escaped note: "chained → X", "spawned → X",
-// "promoted → X", and "chained after X" (dash.settledChainHint, which
-// spells the incoming chain edge in words rather than a "←" glyph). The
-// target is a slug token ([a-z0-9][a-z0-9-]*) optionally carrying one
+// inside an already-HTML-escaped note: "spawned → X" and "promoted → X".
+// The target is a slug token ([a-z0-9][a-z0-9-]*) optionally carrying one
 // "project/" segment. Those chars survive HTML escaping unchanged, so
 // matching after escape is safe: note content can't forge or break the
 // anchor we inject.
-var noteHintRE = regexp.MustCompile(`((?:chained|spawned|promoted) → |chained after )((?:_cabinet/[a-z0-9][a-z0-9-]*)|[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?)`)
+var noteHintRE = regexp.MustCompile(`((?:spawned|promoted) → )((?:_cabinet/[a-z0-9][a-z0-9-]*)|[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?)`)
 
 // noteHTML escapes note for HTML and wraps the target of each machine
 // lineage hint in a link to its run page. Every producer emits qualified
@@ -67,12 +65,8 @@ type dashRowVM struct {
 	// Depth is how many levels the row renders nested under a parent —
 	// 0 top-level, 1 for a completed spawned run (a tailed pulse), 2+ for
 	// deeper spawn lineage. The template draws a "↳" connector for
-	// Depth ≥ 1 and indents further per level. Lineage only — chain
-	// membership is Chained.
+	// Depth ≥ 1 and indents further per level.
 	Depth int
-	// Chained marks an active row that follows its chain parent. It
-	// renders flush-left with a "→" connector instead of indenting.
-	Chained bool
 	// Agent marks a machine-opened run. Deliberately independent of
 	// Depth: a spawned run whose spawner isn't on the board renders
 	// top-level, and the operator still needs to see that the machine put
@@ -85,23 +79,10 @@ type dashRowVM struct {
 }
 
 // agentMark decides whether a row wears the `agent` badge and what its
-// hover says. One badge, two reasons: the machine *opened* the run, or
-// the machine *placed* it in its chain. A row can be both, and the
-// stronger claim — how the run came to exist at all — wins the title.
-//
-// The ride level only appears where the journal recorded one; a
-// pre-trailer edge badges (the groom is inferable from ChainedChild
-// alone once EdgeConsent has an entry, so in practice this is
-// post-landing) without inventing a consent word.
+// hover says.
 func agentMark(r dash.Row) (bool, string) {
-	switch {
-	case r.Agent:
+	if r.Agent {
 		return true, "opened by the machine"
-	case r.EdgeAgent:
-		if r.EdgeConsent == "" {
-			return true, "chained here by a pulse groom"
-		}
-		return true, "chained here by a pulse groom (" + r.EdgeConsent + " ride)"
 	}
 	return false, ""
 }
@@ -258,7 +239,6 @@ func newRowBuckets(now time.Time, rows []dash.Row, topCap int) rowBuckets {
 			When:    dash.HumanAgo(now, r.When),
 			URL:     rowURL(r),
 			Depth:   r.Depth,
-			Chained: r.Chained,
 			Control: r.Control,
 		}
 		row.Agent, row.AgentTitle = agentMark(r)

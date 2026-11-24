@@ -384,7 +384,7 @@ func TestPulseNewExitsInterruptedOnSkip(t *testing.T) {
 	t.Cleanup(func() { runPulseSurvey = orig })
 
 	var out, errb bytes.Buffer
-	if code := Run([]string{"pulse", "new", "moe"}, &out, &errb); code != exitInterrupted {
+	if code := Run([]string{"pulse", "new"}, &out, &errb); code != exitInterrupted {
 		t.Fatalf("`moe pulse new` skip exit=%d, want exitInterrupted (%d); stderr=%q", code, exitInterrupted, errb.String())
 	}
 }
@@ -766,33 +766,6 @@ func TestPulseSurveyUnfilledGateLeavesRunOpen(t *testing.T) {
 	}
 }
 
-// TestTaggedFollowupHarvestPromoteGroomAndKick is the composition
-// regression for the gap this feature closes. A real harvested followup
-// becomes a tagged idea; a real headless pulse turn (fake claude on PATH)
-// names that live idea in spawn + chain; the harness promotes it, grooms
-// it, and reaches the self-kick door. The fake refuses the destination's
-// design turn so the test stops after proving the kick was attempted —
-// stage execution itself is covered by the cascade tests.
-//
-// It also carries the end-to-end half of the default flip, in the one
-// place a gate written by an agent reaches the kick through the whole
-// pipe. The plain gate asks for nothing and rides; its failed child now
-// fails the pulse invocation while leaving both the pulse closed and the
-// child parked. The same gate plus a `park` line holds, and prints the
-// survey's sentence. This is the 2026-07-25 incident's shape: that sweep
-// groomed a thread, wrote no kick field, and the ride ended in silence.
-func TestTaggedFollowupHarvestPromoteGroomAndKick(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		park string
-	}{
-		{name: "unparked"},
-		{name: "parked", park: `"park":"the reflect would read a half-finished record",`},
-	} {
-		t.Run(tc.name, func(t *testing.T) { taggedFollowupGroomAndKick(t, tc.park) })
-	}
-}
-
 func taggedFollowupGroomAndKick(t *testing.T, park string) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -897,121 +870,6 @@ esac
 	}
 }
 
-// TestPulseSurveyOpensReadOnlySandbox is the options pin: the survey
-// reads the project but must never edit it, which is three flags —
-// NeedsSandbox mints the per-run clone, EnforceSandboxBoundary refuses
-// the turn on a tracked-file change, and the absent BoundaryAllowsCommits
-// is what keeps the strict (don't-touch) wording and the HEAD-advance leg
-// live. Direct sibling of TestTwinStagesOpenReadOnlySandbox.
-func TestPulseSurveyOpensReadOnlySandbox(t *testing.T) {
-	for _, headless := range []bool{true, false} {
-		name := "interactive"
-		if headless {
-			name = "headless"
-		}
-		t.Run(name, func(t *testing.T) {
-			var got stageSessionOpts
-			var gotDoc string
-			prev := runStageSession
-			runStageSession = func(_, _, docID string, opts stageSessionOpts, _, _ io.Writer) int {
-				gotDoc, got = docID, opts
-				return 0
-			}
-			t.Cleanup(func() { runStageSession = prev })
-
-			var out, errb bytes.Buffer
-			if survey := openPulse("moe", "pulse-2026-07-21", headless, nil /*pi*/, &out, &errb); survey.code != 0 {
-				t.Fatalf("exit=%d stderr=%q", survey.code, errb.String())
-			}
-			if gotDoc != pulseDoc {
-				t.Errorf("docID = %q, want %q", gotDoc, pulseDoc)
-			}
-			if !got.NeedsSandbox {
-				t.Error("the survey must open the per-run source clone")
-			}
-			if !got.EnforceSandboxBoundary {
-				t.Error("the survey must refuse to close on a tracked-file change")
-			}
-			if got.BoundaryAllowsCommits {
-				t.Error("the survey must not relax the boundary for commits")
-			}
-			if got.Headless != headless {
-				t.Errorf("Headless = %v, want %v", got.Headless, headless)
-			}
-		})
-	}
-}
-
-// TestPulseSurveyRefusesDirtySandboxAndLeavesRunOpen is the boundary
-// end-to-end in the survey's own context: a sweep that writes to the
-// project repo is refused, and the pulse-specific consequence is that
-// its run lingers on the dash's ACTIVE list instead of auto-closing —
-// so the filings never harvest into ideas on the back of a turn that
-// broke the contract. The boundary matrix and the design stage's
-// HEAD-advance leg are covered elsewhere; this picks the dirty-tree leg.
-func TestPulseSurveyRefusesDirtySandboxAndLeavesRunOpen(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	seedSdlcOneShotProject(t, root, "tele")
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-	stubEditor(t)
-	suppressNextStagePrompt(t)
-
-	// The sweep does everything right on the bureaucracy side — a filled
-	// canvas with a passing gate and a filed followup — and then modifies
-	// a tracked file in the read-only project clone. Only the last part
-	// should matter. Canvas and sandbox paths come from the prompt, the
-	// same way the design-stage boundary test reads them.
-	fakeClaudeOnPath(t, `#!/bin/sh
-prompt=
-next=0
-for a in "$@"; do
-  if [ "$next" = "1" ]; then prompt=$a; next=0; fi
-  case "$a" in --append-system-prompt) next=1 ;; esac
-done
-canvas=$(printf '%s' "$prompt" | awk '/Your canvas for this document is the single file:/ {getline; gsub(/^ +| +$/, ""); print; exit}')
-sandbox=$(printf '%s' "$prompt" | awk '/exposed .*as an additional/ {getline; getline; gsub(/^ +| +$/, ""); print; exit}')
-# Backticks come from printf so this script can live in a Go raw string.
-tick=$(printf '\140')
-fence="${tick}${tick}${tick}"
-if [ -n "$canvas" ]; then
-  printf '# Pulse\n\n## Gate\n\n%sjson\n{"status": "ok"}\n%s\n' "$fence" "$fence" > "$canvas"
-  printf -- '- [ ] %stidy-something%s — Tidy something\n' "$tick" "$tick" > "${canvas%/documents/*}/followups.md"
-fi
-if [ -n "$sandbox" ]; then printf 'edited by the sweep\n' >> "$sandbox/README.md"; fi
-exit 0
-`)
-
-	var out, errb bytes.Buffer
-	if code := runPulseSurvey(root, "tele", "" /*emitRun*/, nil /*pi*/, &out, &errb); code == 0 {
-		t.Fatalf("survey exit=0, want non-zero (a refused sweep did not complete); stderr=%q", errb.String())
-	}
-	if !strings.Contains(errb.String(), "uncommitted tracked-file changes") {
-		t.Errorf("stderr = %q, want the boundary refusal named", errb.String())
-	}
-	if !strings.Contains(errb.String(), "pulse must not modify the project repo") {
-		t.Errorf("stderr = %q, want the refusal attributed to the pulse stage", errb.String())
-	}
-
-	// The pulse-specific half: refused means lingering, not auto-closed.
-	if open := openPulseRuns(t, root, "tele"); len(open) != 1 {
-		t.Fatalf("open pulse runs = %v, want exactly one left for a human to look at", open)
-	}
-	if closed := closedPulseRuns(t, root); len(closed) != 0 {
-		t.Fatalf("closed pulse runs = %v, want none — a boundary-refused sweep must not auto-close", closed)
-	}
-	mds, err := run.Scan(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, md := range mds {
-		if md.Workflow == dash.IdeaWorkflow {
-			t.Fatalf("followup harvested into idea %s/%s despite the refusal", md.Project, md.ID)
-		}
-	}
-}
-
 // TestReconcileAtPulseStaysDiskOnly: the pulse's reconcile wrapper has
 // no network leg of its own any more. It used to push conditionally,
 // when the walk moved a run; now whatever it commits reaches origin on
@@ -1113,8 +971,8 @@ func TestPulseNewDynamicCarriesConsent(t *testing.T) {
 		wantMode rideMode
 		wantWalk bool
 	}{
-		{name: "bare", args: []string{"pulse", "new", "moe"}, wantMode: rideNone, wantWalk: false},
-		{name: "dynamic", args: []string{"pulse", "new", "--dynamic", "moe"}, wantMode: rideDynamic, wantWalk: true},
+		{name: "bare", args: []string{"pulse", "new"}, wantMode: rideNone, wantWalk: false},
+		{name: "dynamic", args: []string{"pulse", "new", "--dynamic"}, wantMode: rideDynamic, wantWalk: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := newTestBureaucracy(t)
@@ -1163,7 +1021,7 @@ func TestPulseNewRestoresRideModeAfterDynamic(t *testing.T) {
 	t.Cleanup(func() { runPulseSurvey = orig })
 
 	var out, errb bytes.Buffer
-	if code := Run([]string{"pulse", "new", "--dynamic", "moe"}, &out, &errb); code != 0 {
+	if code := Run([]string{"pulse", "new", "--dynamic"}, &out, &errb); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	if currentRideMode != rideNone || rideWalkActive {

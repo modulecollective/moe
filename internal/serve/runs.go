@@ -69,11 +69,6 @@ type runVM struct {
 	// Status is the fallback meta line when the dash-row lookup has no row.
 	Status      string
 	CanvasLinks []canvasLink
-	// ChainMembers is the live batch hanging off a chain head, head→tail;
-	// empty for every other workflow. The head's canvas is the operator's
-	// purpose note, so this — not the canvas — is where membership and
-	// per-member status live on the page.
-	ChainMembers []chainMemberVM
 	// Provenance is the run's origin story, root first: the actor or run
 	// it descends from, then a step per hop down the spawn chain — by
 	// whom, under what consent — ending at this run. Empty when no
@@ -281,52 +276,6 @@ type ProvHop struct {
 	// spawn entry). Empty when unrecoverable — an old pulse, an edited
 	// canvas — which degrades to a hop with no reason, never an error.
 	Why string
-}
-
-// chainMemberVM is one run in a chain head's batch, rendered with the
-// dash's own note and timestamp so the head page and the dash agree
-// about what a member's state is called.
-type chainMemberVM struct {
-	ID   string // <project>/<slug>
-	URL  string // /run/<project>/<slug>
-	Note template.HTML
-	When string
-	// EdgeAgent / EdgeConsent mark the edge that placed this member here
-	// as a pulse groom's doing, and name the ride it groomed under.
-	// See dash.Row's fields of the same name — absence is unknown.
-	EdgeAgent   bool
-	EdgeConsent string
-}
-
-// gatherChainMembers reads the live batch behind a chain head — the runs
-// `moe chain kick` would actually ride, so the page's count can't lie
-// about what a kick from the terminal will walk. Everything else — a
-// non-chain run, no callback wired, a gather error — yields nothing,
-// which renders as the read-only page chain heads had before. A gather
-// error is logged and swallowed rather than failing the page, matching
-// fillRunRow: the canvas link and the meta line are still worth serving.
-func (s *Server) gatherChainMembers(md *run.Metadata, projectID, slug string, now time.Time) []chainMemberVM {
-	if md.Workflow != dash.ChainWorkflow || s.opts.ChainMembers == nil {
-		return nil
-	}
-	rows, err := s.opts.ChainMembers(projectID, slug)
-	if err != nil {
-		s.logf("chain members %s/%s: %v", projectID, slug, err)
-		return nil
-	}
-	var out []chainMemberVM
-	for _, row := range rows {
-		id := row.Project + "/" + row.Run
-		out = append(out, chainMemberVM{
-			ID:          id,
-			URL:         "/run/" + id,
-			Note:        noteHTML(row.Project, row.Note),
-			When:        dash.HumanAgo(now, row.When),
-			EdgeAgent:   row.EdgeAgent,
-			EdgeConsent: row.EdgeConsent,
-		})
-	}
-	return out
 }
 
 // gatherProvenance reads the run's origin story. A missing callback or a
@@ -688,7 +637,6 @@ func (s *Server) buildRunVM(projectID, slug, id string) (runVM, error) {
 	}
 	s.fillRunRow(&vm, projectID, slug, now)
 	vm.Provenance = s.gatherProvenance(projectID, slug)
-	vm.ChainMembers = s.gatherChainMembers(md, projectID, slug, now)
 	vm.Actions = s.composeRunActions(projectID, slug, vm.NextStage, md)
 	vm.RunStatus = s.runStatusVM(projectID, slug)
 	return vm, nil

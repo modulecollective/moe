@@ -20,10 +20,10 @@ import (
 //
 // Everything here is a ticker, a gate check and a child spawn. It
 // decides nothing — on each tick it asks the cli-side gate which
-// projects warrant a look, and for each one runs `moe pulse new
-// --dynamic --heartbeat <project>` as a child of the selected job host
-// (a local PTY, or a Rex block — rex.go), plus the --emit-run plumbing
-// documented below. --heartbeat is the clock signing its own work,
+// projects warrant a look, and if any does runs one `moe pulse new
+// --dynamic --heartbeat` as a child of the selected job host (a local
+// PTY, or a Rex block — rex.go), plus the --emit-run plumbing documented
+// below. --heartbeat is the clock signing its own work,
 // which is what lets the per-project mode (`moe project mode`) cap the
 // clock rather than the operator: the gate never sweeps a paused
 // project, and a safe one's kick starts only operator-marked threads.
@@ -192,57 +192,59 @@ func (s *Server) heartbeatTick() {
 	s.activity.recordTick(now, decisions)
 	s.saveActivity()
 
+	var due []HeartbeatDecision
 	for _, d := range decisions {
-		if !d.Sweep {
-			continue
+		if d.Sweep {
+			due = append(due, d)
 		}
-		projectID := d.Project
-		if hostErr != nil {
-			reason := hostErr.Error()
-			s.logf("heartbeat: %s held — %s", projectID, reason)
-			s.activity.recordSkip(projectID, reason, true, 0, 0)
-			s.saveActivity()
-			continue
-		}
-		if cooling, left, fails := s.heartbeat.cooling(projectID); cooling {
-			s.logf("heartbeat: %s cooling off after %d failure(s) — %d tick(s) left", projectID, fails, left)
-			// The gate wanted this project swept and the backoff held it,
-			// so the gate's reason is not what happened. Overwrite it or
-			// the panel would read "sweeping — the journal moved" for a
-			// project that is doing nothing of the kind.
-			s.activity.recordSkip(projectID,
-				fmt.Sprintf("cooling off after %d failure(s)", fails), false, fails, left)
-			s.saveActivity()
-			continue
-		}
-		// The server is serial: one working agent, bureaucracy-wide. Any
-		// unsettled sweep holds the slot, including one adopted from a
-		// previous serve's Rex session, and a sweep that kicked a ride can
-		// hold it for many ticks.
-		if s.children.sweepActive() {
-			return
-		}
-		id := heartbeatChildPrefix + projectID
-		// --heartbeat is the child saying who invoked it. The command is
-		// otherwise spelled exactly like the one an operator types, and the
-		// per-project mode caps the clock rather than the operator — so
-		// without it the child could not tell the two apart.
-		args := []string{"pulse", "new", "--dynamic", "--heartbeat",
-			"--emit-run", sweepRunPath(s.opts.Root, projectID)}
-		if d.PRChecks != "" {
-			args = append(args, "--pr-checks", d.PRChecks)
-		}
-		args = append(args, projectID)
-		_, err := s.children.spawn(id, s.opts.MoeBin, args,
-			s.opts.Root, s.opts.Logger)
-		if err != nil {
-			s.logf("heartbeat: spawn %s: %v", projectID, err)
-			continue
-		}
-		s.logf("heartbeat: sweeping %s", projectID)
-		// One start per tick, even if this child has already exited.
+	}
+	if len(due) == 0 {
 		return
 	}
+	if hostErr != nil {
+		reason := hostErr.Error()
+		s.logf("heartbeat: sweep held — %s", reason)
+		for _, d := range due {
+			s.activity.recordSkip(d.Project, reason, true, 0, 0)
+		}
+		s.saveActivity()
+		return
+	}
+	// Backoff is one ledger, keyed on the root project, because one sweep
+	// failing stalls every project alike.
+	if cooling, left, fails := s.heartbeat.cooling(project.RootID); cooling {
+		s.logf("heartbeat: cooling off after %d failure(s) — %d tick(s) left", fails, left)
+		// The gate wanted these swept and the backoff held them, so its
+		// reason is not what happened.
+		reason := fmt.Sprintf("cooling off after %d failure(s)", fails)
+		s.activity.recordSkip(project.RootID, reason, false, fails, left)
+		for _, d := range due {
+			s.activity.recordSkip(d.Project, reason, false, fails, left)
+		}
+		s.saveActivity()
+		return
+	}
+	// The server is serial: one working agent, bureaucracy-wide. Any
+	// unsettled sweep holds the slot, including one adopted from a previous
+	// serve's Rex session, and a sweep that kicked a ride can hold it for
+	// many ticks.
+	if s.children.sweepActive() {
+		return
+	}
+	// --heartbeat is the child saying who invoked it. The command is
+	// otherwise spelled exactly like the one an operator types, and each
+	// project's mode caps the clock rather than the operator.
+	args := []string{"pulse", "new", "--dynamic", "--heartbeat",
+		"--emit-run", sweepRunPath(s.opts.Root, project.RootID)}
+	if prChecks := due[0].PRChecks; prChecks != "" {
+		args = append(args, "--pr-checks", prChecks)
+	}
+	id := heartbeatChildPrefix + project.RootID
+	if _, err := s.children.spawn(id, s.opts.MoeBin, args, s.opts.Root, s.opts.Logger); err != nil {
+		s.logf("heartbeat: spawn sweep: %v", err)
+		return
+	}
+	s.logf("heartbeat: sweeping (%d project(s) due)", len(due))
 }
 
 // completeHeartbeat records a sweep's outcome once its child exits: the

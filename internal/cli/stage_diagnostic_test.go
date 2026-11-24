@@ -102,7 +102,7 @@ func TestMissingCanvasRetainsDiagnostic(t *testing.T) {
 	for _, refusal := range []string{"missing", "empty", "unchanged"} {
 		t.Run(refusal, func(t *testing.T) {
 			root, fake := diagnosticFixture(t)
-			defer withRideMode(rideStatic)()
+			defer withRideMode(rideDynamic)()
 			fake.empty = refusal == "empty"
 			var skeleton string
 			if refusal == "unchanged" {
@@ -137,7 +137,7 @@ func TestMissingCanvasRetainsDiagnostic(t *testing.T) {
 			if strings.Contains(body, "MoE-Document:") || strings.Contains(body, "work: update") {
 				t.Fatalf("diagnostic counts as work: %s", body)
 			}
-			if !strings.Contains(body, "MoE-Consent: static") {
+			if !strings.Contains(body, "MoE-Consent: dynamic") {
 				t.Fatal(body)
 			}
 			if !strings.Contains(errb.String(), "diagnostics saved") {
@@ -509,7 +509,7 @@ func TestCodexRawStreamsThroughStage(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, _ := setupResumeFixture(t, "unused-raw-capture")
-			defer withRideMode(rideStatic)()
+			defer withRideMode(rideDynamic)()
 			scratch := t.TempDir()
 			t.Setenv("TMPDIR", scratch)
 			const raw = "{\"type\":\"thread.started\",\"thread_id\":\"raw-capture-fixture\"}\n{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"\"}}\n{\"type\":\"turn.completed\"}\n"

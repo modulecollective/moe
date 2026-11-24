@@ -8,8 +8,6 @@ import (
 	"testing"
 
 	"github.com/modulecollective/moe/internal/git"
-	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/trailers"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
@@ -253,79 +251,5 @@ func TestIdeaTagUsageErrors(t *testing.T) {
 		if code := Run(args, &out, &errb); code != 2 {
 			t.Fatalf("%v: expected exit=2, got %d; stderr=%q", args, code, errb.String())
 		}
-	}
-}
-
-// TestOperatorTaggedIdeaRidesLikeAHarvestedTag is the continuity claim
-// the whole design rests on: an operator's `moe idea tag` writes the
-// same disk state a filer's `(sdlc)` followup tag writes, so it drives
-// the identical ride. Same fake-claude pulse turn as
-// TestTaggedFollowupHarvestPromoteGroomAndKick, but the tag arrives by
-// hand on an idea filed without one — the two stranded ideas that
-// prompted this run, replayed. The destination deliberately fails its
-// first turn, so the pulse invocation must report that stalled ride.
-func TestOperatorTaggedIdeaRidesLikeAHarvestedTag(t *testing.T) {
-	root := newTestBureaucracy(t)
-	markBureaucracy(t, root)
-	seedSdlcOneShotProject(t, root, "moe")
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-
-	// Filed untagged — exactly what a forgetful filer leaves behind.
-	if _, err := createIdea(root, "moe", "tagged-by-hand", "# Apply the mechanical fix\n", "", trailers.Block{}); err != nil {
-		t.Fatalf("createIdea: %v", err)
-	}
-	if code := Run([]string{"idea", "tag", "moe/tagged-by-hand"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
-		t.Fatal("idea tag failed")
-	}
-
-	fakeClaudeOnPath(t, `#!/bin/sh
-prompt=
-next=0
-for a in "$@"; do
-  if [ "$next" = "1" ]; then prompt=$a; next=0; fi
-  case "$a" in --append-system-prompt) next=1 ;; esac
-done
-canvas=$(printf '%s' "$prompt" | awk '/Your canvas for this document is the single file:/ {getline; gsub(/^ +| +$/, ""); print; exit}')
-ticks=$(printf '\140\140\140')
-case "$canvas" in
-  */documents/pulse/content.md)
-    printf '%s\n' '# Pulse' '' '## Gate' '' "${ticks}json" '{"status":"ok","threads":[{"runs":[{"slug":"tagged-by-hand","title":"Apply the mechanical fix","why":"the operator tagged it"}]}]}' "$ticks" > "$canvas"
-    exit 0
-    ;;
-  *)
-    exit 1
-    ;;
-esac
-`)
-
-	var out, errb bytes.Buffer
-	defer withRideMode(rideDynamic)()
-	if code := runPulseSurvey(root, "moe", "" /*emitRun*/, nil, &out, &errb); code != 1 {
-		t.Fatalf("pulse exit=%d, want failed child exit 1; stderr=%q", code, errb.String())
-	}
-
-	idea, err := run.Load(root, "moe", "tagged-by-hand")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if idea.Status != run.StatusPromoted {
-		t.Fatalf("idea status=%q, want promoted — the hand-stamped tag should license the promote", idea.Status)
-	}
-	var promoted *run.Metadata
-	mds, err := run.Scan(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, md := range mds {
-		if md.Project == "moe" && md.Workflow == "sdlc" {
-			promoted = md
-		}
-	}
-	if promoted == nil || promoted.SpawnedBy == "" {
-		t.Fatalf("promoted run = %+v, want machine lineage", promoted)
-	}
-	if !strings.Contains(errb.String(), "pulse: kicking moe/"+promoted.ID+" (dynamic)") {
-		t.Fatalf("pulse never reached self-kick for the hand-tagged idea; stderr=%q", errb.String())
 	}
 }

@@ -115,15 +115,6 @@ type Block struct {
 	// target-repo change landed by this terminal transition. Values are
 	// "<project>/<chore>".
 	ChoreTouched []string
-	// ChainedTo and ChainedToRemoved each repeat once per edge, one
-	// trailer line per slice entry, value
-	// "<parent-project>/<parent-slug> <child-project>/<child-slug>".
-	// A `chain edit` save commit stamps one ChainedTo per new edge
-	// plus one ChainedToRemoved per replaced edge; a `chain clear`
-	// stamps one ChainedToRemoved per currently-live edge. Empty
-	// slices elide.
-	ChainedTo        []string
-	ChainedToRemoved []string
 }
 
 // String renders the block. Empty fields are skipped; field
@@ -157,12 +148,6 @@ func (b Block) String() string {
 	write(&sb, "MoE-Input-Delivered", b.InputDelivered)
 	for _, v := range b.ChoreTouched {
 		write(&sb, "MoE-Chore-Touched", v)
-	}
-	for _, v := range b.ChainedTo {
-		write(&sb, "MoE-Chained-To", v)
-	}
-	for _, v := range b.ChainedToRemoved {
-		write(&sb, "MoE-Chained-To-Removed", v)
 	}
 	return sb.String()
 }

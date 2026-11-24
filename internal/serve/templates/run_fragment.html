@@ -95,22 +95,6 @@
   </section>
   {{end}}
 
-  {{if .ChainMembers}}
-  <section class="chain-members">
-    <h2>chained</h2>
-    <ul>
-      {{range .ChainMembers}}
-      <li>
-        <a class="slug" href="{{.URL}}">{{.ID}}</a>
-        <span class="note">{{.Note}}</span>
-        <span class="when">{{.When}}</span>
-        {{if .EdgeAgent}}<span class="badge agent" title="placed here by a pulse groom ({{.EdgeConsent}} ride)">agent</span>{{end}}
-      </li>
-      {{end}}
-    </ul>
-  </section>
-  {{end}}
-
   {{if .Traces.Followups}}
   <section class="traces">
     <h2>follow-ups</h2>

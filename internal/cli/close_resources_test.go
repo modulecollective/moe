@@ -125,7 +125,7 @@ func assertCloseRecorded(t *testing.T, root, projectID, runID, workflow string) 
 }
 
 func TestWorkflowCloseReleasesResources(t *testing.T) {
-	for _, workflow := range []string{"sdlc", "pulse", "chat", "chain"} {
+	for _, workflow := range []string{"sdlc", "pulse", "chat"} {
 		for _, state := range []string{"cached", "no-cache", "no-clone"} {
 			t.Run(workflow+"/"+state, func(t *testing.T) {
 				root := seedCloseFixture(t, "tele", "finish", workflow, run.StatusInProgress)
@@ -190,7 +190,7 @@ func TestWorkflowCloseReleasesResources(t *testing.T) {
 }
 
 func TestServeCloseReleasesResources(t *testing.T) {
-	for _, workflow := range []string{"pulse", "chat", "chain"} {
+	for _, workflow := range []string{"pulse", "chat"} {
 		t.Run(workflow, func(t *testing.T) {
 			root := seedCloseFixture(t, "tele", "finish", workflow, run.StatusInProgress)
 			installCloseResourceHooks(t, root, "tele")
@@ -205,7 +205,7 @@ func TestServeCloseReleasesResources(t *testing.T) {
 }
 
 func TestWorkflowClosePreservesReservedResources(t *testing.T) {
-	for _, workflow := range []string{"pulse", "chat", "chain"} {
+	for _, workflow := range []string{"pulse", "chat"} {
 		t.Run(workflow, func(t *testing.T) {
 			root := seedCloseFixture(t, "tele", "finish", workflow, run.StatusInProgress)
 			t.Setenv("MOE_HOME", root)
@@ -335,7 +335,7 @@ func TestPulseSurveyResourceLifecycle(t *testing.T) {
 			markBureaucracy(t, root)
 			trailerstest.SeedProject(t, root, "moe")
 			installCloseResourceHooks(t, root, "moe")
-			mode := rideStatic
+			mode := rideDynamic
 			if scenario == "dynamic" {
 				mode = rideDynamic
 			}
@@ -381,8 +381,8 @@ func TestPulseSurveyResourceLifecycle(t *testing.T) {
 			}
 			assertCloseRecorded(t, root, "moe", closed[0], pulseWorkflow)
 			body := readPulseCanvas(t, root, "moe", closed[0])
-			if scenario == "dynamic" && !strings.Contains(body, "## Kick") {
-				t.Fatalf("kick section lost: %s", body)
+			if scenario == "dynamic" && !strings.Contains(body, "## Next") {
+				t.Fatalf("next section lost: %s", body)
 			}
 			if scenario == "skip" && !strings.Contains(body, "Sweep skipped") {
 				t.Fatalf("skip note lost: %s", body)
@@ -455,12 +455,11 @@ for a in "$@"; do
  case "$a" in --append-system-prompt) next=1 ;; esac
 done
 canvas=$(printf '%s' "$prompt" | awk '/Your canvas for this document is the single file:/ {getline; gsub(/^ +| +$/, ""); print; exit}')
-test -d "$TEST_CLOSE_ROOT"
 fence=$(printf '\140\140\140')
 printf '# Pulse\n\n## Gate\n\n%sjson\n{"status":"ok"}\n%s\n' "$fence" "$fence" > "$canvas"
 `)
 	var log bytes.Buffer
-	defer withRideMode(rideStatic)()
+	defer withRideMode(rideDynamic)()
 	if code := runPulseSurvey(root, "tele", "", nil, &log, &log); code != 0 {
 		t.Fatalf("real survey exit=%d: %s", code, &log)
 	}
@@ -468,12 +467,14 @@ printf '# Pulse\n\n## Gate\n\n%sjson\n{"status":"ok"}\n%s\n' "$fence" "$fence" >
 	if len(closed) != 1 {
 		t.Fatalf("closed=%v: %s", closed, &log)
 	}
-	setup, err := os.ReadFile(filepath.Join(parent, "setup"))
-	if err != nil || len(strings.Fields(string(setup))) != 1 {
-		t.Fatalf("setup receipt=%q, %v", setup, err)
+	// The survey reads canonical checkouts, so it allocates no clone and
+	// runs no dev-env setup.
+	if _, err := os.Stat(filepath.Join(parent, "setup")); !os.IsNotExist(err) {
+		t.Fatalf("survey ran dev-env setup: %v", err)
 	}
-	resources := closeResources{sandbox.Path(root, "tele", closed[0]), strings.TrimSpace(string(setup)), filepath.Join(parent, "teardown"), filepath.Join(parent, "sibling")}
-	resources.assertReleased(t)
+	if _, err := os.Stat(sandbox.Path(root, "tele", closed[0])); !os.IsNotExist(err) {
+		t.Fatalf("survey allocated a clone: %v", err)
+	}
 	assertCloseRecorded(t, root, "tele", closed[0], pulseWorkflow)
 }
 
@@ -546,7 +547,7 @@ printf '{"type":"user","message":{"role":"user","content":"conversation survives
 }
 
 func TestWorkflowCloseKeepsNamedWorkspaceWarm(t *testing.T) {
-	for _, workflow := range []string{"sdlc", "pulse", "chat", "chain"} {
+	for _, workflow := range []string{"sdlc", "pulse", "chat"} {
 		t.Run(workflow, func(t *testing.T) {
 			root := stageWorkspaceFixture(t, "--workspace", "tele/dev")
 			parent := installCloseResourceHooks(t, root, "tele")

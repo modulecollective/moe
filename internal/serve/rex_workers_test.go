@@ -32,7 +32,7 @@ func TestRexWorkerJoinIncludesFinalClose(t *testing.T) {
 	fake.reply("run", `{"block_ids":["block:A"]}`, 0)
 	fake.reply("wait", `{"exit_code":0}`, 0)
 	fake.reply("capture", "final screen", 0)
-	gate := &fakeHeartbeat{due: []string{"alpha"}}
+	gate := &fakeHeartbeat{due: []string{"_cabinet"}}
 	s := rexServer(t, fake, Options{Root: t.TempDir(), MoeBin: "/bin/true", Heartbeat: gate})
 	fake.hold("block-close")
 	// Release non-cancellable calls even when an assertion fails, before
@@ -47,7 +47,7 @@ func TestRexWorkerJoinIncludesFinalClose(t *testing.T) {
 
 	s.heartbeatTick()
 	waitFor(t, "held final close", func() bool { return fake.called("block close block:A") })
-	c, _ := s.children.get("heartbeat:alpha")
+	c, _ := s.children.get("heartbeat:_cabinet")
 	select {
 	case <-c.done:
 	default:
@@ -75,7 +75,7 @@ func TestRexWorkerJoinIncludesFinalClose(t *testing.T) {
 	if c.tail() != "final screen\n" || !slices.Equal(gate.cleanList(), []bool{true}) {
 		t.Fatalf("completion lost: tail %q, clean %v", c.tail(), gate.cleanList())
 	}
-	if calls := fake.calls(); len(calls) != 6 || calls[3] != "capture -b block:A --trim" || calls[4] != "block rename -s session:S block:A done:heartbeat:alpha" || calls[5] != "block close block:A" {
+	if calls := fake.calls(); len(calls) != 6 || calls[3] != "capture -b block:A --trim" || calls[4] != "block rename -s session:S block:A done:heartbeat:_cabinet" || calls[5] != "block close block:A" {
 		t.Fatalf("unexpected completed calls: %q", calls)
 	}
 }
@@ -97,7 +97,7 @@ func TestRexWorkerJoinIncludesHeartbeatCompletion(t *testing.T) {
 	fake.reply("run", `{"block_ids":["block:A"]}`, 0)
 	fake.reply("wait", `{"exit_code":1}`, 1)
 	gate := &heldSweptHeartbeat{
-		fakeHeartbeat: fakeHeartbeat{due: []string{"alpha"}},
+		fakeHeartbeat: fakeHeartbeat{due: []string{"_cabinet"}},
 		entered:       make(chan struct{}), release: make(chan struct{}),
 	}
 	s := rexServer(t, fake, Options{Root: t.TempDir(), MoeBin: "/bin/true", Heartbeat: gate})
@@ -123,7 +123,7 @@ func TestRexWorkerJoinIncludesHeartbeatCompletion(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("join did not return after Swept was released")
 	}
-	if !slices.Equal(gate.cleanList(), []bool{false}) || s.heartbeat.fails["alpha"] != 1 || s.heartbeat.skip["alpha"] != 1 {
+	if !slices.Equal(gate.cleanList(), []bool{false}) || s.heartbeat.fails["_cabinet"] != 1 || s.heartbeat.skip["_cabinet"] != 1 {
 		t.Fatalf("completion lost: clean %v, failures %v, skips %v", gate.cleanList(), s.heartbeat.fails, s.heartbeat.skip)
 	}
 	if fake.called("block close") {
@@ -140,9 +140,9 @@ func TestRexWorkerCancellationLeavesLiveJob(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			fake := newFakeRex(t)
 			fake.reply("run", `{"block_ids":["block:A"]}`, 0)
-			fake.reply("block-ls", `{"blocks":[{"block_id":"block:A","label":"heartbeat:alpha"}]}`, 0)
+			fake.reply("block-ls", `{"blocks":[{"block_id":"block:A","label":"heartbeat:_cabinet"}]}`, 0)
 			fake.hold("wait")
-			gate := &fakeHeartbeat{due: []string{"alpha"}}
+			gate := &fakeHeartbeat{due: []string{"_cabinet"}}
 			s := rexServer(t, fake, Options{Root: t.TempDir(), MoeBin: "/bin/true", Heartbeat: gate})
 			if adopted {
 				if err := testRex(s.children).adopt(); err != nil {
@@ -152,7 +152,7 @@ func TestRexWorkerCancellationLeavesLiveJob(t *testing.T) {
 				s.heartbeatTick()
 			}
 			// Dispatch clears a previous emit file; write the sentinel after it.
-			path := sweepRunPath(s.opts.Root, "alpha")
+			path := sweepRunPath(s.opts.Root, "_cabinet")
 			if err := os.WriteFile(path, []byte("sentinel\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -161,7 +161,7 @@ func TestRexWorkerCancellationLeavesLiveJob(t *testing.T) {
 			h := testRex(s.children)
 			h.cancel()
 			waitRexWorkers(t, h)
-			c, _ := s.children.get("heartbeat:alpha")
+			c, _ := s.children.get("heartbeat:_cabinet")
 			select {
 			case <-c.done:
 				t.Fatal("host cancellation fabricated a remote exit")
@@ -196,7 +196,7 @@ func TestRexHeartbeatPublishedExitWinsCancellation(t *testing.T) {
 				<-unblock
 				original(id, at, err, tail)
 			}
-			c := testRex(s.children).register("heartbeat:alpha", "block:A", adopted, io.Discard)
+			c := testRex(s.children).register("heartbeat:_cabinet", "block:A", adopted, io.Discard)
 			select {
 			case <-entered:
 			case <-time.After(5 * time.Second):
@@ -212,7 +212,7 @@ func TestRexHeartbeatPublishedExitWinsCancellation(t *testing.T) {
 			if !adopted {
 				want = []bool{false}
 			}
-			if !slices.Equal(gate.cleanList(), want) || s.heartbeat.fails["alpha"] != 1 || s.heartbeat.skip["alpha"] != 1 || !c.isSettled() {
+			if !slices.Equal(gate.cleanList(), want) || s.heartbeat.fails["_cabinet"] != 1 || s.heartbeat.skip["_cabinet"] != 1 || !c.isSettled() {
 				t.Fatal("published exit lost on cancellation")
 			}
 		})

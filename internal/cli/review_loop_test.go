@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"io"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -233,70 +232,6 @@ func TestReviewEscalatedStillOffersInteractiveKickback(t *testing.T) {
 	}
 }
 
-// TestKickFloorHoldsASpentReviewLoop: the sweep must not re-ride a run
-// parked at a blocked review the loop gave up on, until a note arrives.
-// The clears cases alone pass vacuously; the held cases are the ones a
-// deleted leg turns red.
-func TestKickFloorHoldsASpentReviewLoop(t *testing.T) {
-	turn := func(doc string) func(t *testing.T, root string) {
-		return func(t *testing.T, root string) {
-			t.Helper()
-			trailerstest.CommitWorkTurnAt(t, root, "moe", "loop", "sdlc", doc, time.Time{})
-		}
-	}
-	reviews := func(n int) func(t *testing.T, root string) {
-		return func(t *testing.T, root string) {
-			t.Helper()
-			for range n {
-				turn("review")(t, root)
-			}
-		}
-	}
-	const escalatedHold = "is parked at a blocked review: the reviewer escalated — another build round won't clear it — answer its question, kick it back by hand, or close it"
-	const capHold = "is parked at a blocked review: review has run 10 times (cap 10) — answer its question, kick it back by hand, or close it"
-	for _, tc := range []struct {
-		name   string
-		canvas string
-		setUp  []func(t *testing.T, root string)
-		want   string
-	}{
-		{name: "escalated, held", canvas: escalatedReviewCanvas, setUp: []func(*testing.T, string){turn("build"), turn("review")}, want: escalatedHold},
-		{name: "at the cap, held", canvas: blockedReviewCanvas, setUp: []func(*testing.T, string){turn("build"), reviews(maxReviewTurns)}, want: capHold},
-		{name: "blocked with budget, rides", canvas: blockedReviewCanvas, setUp: []func(*testing.T, string){turn("build"), turn("review")}},
-		{name: "ready review, rides", canvas: readyReviewCanvas, setUp: []func(*testing.T, string){turn("build"), reviews(maxReviewTurns)}},
-		{name: "build answered since, rides", canvas: escalatedReviewCanvas, setUp: []func(*testing.T, string){turn("review"), turn("build")}},
-		{
-			name: "design answered since, rides", canvas: escalatedReviewCanvas,
-			setUp: []func(*testing.T, string){turn("build"), turn("review"), turn("design"), func(t *testing.T, root string) {
-				advanceAt(t, root, "moe", "loop", "design", time.Now().Local().Add(time.Minute))
-			}},
-		},
-		{
-			name: "an undelivered note releases it", canvas: escalatedReviewCanvas,
-			setUp: []func(*testing.T, string){turn("build"), turn("review"), func(t *testing.T, root string) {
-				if _, err := input.Add(root, "moe", "loop", "the counter reset is in bar.go, look there"); err != nil {
-					t.Fatal(err)
-				}
-			}},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			defer withRideMode(rideDynamic)()
-			root, _, _ := kickFixture(t)
-			seedRun(t, root, "moe", "loop", "sdlc", run.StatusInProgress, time.Now().Local(),
-				map[string]string{"design": "# Loop\n\nbody\n", "review": tc.canvas})
-			advanceAt(t, root, "moe", "loop", "design", time.Now().Local().Add(-time.Hour))
-			for _, f := range tc.setUp {
-				f(t, root)
-			}
-			groomed := groomChains(root, "moe", "pulse-groom", nil, nil, os.Stderr)
-			if got := kickFloorHold(root, "moe/loop", groomed); got != tc.want {
-				t.Errorf("kickFloorHold = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
 // seedLiveReviewRun lays down the run.json input.Ask reads to accept an
 // ask; the cascade fixtures otherwise carry only canvases.
 func seedLiveReviewRun(t *testing.T, root string, md *run.Metadata) {
@@ -426,60 +361,6 @@ func TestUnspentReviewAsksNothing(t *testing.T) {
 	})
 }
 
-// TestSpentReviewAnswerReleasesAndReasks is the round trip: the ask is
-// not a work turn (so the hold survives the summons), the operator's
-// answer releases the hold, and a review that escalates again on the
-// released turn opens a fresh ping.
-func TestSpentReviewAnswerReleasesAndReasks(t *testing.T) {
-	defer withRideMode(rideDynamic)()
-	realGate := checkCascadeStageGate
-	root, _, _ := kickFixture(t)
-	checkCascadeStageGate = realGate // kickFixture stubs it; the park needs the real gate
-	md := &run.Metadata{ID: "loop", Project: "moe", Workflow: "sdlc", Status: run.StatusInProgress}
-	seedRun(t, root, "moe", "loop", "sdlc", run.StatusInProgress, time.Now().Local(),
-		map[string]string{"design": "# Loop\n\nbody\n", "review": escalatedReviewCanvas})
-	advanceAt(t, root, "moe", "loop", "design", time.Now().Local().Add(-time.Hour))
-	trailerstest.CommitWorkTurnAt(t, root, "moe", "loop", "sdlc", "build", time.Time{})
-	commitReviewTurns(t, root, md, 1)
-	stubHeadlessKickback(t, 0, nil)
-	hold := func() string {
-		t.Helper()
-		return kickFloorHold(root, "moe/loop", groomChains(root, "moe", "pulse-groom", nil, nil, io.Discard))
-	}
-
-	if _, code, stderr := runReviewGate(t, md); code != 1 {
-		t.Fatalf("gate code=%d, want the park; stderr=%q", code, stderr)
-	}
-	first := openPings(t, root, md)
-	if len(first) != 1 {
-		t.Fatalf("open pings = %+v, want one", first)
-	}
-	if n, last, err := reviewTurns(root, md); err != nil || n != 1 || !last {
-		t.Fatalf("reviewTurns after ask = %d, %v, %v; want 1, true — the ask must not count as a work turn", n, last, err)
-	}
-	if h := hold(); !strings.Contains(h, "answer its question") {
-		t.Fatalf("hold = %q, want the run held until the question is answered", h)
-	}
-
-	if _, err := input.Answer(root, "moe", "loop", 0, "the counter reset is in bar.go"); err != nil {
-		t.Fatal(err)
-	}
-	if h := hold(); h != "" {
-		t.Fatalf("an answered question should release the hold, got %q", h)
-	}
-
-	// The released review turn escalates again: a new exception, a new
-	// question.
-	commitReviewTurns(t, root, md, 1)
-	if _, code, stderr := runReviewGate(t, md); code != 1 {
-		t.Fatalf("gate code=%d, want the park; stderr=%q", code, stderr)
-	}
-	second := openPings(t, root, md)
-	if len(second) != 1 || second[0].ID == first[0].ID {
-		t.Fatalf("open pings = %+v, want one fresh ping beside answered #%d", second, first[0].ID)
-	}
-}
-
 // TestCascadeFromGateSpentReviewAsks drives the ask through the real
 // cascade call stack: a `!!` walk into an escalated review parks, and
 // the ask commits — no repo lock is held at the park site.
@@ -494,7 +375,7 @@ func TestCascadeFromGateSpentReviewAsks(t *testing.T) {
 	pushes := stubPushFromCascade(t, 0, nil)
 
 	var stdout, stderr bytes.Buffer
-	res, code := cascadeFromGate("review", "", false, false, md, &stdout, &stderr)
+	res, code := cascadeFromGate("review", "", false, md, &stdout, &stderr)
 	if code == 0 || res.shipped || len(*kicks) != 0 || len(*pushes) != 0 {
 		t.Fatalf("code=%d shipped=%v kicks=%d pushes=%d, want a park; stderr=%q", code, res.shipped, len(*kicks), len(*pushes), stderr.String())
 	}

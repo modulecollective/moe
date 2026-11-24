@@ -54,17 +54,6 @@ func cascadeUnavailableReason(workflow string) string {
 	return fmt.Sprintf("workflow %q has no cascade — open without a cascade flag and drive the stages yourself", workflow)
 }
 
-// mintCascadeFlag names the flag that produced a mint verb's cascade
-// answer, so the exclusion checks below blame the flag the operator
-// actually typed. Every mint verb carries the `--ship` / `--chain`
-// ladder, resolved through cascadeAnswerFromFlags.
-func mintCascadeFlag(cascade string) string {
-	if cascade == "!!!" {
-		return "--chain"
-	}
-	return "--ship"
-}
-
 // parkCascadeExclusive refuses --park alongside a cascade flag, the
 // combination every mint verb shares: they're opposite tails (one
 // stops, one cascades). cascade is the bang answer the cascade flags
@@ -74,7 +63,7 @@ func mintCascadeFlag(cascade string) string {
 func parkCascadeExclusive(verb string, park bool, cascade string, stderr io.Writer) int {
 	if park && cascade != "" {
 		moePrintf(stderr, "%s: %s and --park are opposite tails (one cascades, the other stops) — pick one\n",
-			verb, mintCascadeFlag(cascade))
+			verb, "--ship")
 		return 2
 	}
 	return 0
@@ -91,7 +80,7 @@ func preflightMintTail(verb, workflow string, park bool, cascade string, stderr 
 		return code
 	}
 	if cascade != "" && !operatorCascades(workflow) {
-		moePrintf(stderr, "%s: %s: %s\n", verb, mintCascadeFlag(cascade), cascadeUnavailableReason(workflow))
+		moePrintf(stderr, "%s: %s: %s\n", verb, "--ship", cascadeUnavailableReason(workflow))
 		return 2
 	}
 	return 0
@@ -103,11 +92,7 @@ func preflightMintTail(verb, workflow string, park bool, cascade string, stderr 
 // standard chain prompt.
 //
 // cascade is the bang answer the verb's flags resolved to, "" for
-// neither tail. --ship is `!!` on every mint verb — a fresh run has no
-// chained children, so shipping it is `!!` not `!!!`. `new` also offers
-// `!!!`, where the third bang is about what happens *after* the ship:
-// ride whatever the run chains onto. Same seam either way — the answer
-// string is all that differs.
+// neither tail. --ship is `!!` on every mint verb.
 //
 // Callers that know their workflow at parse time (new) have
 // already refused a non-cascading tail via preflightMintTail; the guard
@@ -118,7 +103,7 @@ func mintTail(root string, md *run.Metadata, park bool, cascade string, stdout, 
 	}
 	if cascade != "" {
 		if !operatorCascades(md.Workflow) {
-			moePrintf(stderr, "%s: %s\n", mintCascadeFlag(cascade), cascadeUnavailableReason(md.Workflow))
+			moePrintf(stderr, "%s: %s\n", "--ship", cascadeUnavailableReason(md.Workflow))
 			return 1
 		}
 		wf, err := LookupWorkflow(md.Workflow)
@@ -198,7 +183,6 @@ func runStageVerb(cfg stageVerbCfg, args []string, stdout, stderr io.Writer) int
 	once := fs.Bool("once", false, "run "+cfg.stage+" headless and park at the next chain prompt (= ! at the chain prompt)")
 	to := fs.String("to", "", "walk headless from "+cfg.stage+" up to (but not including) the named gate (= !<stage>)")
 	ship := fs.Bool("ship", false, "headless cascade through push, ship this run (= !!)")
-	chain := fs.Bool("chain", false, "headless cascade through push, then ride the whole chain (= !!!)")
 	var workspaceFlag *string
 	if cfg.bindWorkspace {
 		workspaceFlag = addWorkspaceFlag(fs, "refused while the current tree holds commits or modified tracked files")
@@ -208,7 +192,7 @@ func runStageVerb(cfg stageVerbCfg, args []string, stdout, stderr io.Writer) int
 		if cfg.bindWorkspace {
 			wsUsage = "[--workspace <project>/<name>] "
 		}
-		moePrintf(stderr, "usage: moe %s %s[--agent <name>] [--once | --to=<stage> | --ship | --chain] <project>/<run>\n", cfg.verb, wsUsage)
+		moePrintf(stderr, "usage: moe %s %s[--agent <name>] [--once | --to=<stage> | --ship] <project>/<run>\n", cfg.verb, wsUsage)
 		moePrintln(stderr, "")
 		for _, line := range cfg.usage {
 			moePrintln(stderr, line)
@@ -224,7 +208,6 @@ func runStageVerb(cfg stageVerbCfg, args []string, stdout, stderr io.Writer) int
 		moePrintln(stderr, "  --once         dispatch one stage headless, park at the next gate (= !)")
 		moePrintln(stderr, "  --to=<stage>   walk headless up to (but not including) <stage> (= !<stage>)")
 		moePrintln(stderr, "  --ship         headless cascade through push, ship this run (= !!)")
-		moePrintln(stderr, "  --chain        headless cascade through push, then ride the whole chain (= !!!)")
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
@@ -244,7 +227,7 @@ func runStageVerb(cfg stageVerbCfg, args []string, stdout, stderr io.Writer) int
 		moePrintf(stderr, "%s: %v\n", cfg.verb, err)
 		return 2
 	}
-	answer, ok := cascadeAnswerFromFlags(*once, *to, *ship, *chain)
+	answer, ok := cascadeAnswerFromFlags(*once, *to, *ship)
 	if !ok {
 		moePrintf(stderr, "%s: cascade mode flags (--once, --to, --ship, --chain) are mutually exclusive\n", cfg.verb)
 		return 2
@@ -323,8 +306,7 @@ func agentFlagUsage(persist bool) string {
 //	--once        → "!"            run startStage headless, park
 //	--to=<stage>  → "!" + <stage>  walk headless to that gate
 //	--ship        → "!!"           headless cascade, ship this run
-//	--chain       → "!!!"          headless cascade, ship + ride the chain
-func cascadeAnswerFromFlags(once bool, to string, ship, chain bool) (answer string, ok bool) {
+func cascadeAnswerFromFlags(once bool, to string, ship bool) (answer string, ok bool) {
 	set := 0
 	if once {
 		set++
@@ -333,9 +315,6 @@ func cascadeAnswerFromFlags(once bool, to string, ship, chain bool) (answer stri
 		set++
 	}
 	if ship {
-		set++
-	}
-	if chain {
 		set++
 	}
 	if set > 1 {
@@ -348,8 +327,6 @@ func cascadeAnswerFromFlags(once bool, to string, ship, chain bool) (answer stri
 		return "!" + to, true
 	case ship:
 		return "!!", true
-	case chain:
-		return "!!!", true
 	}
 	return "", true
 }

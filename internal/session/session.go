@@ -41,6 +41,7 @@ import (
 	"strings"
 
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 )
 
@@ -198,10 +199,11 @@ func worktreesDir(root string) string {
 // it has no usable session snapshot to resume.
 func Open(root, projectID, runID, docID string) (*Session, error) {
 	// These IDs become literal sparse patterns as well as branch components.
-	for _, id := range []string{projectID, runID} {
-		if !sessionIDPattern.MatchString(id) {
-			return nil, fmt.Errorf("session: invalid ID %q", id)
-		}
+	if !project.ValidID(projectID) {
+		return nil, fmt.Errorf("session: invalid ID %q", projectID)
+	}
+	if !sessionIDPattern.MatchString(runID) {
+		return nil, fmt.Errorf("session: invalid ID %q", runID)
 	}
 	branch := BranchName(projectID, runID, docID)
 

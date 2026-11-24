@@ -425,7 +425,7 @@ func TestLocalHostPinsRequestedRoot(t *testing.T) {
 	t.Setenv("MOE_HOME", "/wrong/root")
 	cs := newChildren()
 	root := t.TempDir()
-	c, err := cs.spawn("heartbeat:alpha", "/usr/bin/env", nil, root, io.Discard)
+	c, err := cs.spawn("heartbeat:_cabinet", "/usr/bin/env", nil, root, io.Discard)
 	if err != nil {
 		t.Fatal(err)
 	}

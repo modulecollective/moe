@@ -15,455 +15,267 @@ import (
 	"github.com/modulecollective/moe/internal/session"
 )
 
-// The harness-owned step that follows grooming: whether the pulse kicks
-// anything itself. Where a spawned run *lands* is not here — that is a
-// `threads` claim the survey makes.
+// pulseQuietWindow is the operator's quiet tick, matching serve's baked
+// heartbeat cadence. The heartbeat holds a project for it, but the one
+// sweep can still see that project's board, so the ride asks again.
+const pulseQuietWindow = 20 * time.Minute
 
-// pulseSelfKick is the last step of a pulse: under a dynamic sweep,
-// start every kickable parked thread on the board — the ones this sweep
-// groomed first, then the rest. This is the only door to machine-rooted
-// motion, and the dynamic rung is what holds it shut everywhere else.
-//
-// Kicking is the default and *parking* is the marked case, because the
-// error ledger only ever ran one way. Three strandings in four days —
-// an operator-advanced run, a judged chore, and a six-run thread a
-// dynamic sweep groomed and silently left — and not one instance of a
-// survey starting work it shouldn't have. Two prompt fixes each closed
-// the previous miss and the drift came back, because a default that
-// needs the survey to spend confidence to cause motion drifts toward
-// stillness. So the survey no longer asks to move; it writes a `park`
-// reason when it wants the operator to look first, and the reason is
-// mandatory by shape — parking costs a generation, so it owes a
-// sentence.
-//
-// The candidate set is the *board*, not the gate's `threads` list, and
-// that is the fourth stranding's fix. A dynamic pulse is the retry
-// vehicle the heartbeat re-offers when a ride fails; a thread that is
-// already correctly ordered gives the survey nothing to groom, so a
-// gate-keyed kick made the retry a sweep that structurally could not
-// perform it. Two pulses surveyed the same stalled thread on
-// 2026-08-13, each wrote that this sweep was itself a plausible
-// vehicle, and each closed clean with the thread still sitting. So
-// parking now means what the heartbeat's clean-sweep guard already
-// believed it meant — a thread the survey held *with a reason* — and a
-// thread the gate never mentions is started if it clears the floor.
-//
-// The guard is **dynamic consent upstream**. A hand-typed `moe pulse
-// new` grooms and parks; only `--dynamic` — the rung `moe serve
-// --dynamic` stands behind — licenses the machine to start something.
-// That is what makes the surprise ride impossible by construction rather
-// than by restraint: nothing but the clock the operator armed can turn a
-// sweep into motion, and no other verb sweeps at all.
-//
-// There is deliberately no bound on *how many* generations this can run
-// for. Each ride's commits move the journal tip, so the next heartbeat
-// tick sweeps again and the machine walks until a survey finds nothing
-// worth chaining. The rides run inside this child, so their commits land
-// below the tip the sweep's exit records — what keeps that sentence true
-// is the gate refusing both cursors when its window holds a ride commit
-// (heartbeatGate.Swept, rideAuthored). Without that refusal the sweep
-// stamps the post-ride board as already surveyed and the walk stops at
-// its first generation, waiting on a human. Growth is clock-paced
-// rather than recursive: a kicked
-// ride no longer sweeps at its own tail, so this loop is the only walker
-// and the board it snapshotted stays the board it walks. What holds the
-// open-ended part safe is the guard above plus the ladder itself — each
-// generation is real shipped work behind test and review, it shows up on
-// the dash as it lands, and a Ctrl-C halts the ride. Escalation by
-// visibility, not by counting.
-//
-// Kicks that do fire are stamped as dynamic rides, which is what marks
-// their commits as the machine's (see walkConsent).
-//
-// And the thread's root must have **a settled design** — a disk fact
-// about the work, not about who opened it. Lineage was the wrong proxy
-// and said so twice in two days: keying on SpawnedBy alone stranded an
-// operator-advanced run on 2026-07-22, and widening to "or advanced"
-// stranded a pulse-nominated judged chore the same evening (chore opens
-// are the one machine path that mints no SpawnedBy). Both runs were
-// ready; neither had the lineage the guard wanted. So the question the
-// admit asks is whether the design is settled and whether anyone is
-// inside the run — see rootDesignSettled and openSessionStage.
-//
-// What stays with the operator is a root sitting at its first stage,
-// in either of two shapes, and the skip line names which: nothing has
-// run there yet — a promoted sketch, a hand-minted chain head composed
-// over an afternoon — or the turn closed and nobody advanced it, which
-// is the reopened run and the re-edit that out-dated its advance
-// marker. Both are held; only one of them means the design never ran.
-// Those have `!` and `!!!`. The survey's park decides what is
-// *reasonable* to start — this is only the floor of what is safe.
-//
-// Under dynamic consent this step always reports: every kick, every
-// park with its reason, every harness hold, and a line for the sweep
-// that groomed nothing. It used to return before its first stderr line
-// when no thread asked, so a sweep could end with no account of
-// why nothing started — that silence is what made the 2026-07-25 park
-// invisible. Every hold is one line, warn-only ethos.
-//
-// Every fact this step keys on comes out of the groom's final in-memory
-// graph (see groomResult) — thread roots, the board's parked threads,
-// and whether a root is still kickable.
-// Re-reading the journal here would answer the same questions a second
-// time against a state the sweep had already moved, and the enumeration
-// makes that sharper rather than looser: it walks the same scan the
-// groom placed against, so a root it names is a root the sweep just
-// stamped. The one live read is the root's
-// session branches, and that is the point: it asks whether the operator
-// has a stage open *right now*, which no snapshot can say.
-//
-// The walk itself lives in planKick, so the same decisions the loop
-// executes are the ones a dynamic sweep stamps onto its own canvas
-// before this step runs. What stays here is execution: the stderr
-// account, the floor's live re-check as each root is reached, and the
-// child exits.
-//
-// The return is the first ordinary child failure, after every other
-// eligible root has been offered, or exitInterrupted immediately. Zero
-// means no ride started or every ride finished cleanly.
-func pulseSelfKick(root string, groomed groomResult, stdout, stderr io.Writer) int {
-	// No dynamic consent, nothing to say. Absence of a `park` is not a
-	// request, so a hand-typed sweep parking everything it groomed is the
-	// norm it has always been.
-	if currentRideMode != rideDynamic {
-		return 0
-	}
-	plan := planKick(root, groomed)
-	if len(plan.Steps) == 0 {
-		moePrintf(stderr, "pulse: kick: nothing parked — nothing to start\n")
-		return 0
-	}
-	// The survey's own vetoes first, in plan order, so the account of what
-	// the sweep held reads before the first ride's output starts
-	// streaming through this same writer.
-	var wanted []kickStep
-	for _, step := range plan.Steps {
-		if step.Park != "" {
-			moePrintf(stderr, "pulse: kick: %s parked by the survey — %s\n", step.Root, step.Park)
-			continue
-		}
-		wanted = append(wanted, step)
-	}
-	if len(wanted) == 0 {
-		return 0
-	}
-	firstFailure := 0
-	for _, step := range wanted {
-		proj, runID, err := splitProjectRun(step.Root)
-		if err != nil {
-			moePrintf(stderr, "pulse: kick: malformed thread root %q: %v\n", step.Root, err)
-			continue
-		}
-		if step.Hold != "" {
-			moePrintf(stderr, "pulse: kick: %s %s\n", step.Root, step.Hold)
-			continue
-		}
-		// Re-ask the floor. A ride earlier in this same loop runs for as
-		// long as it takes, and the one question the floor asks that a
-		// snapshot cannot answer — is a session open right now — can have
-		// flipped by the time the loop arrives here. The stamped section
-		// says "queued", not "will start", for exactly this window.
-		if step.Repair {
-			code := kickCIRepair(root, step.Root, groomed, stdout, stderr)
-			if code == exitInterrupted {
-				return code
-			}
-			firstFailure = combinePulseExit(firstFailure, code)
-			continue
-		}
-		if hold := kickFloorHold(root, step.Root, groomed); hold != "" {
-			moePrintf(stderr, "pulse: kick: %s %s\n", step.Root, hold)
-			continue
-		}
-		ride := "dynamic"
-		if step.OneStage {
-			ride = "dynamic, design only"
-		}
-		moePrintf(stderr, "pulse: kicking %s (%s)\n", step.Root, ride)
-		if code := chainKickRun(root, proj, runID, rideDynamic, step.OneStage, stdout, stderr); code != 0 {
-			if code == exitYielded {
-				moePrintf(stderr, "pulse: kick %s yielded to operator control\n", step.Root)
-				continue
-			}
-			moePrintf(stderr, "pulse: kick %s exited %d\n", step.Root, code)
-			if code == exitInterrupted {
-				return code
-			}
-			firstFailure = combinePulseExit(firstFailure, code)
-		}
-	}
-	return firstFailure
-}
-
-// kickStep is one thread root's place in a dynamic sweep's kick order,
-// and what the sweep decided about it. Exactly one of Park and Hold is
-// non-empty for a root that will not start; both empty means it cleared
-// every guard and the loop will offer it a ride.
-type kickStep struct {
-	Root string
-	// Gate is true for a root this sweep's gate groomed, false for one
-	// the board enumeration found sitting parked.
-	Gate   bool
+// pulsePick is the survey's `next`, resolved against the board.
+type pulsePick struct {
+	Key    string
+	Why    string
 	Repair bool
-	// Park is the survey's own reason to hold this root, verbatim from
-	// the gate. Non-empty means the floor was never consulted — the
-	// survey's veto is upstream of it.
-	Park string
-	// Hold is the floor's reason, phrased as the tail of the kick's
-	// stderr skip line so that line and the canvas section cannot drift
-	// into two wordings for one disk fact.
+	// Idea says Key is a tagged idea, promoted only once it is ridden.
+	Idea bool
+	// Hold is the floor's reason not to start it, phrased as the tail of
+	// the ride's stderr line and of the canvas's `## Next` section.
 	Hold string
-	// OneStage bounds this root's ride to its first stage — the
-	// design-only spawn's single headless design turn. The ordinary
-	// ride is a `!!!`; this one is the machine's `!`, and the run parks
-	// again the moment the turn closes.
-	//
-	// Unlike Hold this is not re-asked when the loop reaches the root,
-	// so an advance landing inside that window rides one stage and
-	// leaves the rest to the next sweep. That is the safe direction for
-	// a bound, and the same window the section's "queued is a plan, not
-	// a promise" already covers.
+	// OneStage bounds a design-only spawn to its single design turn.
 	OneStage bool
 }
 
-// kickPlan is the whole of a dynamic sweep's kick decision: every root
-// it will walk, in execution order, and why each one starts or doesn't.
-//
-// It exists so the sweep can *say* what it is about to do. A queued
-// retry and a stranded run looked identical to the operator, because
-// the kick reported only to the stderr of a process that outlives no
-// terminal — three diagnosis runs in four days each re-derived the
-// queue by hand. The canvas stamp renders this; pulseSelfKick executes
-// it; neither builds its own answer.
-type kickPlan struct {
-	Steps []kickStep
+// planPick resolves the gate's `next`. It has no side effects, so the
+// sweep can stamp what it is about to do before doing it. minted maps a
+// slug the same gate opened to the id the harness actually gave it.
+func planPick(sc *pulseScan, next *pulseNext, minted map[string]string, prChecks []ownedPRChecks) *pulsePick {
+	if next == nil {
+		return nil
+	}
+	pick := &pulsePick{Key: next.Run, Why: next.Why, Repair: next.Repair != ""}
+	if id, ok := minted[next.Run]; ok {
+		proj, _, _ := splitProjectRun(next.Run)
+		pick.Key = proj + "/" + id
+	}
+	md := sc.byKey[pick.Key]
+	if md == nil {
+		pick.Hold = "names no run on the board — starting nothing"
+		return pick
+	}
+	switch {
+	case pick.Repair:
+		p, ok := repairEvidence(prChecks, pick.Key)
+		if !ok {
+			pick.Hold = "is held — no actionable PR evidence from this survey"
+			return pick
+		}
+		_, pick.Hold = ciRepairEligibility(sc, p)
+	case md.Workflow == dash.IdeaWorkflow:
+		pick.Idea = true
+		pick.Hold = ideaPickHold(sc.root, md)
+	case !operatorCascades(md.Workflow) || md.Status != run.StatusInProgress:
+		pick.Hold = fmt.Sprintf("is a %s %s run, not parked work — starting nothing", md.Status, md.Workflow)
+	default:
+		pick.Hold = kickFloorHold(sc.root, pick.Key, sc)
+		pick.OneStage = designOnlyRide(sc.root, pick.Key, sc)
+	}
+	return pick
 }
 
-// planKick walks the candidate roots and decides each one's fate,
-// reading only the groom's final in-memory graph plus the roots' live
-// session branches (see openSessionStage). No side effects: the caller
-// decides whether to print it, stamp it, or execute it.
-func planKick(root string, groomed groomResult) kickPlan {
-	// Threads are keyed by root, and a park on any group that landed in
-	// one holds the whole thread. Two groups routinely groom into the
-	// same thread — one `onto` a run the other placed — and hand back two
-	// groomedThreads with the same root. Under the old ask-field that
-	// collision needed both groups to ask, so it stayed theoretical;
-	// kicking by default makes it ordinary, and kicking one root twice
-	// would start the ride and then start its finished remains.
-	parked := make(map[string]string, len(groomed.threads))
-	for _, th := range groomed.threads {
-		if th.Park != "" && parked[th.Root] == "" {
-			parked[th.Root] = th.Park
-		}
+// ideaPickHold is why an idea cannot be promoted and ridden. The tag is
+// the licence; the root project has no source for a run to work in.
+func ideaPickHold(root string, md *run.Metadata) string {
+	switch {
+	case md.Status != run.StatusInProgress:
+		return "is a " + md.Status + " idea — starting nothing"
+	case md.PromoteTo == "":
+		return "is an untagged idea — the operator holds the trigger"
+	case md.Project == project.RootID:
+		return "is a top-level idea with no source — file its work into a project"
 	}
-	// The groomed threads first, then the rest of the board. Order is the
-	// whole of the precedence rule: a gate group that named a thread
-	// enumeration would also find carries that thread's `park`, and the
-	// dedupe keeps the first mention of each root.
-	var plan kickPlan
-	seen := make(map[string]bool, len(groomed.threads))
-	add := func(rootKey string, gate, repair bool) {
-		if seen[rootKey] {
-			return
-		}
-		seen[rootKey] = true
-		plan.Steps = append(plan.Steps, kickStep{Root: rootKey, Gate: gate, Repair: repair, Park: parked[rootKey]})
-	}
-	for _, th := range groomed.threads {
-		add(th.Root, true, th.Repair)
-	}
-	for _, rootKey := range kickableThreadRoots(groomed.mds, groomed.byKey, groomed.graph, groomed.projectID) {
-		add(rootKey, false, false)
-	}
-
-	for i := range plan.Steps {
-		if plan.Steps[i].Park != "" {
-			continue
-		}
-		if plan.Steps[i].Repair {
-			p, ok := repairEvidence(groomed.prChecks, plan.Steps[i].Root)
-			if !ok {
-				plan.Steps[i].Hold = "is held — no actionable PR evidence from this survey"
-			} else {
-				sc := &pulseScan{root: root, mds: groomed.mds, idx: groomed.idx, byKey: groomed.byKey, graph: groomed.graph}
-				_, plan.Steps[i].Hold = ciRepairEligibility(sc, p)
-			}
-			continue
-		}
-		plan.Steps[i].Hold = kickFloorHold(root, plan.Steps[i].Root, groomed)
-		plan.Steps[i].OneStage = designOnlyRide(root, plan.Steps[i].Root, groomed)
-	}
-	return plan
+	return quietWindowHold(root, md.Project, modeHold(root, md))
 }
 
-// kickFloorHold asks the floor about one root and returns why it is
-// held, or "" if it clears. The legs are the safety floor the survey's
-// `park` sits on top of, and the returned phrase is the tail of the
-// kick's stderr skip line.
-//
-// Called twice per root on the happy path — once when the plan is built,
-// once when the loop reaches the root — and that is the point rather
-// than an oversight: openSessionStage and the mode read are both live,
-// and the roots behind the first ride can wait hours for their turn.
-func kickFloorHold(root, threadRoot string, groomed groomResult) string {
-	// The operator's standing cap first: under paused or safe the answer
-	// is theirs, and the structural legs below are describing a start
-	// that isn't going to happen either way.
-	if hold := kickModeHold(root, threadRoot, groomed); hold != "" {
+// modeHold is the project's standing cap on the clock. Empty for anything
+// the operator typed. An unreadable project.json holds: the failure would
+// otherwise make the operator's brake invisible.
+func modeHold(root string, md *run.Metadata) string {
+	if !clockInvoked {
+		return ""
+	}
+	mode, err := project.ReadMode(root, md.Project)
+	if err != nil {
+		return "is held — could not read the project's mode: " + err.Error()
+	}
+	if mode == project.ModePaused {
+		return "is held by paused mode — the project starts nothing on its own"
+	}
+	return ""
+}
+
+// quietWindowHold keeps a clock ride off a board the operator touched
+// within the last tick. hold passes through when it is already set.
+func quietWindowHold(root, projectID, hold string) string {
+	if hold != "" || !clockInvoked {
 		return hold
 	}
-	// A group can be groomed onto a thread whose head has already
-	// shipped — `onto` admits a settled anchor on purpose, that being
-	// the queue-jump case — and the root then walks back to a merged
-	// run. Kicking one would ride a finished thread from its finished
-	// end. ChainChildLive is the same terminal-or-missing test every
-	// other edge reader applies.
-	md := groomed.byKey[threadRoot]
-	if md == nil || !run.ChainChildLive(threadRoot, groomed.byKey) {
-		return "heads a thread that has already settled — skipping"
+	if operatorActedSince(root, projectID, time.Now().Add(-pulseQuietWindow)) {
+		return "is held — an operator commit landed in " + projectID + " within the last tick"
 	}
-	if settled, turnClosed := rootDesignSettled(root, md, groomed.idx); !settled {
-		// A design-only spawn is the one unsettled root the floor lets
-		// through, and only for the single design turn its seed asked
-		// for: the fresh mint, or one more turn to carry a note the
-		// operator pushed. Falling through rather than returning "" is
-		// deliberate — the reap and occupancy legs below still apply.
+	return ""
+}
+
+// pulseRide is the last step of a dynamic sweep: start the one run the
+// survey picked and nothing else. A hand-typed sweep never rides.
+func pulseRide(root string, pick *pulsePick, prChecks []ownedPRChecks, stdout, stderr io.Writer) int {
+	if currentRideMode != rideDynamic {
+		return 0
+	}
+	if pick == nil {
+		moePrintf(stderr, "pulse: next: nothing picked — starting nothing\n")
+		return 0
+	}
+	if pick.Hold != "" {
+		moePrintf(stderr, "pulse: next: %s %s\n", pick.Key, pick.Hold)
+		return 0
+	}
+	if pick.Repair {
+		return combinePulseExit(0, kickCIRepair(root, pick.Key, prChecks, stdout, stderr))
+	}
+	key := pick.Key
+	proj, runID, err := splitProjectRun(key)
+	if err != nil {
+		moePrintf(stderr, "pulse: next: malformed run %q: %v\n", key, err)
+		return 1
+	}
+	if pick.Idea {
+		m := &pulseMinter{root: root, projectID: proj, spawnedBy: currentSweep}
+		id, dup := m.promoteIfTaggedIdea(runID, pulseRunSpec{}, stdout, stderr)
+		if dup {
+			sayWhyTaggedIdeaStayed(root, proj, runID, stderr)
+		}
+		if id == "" {
+			return 0
+		}
+		runID, key = id, proj+"/"+id
+	}
+	// Re-ask against the board as it stands now: the survey took minutes,
+	// and a session opened or a mode flipped in that time binds this start.
+	sc, ok := newPulseScan(root)
+	if !ok {
+		moePrintf(stderr, "pulse: next: could not read the board — not starting %s\n", key)
+		return 1
+	}
+	if hold := kickFloorHold(root, key, sc); hold != "" {
+		moePrintf(stderr, "pulse: next: %s %s\n", key, hold)
+		return 0
+	}
+	oneStage := designOnlyRide(root, key, sc)
+	ride := "dynamic"
+	if oneStage {
+		ride = "dynamic, design only"
+	}
+	moePrintf(stderr, "pulse: riding %s (%s) — %s\n", key, ride, pick.Why)
+	code := rideRun(root, proj, runID, rideDynamic, oneStage, stdout, stderr)
+	switch code {
+	case 0:
+	case exitYielded:
+		moePrintf(stderr, "pulse: ride %s yielded to operator control\n", key)
+	default:
+		moePrintf(stderr, "pulse: ride %s exited %d\n", key, code)
+	}
+	return combinePulseExit(0, code)
+}
+
+// kickFloorHold asks the floor about one run and returns why it is held,
+// or "" if it clears. Mode comes first: under paused or safe the answer is
+// the operator's, whatever the structural legs would say.
+func kickFloorHold(root, key string, sc *pulseScan) string {
+	md := sc.byKey[key]
+	if md == nil || md.Status != run.StatusInProgress {
+		return "has already settled — skipping"
+	}
+	if hold := quietWindowHold(root, md.Project, kickModeHold(root, key, sc)); hold != "" {
+		return hold
+	}
+	if settled, turnClosed := rootDesignSettled(root, md, sc.idx); !settled {
+		// A design-only spawn is the one unsettled run the floor lets
+		// through, for the single turn its seed asked for or one more to
+		// carry a note the operator pushed.
 		if !md.DesignOnly {
 			return "is waiting at its first stage with " + designHeldReason(turnClosed) +
 				" — the operator holds the trigger"
 		}
-		if turnClosed && !pendingInputOnThread(root, threadRoot, groomed) {
+		if turnClosed && !pendingInputOnRun(root, md) {
 			return designOnlyHeldReason
 		}
 	}
-	// A dead machine turn on the thread. After the design leg so a root
-	// held for an unsettled design keeps its more specific reason, and
-	// ordering against occupancy is moot — the reap deleted the session
-	// branch openSessionStage reads.
-	if hold := reapHeldThread(threadRoot, groomed.byKey, groomed.graph, groomed.idx); hold != "" {
-		return hold
+	if why := reapHeldReason(md, sc.idx.LastOperatorActivity[key]); why != "" {
+		return "is held — " + why
 	}
 	if stage := openSessionStage(root, md); stage != "" {
 		return "has a live session at " + stage + " — skipping"
 	}
-	// The other half of occupancy: a settled session no longer has a
-	// branch, but the invocation that ran it may still be at its prompt.
+	// A settled session has no branch, but its invocation may still be at
+	// the prompt.
 	if hold := runOwnerHold(root, md); hold != "" {
 		return hold
 	}
-	// An operator hold stands until an explicit resume, whatever the
-	// survey thought of the thread.
 	if hold := controlHoldPhrase(root, md); hold != "" {
 		return hold
 	}
-	// A blocked review the headless loop has given up on: re-riding it
-	// would spend a review turn on an unchanged tree and park again.
-	return reviewLoopHold(root, threadRoot, md, groomed)
+	return reviewLoopHold(root, md)
 }
 
-// renderKickSection renders a plan as the `## Kick` section a dynamic
-// sweep stamps onto its own canvas at close. The pulse canvas is what
-// the operator reads when a thread looks stuck, and until now it stopped
-// at "parked, nothing to groom" — true of the board and silent about the
-// queue the same sweep was about to run.
-//
-// Deliberately not a promise. The wording is "queued", the header says
-// the floor is re-checked, and a root the loop then holds prints its
-// skip line to stderr as it always did. A section that claimed execution
-// would be a second decoy artifact where the first one cost three runs.
-func renderKickSection(plan kickPlan) string {
-	var b strings.Builder
-	b.WriteString("## Kick\n\n")
-	if len(plan.Steps) == 0 {
-		b.WriteString("Nothing parked — nothing to start.\n")
-		return b.String()
+// kickModeHold is modeHold plus safe mode's mark requirement.
+func kickModeHold(root, key string, sc *pulseScan) string {
+	md := sc.byKey[key]
+	if hold := modeHold(root, md); hold != "" || !clockInvoked {
+		return hold
 	}
-	b.WriteString("The order this sweep handed its kick loop. Queued is a plan, not a\n")
-	b.WriteString("promise: the floor is re-checked as each root is reached, so a live\n")
-	b.WriteString("session or a settled thread can still hold one here.\n\n")
-	for i, step := range plan.Steps {
-		source := "parked board"
-		if step.Gate {
-			source = "gate thread"
+	mode, err := project.ReadMode(root, md.Project)
+	if err != nil {
+		return "is held — could not read the project's mode: " + err.Error()
+	}
+	if mode == project.ModeSafe && !operatorMarked(root, md, sc.mds, sc.idx) && !pendingInputOnRun(root, md) {
+		return "is held by safe mode — no operator mark (an advance, a tag, a chore, or an undelivered note licenses it)"
+	}
+	return ""
+}
+
+// renderNextSection renders the `## Next` section a dynamic sweep stamps
+// onto its own canvas at close. It is a plan rather than a record: the
+// floor is asked again when the ride starts.
+func renderNextSection(pick *pulsePick) string {
+	var b strings.Builder
+	b.WriteString("## Next\n\n")
+	switch {
+	case pick == nil:
+		b.WriteString("Nothing picked — nothing starts.\n")
+	case pick.Hold != "":
+		fmt.Fprintf(&b, "`%s` %s.\n\nWhy it was picked: %s\n", pick.Key, pick.Hold, pick.Why)
+	default:
+		kind := "queued — floor re-checked at start"
+		switch {
+		case pick.Repair:
+			kind = "queued — repair CI on the existing PR; claim re-checked at start"
+		case pick.Idea:
+			kind = "queued — promote the tagged idea, then ride it"
+		case pick.OneStage:
+			kind = "queued, design only — one stage, then it parks"
 		}
-		fmt.Fprintf(&b, "%d. %s — %s, %s\n", i+1, step.Root, source, kickStepOutcome(step))
+		fmt.Fprintf(&b, "`%s` %s.\n\nWhy: %s\n", pick.Key, kind, pick.Why)
 	}
 	return b.String()
 }
 
-// kickStepOutcome is one step's fate in the section's vocabulary,
-// reusing the stderr phrasing wherever there is one to reuse.
-func kickStepOutcome(step kickStep) string {
-	switch {
-	case step.Park != "":
-		return "parked by the survey — " + step.Park
-	case step.Hold != "":
-		return step.Hold
-	case step.Repair:
-		return "queued — repair CI on the existing PR; claim re-checked at start"
-	case step.OneStage:
-		return "queued, design only — one stage, then it parks"
-	default:
-		return "queued — floor re-checked at start"
+// kickableRuns lists a project's parked runs a ride could start, sorted so
+// the answer does not depend on scan order.
+func kickableRuns(sc *pulseScan, projectID string) []string {
+	var keys []string
+	for _, md := range sc.mds {
+		if md.Project == projectID && md.Status == run.StatusInProgress && operatorCascades(md.Workflow) {
+			keys = append(keys, md.Project+"/"+md.ID)
+		}
 	}
+	sort.Strings(keys)
+	return keys
 }
 
-// kickableThreadRoots returns the thread roots in a project that could
-// be started: every in-progress chainable run walked back to its root,
-// deduped, sorted so the answer doesn't ride on scan order.
-//
-// This is a shared *test*, not a shared answer, and the difference is
-// load-bearing. Both callers ask "which roots are worth looking at" and
-// then respond differently: the kick offers each one to the floor and
-// prints a line per hold, while the heartbeat's parked leg asks whether
-// a *sweep* could cause motion, which lets it look past a design-held
-// head into the members queued behind it (see parkedKickableThread) —
-// grooming work for the survey, and not something the kick may start.
-// Before this the two seams enumerated the board separately, and the
-// heartbeat re-offering a thread the kick could not reach is exactly
-// how a run stalled for two days.
-//
-// Two shapes are dropped here because they are never a candidate on
-// either side, whatever the floor would say:
-//
-//   - a root whose thread has already settled. `onto` admits a merged
-//     anchor on purpose — that is the queue-jump case — so a live
-//     thread can be rooted at a finished run, and riding it would start
-//     it from its finished end.
-//   - an operator-minted `chain` head. That head is the staging fence
-//     the groom's stagingFenced honours, and a stageless head never
-//     clears the settled-design admit anyway; dropping it here is what
-//     makes the hold silent rather than a line per sweep about a normal
-//     state.
-func kickableThreadRoots(mds []*run.Metadata, byKey map[string]*run.Metadata, graph *run.ChainGraph, projectID string) []string {
-	if graph == nil {
-		// A groom that bailed before building one. Nothing to enumerate,
-		// and the next sweep re-derives the board for free.
-		return nil
-	}
-	var roots []string
-	seen := make(map[string]bool, len(mds))
-	for _, md := range mds {
-		if md.Project != projectID || md.Status != run.StatusInProgress || !chainableWorkflow(md.Workflow) {
-			continue
-		}
-		rootKey := graph.Root(md.Project + "/" + md.ID)
-		if seen[rootKey] {
-			continue
-		}
-		seen[rootKey] = true
-		rootMd := byKey[rootKey]
-		if rootMd == nil || !run.ChainChildLive(rootKey, byKey) {
-			continue
-		}
-		if rootMd.Workflow == chainWorkflow && rootMd.SpawnedBy == "" {
-			continue
-		}
-		roots = append(roots, rootKey)
-	}
-	sort.Strings(roots)
-	return roots
+// pendingInputOnRun reports whether the run carries operator prose no turn
+// has picked up yet. Delivery consumes it: one note buys one push.
+func pendingInputOnRun(root string, md *run.Metadata) bool {
+	f, err := input.Load(root, md.Project, md.ID)
+	return err == nil && len(f.Pending()) > 0
 }
 
 // rootDesignSettled reports whether md's design is settled — the one
@@ -604,73 +416,6 @@ func operatorMarked(root string, md *run.Metadata, mds []*run.Metadata, idx *run
 	return advanced
 }
 
-// pendingInputOnThread reports whether any live member of the thread
-// carries operator prose no turn has picked up yet — the safe-mode leg
-// the input record adds.
-//
-// It is a mark for the same reason the others are: the operator wrote
-// direction at a concrete run, and requiring a second approval before
-// that run may move would break the phone-to-motion loop the record
-// exists for. Thread-scoped rather than root-scoped because that is
-// where the prose lands — the run whose next agent needs it is routinely
-// queued behind the head.
-//
-// Delivery consumes the licence: once the turn that read the note stamps
-// it, the thread is back to needing an ordinary mark, and another note
-// re-arms it. That is deliberately tighter than a licence that lasts the
-// run's life — one note buys one push, not standing permission.
-//
-// It is emphatically *not* an advance marker. It satisfies no stage and
-// chooses no successor. The next sweep still has to pass the ordinary
-// stage and kick floors.
-func pendingInputOnThread(root, threadRoot string, groomed groomResult) bool {
-	if groomed.graph == nil {
-		return false
-	}
-	for _, key := range groomed.graph.Thread(threadRoot) {
-		proj, runID, err := splitProjectRun(key)
-		if err != nil {
-			continue
-		}
-		f, err := input.Load(root, proj, runID)
-		if err != nil {
-			continue
-		}
-		if len(f.Pending()) > 0 {
-			return true
-		}
-	}
-	return false
-}
-
-// threadOperatorTouch returns the committer time of the most recent
-// commit on the thread that the machine did not write — the movement
-// the reap hold releases on. Zero time when nobody has touched any live
-// member by hand.
-//
-// Thread-scoped rather than run-scoped because that is where operator
-// prose actually lands: the same reasoning pendingInputOnThread is
-// built on. A note added at a member queued behind the head is movement
-// on the thread the head belongs to. A `moe chain edit` that reorders
-// the thread lands the same way: its commit is run-scoped to nothing,
-// but the index attributes it to every run it names as an edge
-// endpoint, and every such run on this thread is a member.
-func threadOperatorTouch(threadRoot string, byKey map[string]*run.Metadata, graph *run.ChainGraph, idx *run.JournalIndex) time.Time {
-	var touched time.Time
-	if graph == nil || idx == nil {
-		return touched
-	}
-	for _, key := range graph.Thread(threadRoot) {
-		if !run.ChainChildLive(key, byKey) {
-			continue
-		}
-		if t := idx.LastOperatorActivity[key]; t.After(touched) {
-			touched = t
-		}
-	}
-	return touched
-}
-
 // reapHeldReason names why a run whose last machine turn was reaped is
 // still held, in the one vocabulary every surface that reports the hold
 // uses: the kick's skip line on stderr, the `## Kick` section it
@@ -706,72 +451,6 @@ func reapHeldReason(md *run.Metadata, touched time.Time) string {
 		" — an operator touch on the thread releases it"
 }
 
-// reapHeldThread returns the floor's phrasing for a thread holding a
-// reaped member no operator movement has released, or "" when the
-// thread clears. Any live member holds the whole thread: the kick
-// evaluates a thread at its root, and a member's dead turn is not
-// something a ride from the head may walk into.
-//
-// Why this cannot loop is a property of what releases it, not of a
-// counter. Every journal commit the refusal cycle lands is
-// machine-stamped — the tombstone carries MoE-Consent explicitly, groom
-// placements and spawns carry theirs, and that covers the groom's chain
-// commits too, which the index would otherwise read as an operator
-// touch on both endpoints — so LastOperatorActivity cannot move on the
-// machine's own account (see the map's doc). And each failed retry
-// re-arms at a later Reaped.At than the movement that licensed it, so k
-// operator touches buy at most k retries.
-func reapHeldThread(threadRoot string, byKey map[string]*run.Metadata, graph *run.ChainGraph, idx *run.JournalIndex) string {
-	if graph == nil {
-		return ""
-	}
-	touched := threadOperatorTouch(threadRoot, byKey, graph, idx)
-	for _, key := range graph.Thread(threadRoot) {
-		if !run.ChainChildLive(key, byKey) {
-			continue
-		}
-		if why := reapHeldReason(byKey[key], touched); why != "" {
-			return "is held — " + why
-		}
-	}
-	return ""
-}
-
-// kickModeHold asks the project's mode about one root and returns why it
-// holds, or "" when the mode lets it through. Empty for every invocation
-// the operator typed: the mode binds the clock, and a typed sweep is
-// consent whatever the standing config says.
-//
-// The read is per call rather than once per plan, and that is the point.
-// The gate decided to sweep some minutes before this child reached its
-// kick, and a ride earlier in the same loop can run for hours — so a
-// mode the operator flipped in either window binds the roots that
-// haven't started yet. A pause is meant to take effect when it's typed.
-//
-// An unreadable project.json holds rather than starts: this is the one
-// read in the kick whose failure mode is "the operator's brake is
-// invisible", and the fail-open direction the rest of the sweep takes
-// would spend it in exactly the wrong place.
-func kickModeHold(root, threadRoot string, groomed groomResult) string {
-	if !clockInvoked {
-		return ""
-	}
-	mode, err := project.ReadMode(root, groomed.projectID)
-	if err != nil {
-		return "is held — could not read the project's mode: " + err.Error()
-	}
-	switch mode {
-	case project.ModePaused:
-		return "is held by paused mode — the project starts nothing on its own"
-	case project.ModeSafe:
-		if !operatorMarked(root, groomed.byKey[threadRoot], groomed.mds, groomed.idx) &&
-			!pendingInputOnThread(root, threadRoot, groomed) {
-			return "is held by safe mode — no operator mark (an advance, a tag, a chore, or an undelivered note licenses it)"
-		}
-	}
-	return ""
-}
-
 // designHeldReason names why an unsettled root is held, in the one
 // vocabulary every surface that reports the hold uses: the kick's skip
 // line on stderr, and the held-head annotation the survey reads in the
@@ -805,12 +484,12 @@ const designOnlyHeldReason = "is a design-only spawn parked at design — advanc
 // The settledness question routes through rootDesignSettled rather than
 // being re-derived, so the bound and the floor's admit cannot disagree
 // about which side of the advance a run is on.
-func designOnlyRide(root, threadRoot string, groomed groomResult) bool {
-	md := groomed.byKey[threadRoot]
+func designOnlyRide(root, key string, sc *pulseScan) bool {
+	md := sc.byKey[key]
 	if md == nil || !md.DesignOnly {
 		return false
 	}
-	settled, _ := rootDesignSettled(root, md, groomed.idx)
+	settled, _ := rootDesignSettled(root, md, sc.idx)
 	return !settled
 }
 

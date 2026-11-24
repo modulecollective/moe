@@ -61,23 +61,21 @@ var sdlcStageVerbs = []stageVerb{
 // boundary, where the user-facing error fires.
 func TestCascadeAnswerFromFlagsMapping(t *testing.T) {
 	cases := []struct {
-		name  string
-		once  bool
-		to    string
-		ship  bool
-		chain bool
-		want  string
+		name string
+		once bool
+		to   string
+		ship bool
+		want string
 	}{
 		{name: "no-flag", want: ""},
 		{name: "once", once: true, want: "!"},
 		{name: "to-review", to: "review", want: "!review"},
 		{name: "to-push", to: "push", want: "!push"},
 		{name: "ship", ship: true, want: "!!"},
-		{name: "chain", chain: true, want: "!!!"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ok := cascadeAnswerFromFlags(tc.once, tc.to, tc.ship, tc.chain)
+			got, ok := cascadeAnswerFromFlags(tc.once, tc.to, tc.ship)
 			if !ok {
 				t.Fatalf("ok=false for single-flag case %+v", tc)
 			}
@@ -94,21 +92,18 @@ func TestCascadeAnswerFromFlagsMapping(t *testing.T) {
 // combination and the helper is the only thing that decides.
 func TestCascadeAnswerFromFlagsMutualExclusion(t *testing.T) {
 	cases := []struct {
-		name              string
-		once, ship, chain bool
-		to                string
+		name       string
+		once, ship bool
+		to         string
 	}{
 		{name: "once-and-ship", once: true, ship: true},
-		{name: "once-and-chain", once: true, chain: true},
 		{name: "once-and-to", once: true, to: "push"},
-		{name: "ship-and-chain", ship: true, chain: true},
 		{name: "ship-and-to", ship: true, to: "push"},
-		{name: "chain-and-to", chain: true, to: "push"},
 		{name: "three-flags", once: true, ship: true, to: "push"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, ok := cascadeAnswerFromFlags(tc.once, tc.to, tc.ship, tc.chain); ok {
+			if _, ok := cascadeAnswerFromFlags(tc.once, tc.to, tc.ship); ok {
 				t.Fatalf("expected ok=false for combo %+v", tc)
 			}
 		})
@@ -124,7 +119,7 @@ func TestSDLCStageFlagMutualExclusion(t *testing.T) {
 	for _, sv := range sdlcStageVerbs {
 		t.Run(sv.name, func(t *testing.T) {
 			var out, errb bytes.Buffer
-			code := sv.run([]string{"--once", "--chain", "tele/ghost"}, &out, &errb)
+			code := sv.run([]string{"--once", "--ship", "tele/ghost"}, &out, &errb)
 			if code != 2 {
 				t.Fatalf("exit=%d, want 2; stderr=%q", code, errb.String())
 			}
@@ -480,25 +475,6 @@ func TestSDLCStageRoutesEachCascadeMode(t *testing.T) {
 		{
 			verb:   sdlcStageVerbs[2],
 			flags:  []string{"--ship"},
-			expect: expect{stages: []string{"review"}, wantHeadless: true, wantShipPushed: true},
-		},
-		// --chain: headless cascade through push, same dispatch shape as
-		// --ship (the chain ride only fires if a live child exists, which
-		// this fixture has none of — so the stage/push expectations match
-		// --ship exactly).
-		{
-			verb:   sdlcStageVerbs[0],
-			flags:  []string{"--chain"},
-			expect: expect{stages: []string{"design", "build", "review"}, wantHeadless: true, wantShipPushed: true},
-		},
-		{
-			verb:   sdlcStageVerbs[1],
-			flags:  []string{"--chain"},
-			expect: expect{stages: []string{"build", "review"}, wantHeadless: true, wantShipPushed: true},
-		},
-		{
-			verb:   sdlcStageVerbs[2],
-			flags:  []string{"--chain"},
 			expect: expect{stages: []string{"review"}, wantHeadless: true, wantShipPushed: true},
 		},
 	}

@@ -17,7 +17,6 @@ import (
 	"github.com/modulecollective/moe/internal/input"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/trailers"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
@@ -129,40 +128,6 @@ func TestOwnedPRGatherUsesOnlyRecordedPushedSDLC(t *testing.T) {
 	}
 }
 
-func TestRepairGrammarAndPlacement(t *testing.T) {
-	for _, raw := range []string{`{"run":"x","repair":"ci","ask":"why"}`, `{"run":"x","repair":"build"}`, `{"run":"x","repair":null}`, `{"run":"x","repair":"ci","slug":"other"}`, `{"run":"x","repair":"ci","typo":true}`} {
-		var e pulseThreadEntry
-		if err := json.Unmarshal([]byte(raw), &e); err == nil {
-			t.Errorf("accepted %s", raw)
-		}
-	}
-	root, p := pushedRepairFixture(t)
-	var gate pulseGate
-	if err := decodeStrict([]byte(`{"status":"ok","threads":[{"runs":[{"run":"fix-ci","repair":"ci"}]}]}`), &gate); err != nil {
-		t.Fatal(err)
-	}
-	before := liveEdges(t, root)
-	groups := applyPulseGate(root, "moe", "pulse", gate, io.Discard, io.Discard)
-	groomed := groomChains(root, "moe", "pulse", groups, nil, io.Discard)
-	groomed.prChecks = []ownedPRChecks{p}
-	plan := planKick(root, groomed)
-	if len(plan.Steps) != 1 || !plan.Steps[0].Repair || plan.Steps[0].Root != p.Run || plan.Steps[0].Hold != "" {
-		t.Fatalf("plan: %+v", plan)
-	}
-	if fmt.Sprint(before) != fmt.Sprint(liveEdges(t, root)) {
-		t.Fatal("repair rewired chains")
-	}
-	for _, th := range []pulseThread{
-		{Onto: "another", Runs: gate.Threads[0].Runs},
-		{Head: "batch", Runs: gate.Threads[0].Runs},
-		{Runs: append(gate.Threads[0].Runs, pulseThreadEntry{Existing: "other"})},
-	} {
-		if got := applyPulseGate(root, "moe", "pulse", pulseGate{Threads: []pulseThread{th}}, io.Discard, io.Discard); len(got) != 0 {
-			t.Fatalf("accepted invalid placement: %+v", th)
-		}
-	}
-}
-
 func TestRepairClaimBoundAndFreshNote(t *testing.T) {
 	root, p := pushedRepairFixture(t)
 	defer withClockInvoked()()
@@ -235,50 +200,6 @@ func TestRepairClaimRechecksExternalState(t *testing.T) {
 			idx, _ := run.BuildJournalIndex(root)
 			if len(idx.CIRepairAttempts[observed.Run]) != 0 {
 				t.Fatal("failed validation spent attempt")
-			}
-		})
-	}
-}
-
-func TestRepairClaimRechecksLocalHolds(t *testing.T) {
-	for _, hold := range []string{"paused", "occupied", "staging", "reaped", "commit failure"} {
-		t.Run(hold, func(t *testing.T) {
-			root, p := pushedRepairFixture(t)
-			defer withClockInvoked()()
-			switch hold {
-			case "paused":
-				setMode(t, root, "moe", project.ModePaused)
-			case "occupied":
-				gittest.Run(t, root, "branch", session.BranchName("moe", "fix-ci", "build"))
-			case "staging":
-				trailerstest.SeedRun(t, root, "moe", "batch", chainWorkflow, run.StatusInProgress)
-				seedGitHubProject(t, root, "moe")
-				gittest.Run(t, root, "commit", "--allow-empty", "-m", "stage\n\n"+trailers.Block{ChainedTo: []string{"moe/batch " + p.Run}}.String())
-			case "reaped":
-				md, _ := run.Load(root, "moe", "fix-ci")
-				md.Reaped = &run.ReapNote{Doc: "build", At: "2999-01-01T00:00:00Z"}
-				if err := run.Save(root, md); err != nil {
-					t.Fatal(err)
-				}
-			case "commit failure":
-				hooks := t.TempDir()
-				writeFile(t, filepath.Join(hooks, "pre-commit"), "#!/bin/sh\nexit 1\n")
-				if err := os.Chmod(filepath.Join(hooks, "pre-commit"), 0o755); err != nil {
-					t.Fatal(err)
-				}
-				gittest.Run(t, root, "config", "core.hooksPath", hooks)
-			}
-			if _, err := claimCIRepair(root, p); err == nil {
-				t.Fatalf("claim ignored %s", hold)
-			} else {
-				want := map[string]string{"paused": "paused mode", "occupied": "open session", "staging": "staging fence", "reaped": "reaped", "commit failure": "exit status"}[hold]
-				if !strings.Contains(err.Error(), want) {
-					t.Fatalf("hold %s failed for wrong reason: %v", hold, err)
-				}
-			}
-			idx, _ := run.BuildJournalIndex(root)
-			if len(idx.CIRepairAttempts[p.Run]) != 0 {
-				t.Fatal("hold wrote a claim")
 			}
 		})
 	}
@@ -541,18 +462,6 @@ func TestRepairShipUpdatesSamePRWithoutMerging(t *testing.T) {
 				t.Fatal("repair replaced the recorded PR")
 			}
 		})
-	}
-}
-
-func TestRepairDuplicateNominationDoesNotChangeAnotherStep(t *testing.T) {
-	root, p := pushedRepairFixture(t)
-	groomed := groomChains(root, "moe", "pulse", []groomGroup{{Repair: "fix-ci"}}, nil, io.Discard)
-	groomed.prChecks = []ownedPRChecks{p}
-	repair := groomed.threads[0]
-	groomed.threads = append(groomed.threads, groomedThread{Root: "moe/other"}, repair)
-	plan := planKick(root, groomed)
-	if len(plan.Steps) != 2 || !plan.Steps[0].Repair || plan.Steps[1].Repair {
-		t.Fatalf("duplicate repair changed another root: %+v", plan)
 	}
 }
 

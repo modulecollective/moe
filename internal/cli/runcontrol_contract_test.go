@@ -29,7 +29,7 @@ func TestFinishArrivingDuringOneStageKickApplies(t *testing.T) {
 		return inner(s, p, r, h, o, e)
 	}
 	var out, errs bytes.Buffer
-	code := chainKickRun(root, "moe", "change-auth", rideDynamic, true, &out, &errs)
+	code := rideRun(root, "moe", "change-auth", rideDynamic, true, &out, &errs)
 	if code != 0 {
 		t.Fatalf("kick=%d: %s", code, errs.String())
 	}
@@ -222,7 +222,7 @@ func TestFinishAfterOneStageKickDoesNotRepeatSettledStage(t *testing.T) {
 		return inner(s, p, r, h, o, e)
 	}
 	var errs bytes.Buffer
-	if code := chainKickRun(root, "moe", "change-auth", rideDynamic, true, io.Discard, &errs); code != 0 {
+	if code := rideRun(root, "moe", "change-auth", rideDynamic, true, io.Discard, &errs); code != 0 {
 		t.Fatalf("exit %d: %s", code, &errs)
 	}
 	if n := countInvocations(*captured, "design"); n != 1 {
@@ -260,7 +260,7 @@ func TestFinishAfterOneStageKickStopsAtBlockedGate(t *testing.T) {
 		return inner(s, p, r, h, o, e)
 	}
 	var errs bytes.Buffer
-	if code := chainKickRun(root, "moe", "change-auth", rideDynamic, true, io.Discard, &errs); code != 0 {
+	if code := rideRun(root, "moe", "change-auth", rideDynamic, true, io.Discard, &errs); code != 0 {
 		t.Fatalf("exit %d: %s", code, &errs)
 	}
 	f, _ := controlRecord(t, root).Find("finish-blocked")
@@ -284,7 +284,7 @@ func TestFinishDuringFailedFullKickSettles(t *testing.T) {
 		}
 		return inner(s, p, r, h, o, e)
 	}
-	if code := chainKickRun(root, "moe", "change-auth", rideDynamic, false, io.Discard, io.Discard); code != 1 {
+	if code := rideRun(root, "moe", "change-auth", rideDynamic, false, io.Discard, io.Discard); code != 1 {
 		t.Fatalf("want stage failure, got %d", code)
 	}
 	f, _ := controlRecord(t, root).Find("finish-during-failure")
@@ -372,38 +372,11 @@ func TestFinishDuringFailedTypedCascadeSettles(t *testing.T) {
 		t.Fatalf("failed typed cascade retained reusable finish authority: %+v", f)
 	}
 	delete(exits, "build")
-	if code := chainKickRun(root, "moe", "change-auth", rideDynamic, true, io.Discard, io.Discard); code != 0 {
+	if code := rideRun(root, "moe", "change-auth", rideDynamic, true, io.Discard, io.Discard); code != 0 {
 		t.Fatalf("later kick exit %d", code)
 	}
 	if len(*push) != 0 {
 		t.Fatalf("later one-stage kick shipped under a stale finish: pushes=%d", len(*push))
-	}
-}
-
-// A finish accepted on a chained child while a ride walks it settles at
-// the child's own failed stop; nothing later in the ride returns to it.
-func TestFinishDuringFailedChildRideSettles(t *testing.T) {
-	root, _ := controlFixture(t)
-	parent := seedParkedRun(t, root, "parent-run")
-	chainEdgeCommit(t, root, "moe/parent-run", "moe/change-auth")
-	stubOpenSdlcStage(t, map[string]int{"build": 1})
-	push := stubPushFromCascade(t, 0, nil)
-	inner := openSdlcStage
-	openSdlcStage = func(s, p, r string, h bool, o, e io.Writer) int {
-		if r == "change-auth" && s == "design" {
-			submitControl(t, root, runcontrol.KindFinish, "finish-child")
-		}
-		return inner(s, p, r, h, o, e)
-	}
-	if code := maybeRideChain(parent, false, io.Discard, io.Discard); code != 1 {
-		t.Fatalf("want child stage failure, got %d", code)
-	}
-	f, _ := controlRecord(t, root).Find("finish-child")
-	if f.State != runcontrol.StateFailed || !strings.Contains(f.Outcome, "build stopped") {
-		t.Fatalf("failed child ride retained reusable finish authority: %+v", f)
-	}
-	if len(*push) != 0 {
-		t.Fatalf("failed child shipped: pushes=%d", len(*push))
 	}
 }
 
@@ -449,7 +422,7 @@ func TestFinishDuringFailedStandaloneStageSettles(t *testing.T) {
 	}
 	stubOpenSdlcStage(t, nil)
 	push := stubPushFromCascade(t, 0, nil)
-	chainKickRun(root, "tele", "fix-it", rideDynamic, true, io.Discard, &errs)
+	rideRun(root, "tele", "fix-it", rideDynamic, true, io.Discard, &errs)
 	if len(*push) != 0 {
 		t.Fatalf("later one-stage kick shipped under a failed finish: pushes=%d", len(*push))
 	}
@@ -555,7 +528,7 @@ func TestFinishFailedReceiptCannotReplay(t *testing.T) {
 				gittest.Run(t, root, "config", "--unset", "core.hooksPath")
 			}
 			delete(exits, "build")
-			later := chainKickRun(root, md.Project, md.ID, rideDynamic, true, io.Discard, &errs)
+			later := rideRun(root, md.Project, md.ID, rideDynamic, true, io.Discard, &errs)
 			if len(*push) != 0 {
 				t.Fatalf("later kick shipped under the stale grant: pushes=%d stderr=%s", len(*push), errs.String())
 			}
