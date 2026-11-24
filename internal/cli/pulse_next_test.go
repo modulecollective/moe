@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/input"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
@@ -466,5 +467,35 @@ func TestRootSweptMovesEachDispatchedCursorOnItsOwnEvidence(t *testing.T) {
 	}
 	if len(g.dispatched) != 0 {
 		t.Errorf("dispatched not consumed: %v", g.dispatched)
+	}
+}
+
+func TestKickoffPutsARunWithAnOperatorNoteFirst(t *testing.T) {
+	root, _ := nextFixture(t)
+	stubGH(t, map[string]any{})
+	noted := mintIn(t, root, "beta", "noted-work")
+	plain := mintIn(t, root, "beta", "plain-work")
+	tagIdea(t, root, "beta", "noted-idea")
+	for _, id := range []string{noted, "noted-idea"} {
+		if _, err := input.Add(root, "beta", id, "Do this one next."); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sc, ok := newPulseScan(root)
+	if !ok {
+		t.Fatal("scan failed")
+	}
+	got := pulseKickoffFromScan(sc, root, "pulse-now", io.Discard)
+	for _, want := range []string{
+		"`beta/" + noted + "` (sdlc) — operator note waiting",
+		"`beta/noted-idea` (idea tagged sdlc) — operator note waiting",
+		"comes first when you pick `next`",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("kickoff missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "`beta/"+plain+"` (sdlc) — operator note waiting") {
+		t.Errorf("run with no note was marked:\n%s", got)
 	}
 }

@@ -320,7 +320,8 @@ func pendingInputBlock(sc *pulseScan, projectID string) string {
 	if len(pending) > 0 {
 		b.WriteString("\nWaiting for a turn to pick up — the operator is pushing these runs " +
 			"forward, so don't treat one as waiting on input, and don't relay the text: " +
-			"the run's own turn receives it in full.\n")
+			"the run's own turn receives it in full. A parked run here comes first when " +
+			"you pick `next`, unless the floor holds it.\n")
 		for _, w := range pending {
 			fmt.Fprintf(&b, "- `%s/%s` — %s\n", w.Project, w.Run, w.Entry.FirstLine())
 		}

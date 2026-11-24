@@ -146,11 +146,12 @@ func parkedRunsBlock(sc *pulseScan, projectID string) string {
 		if hold := kickFloorHold(sc.root, key, sc); hold != "" {
 			note = " — held: " + hold
 		}
+		note += operatorNoteMark(sc.root, md)
 		lines = append(lines, fmt.Sprintf("- `%s` (%s)%s — %s", key, md.Workflow, note, settledRunTitle(sc.root, md)))
 	}
 	for _, md := range sc.mds {
 		if md.Project == projectID && md.Workflow == dash.IdeaWorkflow && md.Status == run.StatusInProgress && md.PromoteTo != "" {
-			lines = append(lines, fmt.Sprintf("- `%s/%s` (idea tagged %s) — %s", md.Project, md.ID, md.PromoteTo, settledRunTitle(sc.root, md)))
+			lines = append(lines, fmt.Sprintf("- `%s/%s` (idea tagged %s)%s — %s", md.Project, md.ID, md.PromoteTo, operatorNoteMark(sc.root, md), settledRunTitle(sc.root, md)))
 		}
 	}
 	if len(lines) == 0 {
@@ -158,6 +159,15 @@ func parkedRunsBlock(sc *pulseScan, projectID string) string {
 	}
 	return "Parked work a `next` could name. Before picking a run, read its canvas for anything it says it is waiting on:\n" +
 		strings.Join(lines, "\n")
+}
+
+// operatorNoteMark flags a parked run the operator has pushed a note at, so
+// the pick can put it first.
+func operatorNoteMark(root string, md *run.Metadata) string {
+	if pendingInputOnRun(root, md) {
+		return " — operator note waiting"
+	}
+	return ""
 }
 
 // judgedChoresBlock lists the project's judged chores the survey could

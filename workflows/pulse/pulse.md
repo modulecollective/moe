@@ -192,6 +192,10 @@ pick the prerequisite or something else. Weigh a red default branch and
 a failing PR above new work, and work serving an open intent above work
 that doesn't.
 
+**A run marked `operator note waiting` comes first.** The operator
+pushed it on purpose, so pick it ahead of everything else unless the
+floor holds it. With several, take the one whose note is most urgent.
+
 **The floor is the harness's and you do not re-derive it.** It holds a
 run whose project is paused, a run with no settled design, a run with a
 session open or a recent operator touch, and a run an operator has
