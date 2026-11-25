@@ -464,3 +464,119 @@ printf '\nRe-checked; still waiting.\n' >> "$canvas"
 		t.Fatalf("resumed kickoff argv missing the settled filing:\n%s", b)
 	}
 }
+
+// TestPrerequisiteGateNamesTheFiledSlug drives the seam the hand-written
+// fixtures skip: the agent files an entry and names its slug in the gate
+// before harvest runs, then the real turn-end harvest resolves the entry to
+// a different id. A dated live owner (`fix` → `fix-2026-11-20`) and a
+// collision-allocated idea (`fix` → `fix-2`) must still be named by `fix`;
+// a gate naming something else is held either way.
+func TestPrerequisiteGateNamesTheFiledSlug(t *testing.T) {
+	for _, tc := range []struct {
+		name, entry string
+		setup       func(t *testing.T, root string)
+		// settle walks the resolved filing to settled and returns its key.
+		settle func(t *testing.T, root, resolved string, when time.Time) string
+	}{
+		{"dated live owner", "- [ ] `fix` — Fix\n",
+			func(t *testing.T, root string) { seedOwner(t, root, "beta", "fix-2026-11-20", "sdlc") },
+			func(t *testing.T, root, resolved string, when time.Time) string {
+				settleRun(t, root, "beta", resolved, run.StatusMerged, when)
+				return "beta/" + resolved
+			}},
+		{"slug collision", "- [ ] `fix` (sdlc) — Fix\n",
+			func(t *testing.T, root string) {
+				seedOwner(t, root, "beta", "fix", "idea")
+				settleRun(t, root, "beta", "fix", run.StatusClosed, time.Now().Add(-4*time.Hour))
+			},
+			func(t *testing.T, root, resolved string, when time.Time) string {
+				id := promoteIdea(t, root, "beta", resolved, when)
+				settleRun(t, root, "beta", id, run.StatusMerged, when)
+				return "beta/" + id
+			}},
+	} {
+		for _, gate := range []struct {
+			name, text string
+			admit      bool
+		}{
+			{"filed slug", "Waiting on `fix`.", true},
+			{"prefixed filed slug", "Waiting on `beta/fix`.", true},
+			{"something else", "Waiting on `other`.", false},
+		} {
+			t.Run(tc.name+"/"+gate.name, func(t *testing.T) {
+				root, _ := nextFixture(t)
+				t.Setenv("MOE_HOME", root)
+				t0 := time.Now().Add(-3 * time.Hour)
+				tc.setup(t, root)
+				operatorSourceBlocked(t, root, "study", gate.text, tc.entry, t0)
+				if err := harvestRunInProcess(root, "sdlc", "beta", "study"); err != nil {
+					t.Fatal(err)
+				}
+				var resolved string
+				for _, f := range runFilings(scanOf(t, root), mustLoad(t, root, "beta", "study")) {
+					resolved = strings.TrimPrefix(f.Ref, "beta/")
+				}
+				if resolved == "" || resolved == "fix" {
+					t.Fatalf("harvest resolved the entry to %q; the case needs another id", resolved)
+				}
+				exit := filingExitLines(root, mustLoad(t, root, "beta", "study"), "design")
+				if strings.Contains(exit, "this run resumes when it settles") != gate.admit ||
+					strings.Contains(exit, "nothing will resume this run on its own") == gate.admit {
+					t.Fatalf("exit lines (admit=%v):\n%s", gate.admit, exit)
+				}
+
+				key := tc.settle(t, root, resolved, time.Now())
+				sc := scanOf(t, root)
+				hold := kickFloorHold(root, "beta/study", sc)
+				if (hold == "") != gate.admit {
+					t.Fatalf("settled %s: hold = %q, want admit=%v", key, hold, gate.admit)
+				}
+				if gate.admit && !strings.Contains(parkedRunsBlock(sc, "beta"), "due: its gate names `"+key+"`, merged since its last turn") {
+					t.Fatalf("parked line:\n%s", parkedRunsBlock(sc, "beta"))
+				}
+			})
+		}
+	}
+}
+
+// TestParkedDueClauseMidLadder: a run parked blocked at build on a named
+// filing carries the due clause once that filing settles, not only at the
+// first stage.
+func TestParkedDueClauseMidLadder(t *testing.T) {
+	root, _ := nextFixture(t)
+	t0 := time.Now().Add(-3 * time.Hour)
+	seedOwner(t, root, "beta", "fix", "sdlc")
+	id := mintIn(t, root, "beta", "spawned")
+	advanceAt(t, root, "beta", id, "design", t0)
+
+	gate := "# Code\n\n## Gate\n\n```json\n{\"status\":\"blocked\"}\n```\n\nWaiting on `fix`.\n\n## Behavior\n\nPending.\n"
+	paths := []string{filepath.Join(root, run.FollowupsPath("beta", id))}
+	if err := os.WriteFile(paths[0], []byte("- [x] `fix` — Fix\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range stageCanvasFiles("sdlc", "build") {
+		p := filepath.Join(root, run.ContentFilePath("beta", id, "build", f.Name))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(gate), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, p)
+	}
+	msg := "work: update build\n\n" + trailers.Block{Run: id, Project: "beta", Workflow: "sdlc", Document: "build"}.String()
+	atTime(t, t0.Add(10*time.Minute), func() {
+		if err := run.StageAndCommit(root, msg, paths...); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	want := "`beta/" + id + "` (sdlc) — due: its gate names `beta/fix`, merged since its last turn"
+	if block := parkedRunsBlock(scanOf(t, root), "beta"); strings.Contains(block, "due:") {
+		t.Fatalf("due before the filing settled:\n%s", block)
+	}
+	settleRun(t, root, "beta", "fix", run.StatusMerged, t0.Add(time.Hour))
+	if block := parkedRunsBlock(scanOf(t, root), "beta"); !strings.Contains(block, want) {
+		t.Fatalf("parked line missing %q:\n%s", want, block)
+	}
+}

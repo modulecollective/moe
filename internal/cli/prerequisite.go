@@ -140,20 +140,52 @@ func gateSectionText(body string) string {
 	return ""
 }
 
-// names reports whether a gate's tokens name f: its resolved id or the
-// owner's, either bare or with the `<project>/` prefix.
+// namedBy reports whether a gate's tokens name f: its resolved id or the
+// owner's, either bare or with the `<project>/` prefix. The agent writes
+// its gate before harvest resolves the entry, so a token may be the slug
+// it filed rather than the id the checked line now carries: a dated live
+// owner (`fix` → `fix-2026-11-20`) matches through slugBaseMatches, and a
+// collision-allocated idea (`fix` → `fix-2`) through gateReceipts. Only
+// the run's own filings are ever candidates.
 func (f filing) namedBy(names map[string]bool) bool {
 	keys := []string{f.Ref}
 	if f.Owner != nil {
 		keys = append(keys, f.Owner.Project+"/"+f.Owner.ID)
 	}
-	for _, k := range keys {
-		_, id, _ := strings.Cut(k, "/")
-		if names[k] || names[id] {
-			return true
+	for tok := range names {
+		tp, tid, prefixed := strings.Cut(tok, "/")
+		if !prefixed {
+			tp, tid = "", tok
+		}
+		for _, k := range keys {
+			kp, kid, _ := strings.Cut(k, "/")
+			if (tp == "" || tp == kp) && slugBaseMatches([]string{kid}, tid) {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+// gateReceipts adds to names, for each token that is a slug md filed, the
+// idea its extraction receipt says the entry landed at. Harvest rewrites
+// the checked line to the allocated id, so the receipt is where the filed
+// slug survives. One history read per token; callers reach for it only
+// when a cheaper match has failed.
+func gateReceipts(root string, md *run.Metadata, names map[string]bool) map[string]bool {
+	out := make(map[string]bool, len(names))
+	for tok := range names {
+		out[tok] = true
+		tp, tid, prefixed := strings.Cut(tok, "/")
+		if !prefixed {
+			tp, tid = md.Project, tok
+		}
+		p, id, err := run.FollowupDestination(root, md.Project+"/"+md.ID+"/"+tp+"/"+tid)
+		if err == nil && id != "" {
+			out[p+"/"+id] = true
+		}
+	}
+	return out
 }
 
 // dueFiling returns the filing that makes md due at stage: the stage's
@@ -170,8 +202,21 @@ func dueFiling(sc *pulseScan, md *run.Metadata, stage string) *filing {
 	if !blocked || len(names) == 0 {
 		return nil
 	}
+	var settled []filing
 	for _, f := range runFilings(sc, md) {
-		if f.Settled && f.At.After(last) && f.namedBy(names) {
+		if f.Settled && f.At.After(last) {
+			if f.namedBy(names) {
+				return &f
+			}
+			settled = append(settled, f)
+		}
+	}
+	if len(settled) == 0 {
+		return nil
+	}
+	names = gateReceipts(sc.root, md, names)
+	for _, f := range settled {
+		if f.namedBy(names) {
 			return &f
 		}
 	}
@@ -273,6 +318,9 @@ func filingExitLines(root string, md *run.Metadata, stage string) string {
 		return ""
 	}
 	blocked, names := stageGateSection(root, md, stage)
+	if blocked && len(names) > 0 {
+		names = gateReceipts(root, md, names)
+	}
 	var b strings.Builder
 	named := false
 	for _, f := range open {
