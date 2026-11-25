@@ -153,8 +153,10 @@ func Combined(dir string, args ...string) (string, error) {
 // CombinedContext is Combined bounded by a caller-supplied context —
 // the shape for a git call nobody is watching, where the transport can
 // black-hole and there is no operator to hit Ctrl-C. On expiry the
-// error names the budget ("timed out after 1m0s") and unwraps to
-// ctx.Err(), so errors.Is(err, context.DeadlineExceeded) holds.
+// error names the nonnegative remaining budget at execGitLimited entry,
+// rounded by roundBudget, and unwraps to ctx.Err(), so
+// errors.Is(err, context.DeadlineExceeded) holds. Dispatch delay can
+// consume part of the caller's original timeout before that entry.
 //
 // Cancellation reaps git's whole process group, not just the leader:
 // git-remote-https inherits the captured output pipe, so a leader-only
@@ -308,9 +310,10 @@ func inspectionEnv() []string {
 // contextError renders a finished context as the error the caller
 // should see in place of git's own "signal: killed". Wrapping ctx.Err()
 // keeps errors.Is(err, context.DeadlineExceeded) true for callers that
-// branch on it; the message names the budget, because in a serve log
-// "timed out after 1m0s" is the whole diagnostic and "context deadline
-// exceeded" says nothing about how long anything waited.
+// branch on it. The budget is the nonnegative time from start to the
+// context's effective deadline. start is captured once at execGitLimited
+// entry for the whole call, including index-lock retries, rather than
+// after cancellation and cleanup.
 func contextError(ctx context.Context, start time.Time) error {
 	err := ctx.Err()
 	dl, ok := ctx.Deadline()
@@ -320,9 +323,9 @@ func contextError(ctx context.Context, start time.Time) error {
 	return &timeoutError{budget: max(dl.Sub(start), 0), err: err}
 }
 
-// timeoutError is a git call that blew its deadline. Error() is the
-// bare clause — callers prefix it with the operation they were running,
-// so PushMain's wrap reads "git push: timed out after 1m0s".
+// timeoutError is a git call that blew its deadline. budget is the
+// remaining time at Git-call entry. Error() rounds it and returns the
+// bare clause; callers prefix it with the operation they were running.
 type timeoutError struct {
 	budget time.Duration
 	err    error
@@ -332,11 +335,9 @@ func (e *timeoutError) Error() string { return "timed out after " + roundBudget(
 
 func (e *timeoutError) Unwrap() error { return e.err }
 
-// roundBudget trims sub-tick noise off the printed budget. It is
-// measured against a clock read taken after the caller built the
-// context, so a 60s deadline arrives as 59.9999s; rounding at the
-// budget's own scale prints "1m0s" without flattening a millisecond
-// test budget to "0s".
+// roundBudget rounds the remaining budget to seconds at or above one
+// second, and milliseconds below it. For example, 59.9999s prints as
+// "1m0s"; rounding does not recover time consumed before Git-call entry.
 func roundBudget(d time.Duration) time.Duration {
 	if d >= time.Second {
 		return d.Round(time.Second)

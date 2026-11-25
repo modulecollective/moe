@@ -375,7 +375,8 @@ func TestPusherTimesOutOnABlackHoledOrigin(t *testing.T) {
 	gittest.Run(t, root, "remote", "set-url", "origin", "https://example.invalid/x.git")
 
 	shortenPushInterval(t, 5*time.Millisecond, 40*time.Millisecond)
-	shortenPushTimeout(t, 400*time.Millisecond)
+	const budget = 400 * time.Millisecond
+	shortenPushTimeout(t, budget)
 	log := &syncBuf{}
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, Logger: log})
 
@@ -401,8 +402,19 @@ func TestPusherTimesOutOnABlackHoledOrigin(t *testing.T) {
 	if n := strings.Count(out, "retrying, backing off"); n != 1 {
 		t.Errorf("failure logged %d times, want exactly 1:\n%s", n, out)
 	}
-	if !strings.Contains(out, "git push: timed out after 400ms") {
+	var timeoutLine string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "pusher: git push: timed out after ") {
+			timeoutLine = line
+			break
+		}
+	}
+	token, hasPrefix := strings.CutPrefix(timeoutLine, "pusher: git push: timed out after ")
+	token, hasSuffix := strings.CutSuffix(token, " — retrying, backing off")
+	if !hasPrefix || !hasSuffix {
 		t.Errorf("log doesn't name the deadline the push blew:\n%s", out)
+	} else if got, parseErr := time.ParseDuration(token); parseErr != nil || got < 0 || got > budget {
+		t.Errorf("timeout duration = %q (parse error: %v), want within [0, %s]", token, parseErr, budget)
 	}
 	if !strings.Contains(out, "origin reachable again, pushed 1 commit(s)") {
 		t.Errorf("missing recovery line with the drained count:\n%s", out)

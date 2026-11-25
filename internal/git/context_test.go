@@ -12,6 +12,33 @@ import (
 	"github.com/modulecollective/moe/internal/git/gittest"
 )
 
+func TestContextError_RemainingBudgetAtCallEntry(t *testing.T) {
+	ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	deadline, _ := ctx.Deadline()
+
+	for _, tc := range []struct {
+		remaining time.Duration
+		want      string
+	}{
+		{400 * time.Millisecond, "timed out after 400ms"},
+		{399 * time.Millisecond, "timed out after 399ms"},
+		{398 * time.Millisecond, "timed out after 398ms"},
+		{60*time.Second - 100*time.Microsecond, "timed out after 1m0s"},
+		{-time.Millisecond, "timed out after 0s"},
+	} {
+		t.Run(tc.remaining.String(), func(t *testing.T) {
+			err := contextError(ctx, deadline.Add(-tc.remaining))
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("error = %v, want context.DeadlineExceeded", err)
+			}
+			if got := err.Error(); got != tc.want {
+				t.Errorf("error = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // blackHoleProxy is an https proxy that completes the TCP handshake and
 // then says nothing — the shape a wedged push actually has, where the
 // socket is up and no bytes ever come back. It returns the listener's
@@ -74,8 +101,10 @@ func TestCombinedContext_TimeoutReapsTransportChild(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("error = %v, want it to unwrap to context.DeadlineExceeded", err)
 	}
-	if got := err.Error(); !strings.Contains(got, "timed out after 5s") {
-		t.Errorf("error = %q, want it to name the budget it blew", got)
+	if token, ok := strings.CutPrefix(err.Error(), "timed out after "); !ok {
+		t.Errorf("error = %q, want a timeout duration", err)
+	} else if got, parseErr := time.ParseDuration(token); parseErr != nil || got < 0 || got > budget {
+		t.Errorf("timeout duration = %q (parse error: %v), want within [0, %s]", token, parseErr, budget)
 	}
 
 	var conn net.Conn
