@@ -240,7 +240,7 @@ func TestHeartbeatHTTPAdvanceWithSameSecondFutureQuotaRetry(t *testing.T) {
 	}
 	when := gittest.Output(t, root, "log", "-1", "--format=%cI")
 	postHeartbeatAdvance(t, root, h)
-	gittest.RunWithEnv(t, root, []string{"GIT_COMMITTER_DATE=" + when, "GIT_AUTHOR_DATE=" + when}, "commit", "--amend", "--allow-empty", "--date="+when)
+	gittest.RunWithEnv(t, root, []string{"GIT_COMMITTER_DATE=" + when, "GIT_AUTHOR_DATE=" + when}, "commit", "--amend", "--no-edit", "--allow-empty", "--date="+when)
 	if !heldFor(dueDecisions(t, newHeartbeatGate(root), testTick), "moe") {
 		t.Fatal("quota retry bypassed advance quiet window")
 	}
