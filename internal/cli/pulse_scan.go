@@ -156,6 +156,8 @@ func parkedRunsBlock(sc *pulseScan, projectID string) string {
 		note := ""
 		if hold := kickFloorHold(sc.root, key, sc); hold != "" {
 			note = " — held: " + hold
+		} else if f := parkedDueFiling(sc, md); f != nil {
+			note = " — " + f.dueClause()
 		}
 		note += operatorNoteMark(sc.root, md)
 		lines = append(lines, fmt.Sprintf("- `%s` (%s)%s — %s", key, md.Workflow, note, settledRunTitle(sc.root, md)))
@@ -170,6 +172,22 @@ func parkedRunsBlock(sc *pulseScan, projectID string) string {
 	}
 	return "Parked work a `next` could name. Before picking a run, read its canvas for anything it says it is waiting on:\n" +
 		strings.Join(lines, "\n")
+}
+
+// parkedDueFiling is the settled filing a parked run's blocked gate
+// names, at whatever stage it waits: the first stage's resume, or a
+// mid-ladder park the floor already admits. The survey picks either way;
+// the clause saves it reconstructing why the run can move.
+func parkedDueFiling(sc *pulseScan, md *run.Metadata) *filing {
+	w, err := LookupWorkflow(md.Workflow)
+	if err != nil {
+		return nil
+	}
+	stage, _, err := w.NextWithIndex(sc.root, md, sc.idx)
+	if err != nil || stage == "" {
+		return nil
+	}
+	return dueFiling(sc, md, stage)
 }
 
 // operatorNoteMark flags a parked run the operator has pushed a note at, so

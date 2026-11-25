@@ -736,6 +736,11 @@ func (s *stageSession) buildSpec(workRoot string) (stageTurnSpec, error) {
 	initialPrompt := s.opts.InitialPrompt
 	if s.opts.Headless && initialPrompt == "" {
 		initialPrompt = md.ID
+		// A first stage resumed because the prerequisite its gate names
+		// settled is told so, read from the canonical root's journal.
+		if line := prerequisiteResumeKickoff(s.root, md, s.docID); line != "" {
+			initialPrompt += "\n\n" + line
+		}
 	}
 
 	return stageTurnSpec{

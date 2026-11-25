@@ -116,7 +116,7 @@ func promptNextStageOverride(root string, md *run.Metadata, justFinished, overri
 		}
 		if len(problems) > 0 {
 			finishGateBlocked(root, md, justFinished, stderr)
-			moePrintf(stdout, "%s", stageNotReadyMessage(wf.Name, md, justFinished, problems))
+			moePrintf(stdout, "%s", stageNotReadyMessage(root, wf.Name, md, justFinished, problems))
 			return 0
 		}
 	}

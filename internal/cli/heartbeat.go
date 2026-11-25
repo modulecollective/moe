@@ -1120,8 +1120,10 @@ func parkedKickableThread(root string, sc *pulseScan, projectID string, markedOn
 		if reapHeldReason(md, sc.idx.LastOperatorActivity[key]) != "" {
 			continue
 		}
-		if settled, turnClosed := rootDesignSettled(root, md, sc.idx); !settled && (!md.DesignOnly || turnClosed) {
-			continue
+		if settled, turnClosed := rootDesignSettled(root, md, sc.idx); !settled {
+			if adm, _ := unsettledAdmission(sc, md, turnClosed); adm == admitNone {
+				continue
+			}
 		}
 		if openSessionStage(root, md) != "" || runOwnerHold(root, md) != "" {
 			continue

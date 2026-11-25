@@ -270,7 +270,7 @@ func requireStageReady(root string, md *run.Metadata, stage string, stderr io.Wr
 		return 1
 	}
 	if len(problems) > 0 {
-		moePrintf(stderr, "%s", stageNotReadyMessage(wf.Name, md, stage, problems))
+		moePrintf(stderr, "%s", stageNotReadyMessage(root, wf.Name, md, stage, problems))
 		return 1
 	}
 	return 0

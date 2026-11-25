@@ -305,13 +305,16 @@ func canvasDiffPath(md *run.Metadata, docID string) string {
 // stageNotReadyMessage is the refusal printed when a stage's gate keeps
 // it from advancing: one line per unstamped file and why, then the verb
 // that resumes it. "Gate not satisfied" alone stops being enough once a
-// stage has two files.
-func stageNotReadyMessage(workflow string, md *run.Metadata, stage string, problems []string) string {
+// stage has two files. The tail says where each prerequisite this run
+// filed went and whether its settling will resume the run: extraction is
+// silent, and an operator who cannot see it asks the agent instead.
+func stageNotReadyMessage(root, workflow string, md *run.Metadata, stage string, problems []string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%s not ready — parked at %s:\n", stage, stage)
 	for _, p := range problems {
 		fmt.Fprintf(&b, "  %s\n", p)
 	}
 	fmt.Fprintf(&b, "next: moe %s %s %s/%s\n", workflow, stage, md.Project, md.ID)
+	b.WriteString(filingExitLines(root, md, stage))
 	return b.String()
 }

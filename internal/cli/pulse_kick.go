@@ -30,7 +30,8 @@ type pulsePick struct {
 	// Hold is the floor's reason not to start it, phrased as the tail of
 	// the ride's stderr line and of the canvas's `## Next` section.
 	Hold string
-	// OneStage bounds a design-only spawn to its single design turn.
+	// OneStage bounds the ride to one stage: a design-only spawn's seed
+	// turn, or the turn an operator note buys.
 	OneStage bool
 }
 
@@ -66,7 +67,7 @@ func planPick(sc *pulseScan, next *pulseNext, minted map[string]string, prChecks
 		pick.Hold = fmt.Sprintf("is a %s %s run, not parked work — starting nothing", md.Status, md.Workflow)
 	default:
 		pick.Hold = kickFloorHold(sc.root, pick.Key, sc)
-		pick.OneStage = designOnlyRide(sc.root, pick.Key, sc)
+		pick.OneStage = oneStageRide(sc.root, pick.Key, sc)
 	}
 	return pick
 }
@@ -161,10 +162,10 @@ func pulseRide(root string, pick *pulsePick, prChecks []ownedPRChecks, stdout, s
 		moePrintf(stderr, "pulse: next: %s %s\n", key, hold)
 		return 0
 	}
-	oneStage := designOnlyRide(root, key, sc)
+	oneStage := oneStageRide(root, key, sc)
 	ride := "dynamic"
 	if oneStage {
-		ride = "dynamic, design only"
+		ride = "dynamic, one stage"
 	}
 	moePrintf(stderr, "pulse: riding %s (%s) — %s\n", key, ride, pick.Why)
 	code := rideRun(root, proj, runID, rideDynamic, oneStage, stdout, stderr)
@@ -192,15 +193,15 @@ func kickFloorHold(root, key string, sc *pulseScan) string {
 		return hold
 	}
 	if settled, turnClosed := rootDesignSettled(root, md, sc.idx); !settled {
-		// A design-only spawn is the one unsettled run the floor lets
-		// through, for the single turn its seed asked for or one more to
-		// carry a note the operator pushed.
-		if !md.DesignOnly {
+		// An unsettled run passes only on unsettledAdmission: a
+		// design-only spawn's seed turn, one turn for an operator note, or
+		// a resume once the prerequisite its blocked gate names settles.
+		if adm, _ := unsettledAdmission(sc, md, turnClosed); adm == admitNone {
+			if md.DesignOnly {
+				return designOnlyHeldReason
+			}
 			return "is waiting at its first stage with " + designHeldReason(turnClosed) +
 				" — the operator holds the trigger"
-		}
-		if turnClosed && !pendingInputOnRun(root, md) {
-			return designOnlyHeldReason
 		}
 	}
 	if why := reapHeldReason(md, sc.idx.LastOperatorActivity[key]); why != "" {
@@ -255,7 +256,7 @@ func renderNextSection(pick *pulsePick) string {
 		case pick.Idea:
 			kind = "queued — promote the tagged idea, then ride it"
 		case pick.OneStage:
-			kind = "queued, design only — one stage, then it parks"
+			kind = "queued, one stage — then it parks"
 		}
 		fmt.Fprintf(&b, "`%s` %s.\n\nWhy: %s\n", pick.Key, kind, pick.Why)
 	}
@@ -498,20 +499,22 @@ func designHeldReason(turnClosed bool) string {
 // whether to press a button.
 const designOnlyHeldReason = "is a design-only spawn parked at design — advance it to ride, or close it"
 
-// designOnlyRide reports whether this root's next ride is the bounded
-// one: a design-only spawn nobody has advanced yet, so the kick walks
-// its design stage and stops. False once the operator advances it —
-// from then on the bit is provenance and the run rides like any other.
-// The settledness question routes through rootDesignSettled rather than
-// being re-derived, so the bound and the floor's admit cannot disagree
-// about which side of the advance a run is on.
-func designOnlyRide(root, key string, sc *pulseScan) bool {
+// oneStageRide reports whether this root's next ride is the bounded
+// one: an unsettled run admitted for a single stage — a design-only
+// spawn's seed turn, or the turn an undelivered operator note buys. It
+// routes through unsettledAdmission, so the bound and the floor's admit
+// cannot disagree about which runs ride one stage and which ride on.
+func oneStageRide(root, key string, sc *pulseScan) bool {
 	md := sc.byKey[key]
-	if md == nil || !md.DesignOnly {
+	if md == nil {
 		return false
 	}
-	settled, _ := rootDesignSettled(root, md, sc.idx)
-	return !settled
+	settled, turnClosed := rootDesignSettled(root, md, sc.idx)
+	if settled {
+		return false
+	}
+	adm, _ := unsettledAdmission(sc, md, turnClosed)
+	return adm == admitOneStage
 }
 
 // openSessionStage returns the stage md has a live session branch at,
