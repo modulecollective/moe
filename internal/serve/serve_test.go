@@ -634,14 +634,14 @@ func TestHeaderWrapRulesServed(t *testing.T) {
 		t.Fatalf("want 200, got %d", rr.Code)
 	}
 	css := rr.Body.String()
-	// Only base rules count: a phone-only fix leaves intermediate and
-	// desktop widths broken. Scope declarations to their selector block
-	// so unrelated rules (or border: 1px) cannot satisfy an assertion.
+	// Scope declarations to their selector block so unrelated rules (or
+	// border: 1px) cannot satisfy an assertion. Narrow main keeps status
+	// below the banner/menu; only the wide-main breakpoint restores it.
 	base, _, _ := strings.Cut(css, "@media")
-	block := func(selector string) string {
-		_, rest, found := strings.Cut(base, selector)
+	block := func(scope, selector string) string {
+		_, rest, found := strings.Cut(scope, selector)
 		if !found {
-			t.Fatalf("base stylesheet lost its %s rule", selector)
+			t.Fatalf("stylesheet scope lost its %s rule", selector)
 		}
 		rule, _, found := strings.Cut(rest, "}")
 		if !found {
@@ -651,20 +651,37 @@ func TestHeaderWrapRulesServed(t *testing.T) {
 	}
 	for selector, declarations := range map[string][]string{
 		".page-header {":  {"flex-wrap: wrap;", "row-gap: 0.2rem;"},
-		".banner-serve {": {"order: 1;", "flex-basis: 100%;", "line-height: inherit;"},
+		".banner-serve {": {"order: 1;", "flex-basis: 100%;", "line-height: inherit;", "min-width: 0;", "white-space: nowrap;", "overflow: hidden;", "text-overflow: ellipsis;"},
 		".banner-bar {":   {"overflow-wrap: anywhere;"},
+		".banner-sub {":   {"overflow-wrap: anywhere;"},
 	} {
-		rule := block(selector)
+		rule := block(base, selector)
 		for _, decl := range declarations {
 			if !strings.Contains(rule, decl) {
 				t.Errorf("base %s is missing %q: %q", selector, decl, rule)
 			}
 		}
 	}
-	logo := block(".banner-bar {")
+	logo := block(base, ".banner-bar {")
 	for _, decl := range []string{"white-space: nowrap;", "overflow-x: auto;"} {
 		if strings.Contains(logo, decl) {
 			t.Errorf("logo still scrolls instead of wrapping: %q", decl)
+		}
+	}
+	_, wide, found := strings.Cut(css, "@media (min-width: 64rem) {")
+	if !found {
+		t.Fatal("stylesheet lost its wide-main breakpoint")
+	}
+	// The unindented closing brace ends this media query, so later
+	// selector blocks cannot satisfy a missing wide rule.
+	wide, _, found = strings.Cut(wide, "\n}")
+	if !found {
+		t.Fatal("wide-main breakpoint is unterminated")
+	}
+	rule := block(wide, ".banner-serve {")
+	for _, decl := range []string{"order: 0;", "flex-basis: auto;", "max-width: 50%;", "line-height: 2rem;"} {
+		if !strings.Contains(rule, decl) {
+			t.Errorf("wide .banner-serve is missing %q: %q", decl, rule)
 		}
 	}
 }
