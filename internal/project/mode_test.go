@@ -58,9 +58,9 @@ func TestModeOfDefaultsToAuto(t *testing.T) {
 }
 
 func TestParseModeRejectsAnythingElse(t *testing.T) {
-	for _, ok := range []string{"paused", "safe", "auto"} {
-		if _, err := ParseMode(ok); err != nil {
-			t.Errorf("ParseMode(%q) = %v, want no error", ok, err)
+	for input, want := range map[string]Mode{"paused": ModePaused, "safe": ModeSafe, "auto": ModeAuto} {
+		if got, err := ParseMode(input); err != nil || got != want {
+			t.Errorf("ParseMode(%q) = %q, %v; want %q, nil", input, got, err, want)
 		}
 	}
 	for _, bad := range []string{"", "AUTO", "Safe", "snooze", "off", "auto "} {

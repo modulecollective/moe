@@ -31,12 +31,12 @@ func TestShipOfDefaultsToPR(t *testing.T) {
 }
 
 func TestParseShipRejectsAnythingElse(t *testing.T) {
-	for _, ok := range []string{"pr", "merge"} {
-		if _, err := ParseShip(ok); err != nil {
-			t.Errorf("ParseShip(%q): %v", ok, err)
+	for input, want := range map[string]ShipMode{"pr": ShipPR, "merge": ShipMerge} {
+		if got, err := ParseShip(input); err != nil || got != want {
+			t.Errorf("ParseShip(%q) = %q, %v; want %q, nil", input, got, err, want)
 		}
 	}
-	for _, bad := range []string{"", "PR", "ff", "rebase", "auto"} {
+	for _, bad := range []string{"", "PR", "ff", "rebase", "auto", "pr ", " merge"} {
 		if _, err := ParseShip(bad); err == nil {
 			t.Errorf("ParseShip(%q) accepted", bad)
 		}

@@ -39,8 +39,10 @@ var Ships = []ShipMode{ShipPR, ShipMerge}
 // ParseShip validates an operator-typed ship word.
 func ParseShip(s string) (ShipMode, error) {
 	switch ShipMode(s) {
-	case ShipPR, ShipMerge:
-		return ShipMode(s), nil
+	case ShipPR:
+		return ShipPR, nil
+	case ShipMerge:
+		return ShipMerge, nil
 	}
 	return "", fmt.Errorf("project: unknown ship route %q (want one of: pr, merge)", s)
 }

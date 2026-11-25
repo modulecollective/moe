@@ -71,7 +71,7 @@ func TestAgentControlAndRefreshWithoutArming(t *testing.T) {
 
 func TestAgentBadRequests(t *testing.T) {
 	s := newTestServer(t, Options{Root: gittest.InitSeeded(t)})
-	for _, form := range []string{"agent=codex", "agent=codex&revision=x", "agent=other&revision=0", "agent=&revision=0", "agent=reset&revision=-1"} {
+	for _, form := range []string{"agent=codex", "agent=codex&revision=x", "agent=other&revision=0", "agent=&revision=0", "agent=reset&revision=-1", "agent=%20codex%20&revision=0"} {
 		if r := postForm(t, s, "/agent", form); r.Code != http.StatusBadRequest {
 			t.Fatalf("%s: %d %s", form, r.Code, r.Body.String())
 		}

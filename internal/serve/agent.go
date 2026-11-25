@@ -2,6 +2,7 @@ package serve
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -25,12 +26,21 @@ func defaultAgentView(root string, now time.Time) agentVM {
 }
 
 func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {
-	desired := r.FormValue("agent")
-	if desired == "reset" {
-		desired = ""
-	} else if _, err := agent.Get(desired); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+	submitted := r.FormValue("agent")
+	desired := ""
+	if submitted != "reset" {
+		names := agent.Names()
+		found := false
+		for _, name := range names {
+			if name == submitted {
+				desired, found = name, true
+				break
+			}
+		}
+		if !found {
+			http.Error(w, fmt.Sprintf("agent: unknown backend %q (registered: %v)", submitted, names), http.StatusBadRequest)
+			return
+		}
 	}
 	revision, err := strconv.Atoi(r.FormValue("revision"))
 	if err != nil || revision < 0 {

@@ -461,8 +461,10 @@ func (s *Server) tagWorkflow(name string) (string, bool) {
 	if name == "" && len(s.opts.TagWorkflows) > 0 {
 		return s.opts.TagWorkflows[0], true
 	}
-	if slices.Contains(s.opts.TagWorkflows, name) {
-		return name, true
+	for _, workflow := range s.opts.TagWorkflows {
+		if workflow == name {
+			return workflow, true
+		}
 	}
 	return "", false
 }

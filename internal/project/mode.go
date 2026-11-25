@@ -44,8 +44,12 @@ var Modes = []Mode{ModePaused, ModeSafe, ModeAuto}
 // ParseMode validates an operator-typed mode word.
 func ParseMode(s string) (Mode, error) {
 	switch Mode(s) {
-	case ModePaused, ModeSafe, ModeAuto:
-		return Mode(s), nil
+	case ModePaused:
+		return ModePaused, nil
+	case ModeSafe:
+		return ModeSafe, nil
+	case ModeAuto:
+		return ModeAuto, nil
 	}
 	return "", fmt.Errorf("project: unknown mode %q (want one of: paused, safe, auto)", s)
 }
