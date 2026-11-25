@@ -362,7 +362,7 @@ grooms the idea backlog on your behalf.
 ```sh
 moe chat new [--agent <name>] [--from-idea <project>/<slug>] <project>/<slug>
 moe chat chat [--agent <name>] <project>/<run>
-moe chat close [--no-edit] <project>/<run>
+moe chat close <project>/<run>
 ```
 
 `new` opens the run, `chat` opens or resumes the session, and `close` archives
@@ -698,7 +698,7 @@ Every pulse does three things:
 ```sh
 moe pulse new                            # run the whole pulse by hand (chore auto-open + survey)
 moe pulse cat _cabinet/<run> pulse       # read a sweep's report
-moe pulse close [--no-edit] _cabinet/<run>  # close a failed or interrupted sweep by hand
+moe pulse close _cabinet/<run>            # close a failed or interrupted sweep by hand
 ```
 
 A sweep is machine-paced and has no re-open verb: a failed one is read with
@@ -755,7 +755,18 @@ designer's hour, not a fix worth a ride. An idea the operator tagged design-only
 tag carries the bit, and the promoted run gets the identical one-stage ride with
 the idea canvas as its brief. The run is then held the way any unadvanced run is
 held, and your exits are the run page's advance chip (a full ride follows when a
-later sweep picks it), a pushed note (one more design turn), or close. A spec's
+later sweep picks it), a pushed note (one more design turn), or close.
+
+A note buys one turn on any run still at its first stage, not only a
+design-only one: the floor admits it for one stage, and the run is held again
+once the note is delivered. An operator-opened design that parked itself
+blocked on a prerequisite it filed, naming that followup's slug in backticks in
+its gate section, is admitted for the full ride once the prerequisite's run
+merges or closes (or its idea closes unpromoted) after the design's last turn.
+The survey sees such a run marked `due` in its parked list; the resumed design
+turn re-checks the evidence and stamps its own gate, and a ready gate rides on
+to build. One settlement buys one resume: a re-check that stays blocked is held
+again until another named filing settles or a note arrives. A spec's
 `design_only` is skipped on a slug that already names live work, on a chore
 entry, and on a spec with no `design` body; on an already-design-only idea the
 flag agrees with the tag and is ignored. The bit stays in `run.json` afterwards

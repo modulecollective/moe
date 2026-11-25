@@ -252,9 +252,11 @@ comes before everything else.
 **Pick the first thing that can actually move.** Read the candidate's
 canvas. A run blocked on prose naming another run is waiting on that
 run; if the prerequisite has landed, it is due again, and if it has not,
-pick the prerequisite or something else. Weigh a red default branch and
-a failing PR above new work, and work serving an open intent above work
-that doesn't.
+pick the prerequisite or something else. A parked line marked `due` names
+a prerequisite its gate waits on that has settled since its last turn;
+picking it re-runs the blocked stage, and a ready gate rides on. Weigh a
+red default branch and a failing PR above new work, and work serving an
+open intent above work that doesn't.
 
 **A run marked `operator note waiting` comes first.** The operator
 pushed it on purpose, so pick it ahead of everything else unless the

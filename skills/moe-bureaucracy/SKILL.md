@@ -20,16 +20,13 @@ worth recording for future runs. MoE keeps three places for this:
   needs that kind of proxy." One fact per file with an `applies-when:`
   heuristic so future agents know whether to open it.
 - **Followups** (`followups.md`) records work that's worth doing but out of
-  scope for the current canvas. The operator triages at close; survivors
-  become idea runs.
+  scope for the current canvas. Each entry becomes an idea run.
 
-All three fan out when the run reaches a terminal status — close or merge.
-Tagged followups also extract after a successful SDLC design, build or review
-turn, even when its gate stays blocked; untagged followups and both feedback
-channels retain terminal/manual timing. Conversational sessions (`moe idea
-edit --chat`, `moe intent edit --chat`, `moe chat`) harvest all three at
-*session end*: their runs may never terminate. There is no editor review —
-what you write fans out when the operator exits. Write accordingly.
+All three fan out when a stage turn ends successfully — an SDLC design, build
+or review turn, even when its gate stays blocked, and a conversational
+session's end — and again at a terminal status as a backstop. There is no
+editor review: what you write fans out when the turn ends, and later edits do
+not reach what it became. Write each entry complete the first time.
 
 Two more sections at the end cover artifacts you write *as* the work rather
 than as a note about it: **Knowledge** (the project's durable domain
@@ -115,7 +112,7 @@ in user memory.
 Format: - [ ] `slug` — Title. The same three load-bearing tokens as
 followups below, parsed by the same grammar: the `- [ ]` checkbox,
 the backtick-quoted `slug` (lowercase, hyphenated), and the em-dash
-`—` before a terse title. Any other shape is **rejected at close**,
+`—` before a terse title. Any other shape is **rejected at harvest**,
 not silently dropped. Lore entries never carry the optional workflow
 tag described for followups; a tag here is rejected. Follow with an
 indented body (two-space indent) whose first paragraph is the
@@ -133,9 +130,8 @@ entry prose:
     `tailscale ssh -L HOST:localhost:HOST dev@<box>` from the
     laptop. True for every fly-box + compose + tailscale project.
 
-The operator reviews these at close; surviving unchecked entries
-become `lore/<slug>.md` files and the next stage prompt's catalog
-picks them up automatically.
+When the turn ends, each unchecked entry becomes a `lore/<slug>.md`
+file and the next stage prompt's catalog picks it up automatically.
 
 To merge several existing entries into one, or amend an entry in
 place, add an indented `supersedes:` paragraph after `applies-when:`.
@@ -228,6 +224,16 @@ recoverable — the operator can stamp or clear one later with `moe idea
 tag` / `moe idea untag` — but it strands the work until someone
 notices.
 
+**Build it here first.** When this run needs something that does not exist
+yet, widen the design and build it in this run, ordered first. A missing
+prerequisite is scope; one run is one branch, one PR and one ship decision,
+and a build turn can do two-part work. File it as a prerequisite and block
+only when one of these holds, and say which in one clause on the gate:
+
+  - it belongs to another project;
+  - it should land whether or not this run does;
+  - this design cannot be finished until the built thing produces evidence.
+
 **Prerequisites use the same tag.** Tag only a decided, mechanical, bounded
 and verifiable contract; needing to unblock another run is not a licence
 for an undecided investigation. Name the source run and the concrete evidence
@@ -241,19 +247,27 @@ required before continuation in both the entry body and source canvas:
     source stays blocked until the metric lands and the saved baseline
     results satisfy its admission criteria.
 
-Keep the source's first gate blocked until that evidence exists. Extraction
-creates an idea; a checked line means extracted, never completed. Completion
-never resumes the source automatically. Code prerequisites must land on
+Keep the source's first gate blocked until that evidence exists, and name the
+prerequisite's slug in backticks inside the `## Gate` section, beside what the
+re-check must verify. When that filing merges or closes, the pulse resumes the
+source: design re-checks, and a ready gate rides on to build without the
+operator. A slug named only elsewhere on the canvas, or without backticks,
+resumes nothing. Extraction creates an idea when the turn ends; a checked line
+means extracted, never completed. Do not tell the operator to harvest or
+promote it — an armed serve promotes and rides a tagged idea, and the turn's
+exit prints the command for doing it now. Code prerequisites must land on
 default through the existing merge route or normal PR merge; a pushed PR
-alone does not satisfy them. Name the prerequisite in prose on the blocked
-run's canvas: that is what the pulse reads when it picks the next run.
+alone does not satisfy them.
 
-Check prior context and reuse a known owner's slug. One source slug identifies
-one extraction even if its title/body changes; a separate request needs a
-new slug. Receipt recovery reuses its original idea even after promotion or
-closure. One exact or dated live owner is linked without changing its tag or
-contents; ambiguous owners fail. After a harvest error, retry a successful
-source turn or run `moe sdlc harvest --no-edit <project>/<run>`.
+For a dependency on live work, file an entry under the owner's slug: one exact
+or dated live owner is linked without changing its tag or contents, and the
+source becomes due when that owner settles. Ambiguous owners fail. A finished
+owner matches nothing, so do not refile it; name it on the canvas and re-check
+its evidence in this turn. One source slug identifies one extraction even if
+its title/body changes; a separate request needs a new slug. Receipt recovery
+reuses its original idea even after promotion or closure. After a harvest
+error, retry a successful source turn or run `moe sdlc harvest
+<project>/<run>`.
 
 Content written in any other shape — plain bullets, prose, or a
 hyphen where the em-dash belongs — is **rejected at harvest**, not
@@ -268,8 +282,8 @@ later reader it's tracked. Close warns about claims it can't verify.
 The body carries the *why*, file:line refs where they earn their
 keep, and a one-sentence approach sketch when you have one. An entry
 whose title genuinely is the whole spec can stay short — but that is
-the exception you justify to yourself, not the default. The operator
-reviews and prunes these at termination.
+the exception you justify to yourself, not the default. Nobody edits
+an entry after it is extracted; the idea starts from what you wrote.
 
 To file a followup against a *different* project, prefix the slug
 with `<project>/`. A bare slug (the default) files against the

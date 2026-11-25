@@ -93,17 +93,14 @@ shell` does the same for a named workspace directly.
 MoE's memory improves through a few explicit channels:
 
 - Followups are out-of-scope work noticed during a run. Agents write them to
-  `followups.md`; close-time harvest promotes surviving entries to ideas, and
-  `moe <workflow> harvest` re-runs that promotion without closing the run. A
-  followup slug carrying a `<project>/` prefix routes the promoted idea to that
-  project's backlog instead of the current one. Conversational sessions — the
-  two `edit --chat` verbs and `moe chat` — harvest at session end instead:
-  their runs either never harvest at close (capture workflows) or may never
-  close at all (chat is perpetual). Successful SDLC design, build and review
-  turns also extract workflow-tagged followups, including from blocked
-  canvases. Untagged entries and both feedback files keep their terminal or
-  manual timing. A checked line means extracted, never completed; source
-  gates still require their own evidence before continuation.
+  `followups.md`, and every successful stage turn promotes its new entries to
+  ideas when it ends, blocked gate or not; lore and twin notes harvest at the
+  same moment. No harvest opens an editor. Close harvests again as a backstop,
+  and `moe <workflow> harvest` re-runs it by hand. A followup slug carrying a
+  `<project>/` prefix routes the promoted idea to that project's backlog
+  instead of the current one. A checked line means extracted, never completed.
+  A blocked design that names a filed prerequisite in its gate is resumed by
+  the pulse once that prerequisite merges or closes.
 - The idea backlog holds work that is worth remembering but not ready for a
   full run.
 - The digital twin records project intent in `vision`, `architecture`,

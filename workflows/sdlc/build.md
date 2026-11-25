@@ -148,6 +148,14 @@ see — fix in place if it's small and clearly within scope. If it's
 gnarly, contradicts the design, or would need a re-design pass, stop and
 ask the operator to re-open design.
 
+A missing prerequisite is scope first: build it here, as its own commit
+ahead of the change that needs it, even when it is two-part work. File
+it as a followup and leave the gate blocked only when it belongs to
+another project, should land whether or not this run does, or the design
+cannot be finished until it produces evidence — say which in one clause,
+and name the followup's slug in backticks in the blocked gate's section
+so its settling resumes this run.
+
 If the smallest correct diff turns out to be *no diff* — the change
 already landed, the design's premise doesn't survive contact with the
 code — say so in code.md (what you checked, why the run is moot) and

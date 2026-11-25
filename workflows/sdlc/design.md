@@ -44,6 +44,16 @@ permits normal advancement under existing consent; it starts nothing by itself.
   have, say so. Don't invent it and don't paper over it.
 - **Keep scope visible.** What's in, what's out, what's a deliberate
   follow-up. Scope creep starts here, not in implementation.
+- **Build a missing prerequisite here, first.** When this run needs
+  something that does not exist yet, widen the design to build it in this
+  run, ordered first. A run is one branch, one PR and one ship decision,
+  and a build turn can do two-part work. File it as a prerequisite and
+  block only when it belongs to another project, should land whether or
+  not this run does, or this design cannot be finished until the built
+  thing produces evidence — and say which in one clause on the gate. Then
+  name the followup's slug in backticks in the `## Gate` section with the
+  evidence a re-check must verify: when it merges or closes, the pulse
+  resumes this design, and a ready gate rides on to build.
 - **Prefer the smallest viable shape.** Three similar lines beats a
   premature abstraction. Fewer moving parts beats elegance.
 

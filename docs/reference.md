@@ -305,11 +305,10 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   remain.
 - `moe sync` explicitly reconciles bureaucracy history, pushed runs, and
   project submodule pointers.
-- `moe <workflow> close [--no-edit] <project>/<run>` closes a run; for `sdlc` it
-  abandons the run instead of shipping it through `sdlc push`. `--no-edit` skips
-  the followups and feedback editors, harvesting the files as-is. Capture
-  workflows (`idea` and `intent`) skip harvesting and show no `--no-edit`
-  option.
+- `moe <workflow> close <project>/<run>` closes a run; for `sdlc` it abandons
+  the run instead of shipping it through `sdlc push`. Harvest reads the
+  followups and feedback files as they are; no editor opens. Capture workflows
+  (`idea` and `intent`) skip harvesting.
 
 ### Workflows
 
@@ -351,35 +350,41 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   safe-mode operator marks still apply; a fresh run note licenses retry after
   the one-attempt-per-head journal claim is spent.
 
-`moe <workflow> harvest [--no-edit] <project>/<run>` re-runs a run's
-`followups.md`, `feedback/lore.md`, and `feedback/twin.md` harvests — into
-ideas, `lore/`, and twin-edit ideas respectively — without closing it. It picks
-up captures regenerated after the run was already closed, and it is the
-recovery verb for a session whose own session-end harvest failed partway.
+`moe <workflow> harvest <project>/<run>` re-runs a run's `followups.md`,
+`feedback/lore.md`, and `feedback/twin.md` harvests — into ideas, `lore/`, and
+twin-edit ideas respectively — without closing it. It is the recovery verb for
+a turn whose own harvest failed partway, and it picks up captures regenerated
+after the run was already closed.
 
-Conversational sessions (`moe idea edit --chat`, `moe intent edit --chat`,
-`moe chat`) harvest at session end rather than at close: the capture
-workflows' close deliberately skips harvest and a chat run is perpetual, so
-session end is the only harvest point they reliably reach. That pass is
-silent — the operator was in the conversation, so there is no editor review.
-Run the verb above for the reviewing form.
+Every successful stage turn harvests all three files when it ends: SDLC design,
+build and review turns (even when the gate stays blocked), CI repair and
+hook-failure turns, and conversational sessions (`moe idea edit --chat`,
+`moe intent edit --chat`, `moe chat`). A project-document fix turn does not
+harvest; its outer turn does. Failed and refused turns extract nothing. No
+harvest opens an editor, and a terminal transition harvests again as a
+backstop. A tagged followup becomes an idea the pulse may start; an untagged
+one becomes an idea only the operator promotes.
 
-Successful SDLC design, build and review turns silently extract only
-workflow-tagged followups, even with blocked gates. Tag `(sdlc)` only for
-mechanical, bounded and verifiable work. For a prerequisite, name the source
-run and evidence needed before continuation in its body and source canvas.
-Extraction does not unblock or resume that source; a code prerequisite must
-land on default, not merely have a pushed PR. Untagged followups and both
-feedback channels retain terminal/manual timing.
-
-Tagged extraction uses a journal receipt (`MoE-Followup-Key`) keyed by source
-project/run and target project/original slug. Retry reuses the original idea
-after promotion or closure, including a collision-allocated name. Without a
-receipt, one exact or dated live owner is linked without changing its tag or
+Every followup extraction uses a journal receipt (`MoE-Followup-Key`) keyed by
+source project/run and target project/original slug. Retry reuses the original
+idea after promotion or closure, including a collision-allocated name. Without
+a receipt, one exact or dated live owner is linked without changing its tag or
 contents; multiple owners fail for explicit triage. A checked line means
 extracted, never completed. Title/body edits do not request another
-extraction; use another slug for a separate request. Existing entries become
-eligible on their next successful source turn, or through manual harvest.
+extraction; use another slug for a separate request. Twin notes and lore have
+no receipt.
+
+A prerequisite is filed only when it belongs to another project, should land
+whether or not the source does, or must produce evidence before the source's
+design can finish; otherwise the source builds it in place. The source keeps
+its first gate blocked and names the followup slug in backticks inside its
+`## Gate` section. When that filing settles — its run merges or closes, or its
+idea closes unpromoted — and the settlement is newer than the source's last
+first-stage turn, the kick floor admits the source: the pulse may pick it, its
+design re-checks the evidence, and a ready gate rides on to build, review and
+push without an advance. A pushed PR is not settled. A not-ready stage exit
+lists each unsettled filing with the command that starts it now, and says
+whether its settling will resume the run.
 
 ## Codex Setup
 
