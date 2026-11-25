@@ -622,3 +622,27 @@ func TestBlockedSourceTaggedFollowupPulseHandoff(t *testing.T) {
 		t.Fatalf("source reran: %s", got)
 	}
 }
+
+// TestTerminalHarvestNeverOpensAnEditor: close extracts unchecked entries in
+// all three files as written, with an editor that fails the test if run.
+func TestTerminalHarvestNeverOpensAnEditor(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "source", "sdlc", run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("EDITOR", "sh -c 'echo editor-ran >&2; exit 9'")
+	t.Setenv("VISUAL", "")
+	writeFollowups(t, root, "tele", "source", "- [ ] `later` — Needs judgment\n  An open contract.\n")
+	writeLoreFeedback(t, root, "tele", "source", "- [ ] `closing-fact` — A fact\n\n  applies-when: always\n\n  The fact.\n")
+	writeTwinFeedback(t, root, "tele", "source", "- [ ] `closing-note` — A twin note\n")
+	var out bytes.Buffer
+	if code := Run([]string{"sdlc", "close", "tele/source"}, &out, &out); code != 0 || strings.Contains(out.String(), "editor-ran") {
+		t.Fatalf("close exit=%d: %s", code, &out)
+	}
+	for _, slug := range []string{"later", "closing-note"} {
+		if _, err := run.Load(root, "tele", slug); err != nil {
+			t.Fatalf("%s not extracted: %v", slug, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "lore", "closing-fact.md")); err != nil {
+		t.Fatalf("lore not promoted: %v", err)
+	}
+}
