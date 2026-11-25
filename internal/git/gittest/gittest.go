@@ -142,12 +142,15 @@ func SetupEnv(t *testing.T) {
 // with the combined stdout+stderr folded into the message.
 func Run(t *testing.T, dir string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
-	}
+	RunWithEnv(t, dir, nil, args...)
 }
+
+// noEditor makes a fixture git call that would open an editor fail
+// everywhere. Stage sandboxes export GIT_EDITOR=true and CI has no
+// editor at all, so without it such a call passes in every stage and
+// fails only after merge. A caller that wants an editor passes its own
+// GIT_EDITOR through RunWithEnv; the later entry wins.
+const noEditor = "GIT_EDITOR=false"
 
 // RunWithEnv invokes `git <args...>` in dir with extra env entries
 // appended to os.Environ() (each entry "KEY=VALUE"). Same failure
@@ -158,9 +161,7 @@ func RunWithEnv(t *testing.T, dir string, env []string, args ...string) {
 	t.Helper()
 	cmd := exec.Command("git", args...)
 	cmd.Dir = dir
-	if len(env) > 0 {
-		cmd.Env = append(os.Environ(), env...)
-	}
+	cmd.Env = append(append(os.Environ(), noEditor), env...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}

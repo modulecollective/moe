@@ -234,3 +234,17 @@ func TestWriteConfig_ReportsWriteFailure(t *testing.T) {
 		t.Fatal("writing into a missing directory succeeded")
 	}
 }
+
+// TestRunWithEnv_CallerEditorBeatsThePin confirms the GIT_EDITOR=false
+// pin sits before the caller's env, so a test that wants an editor can
+// still have one.
+func TestRunWithEnv_CallerEditorBeatsThePin(t *testing.T) {
+	dir := Init(t)
+	Commit(t, dir, "init")
+
+	RunWithEnv(t, dir, []string{"GIT_EDITOR=sed -i 1s/^/edited-/"}, "commit", "--amend", "--allow-empty")
+
+	if got := Output(t, dir, "log", "-1", "--format=%s"); got != "edited-init" {
+		t.Fatalf("subject = %q, want the caller's editor to have run", got)
+	}
+}
