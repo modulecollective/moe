@@ -181,9 +181,15 @@ func TestSDLCBlockedTurnHarvestsEverything(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, want := range []string{"(sdlc)", "mechanical, bounded AND verifiable", "checked means extracted", "the pulse resumes this run"} {
+			for _, want := range []string{"(sdlc)", "mechanical, bounded AND verifiable", "checked means extracted", "the pulse resumes this run",
+				"belongs to another project", "should land whether or not this run does", "produces evidence"} {
 				if !strings.Contains(string(prompt), want) {
 					t.Errorf("rendered %s prompt missing %q", stage, want)
+				}
+			}
+			for _, gone := range []string{"never resumes", "terminal or manual harvest"} {
+				if strings.Contains(string(prompt), gone) {
+					t.Errorf("rendered %s prompt still says %q", stage, gone)
 				}
 			}
 			// The fake refiles the same original slug. Its receipt wins on resume.
