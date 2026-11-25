@@ -419,3 +419,48 @@ func TestFilingExitLines(t *testing.T) {
 		t.Errorf("a named filing still printed the nothing-resumes line:\n%s", got)
 	}
 }
+
+// TestResumedDesignKickoffCarriesTheSettledFiling drives a real headless
+// design turn through a fake claude: a due run's kickoff argv carries the
+// line naming what settled; an ordinary headless turn's does not.
+func TestResumedDesignKickoffCarriesTheSettledFiling(t *testing.T) {
+	root, md, _ := designFixture(t, "# Seed\n")
+	argv := filepath.Join(t.TempDir(), "argv")
+	t.Setenv("MOE_TEST_ARGV", argv)
+	fakeClaudeOnPath(t, `#!/bin/sh
+set -eu
+printf '%s\n' "$@" > "$MOE_TEST_ARGV"
+prompt=
+next=0
+for a in "$@"; do
+ if [ "$next" = 1 ]; then prompt=$a; next=0; fi
+ case "$a" in --append-system-prompt) next=1 ;; esac
+done
+canvas=$(printf '%s' "$prompt" | awk '/Your canvas for this document is the single file:/ {getline; gsub(/^ +| +$/, ""); print; exit}')
+printf '\nRe-checked; still waiting.\n' >> "$canvas"
+`)
+	t0 := time.Now().Add(-3 * time.Hour)
+	seedOwner(t, root, "tele", "fix", "sdlc")
+	commitDesignTurn(t, root, "tele", md.ID, blockedDesignGate("Waiting on `fix`."), "- [x] `fix` — Fix\n", t0)
+
+	var out bytes.Buffer
+	if code := openSdlcStage("design", "tele", md.ID, true, &out, &out); code != 0 {
+		t.Fatalf("unsettled turn exit %d: %s", code, &out)
+	}
+	if b, _ := os.ReadFile(argv); strings.Contains(string(b), "Resumed because") {
+		t.Fatalf("an unsettled run's kickoff claimed a resume:\n%s", b)
+	}
+
+	// The turn above is the new work turn; settle after it.
+	settleRun(t, root, "tele", "fix", run.StatusMerged, time.Now().Add(time.Hour))
+	if code := openSdlcStage("design", "tele", md.ID, true, &out, &out); code != 0 {
+		t.Fatalf("resumed turn exit %d: %s", code, &out)
+	}
+	b, err := os.ReadFile(argv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "Resumed because `tele/fix`, which your gate names, merged since your last turn.") {
+		t.Fatalf("resumed kickoff argv missing the settled filing:\n%s", b)
+	}
+}

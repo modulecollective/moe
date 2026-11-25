@@ -318,7 +318,7 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 		moePrintln(stderr, "CI repair push: test declares no ship; keeping the existing PR")
 		return 1, nil
 	}
-	if code, handled := closeNoShipRun(root, md, pj, clonePath, branch, opts, stdout, stderr); handled {
+	if code, handled := closeNoShipRun(root, md, pj, clonePath, branch, stdout, stderr); handled {
 		return code, nil
 	}
 	if err := push.CheckBranchHasCommits(clonePath, branch, pj.DefaultBranch, md.Workflow); err != nil {
@@ -455,7 +455,7 @@ var errFFRetryable = errors.New("ff-push rejected: origin default advanced durin
 // inverting CheckBranchHasCommits's fail-open stance. There, failing
 // open flows into a push whose own errors surface a moment later; here
 // it would delete a sandbox that might hold unpushed commits.
-func closeNoShipRun(root string, md *run.Metadata, pj *project.Metadata, clonePath, branch string, opts pushRunOptions, stdout, stderr io.Writer) (int, bool) {
+func closeNoShipRun(root string, md *run.Metadata, pj *project.Metadata, clonePath, branch string, stdout, stderr io.Writer) (int, bool) {
 	if !testGateShipNone(root, md) {
 		return 0, false
 	}
