@@ -726,16 +726,30 @@ from the session worktree (or use the corresponding diagnostic path).
 - `moe clone list` lists per-run sandbox clones.
 - `moe clone gc [--apply] [--json] [<project>/<run>]` inspects reclamation;
   `--apply` performs eligible cleanup. The optional filter is an exact run,
-  never a path or glob. Holds and an empty inventory exit 0, probe/application
-  failures exit 1, and argument errors exit 2. JSON includes a schema version,
-  invocation ID, physical generation, terminal transition, deadline, outcome,
-  reason and retained receipt path. Hook output goes to stderr in JSON mode.
+  never a path or glob. Holds and an empty inventory exit 0; inventory, probe or
+  application failures exit 1; argument errors exit 2. JSON includes a schema
+  version, invocation ID, physical generation, terminal transition, deadline,
+  outcome, reason and retained receipt path. Hook output goes to stderr in JSON
+  mode.
 - `moe clone recover <project>/<run>` is interactive host recovery for one
   stopped run's legacy enrollment, shell lifetime or resource cleanup debt.
 - `moe workspace release` clears a stale named-workspace claim.
 - `MOE_GIT_TRACE=1` (strict `=1`) prints one line per git invocation —
   dir, argv, duration, error — to stderr. First tool to reach for when a
   stage open or sync stalls inside git.
+
+On Linux, GC inventories both `.moe/clones/` and `.moe/clone-reclamation/`.
+Entries with invalid project or run names, such as `.claude`, are skipped and
+left untouched, including with `--apply`; invalid project entries are never
+traversed. Each skipped entry emits a stderr warning with its quoted full path
+and whether its project or run ID was invalid. Warnings stay on stderr in text
+and JSON modes; skipped entries are not JSON candidates. Skipped names alone do
+not fail the command: an inventory containing only skipped names succeeds with
+no candidates. Directory access/read failures and inventory-limit failures
+still stop the entire scan before any candidates are processed, exiting 1;
+JSON reports `inventory_failed`. Warnings already emitted remain visible.
+Valid names, including unfamiliar or unregistered entries, still undergo the
+existing retention, ownership and deletion checks.
 
 A session branch reserves its entire run across documents and backends. Close
 and advance refuse while any such branch remains, including interrupted or
