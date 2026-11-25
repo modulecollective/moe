@@ -58,7 +58,7 @@ func TestSDLCRecoveryTaggedFollowups(t *testing.T) {
 							t.Fatalf("recovery did not reach readiness gate: %s", &out)
 						}
 						audit := readFollowups(t, root, "tele", md.ID)
-						if !strings.Contains(audit, "- [x] `required-fix` (sdlc)") || !strings.Contains(audit, "- [ ] `needs-judgment`") {
+						if !strings.Contains(audit, "- [x] `required-fix` (sdlc)") || !strings.Contains(audit, "- [x] `needs-judgment`") {
 							t.Fatalf("audit=%s", audit)
 						}
 					}

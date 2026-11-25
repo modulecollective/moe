@@ -89,10 +89,8 @@ func init() {
 	//
 	// Release the survey's source clone and cached dev environment through
 	// the shared close path. The happy-path survey auto-closes through
-	// this same registration (skipEdit, so
-	// filings promote to ideas unreviewed); the verb itself is the manual
-	// ending for a refused or failed sweep, where the editor-pop prune
-	// gate still applies.
+	// this same registration; the verb itself is the manual ending for a
+	// refused or failed sweep.
 	g.Register(closeCommand(pulseWorkflow, "Close pulse run %s/%s", releaseWorkspaceCleanup))
 	g.Register(&Command{
 		Name:    "cat",
@@ -421,9 +419,8 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 
 	// Clean sweep: auto-close the run so the next sweep starts from a
 	// clean board. Route through the registered close (subject +
-	// cleanup) so there's no parallel close path. skipEdit harvests
-	// followups.md as-is — the filings promote to ideas unreviewed;
-	// review moves to scrapping on the dash. A close failure warns and
+	// cleanup) so there's no parallel close path. The filings promote to
+	// ideas unreviewed; review moves to scrapping on the dash. A close failure warns and
 	// leaves the run open, mirroring the pulse's warn-only posture
 	// throughout: the report and filings are already durable on disk, so
 	// a failed auto-close is a close-by-hand-later, not a lost sweep.
@@ -468,8 +465,7 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 
 // closePulseRunStamped closes a pulse run through the registered close —
 // the one subject the happy-path auto-close and the interrupt disposal
-// both ride, so there's no parallel close path. skipEdit harvests
-// followups.md as-is.
+// both ride, so there's no parallel close path.
 //
 // rewrite, when non-nil, stamps the canvas inside the close's locked
 // closure — after the dirty-tree gate, before the status flip — and
@@ -531,7 +527,7 @@ func closePulseRunStamped(root, projectID, runID, name string, rewrite func(body
 		}
 	}
 	err := closeRunPrepared(root, pulseWorkflow, reg.subject, reg.cleanup, prepare,
-		projectID, runID, true /*skipEdit*/, stderr, extraTrailers...)
+		projectID, runID, stderr, extraTrailers...)
 	_, cleanupFailed := errors.AsType[*terminalCleanupError](err)
 	if err != nil && !cleanupFailed && rewrite != nil {
 		if before != nil {

@@ -74,7 +74,7 @@ func TestCloseCommitFailureLeavesRunOpen(t *testing.T) {
 	failCloseCommits(t, root)
 
 	var out, errb bytes.Buffer
-	if code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb); code == 0 {
+	if code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb); code == 0 {
 		t.Fatalf("close succeeded despite a failing close commit; stdout=%q", out.String())
 	}
 
@@ -134,14 +134,14 @@ func TestCloseRetriesAfterCommitFailure(t *testing.T) {
 	unfail := failCloseCommits(t, root)
 
 	var out, errb bytes.Buffer
-	if code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb); code == 0 {
+	if code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb); code == 0 {
 		t.Fatalf("close succeeded despite a failing close commit; stdout=%q", out.String())
 	}
 	unfail()
 
 	out.Reset()
 	errb.Reset()
-	if code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb); code != 0 {
+	if code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb); code != 0 {
 		t.Fatalf("retry exit=%d stderr=%q", code, errb.String())
 	}
 

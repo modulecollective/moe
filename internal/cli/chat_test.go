@@ -67,8 +67,7 @@ func TestChatWorkflowSingleStage(t *testing.T) {
 // TestPromptChatClose pins chat's close policy: closing is the default,
 // so Enter and any y-prefixed answer archive the run, while `n`, a typo,
 // or a bare EOF leave it open. The helper dispatches the registered close
-// shape without --no-edit so an operator-driven close retains its editor
-// and harvest behaviour.
+// with only the run argument.
 func TestPromptChatClose(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -123,7 +122,7 @@ func TestPromptChatClose(t *testing.T) {
 			}
 			if tc.wantDispatch {
 				if got := strings.Join(gotArgs, " "); got != "moe/ponder" {
-					t.Fatalf("close args=%q want %q (no --no-edit)", got, "moe/ponder")
+					t.Fatalf("close args=%q want %q", got, "moe/ponder")
 				}
 			}
 			const want = "chat sitting ended — close this run? [Y/n]\n" +

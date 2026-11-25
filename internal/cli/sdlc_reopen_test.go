@@ -52,7 +52,7 @@ func seedClosedSDLCRunWithFields(t *testing.T, projectID, runID, designBody stri
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
 	var out, errb bytes.Buffer
-	if code := Run([]string{"sdlc", "close", "--no-edit", projectID + "/" + runID}, &out, &errb); code != 0 {
+	if code := Run([]string{"sdlc", "close", projectID + "/" + runID}, &out, &errb); code != 0 {
 		t.Fatalf("close failed: exit=%d stderr=%q", code, errb.String())
 	}
 	return root
@@ -153,7 +153,7 @@ func TestSDLCReopenSeedsKickoffWhenSourceEmpty(t *testing.T) {
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
-	if code := Run([]string{"sdlc", "close", "--no-edit", "tele/blank"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+	if code := Run([]string{"sdlc", "close", "tele/blank"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatalf("setup close failed")
 	}
 	suppressNextStagePrompt(t)

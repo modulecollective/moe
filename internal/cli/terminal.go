@@ -15,11 +15,7 @@ import (
 // repo-relative paths the caller must include in its status-flip
 // commit (run.json, plus followups.md when it ends up on disk).
 //
-// skipEdit controls the harvest pre-flight: false opens followups.md
-// in $EDITOR (close and push — both are operator-initiated termination
-// decisions, so the operator gets to review what's about to fan out
-// into ideas); true harvests as-is (sync reconciling an upstream merge,
-// and `close --no-edit`).
+// No harvest opens an editor: the files are extracted as written.
 //
 // The whole rule "any non-capture run reaching a terminal status
 // harvests its follow-ups" lives here, once. Every site that flips a
@@ -34,18 +30,18 @@ import (
 // one caller that uses the halves apart: it commits the harvest before
 // the ff-push and flips inside the lock window that commits the flip,
 // so no tracked write sits on disk across the network call.
-func enterTerminal(root string, md *run.Metadata, newStatus string, skipEdit bool) ([]string, error) {
-	return enterTerminalPrepared(root, md, newStatus, skipEdit, nil)
+func enterTerminal(root string, md *run.Metadata, newStatus string) ([]string, error) {
+	return enterTerminalPrepared(root, md, newStatus, nil)
 }
 
 // Harvest may commit child ideas. Stage this run's own journal preparation
 // afterward so a child commit cannot accidentally carry the parent's stamp or
 // proposed stylesheet before its terminal transaction succeeds.
-func enterTerminalPrepared(root string, md *run.Metadata, newStatus string, skipEdit bool, prepare closeCleanup) ([]string, error) {
+func enterTerminalPrepared(root string, md *run.Metadata, newStatus string, prepare closeCleanup) ([]string, error) {
 	if err := checkTerminalStatus(newStatus); err != nil {
 		return nil, err
 	}
-	paths, err := harvestTerminal(root, md, skipEdit)
+	paths, err := harvestTerminal(root, md)
 	if err != nil {
 		return nil, err
 	}
@@ -65,12 +61,12 @@ func enterTerminalPrepared(root string, md *run.Metadata, newStatus string, skip
 // owes on reaching a terminal status, and returns the repo-relative
 // paths they left on disk for the caller to commit. It writes no
 // status; markTerminal is its pair.
-func harvestTerminal(root string, md *run.Metadata, skipEdit bool) ([]string, error) {
+func harvestTerminal(root string, md *run.Metadata) ([]string, error) {
 	if isCaptureWorkflow(md.Workflow) {
 		return nil, nil
 	}
 	var paths []string
-	if err := harvestFollowups(root, md.Project, md.ID, md.Workflow, skipEdit); err != nil {
+	if err := harvestFollowups(root, md.Project, md.ID, md.Workflow); err != nil {
 		return nil, err
 	}
 	rel := run.FollowupsPath(md.Project, md.ID)
@@ -84,7 +80,7 @@ func harvestTerminal(root string, md *run.Metadata, skipEdit bool) ([]string, er
 	// ride along on the close commit; stage lore/ as a dir so
 	// every newly-written slug gets picked up without enumerating
 	// them here.
-	if err := harvestLore(root, md.Project, md.ID, md.Workflow, skipEdit); err != nil {
+	if err := harvestLore(root, md.Project, md.ID, md.Workflow); err != nil {
 		return nil, err
 	}
 	loreRel := run.FeedbackPath(md.Project, md.ID, "lore")
@@ -98,7 +94,7 @@ func harvestTerminal(root string, md *run.Metadata, skipEdit bool) ([]string, er
 	// notes about the project's own twin fan out into ideas so a
 	// spotted twin edit gets scheduled rather than waiting for a
 	// pass that no longer exists.
-	if err := harvestTwinFeedback(root, md.Project, md.ID, md.Workflow, skipEdit); err != nil {
+	if err := harvestTwinFeedback(root, md.Project, md.ID, md.Workflow); err != nil {
 		return nil, err
 	}
 	twinRel := run.FeedbackPath(md.Project, md.ID, "twin")

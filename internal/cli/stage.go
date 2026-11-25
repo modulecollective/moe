@@ -202,26 +202,17 @@ type stageSessionOpts struct {
 	// seeds once on first open only; CanvasOnOpen fires every open, which
 	// is what the per-resume marker needs.
 	CanvasOnOpen func(workRoot string, md *run.Metadata, agentName string) error
-	// HarvestOnExit runs the followups + lore harvest against the
-	// canonical root once the turn is committed and merged. Set by the
-	// three conversational openers (captureKind.openChat for idea and intent,
-	// openChat) and nothing else: their runs never reach a harvesting
-	// terminal — the capture workflows' close deliberately skips harvest,
-	// and chat is perpetual, so its close may be weeks away or never — so
-	// session end is the only harvest point they have. SDLC uses the
-	// narrower TaggedFollowupsOnExit mode below.
-	//
-	// The harvest is silent (skipEdit): the operator was *in* the
-	// conversation that produced the entries, so the review a close-time
-	// editor pop provides has already happened live, and a forced $EDITOR
-	// after every chat exit is friction with no new information (it also
-	// keeps the path uniform for serve-spawned sessions, which can't host
-	// an editor). `moe <workflow> harvest` is the reviewing form for
-	// anyone who wants the pop.
+	// HarvestOnExit runs the full harvest — followups, lore and twin
+	// notes — against the canonical root once a successful turn is
+	// committed and merged, whether its gate reads ready or blocked. Set
+	// by the conversational openers (capture and chat, whose runs never
+	// reach a harvesting terminal), the sdlc stage openers, CI repair and
+	// the hook-failure opener. Filers file first and work ideas later, so
+	// an entry is extracted when the turn that wrote it ends rather than
+	// waiting for its source to close. No harvest opens an editor; a
+	// failed or refused turn extracts nothing, and `moe <workflow>
+	// harvest` is the manual retry.
 	HarvestOnExit bool
-	// TaggedFollowupsOnExit extracts only licensed followups after a
-	// successful SDLC turn, including a saved blocked canvas.
-	TaggedFollowupsOnExit bool
 }
 
 // stageAgentName resolves the agent backend for a stage turn. It is
@@ -1117,15 +1108,10 @@ func (s *stageSession) settle(code int) int {
 	// un-commit the turn: the captures stay unchecked on disk and the
 	// next session end — or a manual `moe <workflow> harvest` — retries,
 	// which the `- [x]` skip makes free.
-	if opts.HarvestOnExit {
-		if err := harvestRunInProcess(root, md.Workflow, md.Project, md.ID, true); err != nil {
-			moePrintf(stderr, "harvest: %v\n", err)
-			return 1
-		}
-	}
-	// A hygiene fix turn is provisional until the outer turn re-scans it.
-	if opts.TaggedFollowupsOnExit && !opts.projectDocFixTurn {
-		if err := harvestTaggedFollowups(root, md); err != nil {
+	// A hygiene fix turn is provisional until the outer turn re-scans
+	// it, so only the outer turn harvests.
+	if opts.HarvestOnExit && !opts.projectDocFixTurn {
+		if err := harvestRunInProcess(root, md.Workflow, md.Project, md.ID); err != nil {
 			moePrintf(stderr, "harvest: %v\n", err)
 			return 1
 		}

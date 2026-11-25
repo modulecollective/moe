@@ -350,7 +350,7 @@ func finalizePushedRunOwned(owner *runowner.Handle, root, projectID, runID, stat
 			return err
 		}
 		priorStatus := md.Status
-		paths, err := enterTerminal(root, md, status, true)
+		paths, err := enterTerminal(root, md, status)
 		if err != nil {
 			moePrintf(stderr, "moe sync: %s/%s harvest failed: %v; retry next sync\n", projectID, runID, err)
 			return nil

@@ -91,7 +91,7 @@ func TestCascadeHonorsCloseNomination(t *testing.T) {
 	if len(*closeCaptured) != 1 {
 		t.Fatalf("close dispatched %d times, want 1: %+v", len(*closeCaptured), *closeCaptured)
 	}
-	if got, want := strings.Join((*closeCaptured)[0].args, " "), "--no-edit tele/already-done"; got != want {
+	if got, want := strings.Join((*closeCaptured)[0].args, " "), "tele/already-done"; got != want {
 		t.Fatalf("close args = %q, want %q", got, want)
 	}
 	wantSteps := []string{"build", "close"}

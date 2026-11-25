@@ -345,9 +345,6 @@ func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 	if !(*pushCaptured)[0].options.HeadlessRecovery {
 		t.Fatalf("!!! push recovery option HeadlessRecovery = false, want true")
 	}
-	if !(*pushCaptured)[0].options.SkipTerminalEdit {
-		t.Fatalf("!!! push terminal option SkipTerminalEdit = false, want true")
-	}
 	// Summary line tags the headless mode per stage.
 	if got := stdout.String(); !strings.Contains(got, "cascade: build (headless)") {
 		t.Fatalf("expected per-stage `(headless)` mode tag in stdout, got: %q", got)
@@ -355,7 +352,7 @@ func TestCascadeFromGateYoloShipsAtPush(t *testing.T) {
 }
 
 // closeCommandInvocation records one cascade-side close dispatch — the
-// args the cascade passed (today: ["--no-edit", project, run]) and the
+// args the cascade passed (today: [project, run]) and the
 // stub's chosen exit.
 type closeCommandInvocation struct {
 	args []string
@@ -853,9 +850,6 @@ func TestPromptPushNextStageBangBangShips(t *testing.T) {
 			}
 			if !(*pushCaptured)[0].options.HeadlessRecovery {
 				t.Fatalf("push HeadlessRecovery = false, want true")
-			}
-			if !(*pushCaptured)[0].options.SkipTerminalEdit {
-				t.Fatalf("push SkipTerminalEdit = false, want true")
 			}
 			if strings.Contains(stdout.String()+stderr.String(), "!!!") {
 				t.Fatalf("push prompt must not advertise the legacy alias: stdout=%q stderr=%q", stdout.String(), stderr.String())

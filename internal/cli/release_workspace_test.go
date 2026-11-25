@@ -66,7 +66,7 @@ func TestSDLCCloseLeavesForeignClaim(t *testing.T) {
 	root, wp := foreignHeldWorkspaceFixture(t)
 
 	var out, errb bytes.Buffer
-	if code := Run([]string{"sdlc", "close", "--no-edit", "tele/fix-it"}, &out, &errb); code != 0 {
+	if code := Run([]string{"sdlc", "close", "tele/fix-it"}, &out, &errb); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	if got := loadRun(t, root, "tele", "fix-it").Status; got != run.StatusClosed {

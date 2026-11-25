@@ -50,8 +50,8 @@ var canvasSlugRE = regexp.MustCompile("`((?:_cabinet|[a-z0-9][a-z0-9-]*)/)?([a-z
 // backticked slug, which is the grammar pulse.md teaches for that
 // section. The generic rule misses these entirely — the lines don't
 // contain the word "followup" — and a pulse report that lists a filing
-// it never made feeds the same refile loop on auto-close, where no
-// editor pop reviews anything.
+// it never made feeds the same refile loop on auto-close, where nothing
+// reviews the filings.
 var pulseFilingItemRE = regexp.MustCompile("^\\s*-\\s+`((?:_cabinet/[a-z0-9][a-z0-9-]*|[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?))`")
 
 // newFilingsHeadingRE opens the pulse-specific section; any later `##`

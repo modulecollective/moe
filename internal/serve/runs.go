@@ -344,7 +344,7 @@ func (s *Server) handleRunPage(w http.ResponseWriter, r *http.Request) {
 // closed in-process via runopen.CloseCapture (no harvest, no sandbox);
 // everything else
 // routes through the CloseRun callback, which dispatches the full cli
-// close pipeline by the run's own workflow with --no-edit semantics.
+// close pipeline by the run's own workflow.
 // One route, one guard set, regardless of run kind — a stale or
 // replayed POST hits the same refusals.
 func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {

@@ -41,7 +41,7 @@ func TestSDLCCloseRemovesSandboxAndCommits(t *testing.T) {
 	sandboxPath := cleanTestClone(t, root, "tele", "abandon-me")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele/abandon-me"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "tele/abandon-me"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -85,7 +85,7 @@ func TestSDLCCloseWithoutSandboxIsFine(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele/never-opened"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "tele/never-opened"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -114,7 +114,7 @@ func TestSDLCCloseRefusesPushed(t *testing.T) {
 			beforeHead := gitLog(t, root, "-1", "--format=%H")
 
 			var out, errb bytes.Buffer
-			code := Run([]string{"sdlc", "close", "--no-edit", "tele/done-" + tc.name}, &out, &errb)
+			code := Run([]string{"sdlc", "close", "tele/done-" + tc.name}, &out, &errb)
 			if code == 0 {
 				t.Fatalf("expected non-zero on %s, stdout=%q", tc.status, out.String())
 			}
@@ -154,7 +154,7 @@ func TestSDLCCloseWorkflowMismatch(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele/not-sdlc"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "tele/not-sdlc"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on workflow mismatch, stdout=%q", out.String())
 	}
@@ -173,7 +173,7 @@ func TestSDLCCloseMissingRun(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele/ghost"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "tele/ghost"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on missing run, stdout=%q", out.String())
 	}
@@ -194,7 +194,7 @@ func TestChatCloseBumpsStatusAndCommits(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"chat", "close", "--no-edit", "tele/dead-end"}, &out, &errb)
+	code := Run([]string{"chat", "close", "tele/dead-end"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -240,7 +240,7 @@ func TestChatCloseLeavesUnrelatedPathsAlone(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"chat", "close", "--no-edit", "tele/chat-run"}, &out, &errb)
+	code := Run([]string{"chat", "close", "tele/chat-run"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -268,7 +268,7 @@ func TestChatCloseRefusesTerminal(t *testing.T) {
 
 			beforeHead := gitLog(t, root, "-1", "--format=%H")
 			var out, errb bytes.Buffer
-			code := Run([]string{"chat", "close", "--no-edit", "tele/chat-done-" + tc.name}, &out, &errb)
+			code := Run([]string{"chat", "close", "tele/chat-done-" + tc.name}, &out, &errb)
 			if code == 0 {
 				t.Fatalf("expected non-zero on %s, stdout=%q", tc.status, out.String())
 			}
@@ -290,12 +290,9 @@ func TestCloseHelpMatchesHarvesting(t *testing.T) {
 			if code := Run([]string{workflow, "close", "--help"}, &out, &errb); code != 2 || out.Len() != 0 {
 				t.Fatalf("help: exit=%d stdout=%q stderr=%q", code, out.String(), errb.String())
 			}
-			got := errb.String()
-			wantHarvest := workflow != "idea" && workflow != "intent"
-			for _, text := range []string{"--no-edit", "\n  -no-edit", "followups and feedback"} {
-				if strings.Contains(got, text) != wantHarvest {
-					t.Errorf("%s help has incorrect harvesting description %q:\n%s", workflow, text, got)
-				}
+			// No harvest opens an editor, so no close offers to skip one.
+			if got := errb.String(); strings.Contains(got, "no-edit") {
+				t.Errorf("%s help still offers --no-edit:\n%s", workflow, got)
 			}
 		})
 	}
@@ -372,7 +369,7 @@ func TestSDLCCloseRefusesEmptyDesignCanvas(t *testing.T) {
 	beforeHead := gitLog(t, root, "-1", "--format=%H")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele/empty-design"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "tele/empty-design"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero, stdout=%q", out.String())
 	}
@@ -406,7 +403,7 @@ func TestSDLCCloseRefusesEmptyCodeCanvas(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele/empty-code"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "tele/empty-code"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero, stdout=%q", out.String())
 	}
@@ -426,7 +423,7 @@ func TestSDLCCloseAllowsNeverStartedCode(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele/design-only"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "tele/design-only"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -444,7 +441,7 @@ func TestChatCloseRefusesEmptyCanvas(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"chat", "close", "--no-edit", "tele/chat-empty"}, &out, &errb)
+	code := Run([]string{"chat", "close", "tele/chat-empty"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero, stdout=%q", out.String())
 	}
@@ -486,8 +483,8 @@ func TestIntentCloseSkipsHarvest(t *testing.T) {
 
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
-	// Captures don't expose --no-edit, so close passes skipEdit=false.
-	// A false editor makes any pop a loud failure rather than a hang.
+	// No close opens an editor. A false editor makes any launch a loud
+	// failure rather than a hang.
 	t.Setenv("EDITOR", "false")
 	t.Setenv("VISUAL", "false")
 
@@ -620,12 +617,12 @@ func TestSDLCCloseIgnoresUnrelatedUntrackedFile(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	if code := Run([]string{"sdlc", "harvest", "--no-edit", "tele/ship-it"}, &out, &errb); code != 0 {
+	if code := Run([]string{"sdlc", "harvest", "tele/ship-it"}, &out, &errb); code != 0 {
 		t.Fatalf("expected harvest to ignore an untracked stray, exit=%d stderr=%q", code, errb.String())
 	}
 	out.Reset()
 	errb.Reset()
-	if code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb); code != 0 {
+	if code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb); code != 0 {
 		t.Fatalf("expected close to ignore an untracked stray, exit=%d stderr=%q", code, errb.String())
 	}
 }

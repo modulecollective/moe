@@ -36,7 +36,7 @@ fi
 `)
 	harvest := func() error {
 		return repolock.With(root, repolock.Options{Purpose: "test-harvest"}, func() error {
-			return harvestFollowups(root, "moe", md.ID, md.Workflow, true)
+			return harvestFollowups(root, "moe", md.ID, md.Workflow)
 		})
 	}
 	if err := harvest(); err == nil || !strings.Contains(err.Error(), "reject-second") {

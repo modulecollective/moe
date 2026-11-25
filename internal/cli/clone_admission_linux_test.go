@@ -168,7 +168,7 @@ func TestCloneAdmissionAcceptsCreatedRunIDs(t *testing.T) {
 						t.Fatalf("inventory and exact filter: %d %+v", code, report)
 					}
 				}
-				if code := Run([]string{"sdlc", "close", "--no-edit", md.Project + "/" + id}, io.Discard, io.Discard); code != 0 {
+				if code := Run([]string{"sdlc", "close", md.Project + "/" + id}, io.Discard, io.Discard); code != 0 {
 					t.Fatalf("close exit %d", code)
 				}
 				if got := loadRun(t, root, md.Project, id); got.Status != run.StatusClosed {

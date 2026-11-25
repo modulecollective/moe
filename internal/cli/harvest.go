@@ -31,7 +31,8 @@ import (
 // since `idea edit --chat` and `intent edit --chat`, includes the
 // capture workflows. Their close still skips harvest (the run *is* the
 // capture), so this verb plus HarvestOnExit is the only path their
-// captures have.
+// captures have. Every successful stage turn already harvests on exit;
+// the verb is manual recovery for a turn whose harvest failed.
 func harvestCommand(workflow string) *Command {
 	return &Command{
 		Name:    "harvest",
@@ -62,13 +63,8 @@ func harvestArgKind(workflow string) argKind {
 func runHarvest(workflow string, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(workflow+" harvest", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	// --no-edit mirrors close: skip the editor pre-flight and harvest the
-	// files as-is. The pop is on by default here — the operator is
-	// explicitly invoking harvest, so they get to review what fans out.
-	noEdit := fs.Bool("no-edit", false, "skip the followups.md / feedback/*.md editor steps (harvest as-is)")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe %s harvest [--no-edit] <project>/<run>\n", workflow)
-		fs.PrintDefaults()
+		moePrintf(stderr, "usage: moe %s harvest <project>/<run>\n", workflow)
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
@@ -98,7 +94,7 @@ func runHarvest(workflow string, args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	if err := harvestRunInProcess(root, workflow, projectID, runID, *noEdit); err != nil {
+	if err := harvestRunInProcess(root, workflow, projectID, runID); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
@@ -129,7 +125,7 @@ func runHarvest(workflow string, args []string, stdout, stderr io.Writer) int {
 // session on a capture run files followups and lore like any other
 // stage, and capture close deliberately skips harvest, so refusing here
 // would leave those captures with no path at all.
-func harvestRunInProcess(root, workflow, projectID, runID string, skipEdit bool) error {
+func harvestRunInProcess(root, workflow, projectID, runID string) error {
 	if err := requireProject(root, projectID); err != nil {
 		return err
 	}
@@ -170,17 +166,17 @@ func harvestRunInProcess(root, workflow, projectID, runID string, skipEdit bool)
 	return repolock.With(root, repolock.Options{
 		Purpose: workflow + "-harvest",
 		Run:     projectID + "/" + runID,
-		// Three $EDITOR pops for operator review live inside this
-		// window. See the same note on runClose's lock options.
+		// A harvest commits once per created idea and lore file, so a
+		// long file can outlast StaleThreshold.
 		Heartbeat: true,
 	}, func() error {
-		if err := harvestFollowups(root, projectID, runID, workflow, skipEdit); err != nil {
+		if err := harvestFollowups(root, projectID, runID, workflow); err != nil {
 			return err
 		}
-		if err := harvestLore(root, projectID, runID, workflow, skipEdit); err != nil {
+		if err := harvestLore(root, projectID, runID, workflow); err != nil {
 			return err
 		}
-		if err := harvestTwinFeedback(root, projectID, runID, workflow, skipEdit); err != nil {
+		if err := harvestTwinFeedback(root, projectID, runID, workflow); err != nil {
 			return err
 		}
 		// Stage exactly what enterTerminal stages, and only what's on

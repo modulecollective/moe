@@ -62,7 +62,7 @@ func TestHarvestOpenCommitsExcludeScratch(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(root, "stray"), []byte("untracked"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			if err := harvestRunInProcess(root, "sdlc", "tele", "ship-it", true); err != nil {
+			if err := harvestRunInProcess(root, "sdlc", "tele", "ship-it"); err != nil {
 				t.Fatal(err)
 			}
 			commits := strings.Fields(gittest.Output(t, root, "rev-list", "--reverse", before+"..HEAD"))
@@ -103,7 +103,7 @@ func TestHarvestOpenCommitsExcludeScratch(t *testing.T) {
 			if b, err := os.ReadFile(filepath.Join(root, "stray")); err != nil || string(b) != "untracked" {
 				t.Fatalf("stray changed: %q, %v", b, err)
 			}
-			if err := harvestRunInProcess(root, "sdlc", "tele", "ship-it", true); err != nil {
+			if err := harvestRunInProcess(root, "sdlc", "tele", "ship-it"); err != nil {
 				t.Fatalf("repeat harvest: %v", err)
 			}
 			if got := gittest.Output(t, root, "rev-parse", "HEAD"); got != commits[2] {
@@ -143,7 +143,7 @@ func TestCloseOpenCommitsExcludeStagedScratchAndPulseStamp(t *testing.T) {
 				if !ok {
 					t.Fatal("missing close registration")
 				}
-				err = closeRunInProcess(root, workflow, reg.subject, reg.cleanup, "tele", "ship-it", true, &errb)
+				err = closeRunInProcess(root, workflow, reg.subject, reg.cleanup, "tele", "ship-it", &errb)
 			}
 			if err != nil {
 				t.Fatalf("close: %v; stderr=%s", err, errb.String())

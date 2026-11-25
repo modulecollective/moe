@@ -341,7 +341,7 @@ func TestSDLCCloseHarvestsLore(t *testing.T) {
 	}, "\n"))
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -397,7 +397,7 @@ func TestSDLCCloseHarvestsFollowupsAndLoreTogether(t *testing.T) {
 	}, "\n"))
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -442,7 +442,7 @@ func TestSDLCCloseHarvestsNonCanonicalLore(t *testing.T) {
 	}, "\n"))
 
 	var out, errb bytes.Buffer
-	if code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb); code != 0 {
+	if code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb); code != 0 {
 		t.Fatalf("close: exit=%d stderr=%q", code, errb.String())
 	}
 
@@ -486,7 +486,7 @@ func TestSDLCCloseAutoDisambiguatesLoreCollision(t *testing.T) {
 	}, "\n"))
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -767,7 +767,7 @@ func TestHarvestLoreCommitsFirstEntryPartialProgressForRetry(t *testing.T) {
 		"",
 	}, "\n"))
 
-	if err := harvestLore(root, "tele", "ship-it", "sdlc", true); err == nil {
+	if err := harvestLore(root, "tele", "ship-it", "sdlc"); err == nil {
 		t.Fatal("expected first harvest to fail on directory-shaped old-b.md")
 	}
 	if entries, err := moegit.Status(root); err != nil {
@@ -784,7 +784,7 @@ func TestHarvestLoreCommitsFirstEntryPartialProgressForRetry(t *testing.T) {
 	}
 	gittest.Run(t, root, "add", "-A", lore.DirRel)
 	gittest.Run(t, root, "commit", "-m", "remove deletion blocker")
-	if err := harvestLore(root, "tele", "ship-it", "sdlc", true); err != nil {
+	if err := harvestLore(root, "tele", "ship-it", "sdlc"); err != nil {
 		t.Fatalf("retry harvest: %v", err)
 	}
 	if got := readLoreFeedback(t, root, "tele", "ship-it"); !strings.Contains(got, "- [x] `merged` — Merged") {
@@ -806,7 +806,7 @@ func TestHarvestLoreDoesNotCommitFirstEntryPreWriteFailure(t *testing.T) {
 		"- [ ] `fact` — Fact\n\n  applies-when: always\n\n  body\n")
 
 	before := gittest.HeadSHA(t, root)
-	if err := harvestLore(root, "tele", "ship-it", "sdlc", true); err == nil {
+	if err := harvestLore(root, "tele", "ship-it", "sdlc"); err == nil {
 		t.Fatal("expected lore directory creation failure")
 	}
 	if after := gittest.HeadSHA(t, root); after != before {
@@ -824,7 +824,7 @@ func TestSDLCCloseAbortsOnMalformedLore(t *testing.T) {
 	beforeHead := gitLog(t, root, "-1", "--format=%H")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on malformed lore, stdout=%q", out.String())
 	}
@@ -859,7 +859,7 @@ func TestSDLCCloseSkipsAlreadyCheckedLore(t *testing.T) {
 	}, "\n")+"\n")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -870,72 +870,6 @@ func TestSDLCCloseSkipsAlreadyCheckedLore(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(loreDir, "prior-fact.md")); !os.IsNotExist(err) {
 		t.Fatalf("already-checked entry should not have been re-promoted: %v", err)
-	}
-}
-
-func TestSDLCCloseOpensEditorWhenLoreUnchecked(t *testing.T) {
-	root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-	editorCalls := markerEditor(t)
-
-	writeLoreFeedback(t, root, "tele", "ship-it",
-		"- [ ] `fact` — A portable fact\n\n  applies-when: now\n\n  body\n")
-
-	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	// Followups absent → no followups pop. Lore present → one pop.
-	if n := editorCalls(); n != 1 {
-		t.Fatalf("expected exactly one editor invocation for lore, got %d", n)
-	}
-}
-
-func TestSDLCCloseSkipsEditorOnTrivialLore(t *testing.T) {
-	cases := []struct {
-		name string
-		seed func(t *testing.T, root, projectID, runID string)
-	}{
-		{name: "absent", seed: nil},
-		{
-			name: "header-only",
-			seed: func(t *testing.T, root, projectID, runID string) {
-				writeLoreFeedback(t, root, projectID, runID, "# feedback/lore.md\n\n")
-			},
-		},
-		{
-			name: "all-checked",
-			seed: func(t *testing.T, root, projectID, runID string) {
-				writeLoreFeedback(t, root, projectID, runID, strings.Join([]string{
-					"- [x] `did-this` — Already harvested",
-					"- [x] `did-that` — Also already harvested",
-					"",
-				}, "\n"))
-			},
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
-			t.Setenv("MOE_HOME", root)
-			t.Setenv("NO_COLOR", "1")
-			editorCalls := markerEditor(t)
-
-			if tc.seed != nil {
-				tc.seed(t, root, "tele", "ship-it")
-			}
-
-			var out, errb bytes.Buffer
-			code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb)
-			if code != 0 {
-				t.Fatalf("exit=%d stderr=%q", code, errb.String())
-			}
-			if n := editorCalls(); n != 0 {
-				t.Fatalf("expected zero editor invocations on trivial lore, got %d", n)
-			}
-		})
 	}
 }
 
@@ -952,7 +886,7 @@ func TestSDLCCloseTreatsLoreFileAsCleanForGate(t *testing.T) {
 		"- [ ] `late-add` — Late entry\n\n  applies-when: now\n\n  body\n")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("expected close to tolerate untracked feedback/lore.md, got exit=%d stderr=%q",
 			code, errb.String())
@@ -964,81 +898,11 @@ func TestSDLCCloseTreatsLoreFileAsCleanForGate(t *testing.T) {
 	dirtyTracked(t, root2)
 	out.Reset()
 	errb.Reset()
-	code = Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it-2"}, &out, &errb)
+	code = Run([]string{"sdlc", "close", "tele/ship-it-2"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected close to refuse on unrelated dirty file, stdout=%q", out.String())
 	}
 	if !strings.Contains(errb.String(), "uncommitted changes") {
 		t.Fatalf("expected dirty-tree refusal, got: %q", errb.String())
-	}
-}
-
-func TestInjectEditorPopHeaderInjectsWhenAbsent(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "f.md")
-	if err := os.WriteFile(path, []byte("- [ ] `x` — Y\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := injectEditorPopHeader(path, loreHeader); err != nil {
-		t.Fatalf("inject: %v", err)
-	}
-	got, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.HasPrefix(got, []byte("<!--")) {
-		t.Fatalf("expected leading <!-- after inject:\n%s", got)
-	}
-	if !bytes.Contains(got, []byte("- [ ] `x` — Y")) {
-		t.Fatalf("inject dropped original body:\n%s", got)
-	}
-}
-
-func TestInjectEditorPopHeaderNoOpWhenPresent(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "f.md")
-	original := "<!-- previously injected -->\n\n- [ ] `x` — Y\n"
-	if err := os.WriteFile(path, []byte(original), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := injectEditorPopHeader(path, loreHeader); err != nil {
-		t.Fatalf("inject: %v", err)
-	}
-	got, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != original {
-		t.Fatalf("expected no-op on file with existing comment:\nwant: %q\n got: %q",
-			original, string(got))
-	}
-}
-
-func TestInjectEditorPopHeaderAbsentFileIsNoOp(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "missing.md")
-	if err := injectEditorPopHeader(path, loreHeader); err != nil {
-		t.Fatalf("inject on absent: %v", err)
-	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Fatalf("inject on absent file should not create it: %v", err)
-	}
-}
-
-func TestInjectEditorPopHeaderEmptyFile(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "empty.md")
-	if err := os.WriteFile(path, nil, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := injectEditorPopHeader(path, loreHeader); err != nil {
-		t.Fatalf("inject: %v", err)
-	}
-	got, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.HasPrefix(got, []byte("<!--")) {
-		t.Fatalf("expected header on empty file:\n%s", got)
 	}
 }

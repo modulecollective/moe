@@ -246,7 +246,7 @@ func TestIntentLinkFollowsPromotionAndReopenNotHarvest(t *testing.T) {
 	}
 
 	writeFollowups(t, root, "moe", src.ID, "- [ ] `tidy-thing` — Tidy a thing\n\n  Body.\n")
-	if err := harvestFollowups(root, "moe", src.ID, "sdlc", true); err != nil {
+	if err := harvestFollowups(root, "moe", src.ID, "sdlc"); err != nil {
 		t.Fatal(err)
 	}
 	if got := mustLoad(t, root, "moe", "tidy-thing").Intent; got != "" {

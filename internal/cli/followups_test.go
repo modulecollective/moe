@@ -124,7 +124,7 @@ func TestSDLCClosePersistsFollowupWorkflowTag(t *testing.T) {
 
 	writeFollowups(t, root, "tele", "ship-it", "- [ ] `cleanup-foo` (sdlc) — Clean up foo\n")
 	var out, errb bytes.Buffer
-	if code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb); code != 0 {
+	if code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb); code != 0 {
 		t.Fatalf("close exit=%d stderr=%q", code, errb.String())
 	}
 	idea, err := run.Load(root, "tele", "cleanup-foo")
@@ -526,7 +526,7 @@ func TestSDLCCloseRoutesPrefixedFollowupToTargetProject(t *testing.T) {
 	}, "\n"))
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -568,15 +568,16 @@ func TestSDLCCloseRoutesPrefixedFollowupToTargetProject(t *testing.T) {
 func TestSDLCCloseHarvestPreservesPrefixThroughDisambiguation(t *testing.T) {
 	root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
 	trailerstest.SeedProject(t, root, "claudia")
-	// Pre-existing idea at claudia/taken forces the harvester to bump.
-	trailerstest.SeedRun(t, root, "claudia", "taken", "idea", run.StatusInProgress)
+	// A closed idea at claudia/taken forces the harvester to bump. A live
+	// one would be the entry's owner and link instead.
+	trailerstest.SeedRun(t, root, "claudia", "taken", "idea", run.StatusClosed)
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
 	writeFollowups(t, root, "tele", "ship-it", "- [ ] `claudia/taken` — Routed but colliding\n")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -608,7 +609,7 @@ func TestSDLCCloseRejectsUnknownTargetProject(t *testing.T) {
 	beforeHead := gitLog(t, root, "-1", "--format=%H")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on unknown target project, stdout=%q", out.String())
 	}
@@ -653,7 +654,7 @@ func TestSDLCCloseHarvestsFollowupBodyIntoIdeaCanvas(t *testing.T) {
 	}, "\n"))
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -695,7 +696,7 @@ func TestSDLCCloseHarvestsFollowups(t *testing.T) {
 	}, "\n"))
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -762,7 +763,7 @@ func TestSDLCCloseHarvestsNonCanonicalFollowup(t *testing.T) {
 	writeFollowups(t, root, "tele", "ship-it", "-  [ ] `cleanup-foo` — Clean up foo helper\n")
 
 	var out, errb bytes.Buffer
-	if code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb); code != 0 {
+	if code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb); code != 0 {
 		t.Fatalf("close: exit=%d stderr=%q", code, errb.String())
 	}
 
@@ -779,7 +780,7 @@ func TestSDLCCloseHarvestsNonCanonicalFollowup(t *testing.T) {
 	afterClose := gitLog(t, root, "-1", "--format=%H")
 	out.Reset()
 	errb.Reset()
-	if code := Run([]string{"sdlc", "harvest", "--no-edit", "tele/ship-it"}, &out, &errb); code != 0 {
+	if code := Run([]string{"sdlc", "harvest", "tele/ship-it"}, &out, &errb); code != 0 {
 		t.Fatalf("re-harvest: exit=%d stderr=%q", code, errb.String())
 	}
 	if afterSecond := gitLog(t, root, "-1", "--format=%H"); afterSecond != afterClose {
@@ -796,15 +797,19 @@ func TestSDLCCloseAutoDisambiguatesSlugCollision(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	stubEditor(t)
 
-	// Pre-create an idea named "foo" so the harvester has to bump.
+	// Pre-create and close an idea named "foo" so the harvester has to
+	// bump. A live one would be the entry's owner and link instead.
 	if code := Run([]string{"idea", "new", "tele/foo"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 		t.Fatal("seed idea creation failed")
+	}
+	if code := Run([]string{"idea", "close", "tele/foo"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		t.Fatal("seed idea close failed")
 	}
 
 	writeFollowups(t, root, "tele", "ship-it", "- [ ] `foo` — Foo follow-up\n")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -829,7 +834,7 @@ func TestSDLCCloseAbortsOnMalformedFollowup(t *testing.T) {
 	beforeHead := gitLog(t, root, "-1", "--format=%H")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on malformed followup, stdout=%q", out.String())
 	}
@@ -860,7 +865,7 @@ func TestSDLCCloseSkipsAlreadyCheckedLines(t *testing.T) {
 	}, "\n")+"\n")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -874,147 +879,15 @@ func TestSDLCCloseSkipsAlreadyCheckedLines(t *testing.T) {
 	}
 }
 
-// markerEditor installs a $EDITOR that records each invocation by
-// appending to a marker file. The returned func reports the call count.
-// Used to prove the harvest pre-flight skipped (or didn't skip) the pop
-// without depending on side-effects from a real editor.
-func markerEditor(t *testing.T) func() int {
-	t.Helper()
-	dir := t.TempDir()
-	marker := filepath.Join(dir, "calls")
-	script := filepath.Join(dir, "editor.sh")
-	body := "#!/bin/sh\nprintf . >> '" + marker + "'\n"
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("EDITOR", script)
-	t.Setenv("VISUAL", "")
-	return func() int {
-		data, err := os.ReadFile(marker)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return 0
-			}
-			t.Fatal(err)
-		}
-		return len(data)
-	}
-}
-
-// TestSDLCCloseSkipsEditorOnTrivialFollowups pins the design's core
-// behaviour change: without --no-edit, the editor pop is gated on the
-// file having at least one unchecked entry. Absent, header-only, and
-// all-`[x]` files all skip the pop — there's nothing to review.
-func TestSDLCCloseSkipsEditorOnTrivialFollowups(t *testing.T) {
-	cases := []struct {
-		name string
-		// seed runs before close. nil means "leave followups.md absent."
-		seed func(t *testing.T, root, projectID, runID string)
-	}{
-		{
-			name: "absent",
-			seed: nil,
-		},
-		{
-			name: "header-only",
-			seed: func(t *testing.T, root, projectID, runID string) {
-				writeFollowups(t, root, projectID, runID, "# Follow-ups\n\n")
-			},
-		},
-		{
-			name: "all-checked",
-			seed: func(t *testing.T, root, projectID, runID string) {
-				writeFollowups(t, root, projectID, runID, strings.Join([]string{
-					"# Follow-ups",
-					"",
-					"- [x] `did-this` — Already harvested",
-					"- [x] `did-that` — Also already harvested",
-					"",
-				}, "\n"))
-			},
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
-			t.Setenv("MOE_HOME", root)
-			t.Setenv("NO_COLOR", "1")
-			editorCalls := markerEditor(t)
-
-			if tc.seed != nil {
-				tc.seed(t, root, "tele", "ship-it")
-			}
-
-			var out, errb bytes.Buffer
-			code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb)
-			if code != 0 {
-				t.Fatalf("exit=%d stderr=%q", code, errb.String())
-			}
-			if n := editorCalls(); n != 0 {
-				t.Fatalf("expected zero editor invocations on trivial followups.md, got %d", n)
-			}
-		})
-	}
-}
-
-// TestSDLCCloseOpensEditorWhenUnchecked is the positive companion to
-// the trivial-skip test: an unchecked entry on disk means the operator
-// still gets the pop before harvest fans out into ideas.
-func TestSDLCCloseOpensEditorWhenUnchecked(t *testing.T) {
-	root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-	editorCalls := markerEditor(t)
-
-	writeFollowups(t, root, "tele", "ship-it",
-		"- [ ] `chase-it` — Chase the thing\n")
-
-	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	if n := editorCalls(); n != 1 {
-		t.Fatalf("expected exactly one editor invocation, got %d", n)
-	}
-}
-
-// TestSDLCCloseOpensEditorOnMalformedUnchecked pins the design's
-// tie-breaker: a malformed `- [ ]` line still trips the pop, so the
-// operator can fix it in-editor rather than hit parseFollowups's hard
-// error with no chance to recover.
-func TestSDLCCloseOpensEditorOnMalformedUnchecked(t *testing.T) {
-	root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
-	t.Setenv("MOE_HOME", root)
-	t.Setenv("NO_COLOR", "1")
-	editorCalls := markerEditor(t)
-
-	// Hyphen instead of em-dash — parseFollowups rejects this, but the
-	// shape-only gate must still pop the editor first.
-	writeFollowups(t, root, "tele", "ship-it",
-		"- [ ] `chase-it` - Chase the thing\n")
-
-	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb)
-	// The malformed line still trips parseFollowups after the pop; we
-	// don't care about exit code here, only that the editor ran.
-	_ = code
-	_ = out
-	_ = errb
-	if n := editorCalls(); n != 1 {
-		t.Fatalf("expected editor pop on malformed unchecked entry, got %d invocations", n)
-	}
-}
-
 func TestSDLCCloseEmptyFollowupsIsClean(t *testing.T) {
 	root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
 	t.Setenv("MOE_HOME", root)
 	t.Setenv("NO_COLOR", "1")
 
-	// No followups.md on disk; --no-edit means we don't scaffold or open
-	// the editor — close should succeed with no harvest side-effects.
+	// No followups.md on disk: close should succeed with no harvest
+	// side-effects.
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -1035,7 +908,7 @@ func TestSDLCCloseTreatsFollowupsAsCleanForGate(t *testing.T) {
 
 	// First close: followups.md is dirty/untracked — should still succeed.
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "close", "tele/ship-it"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("expected harvest to tolerate untracked followups.md, got exit=%d stderr=%q", code, errb.String())
 	}
@@ -1046,7 +919,7 @@ func TestSDLCCloseTreatsFollowupsAsCleanForGate(t *testing.T) {
 	dirtyTracked(t, root2)
 	out.Reset()
 	errb.Reset()
-	code = Run([]string{"sdlc", "close", "--no-edit", "tele/ship-it-2"}, &out, &errb)
+	code = Run([]string{"sdlc", "close", "tele/ship-it-2"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected close to refuse on unrelated dirty file, stdout=%q", out.String())
 	}

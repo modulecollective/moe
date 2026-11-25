@@ -218,9 +218,8 @@ func openChat(projectID, runID, agentOverride string, stdout, stderr io.Writer) 
 // close as the default: most sittings are finished when you leave them,
 // and close costs nothing because re-entering the run reopens it in one
 // step (reopenClosedChat). Blank input and any answer starting with `y`
-// dispatch the registered close command — without --no-edit, so the
-// operator-driven close keeps its editor and harvest behaviour. `n` or
-// any other text leaves the run open.
+// dispatch the registered close command, which harvests. `n` or any other
+// text leaves the run open.
 //
 // The two abort keys agree and both leave the run open: SIGINT echoes ^C,
 // and a bare Ctrl-D (EOF with nothing typed) returns without dispatching.

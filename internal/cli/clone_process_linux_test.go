@@ -104,7 +104,7 @@ func TestCloneCLIExclusiveShellOwnsDetachedJobs(t *testing.T) {
 	if result.Reason != "owner_busy" {
 		t.Fatalf("collector entered live shell: %+v", result)
 	}
-	for _, args := range [][]string{{"sdlc", "design", "--once", "tele/finish"}, {"sdlc", "close", "--no-edit", "tele/finish"}, {"sdlc", "push", "tele/finish"}, {"sdlc", "shell", "tele/finish"}} {
+	for _, args := range [][]string{{"sdlc", "design", "--once", "tele/finish"}, {"sdlc", "close", "tele/finish"}, {"sdlc", "push", "tele/finish"}, {"sdlc", "shell", "tele/finish"}} {
 		var output safeBuffer
 		if code := Run(args, &output, &output); code != 1 || !strings.Contains(output.String(), "owned by another") {
 			t.Fatalf("%v entered shell ownership: %d %s", args, code, output.String())

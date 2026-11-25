@@ -73,7 +73,7 @@ func TestHarvestFreshEntries(t *testing.T) {
 	}, "\n"))
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "harvest", "--no-edit", "tele/ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "harvest", "tele/ship-it"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -123,14 +123,14 @@ func TestHarvestIsIdempotent(t *testing.T) {
 	writeFollowups(t, root, "tele", "ship-it", "- [ ] `cleanup-foo` — Clean up foo helper\n")
 
 	var out, errb bytes.Buffer
-	if code := Run([]string{"sdlc", "harvest", "--no-edit", "tele/ship-it"}, &out, &errb); code != 0 {
+	if code := Run([]string{"sdlc", "harvest", "tele/ship-it"}, &out, &errb); code != 0 {
 		t.Fatalf("first harvest: exit=%d stderr=%q", code, errb.String())
 	}
 	afterFirst := gitLog(t, root, "-1", "--format=%H")
 
 	out.Reset()
 	errb.Reset()
-	if code := Run([]string{"sdlc", "harvest", "--no-edit", "tele/ship-it"}, &out, &errb); code != 0 {
+	if code := Run([]string{"sdlc", "harvest", "tele/ship-it"}, &out, &errb); code != 0 {
 		t.Fatalf("second harvest: exit=%d stderr=%q", code, errb.String())
 	}
 	if afterSecond := gitLog(t, root, "-1", "--format=%H"); afterSecond != afterFirst {
@@ -149,7 +149,7 @@ func TestHarvestOnClosedRun(t *testing.T) {
 	writeFollowups(t, root, "tele", "ship-it", "- [ ] `late-idea` — Regenerated after close\n")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "harvest", "--no-edit", "tele/ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "harvest", "tele/ship-it"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("harvest on closed run should succeed, exit=%d stderr=%q", code, errb.String())
 	}
@@ -171,52 +171,13 @@ func TestHarvestRejectsStrayContent(t *testing.T) {
 	writeFollowups(t, root, "tele", "ship-it", "- clean up foo without a checkbox\n")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"sdlc", "harvest", "--no-edit", "tele/ship-it"}, &out, &errb)
+	code := Run([]string{"sdlc", "harvest", "tele/ship-it"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected non-zero on stray content, stdout=%q", out.String())
 	}
 	if !strings.Contains(errb.String(), "has content but no") {
 		t.Fatalf("expected stray-content error, got: %q", errb.String())
 	}
-}
-
-// TestHarvestEditorPreflight pins the editor gating, matching close:
-// the pop fires by default when an unchecked entry exists, and --no-edit
-// skips it.
-func TestHarvestEditorPreflight(t *testing.T) {
-	t.Run("pops by default on unchecked entry", func(t *testing.T) {
-		root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
-		t.Setenv("MOE_HOME", root)
-		t.Setenv("NO_COLOR", "1")
-		editorCalls := markerEditor(t)
-
-		writeFollowups(t, root, "tele", "ship-it", "- [ ] `chase-it` — Chase the thing\n")
-
-		var out, errb bytes.Buffer
-		if code := Run([]string{"sdlc", "harvest", "tele/ship-it"}, &out, &errb); code != 0 {
-			t.Fatalf("exit=%d stderr=%q", code, errb.String())
-		}
-		if n := editorCalls(); n != 1 {
-			t.Fatalf("expected exactly one editor pop, got %d", n)
-		}
-	})
-
-	t.Run("--no-edit skips the pop", func(t *testing.T) {
-		root := seedCloseFixture(t, "tele", "ship-it", "sdlc", run.StatusInProgress)
-		t.Setenv("MOE_HOME", root)
-		t.Setenv("NO_COLOR", "1")
-		editorCalls := markerEditor(t)
-
-		writeFollowups(t, root, "tele", "ship-it", "- [ ] `chase-it` — Chase the thing\n")
-
-		var out, errb bytes.Buffer
-		if code := Run([]string{"sdlc", "harvest", "--no-edit", "tele/ship-it"}, &out, &errb); code != 0 {
-			t.Fatalf("exit=%d stderr=%q", code, errb.String())
-		}
-		if n := editorCalls(); n != 0 {
-			t.Fatalf("expected no editor pop under --no-edit, got %d", n)
-		}
-	})
 }
 
 // TestHarvestRejectsWrongWorkflow guards the workflow match: a sdlc run
@@ -227,7 +188,7 @@ func TestHarvestRejectsWrongWorkflow(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"chat", "harvest", "--no-edit", "tele/ship-it"}, &out, &errb)
+	code := Run([]string{"chat", "harvest", "tele/ship-it"}, &out, &errb)
 	if code == 0 {
 		t.Fatalf("expected refusal harvesting a sdlc run as chat, stdout=%q", out.String())
 	}
@@ -258,7 +219,7 @@ func TestHarvestPromotesLore(t *testing.T) {
 	}, "\n"))
 
 	var out, errb bytes.Buffer
-	if code := Run([]string{"sdlc", "harvest", "--no-edit", "tele/ship-it"}, &out, &errb); code != 0 {
+	if code := Run([]string{"sdlc", "harvest", "tele/ship-it"}, &out, &errb); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 
@@ -304,14 +265,14 @@ func TestHarvestLoreIsIdempotent(t *testing.T) {
 	}, "\n"))
 
 	var out, errb bytes.Buffer
-	if code := Run([]string{"sdlc", "harvest", "--no-edit", "tele/ship-it"}, &out, &errb); code != 0 {
+	if code := Run([]string{"sdlc", "harvest", "tele/ship-it"}, &out, &errb); code != 0 {
 		t.Fatalf("first harvest: exit=%d stderr=%q", code, errb.String())
 	}
 	afterFirst := gitLog(t, root, "-1", "--format=%H")
 
 	out.Reset()
 	errb.Reset()
-	if code := Run([]string{"sdlc", "harvest", "--no-edit", "tele/ship-it"}, &out, &errb); code != 0 {
+	if code := Run([]string{"sdlc", "harvest", "tele/ship-it"}, &out, &errb); code != 0 {
 		t.Fatalf("second harvest: exit=%d stderr=%q", code, errb.String())
 	}
 	if afterSecond := gitLog(t, root, "-1", "--format=%H"); afterSecond != afterFirst {
@@ -333,7 +294,7 @@ func TestHarvestAcceptsCaptureRuns(t *testing.T) {
 			writeFollowups(t, root, "tele", "sharpen-me", "- [ ] `spotted-this` — Spotted mid-conversation\n")
 
 			var out, errb bytes.Buffer
-			if code := Run([]string{wf, "harvest", "--no-edit", "tele/sharpen-me"}, &out, &errb); code != 0 {
+			if code := Run([]string{wf, "harvest", "tele/sharpen-me"}, &out, &errb); code != 0 {
 				t.Fatalf("exit=%d stderr=%q", code, errb.String())
 			}
 			if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "spotted-this", "run.json")); err != nil {

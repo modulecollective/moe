@@ -830,18 +830,15 @@ func TestPushNoRebaseNeededFastPath(t *testing.T) {
 	}
 }
 
-// TestPushHarvestsFollowupsWithBodyAtMerge pins the new push-time
-// editor gate end-to-end: a sentinel $EDITOR is invoked on the
-// followups.md, the captured body lands in the harvested idea's seed
-// canvas, the line is rewritten as `[x]` carrying the resolved slug,
-// and the merge proceeds. Without the skipEdit=false flip in
-// mergePath this test would not see the editor invocation marker.
+// TestPushHarvestsFollowupsWithBodyAtMerge pins push-time harvest
+// end-to-end: no $EDITOR opens, the captured body lands in the harvested
+// idea's seed canvas, the line is rewritten as `[x]` carrying the
+// resolved slug, and the merge proceeds.
 func TestPushHarvestsFollowupsWithBodyAtMerge(t *testing.T) {
 	f := newPushFixture(t)
 
-	// Sentinel editor: writes a marker file when invoked. Confirms the
-	// editor pops at push time, not just that harvest ran (which it
-	// would have under the old skipEdit=true path too).
+	// Sentinel editor: writes a marker file when invoked. No harvest
+	// opens an editor, so push must harvest without touching it.
 	marker := filepath.Join(t.TempDir(), "editor-was-called")
 	editorScript := filepath.Join(t.TempDir(), "editor.sh")
 	if err := os.WriteFile(editorScript,
@@ -865,8 +862,8 @@ func TestPushHarvestsFollowupsWithBodyAtMerge(t *testing.T) {
 		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout, stderr)
 	}
 
-	if _, err := os.Stat(marker); err != nil {
-		t.Fatalf("expected $EDITOR to be invoked at push time: %v", err)
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("push harvest invoked $EDITOR: %v", err)
 	}
 
 	canvas, err := os.ReadFile(filepath.Join(f.root,
@@ -890,37 +887,6 @@ func TestPushHarvestsFollowupsWithBodyAtMerge(t *testing.T) {
 	}
 }
 
-// TestPushFailsCleanlyWhenNoEditorAtMerge: the merge path pops $EDITOR
-// on followups.md before harvest whenever there's an unchecked entry to
-// review. With one such entry on disk and neither $EDITOR nor $VISUAL
-// set, push fails with the editor-missing error, the run stays
-// in_progress, and origin/main is unchanged.
-func TestPushFailsCleanlyWhenNoEditorAtMerge(t *testing.T) {
-	f := newPushFixture(t)
-	noEditor(t)
-
-	// Seed an unchecked entry so the harvest pre-flight reaches the
-	// editor pop — an empty followups.md now short-circuits before the
-	// $EDITOR check, which would let push succeed.
-	writeFollowups(t, f.root, f.projectID, f.runID,
-		"- [ ] `chase-it` — Chase the thing\n")
-
-	mainBefore := f.originHead()
-	stdout, stderr, code := f.runInRoot("sdlc", "push", f.projectID+"/"+f.runID)
-	if code == 0 {
-		t.Fatalf("expected non-zero exit when no editor is configured; stdout=%s stderr=%s", stdout, stderr)
-	}
-	if !strings.Contains(stderr, "no $EDITOR or $VISUAL set") {
-		t.Errorf("expected editor-missing error in stderr, got: %s", stderr)
-	}
-	if got := f.originHead(); got != mainBefore {
-		t.Fatalf("origin/main must not advance when push fails the editor gate: want %s, got %s", mainBefore, got)
-	}
-	if md := f.reloadRun(); md.Status != run.StatusInProgress {
-		t.Fatalf("status should remain in_progress after editor-gate failure, got %s", md.Status)
-	}
-}
-
 func TestCascadePushHarvestsFollowupsWithoutEditor(t *testing.T) {
 	f := newPushFixture(t)
 	noEditor(t)
@@ -939,7 +905,6 @@ func TestCascadePushHarvestsFollowupsWithoutEditor(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code, err := runPushTypedWithOptions("sdlc", []string{f.projectID + "/" + f.runID}, pushRunOptions{
 		HeadlessRecovery: true,
-		SkipTerminalEdit: true,
 	}, &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("runPushTypedWithOptions error: %v", err)
@@ -981,7 +946,6 @@ func TestCascadePushStampsConsentOnMergeRecord(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	code, err := runPushTypedWithOptions("sdlc", []string{f.projectID + "/" + f.runID}, pushRunOptions{
 		HeadlessRecovery: true,
-		SkipTerminalEdit: true,
 	}, &stdout, &stderr)
 	if err != nil {
 		t.Fatalf("runPushTypedWithOptions error: %v", err)
@@ -2050,7 +2014,7 @@ func TestPushSynthesisDispatchesHeadlessStage(t *testing.T) {
 	if capturedOpts.Model != "" {
 		t.Errorf("Model: want empty agent default, got %q", capturedOpts.Model)
 	}
-	if capturedOpts.TaggedFollowupsOnExit || capturedOpts.HarvestOnExit {
+	if capturedOpts.HarvestOnExit {
 		t.Error("push synthesis must not trigger session-end harvest")
 	}
 }

@@ -124,7 +124,7 @@ func TestSweepLandsOnlyMachineMarkedCommits(t *testing.T) {
 		"  The idea canvas is the only promotion seed.",
 		"",
 	}, "\n"))
-	if err := harvestFollowups(root, "moe", source.ID, "sdlc", true); err != nil {
+	if err := harvestFollowups(root, "moe", source.ID, "sdlc"); err != nil {
 		t.Fatalf("harvestFollowups: %v", err)
 	}
 	if err := run.StageAndCommit(root, "test: land harvested audit line", run.FollowupsPath("moe", source.ID)); err != nil {
@@ -341,7 +341,7 @@ func TestCloseStampsConsentOnlyInsideAWalk(t *testing.T) {
 			}
 			var errb bytes.Buffer
 			if err := closeRunInProcess(root, "sdlc", reg.subject, reg.cleanup,
-				"tele", "close-me", true /*skipEdit*/, &errb); err != nil {
+				"tele", "close-me", &errb); err != nil {
 				t.Fatalf("close: %v stderr=%q", err, errb.String())
 			}
 			tip, err := git.HEAD(root)

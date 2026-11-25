@@ -95,17 +95,8 @@ func closeCommand(workflow, subject string, cleanup closeCleanup) *Command {
 func runClose(workflow, subject string, cleanup closeCleanup, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(workflow+" close", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	// --no-edit skips the followups and feedback editors (idiom from
-	// `git commit --no-edit`). Harvest still reads the files on disk.
-	noEdit := fs.Bool("no-edit", false, "skip the followups and feedback editor steps (harvest the files as-is)")
 	fs.Usage = func() {
-		if isCaptureWorkflow(workflow) {
-			// Capture closes skip harvesting, so --no-edit is inert.
-			moePrintf(stderr, "usage: moe %s close <project>/<run>\n", workflow)
-		} else {
-			moePrintf(stderr, "usage: moe %s close [--no-edit] <project>/<run>\n", workflow)
-			fs.PrintDefaults()
-		}
+		moePrintf(stderr, "usage: moe %s close <project>/<run>\n", workflow)
 	}
 	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
 		return 2
@@ -141,7 +132,7 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 	}
 	defer releaseRun()
 
-	if err := closeRunInProcess(root, workflow, subject, cleanup, projectID, runID, *noEdit, stderr); err != nil {
+	if err := closeRunInProcess(root, workflow, subject, cleanup, projectID, runID, stderr); err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
@@ -160,23 +151,22 @@ func runClose(workflow, subject string, cleanup closeCleanup, args []string, std
 // State-rooted refusals (wrong workflow, pushed, already-terminal) come
 // back as *runopen.NotClosableError so serve can answer 409; the
 // canvas-empty gate and any IO/commit failure come back as plain errors
-// (serve answers 500). skipEdit threads to enterTerminal's harvest
-// pre-flight: serve always passes true since it can't host $EDITOR.
-func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, projectID, runID string, skipEdit bool, stderr io.Writer, extraTrailers ...trailers.Block) error {
-	return closeRunPrepared(root, workflow, subject, cleanup, nil, projectID, runID, skipEdit, stderr, extraTrailers...)
+// (serve answers 500).
+func closeRunInProcess(root, workflow, subject string, cleanup closeCleanup, projectID, runID string, stderr io.Writer, extraTrailers ...trailers.Block) error {
+	return closeRunPrepared(root, workflow, subject, cleanup, nil, projectID, runID, stderr, extraTrailers...)
 }
 
 // prepare contributes journal content (pulse's stamp), never resource cleanup.
-func closeRunPrepared(root, workflow, subject string, cleanup, prepare closeCleanup, projectID, runID string, skipEdit bool, stderr io.Writer, extraTrailers ...trailers.Block) error {
+func closeRunPrepared(root, workflow, subject string, cleanup, prepare closeCleanup, projectID, runID string, stderr io.Writer, extraTrailers ...trailers.Block) error {
 	release, err := ownRun(root, projectID, runID, false)
 	if err != nil {
 		return err
 	}
 	defer release()
-	return closeRunPreparedOwned(heldRun(root, projectID, runID), root, workflow, subject, cleanup, prepare, projectID, runID, skipEdit, stderr, extraTrailers...)
+	return closeRunPreparedOwned(heldRun(root, projectID, runID), root, workflow, subject, cleanup, prepare, projectID, runID, stderr, extraTrailers...)
 }
 
-func closeRunPreparedOwned(owner *runowner.Handle, root, workflow, subject string, cleanup, prepare closeCleanup, projectID, runID string, skipEdit bool, stderr io.Writer, extraTrailers ...trailers.Block) error {
+func closeRunPreparedOwned(owner *runowner.Handle, root, workflow, subject string, cleanup, prepare closeCleanup, projectID, runID string, stderr io.Writer, extraTrailers ...trailers.Block) error {
 	if owner == nil || !owner.Owns(root, projectID, runID) {
 		return fmt.Errorf("close requires held run ownership")
 	}
@@ -193,13 +183,10 @@ func closeRunPreparedOwned(owner *runowner.Handle, root, workflow, subject strin
 	err := repolock.With(root, repolock.Options{
 		Purpose: workflow + "-close",
 		Run:     projectID + "/" + runID,
-		// enterTerminal harvests, and an interactive harvest pops
-		// $EDITOR inside this window — an unbounded wait on the
-		// operator. Without the heartbeat the holder reads as stale
-		// after StaleThreshold and the next acquirer takes the lock out
-		// from under the review. Most journal windows dropped the
-		// heartbeat when the push left; this is one of the few that
-		// can still sit.
+		// enterTerminal harvests, one commit per created idea and
+		// lore file, then the cleanup runs. A long harvest can outlast
+		// StaleThreshold; without the heartbeat the next acquirer
+		// would take the lock out from under it.
 		Heartbeat: true,
 	}, func() error {
 		if err := requireProject(root, projectID); err != nil {
@@ -313,7 +300,7 @@ func closeRunPreparedOwned(owner *runowner.Handle, root, workflow, subject strin
 			return err
 		}
 
-		paths, err := enterTerminalPrepared(root, md, run.StatusClosed, skipEdit, prepare)
+		paths, err := enterTerminalPrepared(root, md, run.StatusClosed, prepare)
 		if err != nil {
 			return err
 		}

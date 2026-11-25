@@ -29,18 +29,6 @@ import (
 // validatePromoteTag accepts only staged, chainable workflows, and
 // there is no twin workflow to name.
 
-// twinFeedbackHeader is the editor-pop banner auto-injected onto
-// feedback/twin.md before $EDITOR opens. Third of the trio with
-// followupsHeader and loreHeader, same convention: HTML comment,
-// file-specific phrasing, closing "remove freely" line.
-const twinFeedbackHeader = `<!--
-feedback/twin.md — digital-twin edits spotted this run but left undone.
-Save this file to spin each unchecked ` + "`- [ ]`" + ` entry into a new idea
-run. Delete the line to skip. Lines marked ` + "`- [x]`" + ` are already
-promoted; leave them alone.
-This header is auto-injected on editor pop; remove it freely.
--->`
-
 // parsedTwinNote is one harvest candidate plucked from feedback/twin.md.
 type parsedTwinNote struct {
 	lineIdx   int
@@ -92,15 +80,14 @@ func twinNoteProvenance(projectID, runID string) string {
 
 // harvestTwinFeedback is the twin counterpart of harvestFollowups.
 // Same flow, same idempotency, same destination (an idea run) — the
-// only differences are the header, the provenance line prepended to
+// only differences are the provenance line prepended to
 // each seed canvas, and the narrower slug grammar.
-func harvestTwinFeedback(root, projectID, runID, workflow string, skipEdit bool) error {
+func harvestTwinFeedback(root, projectID, runID, workflow string) error {
 	relPath := run.FeedbackPath(projectID, runID, "twin")
 	openTrailers := trailers.Block{FromRun: projectID + "/" + runID, Consent: walkConsent()}
 
 	spec := scratchHarvestSpec[parsedTwinNote]{
 		relPath:         relPath,
-		header:          twinFeedbackHeader,
 		progressSubject: fmt.Sprintf("harvest: capture twin observations for %s/%s", projectID, runID),
 		writeErrPrefix:  "create idea",
 		parse: func(body []byte) ([]string, []scratchItem[parsedTwinNote], error) {
@@ -126,5 +113,5 @@ func harvestTwinFeedback(root, projectID, runID, workflow string, skipEdit bool)
 			return md.ID, nil
 		},
 	}
-	return harvestScratchTyped(root, projectID, runID, workflow, skipEdit, spec)
+	return harvestScratchTyped(root, projectID, runID, workflow, spec)
 }

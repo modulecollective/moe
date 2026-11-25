@@ -21,7 +21,7 @@ func TestWorkflowCloseCommitFailureRetainsSourceAndEnvironment(t *testing.T) {
 			allow := failCommits(t, root)
 			defer allow()
 			var log bytes.Buffer
-			if code := Run([]string{workflow, "close", "--no-edit", "tele/finish"}, &log, &log); code == 0 {
+			if code := Run([]string{workflow, "close", "tele/finish"}, &log, &log); code == 0 {
 				t.Fatalf("commit unexpectedly succeeded: %s", &log)
 			}
 			resources.assertRetained(t)
@@ -48,7 +48,7 @@ func TestWorkflowCloseTeardownFailureKeepsTerminalTruthAndCache(t *testing.T) {
 			gittest.Run(t, root, "add", script)
 			gittest.Run(t, root, "commit", "-m", "test: fail resource teardown")
 			var log bytes.Buffer
-			if code := Run([]string{workflow, "close", "--no-edit", "tele/finish"}, &log, &log); code != 1 {
+			if code := Run([]string{workflow, "close", "tele/finish"}, &log, &log); code != 1 {
 				t.Fatalf("cleanup failure exit=%d: %s", code, &log)
 			}
 			if !strings.Contains(log.String(), "is closed; cleanup failed") {

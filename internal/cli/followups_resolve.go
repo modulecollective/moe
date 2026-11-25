@@ -8,18 +8,17 @@ import (
 	"strings"
 
 	"github.com/modulecollective/moe/internal/git"
-	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
-// resolveFollowup is shared by early, manual and terminal extraction. Untagged
-// captures keep ordinary allocation; tagged captures have stable retry identity.
+// resolveFollowup is shared by turn-end, manual and terminal extraction.
+// Every entry, tagged or not, has stable retry identity: a receipt from an
+// earlier attempt wins, then a live owner under the same slug, and only
+// then a new idea carrying the receipt. Harvest runs after every
+// successful turn, so without the receipt a retry after a partial failure
+// would mint a `-2` duplicate.
 func resolveFollowup(root, sourceProject, sourceRun string, fu parsedFollowup, body string, tr trailers.Block) (md *run.Metadata, liveLink bool, err error) {
-	if fu.promoteTo == "" {
-		md, err = createIdea(root, fu.project, fu.slug, body, fu.promoteTo, tr)
-		return md, false, err
-	}
 	key := sourceProject + "/" + sourceRun + "/" + fu.project + "/" + fu.slug
 	p, id, err := run.FollowupDestination(root, key)
 	if err != nil {
@@ -56,39 +55,10 @@ func resolveFollowup(root, sourceProject, sourceRun string, fu parsedFollowup, b
 	return md, false, err
 }
 
-// harvestTaggedFollowups takes a fresh short lock after session settlement.
-// It never reads or stages the feedback channels or changes the source status.
-func harvestTaggedFollowups(root string, md *run.Metadata) error {
-	return repolock.With(root, repolock.Options{Purpose: "sdlc-tagged-followups", Run: md.Project + "/" + md.ID}, func() error {
-		rel := run.FollowupsPath(md.Project, md.ID)
-		dirty, err := dirtyOutsidePaths(root, rel)
-		if err != nil {
-			return err
-		}
-		if dirty {
-			return errors.New("working tree has uncommitted changes outside followups.md; commit or stash first")
-		}
-		if err := harvestFollowupsMode(root, md.Project, md.ID, md.Workflow, true, true); err != nil {
-			return err
-		}
-		if _, err := os.Stat(filepath.Join(root, rel)); os.IsNotExist(err) {
-			return nil
-		} else if err != nil {
-			return err
-		}
-		msg := fmt.Sprintf("harvest: capture tagged follow-ups for %s/%s\n\n", md.Project, md.ID) +
-			trailers.Block{Project: md.Project, Run: md.ID, Workflow: md.Workflow, Consent: walkConsent()}.String()
-		if err := run.StageAndCommit(root, msg, rel); err != nil && !errors.Is(err, run.ErrNothingToCommit) {
-			return err
-		}
-		return nil
-	})
-}
-
 // A live-owner link has no idea-open receipt. Commit it before returning;
 // on failure restore the unchecked source and its original index entry so
 // retry re-judges the owner. Created ideas retain their own durable receipts.
-func commitTaggedFollowupAudit(root, projectID, runID, workflow string, lines []string) error {
+func commitFollowupAudit(root, projectID, runID, workflow string, lines []string) error {
 	rel := run.FollowupsPath(projectID, runID)
 	abs := filepath.Join(root, rel)
 	before, err := os.ReadFile(abs)
@@ -106,7 +76,7 @@ func commitTaggedFollowupAudit(root, projectID, runID, workflow string, lines []
 	if err := os.WriteFile(abs, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
 		return err
 	}
-	msg := fmt.Sprintf("harvest: capture tagged follow-ups for %s/%s\n\n", projectID, runID) +
+	msg := fmt.Sprintf("harvest: link follow-up to its live owner for %s/%s\n\n", projectID, runID) +
 		trailers.Block{Project: projectID, Run: runID, Workflow: workflow, Consent: walkConsent()}.String()
 	err = run.Stage(root, rel)
 	if err == nil {

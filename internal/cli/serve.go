@@ -183,9 +183,7 @@ func serveOptions(root string, stderr io.Writer) serve.Options {
 		GatherRunTraces: func(project, runID string) (serve.RunTraces, error) {
 			return GatherRunTraces(root, project, runID)
 		},
-		// serve can't host $EDITOR inside an HTTP POST, so close runs
-		// with --no-edit semantics (skipEdit=true): harvest the
-		// feedback files as they sit on disk. Dispatch is by the
+		// Close harvests the feedback files as they sit on disk. Dispatch is by the
 		// run's own workflow through the close registry — the same
 		// (subject, cleanup) pair `moe <workflow> close` registered —
 		// so the in-process path and the CLI verb stay one pipeline.
@@ -221,7 +219,7 @@ func serveOptions(root string, stderr io.Writer) serve.Options {
 						return nil
 					}
 					return releaseRunWorkspace(h, md)
-				}, nil, project, runID, true, stderr)
+				}, nil, project, runID, stderr)
 		},
 		// The workflow registries are init-time static, so the serve UI
 		// declarations cross the seam as a lookup plus a precomputed

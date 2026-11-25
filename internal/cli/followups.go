@@ -2,10 +2,7 @@ package cli
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
 	"regexp"
-	"slices"
 	"strings"
 
 	"github.com/modulecollective/moe/internal/git"
@@ -14,8 +11,9 @@ import (
 	"github.com/modulecollective/moe/internal/trailers"
 )
 
-// followups.md is the run-scoped scratch file harvested into the idea queue,
-// at session end for tagged SDLC work or through the full harvest.
+// followups.md is the run-scoped scratch file harvested into the idea queue
+// when a stage turn ends, at a terminal transition, or by `moe <workflow>
+// harvest`.
 // Format (matching designs/follow-up-ideas):
 //
 //	# Follow-ups
@@ -33,20 +31,6 @@ import (
 // between paragraphs) rides into the new idea's seed canvas under the
 // title H1. Already-checked lines are pass-through, which makes a
 // retry after a partial-failure idempotent.
-
-// followupsHeader is the editor-pop banner auto-injected onto
-// followups.md before $EDITOR opens. Companion to loreHeader in
-// lore.go — both follow the convention described above
-// injectEditorPopHeader: HTML comment (invisible in any markdown
-// renderer), file-specific phrasing for what the gesture does, and a
-// closing "remove freely" line so the operator can silence it.
-const followupsHeader = `<!--
-followups.md — out-of-scope items captured this run.
-Save this file to extract each unchecked ` + "`- [ ]`" + ` entry into the idea
-queue. Tagged entries may link an existing owner. Delete the line to skip.
-Lines marked ` + "`- [x]`" + ` are already extracted; leave them alone.
-This header is auto-injected on editor pop; remove it freely.
--->`
 
 // followupOpenRE matches an unchecked entry. Captures the indent + box
 // prefix (group 1), the slug (group 2), the optional promotion workflow
@@ -84,14 +68,6 @@ var followupDoneRE = regexp.MustCompile(`^\s*-\s+\[[xX]\]`)
 // back out of them to link each promoted entry to where it landed.
 // Kept beside its sibling so the two stay one grammar.
 var followupDoneCaptureRE = regexp.MustCompile("^(\\s*-\\s+\\[[xX]\\]\\s+)`((?:_cabinet/[a-z0-9][a-z0-9-]*|[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)?))`(?:\\s+\\(([a-z0-9][a-z0-9-]*)\\))?\\s+—\\s*(.*?)\\s*$")
-
-// followupUncheckedShapeRE detects any line whose shape suggests an
-// unchecked follow-up, malformed or not. The pop-the-editor gate uses
-// this as its trigger — anything that looks like an open item is worth
-// the operator's review, even if parseFollowups would later reject it.
-// Validation is still parseFollowups's job; this is intentionally a
-// strictly looser predicate.
-var followupUncheckedShapeRE = regexp.MustCompile(`^\s*-\s+\[\s\]`)
 
 // parsedFollowup is one harvest candidate plucked from followups.md.
 type parsedFollowup struct {
@@ -245,15 +221,12 @@ func markHarvested(line, baseSlug, resolvedSlug string) (string, bool) {
 // runClose for non-idea workflows. Caller holds the bureaucracy lock.
 //
 // Steps, on the happy path:
-//  1. If !skipEdit and the on-disk file has at least one unchecked
-//     entry, open followups.md in $EDITOR for operator review. An
-//     absent / header-only / all-`[x]` file skips the pop entirely —
-//     there's nothing to review and nothing to fan out.
-//  2. Read and parse the file. Empty/absent file is a no-op.
-//  3. For each unchecked entry, call createIdea (which writes its own
-//     open-run commit). Track the resolved slug so the line can be
-//     rewritten as `- [x]`.
-//  4. After every entry succeeds, write the updated followups.md to
+//  1. Read and parse the file. Empty/absent file is a no-op.
+//  2. For each unchecked entry, resolve it (resolveFollowup: a receipt
+//     from an earlier attempt, a live owner under the same slug, or a
+//     new idea with its own open-run commit). Track the resolved slug so
+//     the line can be rewritten as `- [x]`.
+//  3. After every entry succeeds, write the updated followups.md to
 //     disk. The caller stages it alongside run.json on the close commit.
 //
 // Partial failure (a createIdea call mid-batch returns non-nil): the
@@ -261,12 +234,9 @@ func markHarvested(line, baseSlug, resolvedSlug string) (string, bool) {
 // succeed, then returns the original error. The run stays in_progress;
 // requireCleanTree on the next attempt is satisfied because the
 // progress commit took the dirty file with it.
-func harvestFollowups(root, projectID, runID, workflow string, skipEdit bool) error {
-	return harvestFollowupsMode(root, projectID, runID, workflow, skipEdit, false)
-}
-
+//
 // Caller holds the repository lock for both resolution and audit writing.
-func harvestFollowupsMode(root, projectID, runID, workflow string, skipEdit, taggedOnly bool) error {
+func harvestFollowups(root, projectID, runID, workflow string) error {
 	relPath := run.FollowupsPath(projectID, runID)
 	// enterTerminal harvests on every close and merge, so these idea
 	// opens land inside a ride's window as often as they land under an
@@ -277,16 +247,12 @@ func harvestFollowupsMode(root, projectID, runID, workflow string, skipEdit, tag
 
 	spec := scratchHarvestSpec[parsedFollowup]{
 		relPath:         relPath,
-		header:          followupsHeader,
 		progressSubject: fmt.Sprintf("harvest: capture follow-ups for %s/%s", projectID, runID),
 		writeErrPrefix:  "create idea",
 		parse: func(body []byte) ([]string, []scratchItem[parsedFollowup], error) {
 			lines, todo, err := parseFollowups(body, projectID)
 			if err != nil {
 				return nil, nil, err
-			}
-			if taggedOnly {
-				todo = slices.DeleteFunc(todo, func(fu parsedFollowup) bool { return fu.promoteTo == "" })
 			}
 			// Validation is upfront and total (the harvest's contract):
 			// reject an unknown target project before any idea is
@@ -346,87 +312,10 @@ func harvestFollowupsMode(root, projectID, runID, workflow string, skipEdit, tag
 			if !liveLink {
 				return nil
 			}
-			return commitTaggedFollowupAudit(root, projectID, runID, workflow, lines)
+			return commitFollowupAudit(root, projectID, runID, workflow, lines)
 		},
 	}
-	return harvestScratchTyped(root, projectID, runID, workflow, skipEdit, spec)
-}
-
-// hasUncheckedEntry reports whether absPath contains any line whose
-// shape matches an open follow-up (`- [ ] ...`). It's a deliberately
-// loose check: malformed open lines (missing slug, wrong dash) also
-// trigger a true so the operator gets the chance to fix them in
-// $EDITOR rather than hit a parse error after the pop was skipped.
-//
-// Absent file (the common case at close time when the agent appended
-// nothing) and read errors below the IsNotExist line both return
-// false: there's no review to do, so the harvest can fall through to
-// the parser's empty-file no-op path.
-func hasUncheckedEntry(absPath string) bool {
-	body, err := os.ReadFile(absPath)
-	if err != nil {
-		return false
-	}
-	return slices.ContainsFunc(strings.Split(string(body), "\n"), followupUncheckedShapeRE.MatchString)
-}
-
-// injectEditorPopHeader prepends headerText to absPath if the file
-// doesn't already start with an HTML comment. The header explains the
-// editor pop's gesture (save-to-promote, delete-to-skip) in-place so
-// the operator doesn't have to remember context across stage outputs.
-//
-// Idempotent on the no-op-when-present check: if the operator removed
-// the comment mid-edit, the next pop on the next close will re-inject
-// — useful when months go by between encounters with a rarely-touched
-// bucket. Absent file is also a no-op; the caller's
-// hasUncheckedEntry gate keeps us off the inject path when there's
-// nothing to review.
-func injectEditorPopHeader(absPath, headerText string) error {
-	body, err := os.ReadFile(absPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("read %s: %w", absPath, err)
-	}
-	// Skip leading blank lines when looking for an existing comment —
-	// the operator might have added a blank line above a previous
-	// header without realising.
-	trimmed := strings.TrimLeft(string(body), "\n")
-	if strings.HasPrefix(trimmed, "<!--") {
-		return nil
-	}
-	out := headerText
-	if !strings.HasSuffix(out, "\n") {
-		out += "\n"
-	}
-	if len(body) > 0 {
-		out += "\n"
-		out += string(body)
-	}
-	return os.WriteFile(absPath, []byte(out), 0o644)
-}
-
-// launchEditorOrFail mirrors launchEditor but returns an error rather
-// than printing-and-exiting, so the caller can wrap context. Editor
-// gating ($EDITOR/$VISUAL) is enforced upstream by the close handler.
-func launchEditorOrFail(path string) error {
-	editor := os.Getenv("VISUAL")
-	if editor == "" {
-		editor = os.Getenv("EDITOR")
-	}
-	if editor == "" {
-		return fmt.Errorf("no $EDITOR or $VISUAL set; pass --no-edit to skip the editor step")
-	}
-	// $1 (not string interp) keeps paths with spaces/quotes/`;` shell-safe — don't collapse.
-	cmd := exec.Command("sh", "-c", editor+` "$1"`, "sh", path)
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("editor exited: %w", err)
-	}
-	return nil
+	return harvestScratchTyped(root, projectID, runID, workflow, spec)
 }
 
 // dirtyOutsidePaths returns true if the working tree has uncommitted

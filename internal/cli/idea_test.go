@@ -1228,7 +1228,7 @@ func reopenFixture(t *testing.T, projectID, ideaSlug, destStatus string) (root, 
 	case run.StatusClosed:
 		// `sdlc close` on the destination is the natural way to
 		// produce the precondition the reopen verb is built for.
-		if code := Run([]string{"sdlc", "close", "--no-edit", projectID + "/" + destSlug}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+		if code := Run([]string{"sdlc", "close", projectID + "/" + destSlug}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
 			t.Fatalf("setup close destination failed")
 		}
 	case run.StatusInProgress:

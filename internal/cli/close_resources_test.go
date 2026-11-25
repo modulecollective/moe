@@ -147,7 +147,7 @@ func TestWorkflowCloseReleasesResources(t *testing.T) {
 					gittest.Run(t, root, "commit", "-m", "test: fail if teardown runs without cache")
 				}
 				var log bytes.Buffer
-				code := Run([]string{workflow, "close", "--no-edit", "tele/finish"}, &log, &log)
+				code := Run([]string{workflow, "close", "tele/finish"}, &log, &log)
 				if state == "no-cache" {
 					if code != 1 || !strings.Contains(log.String(), "original owned cache missing") {
 						t.Fatalf("missing allocated cache was not held: %d %s", code, &log)
@@ -217,7 +217,7 @@ func TestWorkflowClosePreservesReservedResources(t *testing.T) {
 			}
 			defer stop()
 			var log bytes.Buffer
-			if code := Run([]string{workflow, "close", "--no-edit", "tele/finish"}, &log, &log); code == 0 || !strings.Contains(log.String(), "session/") {
+			if code := Run([]string{workflow, "close", "tele/finish"}, &log, &log); code == 0 || !strings.Contains(log.String(), "session/") {
 				t.Fatalf("reserved close exit=%d: %s", code, &log)
 			}
 			resources.assertRetained(t)
@@ -534,7 +534,7 @@ printf '{"type":"user","message":{"role":"user","content":"conversation survives
 			t.Fatal("reopen reused released dev root")
 		}
 		previousRoot = owned
-		if code := Run([]string{"chat", "close", "--no-edit", "tele/ponder"}, &log, &log); code != 0 {
+		if code := Run([]string{"chat", "close", "tele/ponder"}, &log, &log); code != 0 {
 			t.Fatalf("chat close exit=%d: %s", code, &log)
 		}
 		(closeResources{clone, owned, filepath.Join(parent, "teardown"), filepath.Join(parent, "sibling")}).assertReleased(t)
@@ -571,7 +571,7 @@ func TestWorkflowCloseKeepsNamedWorkspaceWarm(t *testing.T) {
 				t.Fatal(err)
 			}
 			var log bytes.Buffer
-			if code := Run([]string{workflow, "close", "--no-edit", "tele/fix-it"}, &log, &log); code != 0 {
+			if code := Run([]string{workflow, "close", "tele/fix-it"}, &log, &log); code != 0 {
 				t.Fatalf("close exit=%d: %s", code, &log)
 			}
 			if _, err := os.Stat(env["TEST_CLOSE_ROOT"]); err != nil {

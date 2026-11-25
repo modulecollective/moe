@@ -398,7 +398,7 @@ func openSdlcDesign(projectID, runID string, headless bool, agentOverride string
 	return runStageSession(projectID, runID, "design",
 		stageSessionOpts{
 			ValidateEntry:          sdlcSessionEntry,
-			TaggedFollowupsOnExit:  true,
+			HarvestOnExit:          true,
 			NeedsSandbox:           true,
 			EnforceSandboxBoundary: true,
 			Headless:               headless,
@@ -430,12 +430,12 @@ func openSdlcBuild(projectID, runID string, headless bool, agentOverride string,
 	}
 	return runStageSession(projectID, runID, "build",
 		stageSessionOpts{
-			ValidateEntry:         sdlcSessionEntry,
-			TaggedFollowupsOnExit: true,
-			NeedsSandbox:          true,
-			Headless:              headless,
-			Agent:                 agentOverride,
-			ExtraStagePaths:       stageCommitPathsPresent,
+			ValidateEntry:   sdlcSessionEntry,
+			HarvestOnExit:   true,
+			NeedsSandbox:    true,
+			Headless:        headless,
+			Agent:           agentOverride,
+			ExtraStagePaths: stageCommitPathsPresent,
 		}, stdout, stderr)
 }
 
@@ -456,7 +456,7 @@ func openSdlcReview(projectID, runID string, headless bool, agentOverride string
 	return runStageSession(projectID, runID, "review",
 		stageSessionOpts{
 			ValidateEntry:          sdlcSessionEntry,
-			TaggedFollowupsOnExit:  true,
+			HarvestOnExit:          true,
 			NeedsSandbox:           true,
 			EnforceSandboxBoundary: true,
 			BoundaryAllowsCommits:  true,

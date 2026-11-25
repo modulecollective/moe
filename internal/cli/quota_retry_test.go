@@ -285,7 +285,7 @@ func TestQuotaRetryAggregationAndObservedTokens(t *testing.T) {
 	// Force the operator edit into the retry event's exact second. A
 	// restarted gate has no cursor and must compare commits, not dates.
 	when := strings.TrimSpace(gittest.Output(t, root, "log", "-1", "--format=%cI", "--grep", "^MoE-Quota-Retry:"))
-	gittest.RunWithEnv(t, root, []string{"GIT_COMMITTER_DATE=" + when, "GIT_AUTHOR_DATE=" + when}, "commit", "--amend", "--no-edit", "--date="+when)
+	gittest.RunWithEnv(t, root, []string{"GIT_COMMITTER_DATE=" + when, "GIT_AUTHOR_DATE=" + when}, "commit", "--amend", "--date="+when)
 	if got := dueProjectsPastTheWindow(t, newHeartbeatGate(root)); len(got) != 1 {
 		t.Fatalf("restart swallowed a same-second edit: %v", got)
 	}

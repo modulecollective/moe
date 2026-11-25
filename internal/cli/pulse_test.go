@@ -578,8 +578,8 @@ func TestPulseSurveyAllowsConcurrentRuns(t *testing.T) {
 // TestPulseSurveyAutoClosesOnSuccess: a clean (exit 0) survey auto-closes
 // its own run so no pulse run is left lingering on the dash. The stubbed
 // agent turn files one followup, so the assertion also pins that the
-// skipEdit auto-close harvests filings into ideas (review moves from a
-// $EDITOR prune at close to scrapping on the dash).
+// auto-close harvests filings into ideas (review is scrapping on the
+// dash).
 func TestPulseSurveyAutoClosesOnSuccess(t *testing.T) {
 	root := newTestBureaucracy(t)
 	markBureaucracy(t, root)
@@ -783,7 +783,7 @@ func taggedFollowupGroomAndKick(t *testing.T, park string) {
 		"  The idea canvas is the only promotion seed.",
 		"",
 	}, "\n"))
-	if err := harvestFollowups(root, "moe", source.ID, "sdlc", true); err != nil {
+	if err := harvestFollowups(root, "moe", source.ID, "sdlc"); err != nil {
 		t.Fatalf("harvestFollowups: %v", err)
 	}
 	if err := run.StageAndCommit(root, "test: land harvested audit line", run.FollowupsPath("moe", source.ID)); err != nil {

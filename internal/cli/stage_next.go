@@ -732,8 +732,7 @@ func promptPushNextStage(next *Command, back []*Command, scuttle *Command, root 
 		return next.Run([]string{"--merge", md.Project + "/" + md.ID}, stdout, stderr)
 	case "!!", "!!!":
 		// `!!` at the push gate uses the typed cascade push path, not
-		// Command.Run: cascade harvest is --no-edit even though manual
-		// `m` keeps the editor pop. `!!!` once also rode a chain; it stays
+		// Command.Run. `!!!` once also rode a chain; it stays
 		// a synonym so old muscle memory ships instead of declining.
 		return promptPushCascadeShip(md, stdout, stderr)
 	case "p":
@@ -1232,8 +1231,7 @@ func stageNominatedClose(root string, md *run.Metadata, stage string) bool {
 }
 
 // closeNominatedRun closes md through its workflow's registered close
-// command — the same `--no-edit` dispatch the cascade's auto-close
-// uses, so a nominated close and an operator's `moe sdlc close` land
+// command — the same dispatch the cascade's auto-close uses, so a nominated close and an operator's `moe sdlc close` land
 // identical commits and cleanup.
 //
 // A failing close warns and leaves the run open, propagating the exit
@@ -1252,7 +1250,7 @@ func closeNominatedRun(md *run.Metadata, stage string, stdout, stderr io.Writer)
 		return 1
 	}
 	moePrintf(stdout, "%s nominated close: the run is moot — closing it.\n", stage)
-	if code := closeCmd.Run([]string{"--no-edit", md.Project + "/" + md.ID}, stdout, stderr); code != 0 {
+	if code := closeCmd.Run([]string{md.Project + "/" + md.ID}, stdout, stderr); code != 0 {
 		moePrintf(stderr, "warn: close failed (exit %d); %s/%s left open\n", code, md.Project, md.ID)
 		return code
 	}
@@ -1304,7 +1302,6 @@ func cascadeShipStep(workflow string, md *run.Metadata, stdout, stderr io.Writer
 		// first attempt and on the retry after recovery alike.
 		ship, err := pushFromCascade(workflow, []string{md.Project + "/" + md.ID}, pushRunOptions{
 			HeadlessRecovery: true,
-			SkipTerminalEdit: true,
 		}, stdout, stderr)
 		if deferred, ok := errors.AsType[*PushDeferredError](err); ok {
 			// Record the deferred step even when a retry will follow: a

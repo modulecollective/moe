@@ -57,7 +57,7 @@ func TestSDLCCloseCommitsInPlaceLoreAmendment(t *testing.T) {
 	}, "\n"))
 
 	var out, errb bytes.Buffer
-	if code := Run([]string{"sdlc", "close", "--no-edit", "tele/repoint"}, &out, &errb); code != 0 {
+	if code := Run([]string{"sdlc", "close", "tele/repoint"}, &out, &errb); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 

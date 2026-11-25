@@ -399,7 +399,7 @@ func TestCloneShellAndCloseRefuseIndependentDebts(t *testing.T) {
 				t.Fatalf("shell debt: %d %s", code, &log)
 			}
 			log.Reset()
-			if code := Run([]string{"sdlc", "close", "--no-edit", "tele/finish"}, &log, &log); code != 1 || !strings.Contains(log.String(), want) {
+			if code := Run([]string{"sdlc", "close", "tele/finish"}, &log, &log); code != 1 || !strings.Contains(log.String(), want) {
 				t.Fatalf("close debt: %d %s", code, &log)
 			}
 			if kind == "ship" {

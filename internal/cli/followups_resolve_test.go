@@ -17,6 +17,7 @@ import (
 
 // Real SDLC callers, including directory-form build, consume this fake's
 // authored blocked canvas and mixed filings. Pulse gets an empty quiet gate.
+// Feedback files are written once, so a repeat turn sees them checked.
 const taggedFollowupAgent = `#!/bin/sh
 set -eu
 prompt=
@@ -50,8 +51,12 @@ fi
 bt=$(printf '\140')
 printf '%s\n' "- [ ] ${bt}required-fix${bt} (sdlc) — Required fix" '' '  Prerequisite for tele/design-gate. Verify the saved synthetic trace.' "- [ ] ${bt}needs-judgment${bt} — Needs judgment" '  The contract is undecided.' > "$rundir/followups.md"
 mkdir -p "$rundir/feedback"
-printf '%s\n' "- [ ] ${bt}portable-fact${bt} — Keep this fact for review" > "$rundir/feedback/lore.md"
-printf '%s\n' "- [ ] ${bt}twin-note${bt} — Keep this observation for review" > "$rundir/feedback/twin.md"
+if [ ! -f "$rundir/feedback/lore.md" ]; then
+ printf '%s\n' "- [ ] ${bt}portable-fact${bt} — Keep this fact" '' '  applies-when: a test needs a portable fact' '' '  The fact itself.' > "$rundir/feedback/lore.md"
+fi
+if [ ! -f "$rundir/feedback/twin.md" ]; then
+ printf '%s\n' "- [ ] ${bt}twin-note${bt} — Keep this observation" > "$rundir/feedback/twin.md"
+fi
 case "${MOE_TEST_TAGGED_MODE:-}" in
  fail) exit 3 ;;
  interrupt) exit 130 ;;
@@ -81,10 +86,21 @@ func taggedTurnFixture(t *testing.T) (string, *run.Metadata) {
 	return root, md
 }
 
-func TestSDLCBlockedTurnExtractsTaggedFollowups(t *testing.T) {
+// harvestTurnEnd is the harvest a successful stage turn runs on exit.
+func harvestTurnEnd(root string, md *run.Metadata) error {
+	return harvestRunInProcess(root, md.Workflow, md.Project, md.ID)
+}
+
+// TestSDLCBlockedTurnHarvestsEverything: a successful sdlc turn, blocked or
+// not, extracts every channel — tagged and untagged followups, lore and
+// twin notes — and no harvest opens an editor.
+func TestSDLCBlockedTurnHarvestsEverything(t *testing.T) {
 	for _, stage := range []string{"design", "build", "review"} {
 		t.Run(stage, func(t *testing.T) {
 			root, md := taggedTurnFixture(t)
+			// Any editor launch fails the test: no harvest pops one.
+			t.Setenv("EDITOR", "sh -c 'echo editor-ran >&2; exit 9'")
+			t.Setenv("VISUAL", "")
 			if stage != "design" {
 				writeStageCanvas(t, root, md, "design", readyDesign)
 				if stage == "review" {
@@ -109,18 +125,32 @@ func TestSDLCBlockedTurnExtractsTaggedFollowups(t *testing.T) {
 			if err != nil || !strings.Contains(string(b), "Verify the saved synthetic trace.") {
 				t.Fatalf("seed=%q, %v", b, err)
 			}
-			if _, err := run.Load(root, "tele", "needs-judgment"); err == nil {
-				t.Fatal("untagged entry extracted early")
+			if strings.Contains(out.String(), "editor-ran") {
+				t.Fatalf("a harvest opened an editor: %s", &out)
+			}
+			untagged, err := run.Load(root, "tele", "needs-judgment")
+			if err != nil || untagged.PromoteTo != "" {
+				t.Fatalf("untagged entry: %+v %v", untagged, err)
+			}
+			if p, id, err := run.FollowupDestination(root, "tele/"+md.ID+"/tele/needs-judgment"); err != nil || p != "tele" || id != "needs-judgment" {
+				t.Fatalf("untagged receipt=%s/%s %v", p, id, err)
 			}
 			audit := readFollowups(t, root, "tele", md.ID)
-			if !strings.Contains(audit, "- [x] `required-fix` (sdlc)") || !strings.Contains(audit, "- [ ] `needs-judgment`") {
+			if !strings.Contains(audit, "- [x] `required-fix` (sdlc)") || !strings.Contains(audit, "- [x] `needs-judgment`") {
 				t.Fatalf("audit=%s", audit)
 			}
 			for _, kind := range []string{"lore", "twin"} {
 				b, err := os.ReadFile(filepath.Join(root, run.FeedbackPath("tele", md.ID, kind)))
-				if err != nil || strings.Contains(string(b), "[x]") {
+				if err != nil || !strings.Contains(string(b), "[x]") {
 					t.Fatalf("feedback %s=%q, %v", kind, b, err)
 				}
+			}
+			if _, err := os.Stat(filepath.Join(root, "lore", "portable-fact.md")); err != nil {
+				t.Fatalf("lore not promoted: %v", err)
+			}
+			twin, err := os.ReadFile(filepath.Join(root, run.ContentPath("tele", "twin-note", "idea")))
+			if err != nil || !strings.Contains(string(twin), twinNoteProvenance("tele", md.ID)) {
+				t.Fatalf("twin idea=%q %v", twin, err)
 			}
 			wf, _ := LookupWorkflow("sdlc")
 			if ok, err := wf.CheckStageGate(root, md, stage); err != nil || ok {
@@ -141,7 +171,7 @@ func TestSDLCBlockedTurnExtractsTaggedFollowups(t *testing.T) {
 			}
 			openSHA := gitLog(t, root, "-1", "--format=%H", "--grep=^Open run tele/required-fix$")
 			assertCommitPaths(t, root, strings.TrimSpace(openSHA), filepath.Join(run.Dir("tele", idea.ID), "run.json"), run.ContentPath("tele", idea.ID, "idea"))
-			if paths := gitLog(t, root, "-1", "--format=", "--name-only"); strings.TrimSpace(paths) != run.FollowupsPath("tele", md.ID) {
+			if paths := gitLog(t, root, "-1", "--format=", "--name-only"); !strings.Contains(paths, run.FollowupsPath("tele", md.ID)) {
 				t.Fatalf("audit paths=%q", paths)
 			}
 			if msg := gitLog(t, root, "-1", "--format=%B"); !strings.Contains(msg, "MoE-Consent: dynamic") {
@@ -151,7 +181,7 @@ func TestSDLCBlockedTurnExtractsTaggedFollowups(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, want := range []string{"(sdlc)", "mechanical, bounded AND verifiable", "checked means extracted", "concrete evidence"} {
+			for _, want := range []string{"(sdlc)", "mechanical, bounded AND verifiable", "checked means extracted", "the pulse resumes this run"} {
 				if !strings.Contains(string(prompt), want) {
 					t.Errorf("rendered %s prompt missing %q", stage, want)
 				}
@@ -160,8 +190,10 @@ func TestSDLCBlockedTurnExtractsTaggedFollowups(t *testing.T) {
 			if code := openSdlcStage(stage, "tele", md.ID, true, &out, &out); code != 0 {
 				t.Fatalf("repeat exit %d: %s", code, &out)
 			}
-			if n := strings.Count(gitLog(t, root, "--format=%s", "--grep=^Open run tele/required-fix"), "Open run"); n != 1 {
-				t.Fatalf("repeat opened %d ideas", n)
+			for _, slug := range []string{"required-fix", "needs-judgment"} {
+				if n := strings.Count(gitLog(t, root, "--format=%s", "--grep=^Open run tele/"+slug), "Open run"); n != 1 {
+					t.Fatalf("repeat opened %d %s ideas", n, slug)
+				}
 			}
 			if st := gittest.Output(t, root, "status", "--porcelain"); st != "" {
 				t.Fatalf("dirty retry: %s", st)
@@ -180,8 +212,10 @@ func TestSDLCFailedTurnDoesNotExtract(t *testing.T) {
 			if code == 0 {
 				t.Fatalf("%s succeeded: %s", mode, &out)
 			}
-			if _, err := run.Load(root, "tele", "required-fix"); err == nil {
-				t.Fatal("failed turn extracted an idea")
+			for _, slug := range []string{"required-fix", "needs-judgment", "twin-note"} {
+				if _, err := run.Load(root, "tele", slug); err == nil {
+					t.Fatalf("failed turn extracted %s", slug)
+				}
 			}
 			if mode == "hygiene" && !strings.Contains(out.String(), "findings survived the fix turn") {
 				t.Fatalf("did not drive the hygiene recovery: %s", &out)
@@ -205,74 +239,80 @@ func TestSDLCFailedTurnDoesNotExtract(t *testing.T) {
 	}
 }
 
-func TestTaggedFollowupLiveOwners(t *testing.T) {
-	for _, tc := range []struct {
-		name                               string
-		ids                                []string
-		status, workflow, want, diagnostic string
-	}{
-		{"exact untagged idea", []string{"fix"}, run.StatusInProgress, "idea", "fix", ""},
-		{"dated pushed", []string{"fix-2026-11-20"}, run.StatusPushed, "sdlc", "fix-2026-11-20", ""},
-		{"similar prefix", []string{"fix-more"}, run.StatusInProgress, "sdlc", "fix", ""},
-		{"ambiguous", []string{"fix", "fix-2026-11-20"}, run.StatusInProgress, "sdlc", "", "ambiguous live owners"},
-		{"self", nil, "", "", "", "own source"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			root := seedCloseFixture(t, "tele", "source", "sdlc", run.StatusInProgress)
-			md, _ := run.Load(root, "tele", "source")
-			for _, id := range tc.ids {
-				trailerstest.SeedRun(t, root, "tele", id, tc.workflow, tc.status)
-			}
-			slug := "fix"
-			if tc.name == "self" {
-				slug = "source"
-			}
-			writeFollowups(t, root, "tele", "source", fmt.Sprintf("- [ ] `%s` (sdlc) — A fix\n  Required evidence.\n", slug))
-			before := gitLog(t, root, "--format=%s", "--grep=^Open run")
-			err := harvestTaggedFollowups(root, md)
-			if tc.diagnostic != "" {
-				if err == nil || !strings.Contains(err.Error(), tc.diagnostic) {
-					t.Fatalf("error=%v", err)
+func TestFollowupLiveOwners(t *testing.T) {
+	for _, tag := range []string{" (sdlc)", ""} {
+		for _, tc := range []struct {
+			name                               string
+			ids                                []string
+			status, workflow, want, diagnostic string
+		}{
+			{"exact untagged idea", []string{"fix"}, run.StatusInProgress, "idea", "fix", ""},
+			{"dated pushed", []string{"fix-2026-11-20"}, run.StatusPushed, "sdlc", "fix-2026-11-20", ""},
+			{"similar prefix", []string{"fix-more"}, run.StatusInProgress, "sdlc", "fix", ""},
+			{"ambiguous", []string{"fix", "fix-2026-11-20"}, run.StatusInProgress, "sdlc", "", "ambiguous live owners"},
+			{"self", nil, "", "", "", "own source"},
+		} {
+			t.Run(tc.name+tag, func(t *testing.T) {
+				root := seedCloseFixture(t, "tele", "source", "sdlc", run.StatusInProgress)
+				md, _ := run.Load(root, "tele", "source")
+				for _, id := range tc.ids {
+					trailerstest.SeedRun(t, root, "tele", id, tc.workflow, tc.status)
 				}
-				if !strings.Contains(readFollowups(t, root, "tele", "source"), "[ ]") {
-					t.Fatal("failed resolution marked extracted")
+				slug := "fix"
+				if tc.name == "self" {
+					slug = "source"
 				}
-				return
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !strings.Contains(readFollowups(t, root, "tele", "source"), "[x] `"+tc.want+"`") {
-				t.Fatal("wrong owner")
-			}
-			owner, err := run.Load(root, "tele", tc.want)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if tc.name != "similar prefix" {
-				if before != gitLog(t, root, "--format=%s", "--grep=^Open run") {
-					t.Fatal("reuse created a run")
+				writeFollowups(t, root, "tele", "source", fmt.Sprintf("- [ ] `%s`%s — A fix\n  Required evidence.\n", slug, tag))
+				before := gitLog(t, root, "--format=%s", "--grep=^Open run")
+				err := harvestTurnEnd(root, md)
+				if tc.diagnostic != "" {
+					if err == nil || !strings.Contains(err.Error(), tc.diagnostic) {
+						t.Fatalf("error=%v", err)
+					}
+					if !strings.Contains(readFollowups(t, root, "tele", "source"), "[ ]") {
+						t.Fatal("failed resolution marked extracted")
+					}
+					return
 				}
-				if owner.PromoteTo != "" {
-					t.Fatal("reuse changed permission")
+				if err != nil {
+					t.Fatal(err)
 				}
-			}
-		})
+				if !strings.Contains(readFollowups(t, root, "tele", "source"), "[x] `"+tc.want+"`") {
+					t.Fatal("wrong owner")
+				}
+				owner, err := run.Load(root, "tele", tc.want)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if tc.name != "similar prefix" {
+					if before != gitLog(t, root, "--format=%s", "--grep=^Open run") {
+						t.Fatal("reuse created a run")
+					}
+					if owner.PromoteTo != "" {
+						t.Fatal("reuse changed permission")
+					}
+				}
+			})
+		}
 	}
 }
 
-func TestTaggedFollowupReceiptRetry(t *testing.T) {
-	for _, state := range []string{"open", "promoted", "closed", "untagged"} {
+func TestFollowupReceiptRetry(t *testing.T) {
+	for _, state := range []string{"open", "promoted", "closed", "untagged", "untagged-entry"} {
 		t.Run(state, func(t *testing.T) {
 			root := seedCloseFixture(t, "tele", "source", "sdlc", run.StatusInProgress)
 			md, _ := run.Load(root, "tele", "source")
 			trailerstest.SeedRun(t, root, "tele", "fix", "idea", run.StatusClosed)
 			original := "- [ ] `fix` (sdlc) — A fix\n  Original contract.\n"
+			if state == "untagged-entry" {
+				// Every-turn harvest gives an untagged entry the same receipt.
+				original = "- [ ] `fix` — A fix\n  Original contract.\n"
+			}
 			writeFollowups(t, root, "tele", "source", original)
 			gittest.Run(t, root, "add", run.FollowupsPath("tele", "source"))
 			gittest.Run(t, root, "commit", "-m", "file tagged work")
-			installCreateFailureHook(t, root, `case "$(head -n 1 "$1")" in 'harvest: capture tagged'*) echo reject-audit >&2; exit 1 ;; esac`)
-			if err := harvestTaggedFollowups(root, md); err == nil || !strings.Contains(err.Error(), "reject-audit") {
+			installCreateFailureHook(t, root, `case "$(head -n 1 "$1")" in 'harvest: capture follow-ups'*) echo reject-audit >&2; exit 1 ;; esac`)
+			if err := harvestTurnEnd(root, md); err == nil || !strings.Contains(err.Error(), "reject-audit") {
 				t.Fatalf("audit failure=%v", err)
 			}
 			p, id, err := run.FollowupDestination(root, "tele/source/tele/fix")
@@ -307,7 +347,7 @@ func TestTaggedFollowupReceiptRetry(t *testing.T) {
 			trailerstest.SeedRun(t, root, "tele", "fix-2026-11-22", "sdlc", run.StatusInProgress)
 			// Edits under the same slug do not request another extraction.
 			writeFollowups(t, root, "tele", "source", strings.Replace(original, "Original contract.", "Edited prose.", 1))
-			if err := harvestTaggedFollowups(root, md); err != nil {
+			if err := harvestTurnEnd(root, md); err != nil {
 				t.Fatal(err)
 			}
 			if !strings.Contains(readFollowups(t, root, "tele", "source"), "[x] `fix-2`") {
@@ -329,7 +369,7 @@ func TestTaggedFollowupReceiptRetry(t *testing.T) {
 			// Exercise receipt resolution in full/manual and terminal harvest,
 			// rather than proving only their checked-line no-op.
 			writeFollowups(t, root, "tele", "source", original)
-			if err := harvestRunInProcess(root, "sdlc", "tele", "source", true); err != nil {
+			if err := harvestRunInProcess(root, "sdlc", "tele", "source"); err != nil {
 				t.Fatal(err)
 			}
 			if !strings.Contains(readFollowups(t, root, "tele", "source"), "[x] `fix-2`") {
@@ -337,7 +377,7 @@ func TestTaggedFollowupReceiptRetry(t *testing.T) {
 			}
 			writeFollowups(t, root, "tele", "source", original)
 			t.Setenv("MOE_HOME", root)
-			if code := Run([]string{"sdlc", "close", "--no-edit", "tele/source"}, io.Discard, io.Discard); code != 0 {
+			if code := Run([]string{"sdlc", "close", "tele/source"}, io.Discard, io.Discard); code != 0 {
 				t.Fatalf("terminal harvest exit=%d", code)
 			}
 			if !strings.Contains(readFollowups(t, root, "tele", "source"), "[x] `fix-2`") {
@@ -350,12 +390,12 @@ func TestTaggedFollowupReceiptRetry(t *testing.T) {
 	}
 }
 
-func TestTaggedFollowupCrossProjectAndReceiptErrors(t *testing.T) {
+func TestFollowupCrossProjectAndReceiptErrors(t *testing.T) {
 	root := seedCloseFixture(t, "tele", "source", "sdlc", run.StatusInProgress)
 	md, _ := run.Load(root, "tele", "source")
 	trailerstest.SeedRun(t, root, "other", "existing", "idea", run.StatusClosed)
 	writeFollowups(t, root, "tele", "source", "- [ ] `other/fix` (sdlc) — Cross-project fix\n  A bounded contract.\n")
-	if err := harvestTaggedFollowups(root, md); err != nil {
+	if err := harvestTurnEnd(root, md); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(readFollowups(t, root, "tele", "source"), "[x] `other/fix`") {
@@ -369,18 +409,18 @@ func TestTaggedFollowupCrossProjectAndReceiptErrors(t *testing.T) {
 	writeFollowups(t, root, "tele", "source", "- [ ] `other/fix` (sdlc) — Again\n")
 	gittest.Run(t, root, "rm", "-r", run.Dir("other", "fix"))
 	gittest.Run(t, root, "commit", "-m", "remove recorded destination")
-	if err := harvestRunInProcess(root, "sdlc", "tele", "source", true); err == nil || !strings.Contains(err.Error(), "missing or unreadable") {
+	if err := harvestRunInProcess(root, "sdlc", "tele", "source"); err == nil || !strings.Contains(err.Error(), "missing or unreadable") {
 		t.Fatalf("missing target=%v", err)
 	}
 }
 
-func TestTaggedFollowupReuseAuditFailure(t *testing.T) {
+func TestFollowupReuseAuditFailure(t *testing.T) {
 	root := seedCloseFixture(t, "tele", "source", "sdlc", run.StatusInProgress)
 	md, _ := run.Load(root, "tele", "source")
 	trailerstest.SeedRun(t, root, "tele", "fix", "idea", run.StatusInProgress)
 	writeFollowups(t, root, "tele", "source", "- [ ] `fix` (sdlc) — Existing owner\n")
 	installCreateFailureHook(t, root, "echo reject-audit >&2\nexit 1\n")
-	if err := harvestTaggedFollowups(root, md); err == nil {
+	if err := harvestTurnEnd(root, md); err == nil {
 		t.Fatal("failed audit reported success")
 	}
 	if got := gitLog(t, root, "--format=%s", "--grep=^Open run"); strings.Contains(got, "fix-2") {
@@ -392,7 +432,7 @@ func TestTaggedFollowupReuseAuditFailure(t *testing.T) {
 	if !strings.Contains(readFollowups(t, root, "tele", "source"), "[ ] `fix`") {
 		t.Fatal("failed link left a checked source")
 	}
-	if err := harvestTaggedFollowups(root, md); err != nil {
+	if err := harvestTurnEnd(root, md); err != nil {
 		t.Fatal(err)
 	}
 	if st := gittest.Output(t, root, "status", "--porcelain"); st != "" {
@@ -400,7 +440,7 @@ func TestTaggedFollowupReuseAuditFailure(t *testing.T) {
 	}
 }
 
-func TestTaggedFollowupDoesNotStageUnrelatedFiles(t *testing.T) {
+func TestFollowupHarvestDoesNotStageUnrelatedFiles(t *testing.T) {
 	root := seedCloseFixture(t, "tele", "source", "sdlc", run.StatusInProgress)
 	md, _ := run.Load(root, "tele", "source")
 	writeFollowups(t, root, "tele", "source", "- [ ] `fix` (sdlc) — Fix\n")
@@ -408,7 +448,7 @@ func TestTaggedFollowupDoesNotStageUnrelatedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	gittest.Run(t, root, "add", "unrelated")
-	if err := harvestTaggedFollowups(root, md); err == nil {
+	if err := harvestTurnEnd(root, md); err == nil {
 		t.Fatal("accepted unrelated staged change")
 	}
 	if got := gitLog(t, root, "-1", "--format=", "--name-only"); strings.Contains(got, "unrelated") {
@@ -416,28 +456,28 @@ func TestTaggedFollowupDoesNotStageUnrelatedFiles(t *testing.T) {
 	}
 }
 
-func TestTaggedFollowupFailedLinkRejudgesOwner(t *testing.T) {
+func TestFollowupFailedLinkRejudgesOwner(t *testing.T) {
 	for _, mode := range []string{"early", "manual", "terminal"} {
 		t.Run(mode, func(t *testing.T) {
 			root := seedCloseFixture(t, "tele", "source", "sdlc", run.StatusInProgress)
 			md, _ := run.Load(root, "tele", "source")
 			t.Setenv("MOE_HOME", root)
 			trailerstest.SeedRun(t, root, "tele", "fix", "idea", run.StatusInProgress)
-			// Earlier untagged creations must also survive a later failed link
-			// in the full harvest, without gaining the tagged receipt behavior.
+			// An earlier untagged creation must survive a later failed link:
+			// its receipt resolves it on retry rather than minting later-2.
 			original := "- [ ] `later` — Needs judgment\n  An unresolved contract.\n- [ ] `fix` (sdlc) — Existing owner\n"
 			writeFollowups(t, root, "tele", "source", original)
-			installCreateFailureHook(t, root, `case "$(head -n 1 "$1")" in 'harvest: capture tagged'*) echo reject-link >&2; exit 1 ;; esac`)
+			installCreateFailureHook(t, root, `case "$(head -n 1 "$1")" in 'harvest: link follow-up'*) echo reject-link >&2; exit 1 ;; esac`)
 			harvest := func() error {
 				if mode == "early" {
-					return harvestTaggedFollowups(root, md)
+					return harvestTurnEnd(root, md)
 				}
 				verb := "harvest"
 				if mode == "terminal" {
 					verb = "close"
 				}
 				var out bytes.Buffer
-				if code := Run([]string{"sdlc", verb, "--no-edit", "tele/source"}, &out, &out); code != 0 {
+				if code := Run([]string{"sdlc", verb, "tele/source"}, &out, &out); code != 0 {
 					return fmt.Errorf("exit %d: %s", code, &out)
 				}
 				return nil
@@ -468,7 +508,7 @@ func TestTaggedFollowupFailedLinkRejudgesOwner(t *testing.T) {
 	}
 }
 
-func TestTaggedFollowupFailedLinkPreservesSourceIndex(t *testing.T) {
+func TestFollowupFailedLinkPreservesSourceIndex(t *testing.T) {
 	root := seedCloseFixture(t, "tele", "source", "sdlc", run.StatusInProgress)
 	md, _ := run.Load(root, "tele", "source")
 	trailerstest.SeedRun(t, root, "tele", "fix", "idea", run.StatusInProgress)
@@ -481,7 +521,7 @@ func TestTaggedFollowupFailedLinkPreservesSourceIndex(t *testing.T) {
 	gittest.Run(t, root, "add", rel)
 	writeFollowups(t, root, "tele", "source", working)
 	installCreateFailureHook(t, root, "echo reject-link >&2\nexit 1\n")
-	if err := harvestTaggedFollowups(root, md); err == nil {
+	if err := harvestTurnEnd(root, md); err == nil {
 		t.Fatal("failed audit reported success")
 	}
 	if got := gittest.Output(t, root, "show", ":"+rel); got != strings.TrimSpace(staged) {

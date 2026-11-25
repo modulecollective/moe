@@ -55,7 +55,7 @@ func TestHarvestTwinFeedbackMintsIdea(t *testing.T) {
 	}, "\n"))
 
 	var out, errb bytes.Buffer
-	if code := Run([]string{"sdlc", "harvest", "--no-edit", "tele/ship-it"}, &out, &errb); code != 0 {
+	if code := Run([]string{"sdlc", "harvest", "tele/ship-it"}, &out, &errb); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 
@@ -94,14 +94,14 @@ func TestHarvestTwinFeedbackIsIdempotent(t *testing.T) {
 	writeTwinFeedback(t, root, "tele", "ship-it", "- [ ] `one-note` — One observation\n\n  Body.\n")
 
 	var out, errb bytes.Buffer
-	if code := Run([]string{"sdlc", "harvest", "--no-edit", "tele/ship-it"}, &out, &errb); code != 0 {
+	if code := Run([]string{"sdlc", "harvest", "tele/ship-it"}, &out, &errb); code != 0 {
 		t.Fatalf("first harvest: exit=%d stderr=%q", code, errb.String())
 	}
 	afterFirst := gitLog(t, root, "-1", "--format=%H")
 
 	out.Reset()
 	errb.Reset()
-	if code := Run([]string{"sdlc", "harvest", "--no-edit", "tele/ship-it"}, &out, &errb); code != 0 {
+	if code := Run([]string{"sdlc", "harvest", "tele/ship-it"}, &out, &errb); code != 0 {
 		t.Fatalf("second harvest: exit=%d stderr=%q", code, errb.String())
 	}
 	if afterSecond := gitLog(t, root, "-1", "--format=%H"); afterSecond != afterFirst {
@@ -124,7 +124,7 @@ func TestHarvestRejectsLegacyTwinProse(t *testing.T) {
 		"architecture.md says X is invariant, but pkg/foo.go:42 does Y.\nDecide which is canon.\n")
 
 	var out, errb bytes.Buffer
-	if code := Run([]string{"sdlc", "harvest", "--no-edit", "tele/ship-it"}, &out, &errb); code == 0 {
+	if code := Run([]string{"sdlc", "harvest", "tele/ship-it"}, &out, &errb); code == 0 {
 		t.Fatalf("expected refusal, got exit=0\nstdout=%q", out.String())
 	}
 	got := errb.String()

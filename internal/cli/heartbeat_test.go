@@ -43,7 +43,7 @@ func backdateHead(t *testing.T, root string, ago time.Duration) {
 	t.Helper()
 	when := time.Now().Add(-ago).Format(time.RFC3339)
 	gittest.RunWithEnv(t, root, []string{"GIT_COMMITTER_DATE=" + when, "GIT_AUTHOR_DATE=" + when},
-		"commit", "--amend", "--no-edit", "--date="+when)
+		"commit", "--amend", "--date="+when)
 }
 
 // journalCommit stamps a file-changing commit in the project's tree, so

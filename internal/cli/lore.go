@@ -17,8 +17,7 @@ import (
 // into lore/<slug>.md at the bureaucracy root. Format mirrors
 // followups.md exactly, by design — same parser shape, same operator
 // gesture (delete-to-skip, leave-to-promote), same idempotency story
-// — so the second close-time editor pop is legible without re-learning
-// the shape. The only schema difference: each entry's indented body's
+// — so an operator reading either knows the other. The only schema difference: each entry's indented body's
 // first paragraph is conventionally an `applies-when:` line; that
 // line is lifted into the promoted file's YAML frontmatter. An
 // optional `supersedes:` paragraph names existing lore entries this
@@ -39,22 +38,6 @@ import (
 // appending the amending run to an `updated-in` list) and
 // the checklist line is rewritten to `- [x] \`resolved-slug\`` — same
 // audit-trail shape followups uses.
-
-// loreHeader is the editor-pop banner auto-injected onto
-// feedback/lore.md before $EDITOR opens. Constant lives next to its
-// only caller so the message and the file stay in sync; injection is
-// idempotent (see injectEditorPopHeader).
-const loreHeader = `<!--
-feedback/lore.md — portable, cross-project facts captured this run.
-Save this file to promote each unchecked ` + "`- [ ]`" + ` entry into
-lore/<slug>.md at the bureaucracy root. Delete the line to skip.
-Use an indented ` + "`supersedes:`" + ` paragraph to replace or merge
-existing lore entries; the replacement is written before they are deleted.
-Naming an entry's own slug amends it in place, keeping its provenance;
-the body written here replaces the old entry whole, so include all of it.
-Lines marked ` + "`- [x]`" + ` are already promoted; leave them alone.
-This header is auto-injected on editor pop; remove it freely.
--->`
 
 // parsedLore is one harvest candidate plucked from feedback/lore.md.
 type parsedLore struct {
@@ -346,14 +329,10 @@ func appendUpdatedIn(existing, discoveredIn, thisRun string) string {
 // project to route through). Caller holds the bureaucracy lock.
 //
 // Steps, on the happy path:
-//  1. If !skipEdit and the on-disk file has at least one unchecked
-//     entry, inject the editor-pop header and open feedback/lore.md
-//     in $EDITOR for operator review. An absent / header-only /
-//     all-`[x]` file skips the pop — nothing to review.
-//  2. Read and parse the file. Empty/absent file is a no-op.
-//  3. For each unchecked entry, write lore/<resolved-slug>.md and
+//  1. Read and parse the file. Empty/absent file is a no-op.
+//  2. For each unchecked entry, write lore/<resolved-slug>.md and
 //     rewrite the line to `- [x]`.
-//  4. After every entry succeeds, write the updated feedback/lore.md
+//  3. After every entry succeeds, write the updated feedback/lore.md
 //     to disk. The caller stages it alongside run.json on the close
 //     commit.
 //
@@ -362,11 +341,10 @@ func appendUpdatedIn(existing, discoveredIn, thisRun string) string {
 // did succeed, then return the original error. The run stays
 // in_progress; requireCleanTree on the next attempt is satisfied
 // because the progress commit took the dirty file with it.
-func harvestLore(root, projectID, runID, workflow string, skipEdit bool) error {
+func harvestLore(root, projectID, runID, workflow string) error {
 	relPath := run.FeedbackPath(projectID, runID, "lore")
 	spec := scratchHarvestSpec[parsedLore]{
 		relPath:                  relPath,
-		header:                   loreHeader,
 		progressSubject:          fmt.Sprintf("harvest: capture lore for %s/%s", projectID, runID),
 		progressPaths:            []string{lore.DirRel},
 		writeErrorLeavesProgress: loreWriteErrorLeavesProgress,
@@ -386,5 +364,5 @@ func harvestLore(root, projectID, runID, workflow string, skipEdit bool) error {
 			return promoteLoreEntry(root, projectID, runID, p)
 		},
 	}
-	return harvestScratchTyped(root, projectID, runID, workflow, skipEdit, spec)
+	return harvestScratchTyped(root, projectID, runID, workflow, spec)
 }

@@ -124,7 +124,7 @@ func splitPromotedTo(v string) (project, slug string, parsed bool) {
 // The hint and the multi-descendant list both render the suggested
 // invocation as `moe <verb> <project> <descendant>`, where verb is
 // the sub-command label the caller passes in (e.g. "sdlc build"). Verb
-// flags like `--pr` or `--no-edit` don't carry through — the operator
+// flags like `--pr` don't carry through — the operator
 // re-types if they need the flag, the hint stays minimal and
 // unambiguous.
 //

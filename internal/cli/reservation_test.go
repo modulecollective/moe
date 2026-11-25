@@ -55,7 +55,7 @@ func TestReservationOrderingHelper(t *testing.T) {
 			fmt.Println("admitted")
 		}
 	case "close":
-		err = closeRunInProcess(root, "sdlc", sdlcCloseSubject, func(string, *run.Metadata) error { barrier(); return nil }, "tele", "work", true, io.Discard)
+		err = closeRunInProcess(root, "sdlc", sdlcCloseSubject, func(string, *run.Metadata) error { barrier(); return nil }, "tele", "work", io.Discard)
 	case "advance":
 		err = runopen.MarkAdvanced(root, "tele", "work", "design", runopen.AdvanceOptions{Validate: func(*run.Metadata) (string, error) { barrier(); return "design", nil }})
 	default:
@@ -179,7 +179,7 @@ func TestCloseRefusalPreservesSandboxAndClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 	called := false
-	err = closeRunInProcess(root, "sdlc", sdlcCloseSubject, func(string, *run.Metadata) error { called = true; return nil }, "tele", "work", true, io.Discard)
+	err = closeRunInProcess(root, "sdlc", sdlcCloseSubject, func(string, *run.Metadata) error { called = true; return nil }, "tele", "work", io.Discard)
 	var conflict *session.UnresolvedError
 	if !errors.As(err, &conflict) || called {
 		t.Fatalf("close %v cleanup %v", err, called)
@@ -196,7 +196,7 @@ func TestCloseRefusalPreservesSandboxAndClaim(t *testing.T) {
 	}
 	t.Setenv("MOE_HOME", root)
 	var out, errb bytes.Buffer
-	if code := Run([]string{"sdlc", "close", "--no-edit", "tele/work"}, &out, &errb); code == 0 || !strings.Contains(errb.String(), s.Branch) {
+	if code := Run([]string{"sdlc", "close", "tele/work"}, &out, &errb); code == 0 || !strings.Contains(errb.String(), s.Branch) {
 		t.Fatalf("CLI close %d: %s", code, &errb)
 	}
 }

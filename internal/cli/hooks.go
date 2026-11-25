@@ -238,14 +238,14 @@ func openRecoveryStageSession(md *run.Metadata, document, override string, headl
 		skeleton = designCanvasSkeleton
 	}
 	code := runStageSession(md.Project, md.ID, document, stageSessionOpts{
-		TaggedFollowupsOnExit: true,
-		CanvasSkeleton:        skeleton,
-		ValidateEntry:         sdlcSessionEntry,
-		NeedsSandbox:          true,
-		Headless:              headless,
-		InitialPrompt:         kickoff,
-		NextStageOverride:     override,
-		ExtraStagePaths:       stageCommitPathsPresent,
+		HarvestOnExit:     true,
+		CanvasSkeleton:    skeleton,
+		ValidateEntry:     sdlcSessionEntry,
+		NeedsSandbox:      true,
+		Headless:          headless,
+		InitialPrompt:     kickoff,
+		NextStageOverride: override,
+		ExtraStagePaths:   stageCommitPathsPresent,
 	}, stdout, stderr)
 	if code != 0 || !headless {
 		return code

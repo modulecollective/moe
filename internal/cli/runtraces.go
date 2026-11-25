@@ -79,7 +79,7 @@ func scanChecklistDisplay(body []byte) []displayEntry {
 			}
 			continue
 		}
-		// Headings and the editor-pop comment header land here and are
+		// Headings and HTML comment headers land here and are
 		// dropped — scaffolding, not traces.
 		finalize()
 	}

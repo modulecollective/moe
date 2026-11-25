@@ -44,7 +44,6 @@ const branchPrefix = "moe/"
 
 type pushRunOptions struct {
 	HeadlessRecovery bool
-	SkipTerminalEdit bool
 	// RepairPR pins a same-PR recovery; it must never create or merge a PR.
 	RepairPR   string
 	RepairHead string
@@ -408,10 +407,7 @@ func runPushTypedWithOptions(workflow string, args []string, opts pushRunOptions
 			return openPRPath(root, md, pj, branch, opts.RepairPR, stdout, stderr), nil
 		}
 
-		// Retries harvest as-is (skipEdit=true): the operator reviewed
-		// followups on attempt 1, so attempts 2+ don't re-pop $EDITOR.
-		skipEdit := opts.SkipTerminalEdit || attempt > 1
-		code, err := mergePath(root, md, pj, clonePath, branch, skipEdit, stdout, stderr)
+		code, err := mergePath(root, md, pj, clonePath, branch, stdout, stderr)
 		if errors.Is(err, errFFRetryable) {
 			if attempt < maxPushAttempts {
 				moePrintf(stdout, "origin/%s advanced during checks — rebasing and retrying (attempt %d/%d)\n",
@@ -496,7 +492,7 @@ func closeNoShipRun(root string, md *run.Metadata, pj *project.Metadata, clonePa
 	subject := reg.subject + " — no ship: no project change"
 	prepare, restoreStylesheet := stylesheetClosePreparation()
 	if err := closeRunPrepared(root, md.Workflow, subject, reg.cleanup, prepare, md.Project, md.ID,
-		opts.SkipTerminalEdit, stderr); err != nil {
+		stderr); err != nil {
 		if _, cleanupFailed := errors.AsType[*terminalCleanupError](err); !cleanupFailed {
 			restoreStylesheet(root)
 		}
@@ -791,7 +787,7 @@ func resumePRRecord(root string, md *run.Metadata, pending *pendingPRRecord, std
 // The int is the shell exit code; the error is errFFRetryable only when
 // the ff-push was rejected because origin's default advanced during the
 // checks (the caller's loop retries on it) and nil otherwise.
-func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, branch string, skipTerminalEdit bool, stdout, stderr io.Writer) (int, error) {
+func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, branch string, stdout, stderr io.Writer) (int, error) {
 	tipSHA, err := git.RevParse(clonePath, "refs/heads/"+branch)
 	if err != nil {
 		moePrintf(stderr, "push: resolve %s: %v\n", branch, err)
@@ -811,9 +807,7 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 	// the point of no return. A rejected ff-push then has nothing to
 	// revert, and a ship killed mid-push leaves a clean tree and a run
 	// that a re-run pushes again. Harvest runs under lock so each
-	// createIdea sees a held bureaucracy lock. Interactive push keeps
-	// the editor pop just like close; cascade push harvests as-is so a
-	// headless ship has no hidden interactive surface.
+	// createIdea sees a held bureaucracy lock.
 	consent := walkConsent()
 	harvestMsg := fmt.Sprintf("harvest: capture follow-ups, lore, and twin observations for %s/%s\n\n", md.Project, md.ID) +
 		trailers.Block{
@@ -825,11 +819,10 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 	err = repolock.With(root, repolock.Options{
 		Purpose: "push-harvest",
 		Run:     md.Project + "/" + md.ID,
-		// An interactive push keeps the harvest editor pop, so this
-		// window can sit on the operator. See runClose.
+		// One commit per created idea and lore file. See runClose.
 		Heartbeat: true,
 	}, func() error {
-		paths, err := harvestTerminal(root, md, skipTerminalEdit)
+		paths, err := harvestTerminal(root, md)
 		if err != nil || len(paths) == 0 {
 			return err
 		}

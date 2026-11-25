@@ -21,8 +21,8 @@ type checklistEntry struct {
 }
 
 // atxHeadingRE matches a markdown ATX heading (`# ` … `###### `). A
-// heading like "# Follow-ups" is legitimate scaffolding the agent or
-// the editor-pop wrote, not lost content, so the stray-content guard
+// heading like "# Follow-ups" is legitimate scaffolding the agent
+// wrote, not lost content, so the stray-content guard
 // below skips it.
 var atxHeadingRE = regexp.MustCompile(`^#{1,6}\s`)
 
@@ -33,8 +33,9 @@ var atxHeadingRE = regexp.MustCompile(`^#{1,6}\s`)
 // finds zero open entries but at least one *substantive* line — prose or
 // plain bullets, the shape an agent reaches for when it forgets the
 // `- [ ]` grammar — it fails loud instead of returning a clean empty
-// result that would silently drop the content. Headings and the
-// multi-line `<!-- … -->` editor-pop header are scaffolding, not
+// result that would silently drop the content. Headings and a
+// multi-line `<!-- … -->` comment (older harvests injected one as an
+// editor header) are scaffolding, not
 // content, so they don't trip the guard; an absent / header-only /
 // heading-only / all-`[x]` file stays a clean no-op.
 func parseChecklist(body []byte, noun, slugNoun string) (lines []string, todo []checklistEntry, err error) {
@@ -45,7 +46,7 @@ func parseChecklist(body []byte, noun, slugNoun string) (lines []string, todo []
 	var bodyLines []string
 
 	// strayIdx remembers the first substantive line dropped without ever
-	// attaching to a checkbox. inComment tracks the editor-pop header so
+	// attaching to a checkbox. inComment tracks an HTML comment block so
 	// its lines are never counted as stray.
 	strayIdx := -1
 	inComment := false
@@ -59,7 +60,7 @@ func parseChecklist(body []byte, noun, slugNoun string) (lines []string, todo []
 	}
 
 	for i, line := range lines {
-		// Track the HTML comment block (the editor-pop header) so its
+		// Track the HTML comment block so its
 		// lines don't read as stray content. Computed before the branches
 		// below and consulted only by the stray check; a marker only ever
 		// rides a non-blank line, but tracking every line keeps an
@@ -104,7 +105,7 @@ func parseChecklist(body []byte, noun, slugNoun string) (lines []string, todo []
 		}
 		finalize()
 		// A non-blank, non-indented, non-checkbox line dropped here.
-		// Headings and the editor-pop comment are scaffolding; anything
+		// Headings and HTML comments are scaffolding; anything
 		// else is content written in the wrong shape — remember the first
 		// one so the post-scan guard can fail loud if nothing valid
 		// parsed.
@@ -127,7 +128,6 @@ type scratchItem[T any] struct {
 
 type scratchHarvestSpec[T any] struct {
 	relPath string
-	header  string
 	parse   func([]byte) ([]string, []scratchItem[T], error)
 	write   func(T) (string, error)
 	// checkpoint makes selected source links durable before continuing.
@@ -141,17 +141,8 @@ type scratchHarvestSpec[T any] struct {
 	writeErrPrefix           string
 }
 
-func harvestScratchTyped[T any](root, projectID, runID, workflow string, skipEdit bool, spec scratchHarvestSpec[T]) error {
+func harvestScratchTyped[T any](root, projectID, runID, workflow string, spec scratchHarvestSpec[T]) error {
 	absPath := filepath.Join(root, spec.relPath)
-
-	if !skipEdit && hasUncheckedEntry(absPath) {
-		if err := injectEditorPopHeader(absPath, spec.header); err != nil {
-			return err
-		}
-		if err := launchEditorOrFail(absPath); err != nil {
-			return err
-		}
-	}
 
 	body, err := os.ReadFile(absPath)
 	if err != nil {
