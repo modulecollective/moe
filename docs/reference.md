@@ -377,14 +377,19 @@ no receipt.
 A prerequisite is filed only when it belongs to another project, should land
 whether or not the source does, or must produce evidence before the source's
 design can finish; otherwise the source builds it in place. The source keeps
-its first gate blocked and names the followup slug in backticks inside its
-`## Gate` section. When that filing settles — its run merges or closes, or its
-idea closes unpromoted — and the settlement is newer than the source's last
-first-stage turn, the kick floor admits the source: the pulse may pick it, its
-design re-checks the evidence, and a ready gate rides on to build, review and
-push without an advance. A pushed PR is not settled. A not-ready stage exit
-lists each unsettled filing with the command that starts it now, and says
-whether its settling will resume the run.
+its first gate blocked and names its own followup slug in backticks inside its
+`## Gate` section. For an otherwise-unsettled, operator-opened design with that
+authored blocked gate, a newer settlement of the filing — its run merges or
+closes, or its idea closes unpromoted, after the source's last design turn —
+admits a full ride without an advance. [Design-only
+runs](workflows.md#proposed-work-and-the-next-run) are excluded from this
+exception. A dynamic pulse must pick the source, other holds still apply, and
+the resumed design re-checks the evidence before stamping its own gate ready to
+ride on through build, review and push. Closure may mean the prerequisite was
+dropped; any code still needed must have landed on default. A pushed PR is not
+settled. A re-check that stays blocked cannot reuse that older settlement. A
+not-ready stage exit lists each unsettled filing with the command that starts
+it now, and says whether its settling will resume the run.
 
 ## Codex Setup
 

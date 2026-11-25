@@ -99,17 +99,21 @@ MoE's memory improves through a few explicit channels:
   and `moe <workflow> harvest` re-runs it by hand. A followup slug carrying a
   `<project>/` prefix routes the promoted idea to that project's backlog
   instead of the current one. A checked line means extracted, never completed.
-  A blocked design that names a filed prerequisite in its gate is resumed by
-  the pulse once that prerequisite merges or closes.
+  For an otherwise-unsettled, operator-opened design, an authored blocked first
+  gate naming its own filed prerequisite in backticks inside the `## Gate`
+  section lets the pulse pick it for a re-check after a newer settlement. The
+  design checks the evidence before riding on; [design-only
+  runs](workflows.md#proposed-work-and-the-next-run) are excluded from this
+  full-ride exception. See the [prerequisite rules](reference.md#workflows).
 - The idea backlog holds work that is worth remembering but not ready for a
   full run.
 - The digital twin records project intent in `vision`, `architecture`,
   `patterns`, `operations`, and `glossary` documents. When code and twin
   disagree, the twin wins until a deliberate edit updates it. An sdlc stage
   makes that edit in place, riding its own turn commit; the stage won't close
-  on a twin left structurally broken. A twin edit a run sees but shouldn't
-  make goes to `feedback/twin.md`, which harvests into an idea at termination
-  the same way followups do.
+  on a twin left structurally broken. A twin edit a run sees but shouldn't make
+  goes to `feedback/twin.md`, which harvests into an idea after each successful
+  turn, with close as a backstop, the same way followups do.
 - Lore stores portable facts that apply across projects. Agents see a compact
   catalog and open entries only when the "applies when" hint matches. Entries
   carry provenance frontmatter: the run that discovered the fact

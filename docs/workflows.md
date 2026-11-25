@@ -372,8 +372,9 @@ yourself. The run stays open across sittings, so re-running `chat` continues
 the same thread. When an interactive sitting ends, moe asks whether to close
 the run, and the default is yes — most sittings are finished when you leave
 them, and close is cheap because re-entry reopens; Enter runs the same
-operator-driven close as `moe chat close`, editor and harvest included, while
-`n` leaves the run open for a later sitting and Ctrl-C or Ctrl-D does the same.
+operator-driven close as `moe chat close`, while `n` leaves the run open for a
+later sitting and Ctrl-C or Ctrl-D does the same. Every successful sitting
+harvests its filings; close harvests again as a backstop, without an editor.
 Close is a soft archive rather than a one-way door: running `chat` against a
 closed run reopens and continues it in one step, which is why there is no
 separate reopen verb. The canvas is a moe-written session log; the conversation
@@ -757,20 +758,28 @@ the idea canvas as its brief. The run is then held the way any unadvanced run is
 held, and your exits are the run page's advance chip (a full ride follows when a
 later sweep picks it), a pushed note (one more design turn), or close.
 
-A note buys one turn on any run still at its first stage, not only a
-design-only one: the floor admits it for one stage, and the run is held again
-once the note is delivered. An operator-opened design that parked itself
-blocked on a prerequisite it filed, naming that followup's slug in backticks in
-its gate section, is admitted for the full ride once the prerequisite's run
-merges or closes (or its idea closes unpromoted) after the design's last turn.
-The survey sees such a run marked `due` in its parked list; the resumed design
-turn re-checks the evidence and stamps its own gate, and a ready gate rides on
-to build. One settlement buys one resume: a re-check that stays blocked is held
-again until another named filing settles or a note arrives. A spec's
-`design_only` is skipped on a slug that already names live work, on a chore
-entry, and on a spec with no `design` body; on an already-design-only idea the
-flag agrees with the tag and is ignored. The bit stays in `run.json` afterwards
-as provenance.
+A waiting note buys one stage on an otherwise-unsettled run still at its first
+stage, including a design-only one. It does not cap a run already eligible for
+a full ride. Once the note is delivered, the run is held again only if it is
+still unsettled and has no other admission.
+
+An otherwise-unsettled, operator-opened design that parked itself with an
+authored blocked first gate on a prerequisite it filed, naming that followup's
+slug in backticks inside its `## Gate` section, is admitted for the full ride
+once the prerequisite's run merges or closes (or its idea closes unpromoted)
+after the design's last turn. Design-only runs are excluded from this
+exception. The survey sees such a run marked `due` in its parked list; a
+dynamic pulse must pick it, and other holds still apply. The resumed design
+re-checks the evidence and stamps its own gate; a ready gate rides on to build.
+Closure may mean the prerequisite was dropped, so any code still needed must
+have landed on default; a pushed PR is not settled. One settlement buys one
+resume: a re-check that stays blocked cannot reuse that older settlement, but a
+newer settlement of a named filing or a waiting note may admit it again.
+
+A spec's `design_only` is skipped on a slug that already names live work, on a
+chore entry, and on a spec with no `design` body; on an already-design-only
+idea the flag agrees with the tag and is ignored. The bit stays in `run.json`
+afterwards as provenance.
 
 `next` is the only way anything starts:
 
@@ -782,15 +791,16 @@ as provenance.
 It may name a parked run in any project, a run this gate's `loose` just opened,
 or a tagged idea, which is promoted only when picked. An untagged idea stays
 yours. A hand-typed `moe pulse new` starts nothing. Under `--dynamic`, the
-harness rides the pick and nothing else. The shared floor holds a run with only
-a seed, a live session or execution owner, an operator hold, or a dead machine
-turn nobody has touched since (the reap's tombstone, below). Clock-started rides
-also obey project mode and the one-tick operator quiet window, with the
-[pending-note exception](#prose-both-directions). A hand-typed
-`moe pulse new --dynamic` bypasses mode and the quiet window. A machine-baked,
-chore-authored, or past-first-stage run has a settled design; a design-only
-spawn rides its one design stage and is held from then on. A held pick prints
-the floor's reason and starts nothing.
+harness rides the pick and nothing else. The shared floor holds seed-only runs
+unless admitted as described above, and holds any run with a live session or
+execution owner, an operator hold, or a dead machine turn nobody has touched
+since (the reap's tombstone, below). Clock-started rides also obey project mode
+and the one-tick operator quiet window, with the [pending-note
+exception](#prose-both-directions). A hand-typed `moe pulse new --dynamic`
+bypasses mode and the quiet window. A machine-baked, chore-authored, or
+past-first-stage run has a settled design; a design-only spawn rides its one
+design stage and is then held unless admitted again as above. A held pick
+prints the floor's reason and starts nothing.
 
 The sweep stamps its pick onto its own canvas as a closing `## Next` section, in
 the same commit as the close, so a sweep's report says what it was about to run
@@ -1019,7 +1029,7 @@ treat compression as a valid edit. A stage that leaves the tree structurally
 broken — a dangling cross-reference, an empty doc — doesn't get to close on it.
 
 A twin edit a run can see but shouldn't make goes to `feedback/twin.md`, which
-harvests into an idea at termination. See
+harvests into an idea after each successful turn, with close as a backstop. See
 [concepts.md §Feedback Channels](concepts.md#feedback-channels) for how the
 twin steers future runs.
 
