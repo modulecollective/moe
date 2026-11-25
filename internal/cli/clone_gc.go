@@ -76,7 +76,7 @@ func runCloneGC(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	report := cloneReport{Version: 1, Root: root, Invocation: hex.EncodeToString(nonce[:]), Apply: *apply, Candidates: []cloneResult{}}
-	keys, err := cloneInventory(root)
+	keys, err := cloneInventory(root, stderr)
 	if err != nil {
 		moePrintf(stderr, "clone gc inventory: %v\n", err)
 		if *asJSON {

@@ -17,7 +17,9 @@ import (
 	"github.com/modulecollective/moe/internal/sandbox"
 )
 
-func cloneInventory(root string) ([]string, error) { return clonereclaim.Inventory(root) }
+func cloneInventory(root string, stderr io.Writer) ([]string, error) {
+	return clonereclaim.Inventory(root, stderr)
+}
 
 func collectClone(root, p, id string, apply, retry bool, now time.Time, stdout, stderr io.Writer) cloneResult {
 	result := cloneResult{Project: p, Run: id, Path: sandbox.Path(root, p, id), Outcome: "held", Reason: "owner_busy"}

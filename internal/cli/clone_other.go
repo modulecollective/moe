@@ -15,7 +15,7 @@ import (
 	"github.com/modulecollective/moe/internal/sandbox"
 )
 
-func cloneInventory(root string) ([]string, error) {
+func cloneInventory(root string, stderr io.Writer) ([]string, error) {
 	entries, err := listClones(root)
 	if err != nil {
 		return nil, err

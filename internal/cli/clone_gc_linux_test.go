@@ -7,9 +7,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -457,4 +459,137 @@ func TestCloneGCProbeFailuresExitOneAndRetainResources(t *testing.T) {
 			t.Fatal("inventory followed outside link")
 		}
 	})
+}
+
+func TestCloneGCSkipsInvalidInventoryNames(t *testing.T) {
+	root, path := gcFixture(t, run.StatusClosed, time.Now().UTC().Add(-time.Hour))
+	var strays []string
+	for _, base := range []string{"clones", "clone-reclamation"} {
+		for _, suffix := range []string{".claude", "tele/.claude"} {
+			stray := filepath.Join(root, ".moe", base, suffix)
+			if err := os.MkdirAll(filepath.Join(stray, ".cc-writes"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			strays = append(strays, stray)
+		}
+	}
+	for _, mode := range []string{"text inspect", "json inspect", "json apply", "json retry"} {
+		t.Run(mode, func(t *testing.T) {
+			var out, diagnostics bytes.Buffer
+			args := []string{}
+			asJSON := strings.HasPrefix(mode, "json")
+			if asJSON {
+				args = append(args, "--json")
+			}
+			if mode == "json apply" || mode == "json retry" {
+				args = append(args, "--apply")
+			}
+			if code := runCloneGC(args, &out, &diagnostics); code != 0 {
+				t.Fatalf("exit %d: stdout %s stderr %s", code, &out, &diagnostics)
+			}
+			want := "eligible"
+			if mode == "json apply" {
+				want = "removed"
+			} else if mode == "json retry" {
+				want = "held"
+			}
+			if asJSON {
+				var report cloneReport
+				decoder := json.NewDecoder(&out)
+				decoder.DisallowUnknownFields()
+				if err := decoder.Decode(&report); err != nil {
+					t.Fatal(err)
+				}
+				if err := decoder.Decode(new(any)); err != io.EOF {
+					t.Fatalf("extra stdout: %v", err)
+				}
+				if report.Version != 1 || report.Root != root || report.Invocation == "" || report.Error != "" || len(report.Candidates) != 1 || report.Candidates[0].Project != "tele" || report.Candidates[0].Run != "finish" || report.Candidates[0].Outcome != want {
+					t.Fatalf("report = %+v; want %s", report, want)
+				}
+				if mode == "json retry" && report.Candidates[0].Reason != "already_absent" {
+					t.Fatalf("retry: %+v", report)
+				}
+			} else if !strings.Contains(out.String(), "tele/finish: eligible (") || strings.Contains(out.String(), ".claude") {
+				t.Fatalf("text output: %s", &out)
+			}
+			if strings.Count(diagnostics.String(), "clone gc inventory: skipping ") != len(strays) {
+				t.Fatalf("warnings: %s", &diagnostics)
+			}
+			for _, stray := range strays {
+				if !strings.Contains(diagnostics.String(), fmt.Sprintf("%q", stray)) {
+					t.Errorf("missing diagnostic for %s: %s", stray, &diagnostics)
+				}
+				if entries, err := os.ReadDir(filepath.Join(stray, ".cc-writes")); err != nil || len(entries) != 0 {
+					t.Errorf("stray changed: %s: %v %v", stray, entries, err)
+				}
+			}
+			_, err := os.Stat(path)
+			if want == "eligible" && err != nil {
+				t.Fatal("inspection removed clone:", err)
+			} else if want != "eligible" && !os.IsNotExist(err) {
+				t.Fatal("apply retained clone:", err)
+			}
+		})
+	}
+}
+
+func TestCloneGCAllInvalidInventorySucceeds(t *testing.T) {
+	root := seedCloseFixture(t, "tele", "finish", "sdlc", run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+	stray := filepath.Join(root, ".moe", "clones", ".claude", ".cc-writes")
+	if err := os.MkdirAll(stray, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{nil, {"--apply"}, {"--json"}, {"--json", "--apply"}} {
+		var out, diagnostics bytes.Buffer
+		if code := runCloneGC(args, &out, &diagnostics); code != 0 {
+			t.Fatalf("args %v: exit %d: %s", args, code, &diagnostics)
+		}
+		if slices.Contains(args, "--json") {
+			var report cloneReport
+			if err := json.Unmarshal(out.Bytes(), &report); err != nil || report.Version != 1 || report.Error != "" || len(report.Candidates) != 0 {
+				t.Fatalf("empty JSON: %+v %v", report, err)
+			}
+		} else if out.String() != "clone gc: no candidates\n" {
+			t.Fatalf("empty text: %q", &out)
+		}
+		if strings.Count(diagnostics.String(), "invalid project ID") != 1 {
+			t.Fatalf("warnings: %s", &diagnostics)
+		}
+		if _, err := os.Stat(stray); err != nil {
+			t.Fatal("stray removed:", err)
+		}
+	}
+}
+
+func TestCloneGCSkippedEntryBeforeFatalInventoryError(t *testing.T) {
+	root, path := gcFixture(t, run.StatusClosed, time.Now().UTC().Add(-time.Hour))
+	stray := filepath.Join(root, ".moe", "clones", ".claude")
+	writeFile(t, filepath.Join(stray, ".cc-writes", "sentinel"), "retained stray")
+	outside := t.TempDir()
+	writeFile(t, filepath.Join(outside, "sentinel"), "outside survives")
+	if err := os.Symlink(outside, filepath.Join(root, ".moe", "clone-reclamation", "valid-link")); err != nil {
+		t.Fatal(err)
+	}
+	var out, diagnostics bytes.Buffer
+	code := runCloneGC([]string{"--json", "--apply"}, &out, &diagnostics)
+	var report cloneReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatal(err)
+	}
+	if code != 1 || report.Error != "inventory_failed" || len(report.Candidates) != 0 {
+		t.Fatalf("partial inventory accepted: %d %+v", code, report)
+	}
+	warning := fmt.Sprintf("clone gc inventory: skipping %q: invalid project ID\n", stray)
+	if !strings.HasPrefix(diagnostics.String(), warning) || !strings.Contains(strings.TrimPrefix(diagnostics.String(), warning), "clone gc inventory: ") {
+		t.Fatalf("lost warning or fatal error: %s", &diagnostics)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal("fatal scan removed eligible clone:", err)
+	}
+	for file, want := range map[string]string{filepath.Join(stray, ".cc-writes", "sentinel"): "retained stray", filepath.Join(outside, "sentinel"): "outside survives"} {
+		if b, err := os.ReadFile(file); err != nil || string(b) != want {
+			t.Fatalf("changed %s: %q %v", file, b, err)
+		}
+	}
 }

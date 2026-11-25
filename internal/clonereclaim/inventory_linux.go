@@ -4,8 +4,10 @@ package clonereclaim
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 
 	"github.com/modulecollective/moe/internal/project"
@@ -13,8 +15,9 @@ import (
 )
 
 // Inventory includes both live paths and retained generations. Every parent is
-// opened without following links; malformed components fail the whole inventory.
-func Inventory(root string) ([]string, error) {
+// opened without following links. Invalid names are skipped with diagnostics;
+// directory access failures and inventory limits fail the whole scan.
+func Inventory(root string, stderr io.Writer) ([]string, error) {
 	f, err := openAbsoluteDir(root)
 	if err != nil {
 		return nil, err
@@ -48,8 +51,8 @@ func Inventory(root string) ([]string, error) {
 		}
 		for _, p := range projects {
 			if !project.ValidID(p.Name()) {
-				base.Close()
-				return nil, errors.New("invalid project inventory entry")
+				fmt.Fprintf(stderr, "clone gc inventory: skipping %q: invalid project ID\n", filepath.Join(root, ".moe", name, p.Name()))
+				continue
 			}
 			dir, err := childDir(base, p.Name(), false)
 			if err != nil {
@@ -68,8 +71,8 @@ func Inventory(root string) ([]string, error) {
 			}
 			for _, r := range runs {
 				if !run.ValidID(r.Name()) {
-					base.Close()
-					return nil, errors.New("invalid run inventory entry")
+					fmt.Fprintf(stderr, "clone gc inventory: skipping %q: invalid run ID\n", filepath.Join(root, ".moe", name, p.Name(), r.Name()))
+					continue
 				}
 				keys[p.Name()+"/"+r.Name()] = true
 				if len(keys) > 8192 {
