@@ -794,13 +794,14 @@ yours. A hand-typed `moe pulse new` starts nothing. Under `--dynamic`, the
 harness rides the pick and nothing else. The shared floor holds seed-only runs
 unless admitted as described above, and holds any run with a live session or
 execution owner, an operator hold, or a dead machine turn nobody has touched
-since (the reap's tombstone, below). Clock-started rides also obey project mode
-and the one-tick operator quiet window, with the [pending-note
-exception](#prose-both-directions). A hand-typed `moe pulse new --dynamic`
-bypasses mode and the quiet window. A machine-baked, chore-authored, or
-past-first-stage run has a settled design; a design-only spawn rides its one
-design stage and is then held unless admitted again as above. A held pick
-prints the floor's reason and starts nothing.
+since (the reap's tombstone, below). Clock-started rides also obey project
+mode. A hand-typed `moe pulse new --dynamic` follows its typed consent. A
+machine-baked, chore-authored, or past-first-stage run has a settled design; a
+design-only spawn rides its one design stage and is then held unless admitted
+again as above. A held pick prints the floor's reason and starts nothing. Human
+activity on a sibling run and fresh operator commits impose no project-wide
+hold. Keep ideas untagged while arranging them; project mode and the global
+pause provide broader holds.
 
 The sweep stamps its pick onto its own canvas as a closing `## Next` section, in
 the same commit as the close, so a sweep's report says what it was about to run
@@ -823,8 +824,7 @@ That is the stuck-run loop: from the terminal or from the web's `/input` queue
 on a phone, write a sentence, and the next turn on that run acts on it. The
 note starts nothing — it writes one journal commit, so an armed serve's next
 heartbeat offers the board to a pulse, and the survey is told to pick a parked
-run with a waiting note first unless the floor holds it. The note also lifts the
-one-tick quiet window for that run alone, so it can start on the next tick. `moe pulse new
+run with a waiting note first unless the floor holds it. `moe pulse new
 --dynamic` is the expedite path. A note can steer further work on an open PR or
 accompany an idea into its eventual run. A pending note counts as an operator
 mark under `safe` mode, so eligible work can continue on a project that
@@ -866,8 +866,29 @@ existing Rex-hosted sweep and the rides it carries survive serve shutdown; an
 armed restart with a usable Rex host adopts them, and Ctrl-C in the sweep's Rex
 block cancels them. Local sweeps stop with serve. See
 [Re-Entry And Supervision](reference.md#re-entry-and-supervision) for finding
-the session, checking the host, and reading failed blocks. An unarmed
-`moe serve` is a reader with a capture door.
+the session, checking the host, and reading failed blocks.
+
+`moe serve pause` pauses new automatic sweeps across the bureaucracy for 24
+hours; `moe serve unpause` clears it early, and `moe serve status` reports its
+expiry in local time. The commands work with serve stopped. Pausing an active
+pause is a no-op and does not extend the window. The web dashboard's global menu
+and `/serve` offer **Pause for 24 hours** / **Unpause**; `moe ui` offers
+`:serve pause`, `:serve unpause`, and `:serve status` without a selected run.
+Active pause or unreadable state appears in the status cluster and terminal
+overview; refresh observes remote writes and expiry. Stale opposing web/UI
+controls refuse and show current state.
+
+A pause caps admission of new automatic sweeps: an already-admitted survey and
+its selected ride may finish. It does not stop current work, arm serve, clear
+project modes or reset failure/quota history. Unpause and expiry permit the next
+otherwise-eligible five-minute tick; neither starts anything immediately. Human
+stage commands and typed dynamic pulses remain usable, as do HTTP, journal
+pushing and reap/GC hygiene. The tracked root `serve-pause.json` stores a revision
+and optional UTC expiry; malformed or unreadable state holds automatic starts
+and reports an error. Expiry is read-time only and creates no commit. There is
+no migration from the ignored legacy `.moe/snooze` file.
+
+An unarmed `moe serve` is a reader with a capture door.
 
 Per project, `moe project ship <id> pr|merge` picks how a finished run lands
 there. New registrations store `merge`: fast-forward the default branch,
@@ -924,32 +945,33 @@ without a sweep since — one probe per expiry, not one per tick); or when
 startable work is parked with nobody inside it *and no sweep has looked at that
 board since it last changed* — a settled run, or an open idea you tagged, since
 the tag is the licence to start it. A run a survey saw and did not pick is not
-re-offered until something moves; every release from a hold is a journal commit.
-A project with anything live in it — you sitting in a stage, a ride mid-hop —
-and a project you touched by hand in the last tick is held out of that tick's
-verdict, and its cursors stay put so the next tick offers it again. A quiet board
-costs no agent turn, run or journal line. Recorded pushed PRs are polled at this
-cadence outside the journal lock. A merged or closed owned PR wakes a pulse to
-reconcile its still-pushed run before the survey reads the board. It keeps
-waking eligible ticks until reconciliation succeeds, including after a restart.
-This follows the five-minute cadence and existing holds and failure backoff;
-it is not an immediate refresh. Run `moe sync` for immediate reconciliation. A
-new actionable failure can also wake a survey even when the journal has not
-moved. Stable failure observations are acknowledged only after a successful
-sweep, against the exact snapshot handed to that survey; failures arriving
-during its rides remain visible to the next tick. Healthy and pending changes
-alone spend no turn. No recorded pushed PR means no added network read.
+re-offered until something moves; every release from a hold is a journal
+commit. A human session or owner on one run holds that run, while another run
+in the same project can be surveyed and ridden. Fresh human commits require no
+quiet window. Human and ride commits arriving during a survey remain unsurveyed
+and wake a later eligible tick. A quiet board costs no agent turn, run or
+journal line. Recorded pushed PRs are polled at this cadence outside the
+journal lock. A merged or closed owned PR wakes a pulse to reconcile its
+still-pushed run before the survey reads the board. It keeps waking eligible
+ticks until reconciliation succeeds, including after a restart. This follows
+the five-minute cadence and existing holds and failure backoff; it is not an
+immediate refresh. Run `moe sync` for immediate reconciliation. A new
+actionable failure can also wake a survey even when the journal has not moved.
+Stable failure observations are acknowledged only after a successful sweep,
+against the exact snapshot handed to that survey; failures arriving during its
+rides remain visible to the next tick. Healthy and pending changes alone spend
+no turn. No recorded pushed PR means no added network read.
 
 Known quota exhaustion yields the session and records a retry in the journal.
 The first ordinary heartbeat at or after its date can commission a fresh
 survey, even after restart and with nothing parked. The survey rejudges the
-current board; it never resumes an old pick. Future retries alone cost
-no run or agent call and do not block new journal, chore or PR work. Paused
-mode, the operator quiet window and live occupancy still hold a due retry.
-Stopping or unarming serve leaves its dates inert. Pure quota deferral neither
-acknowledges the board or PR checks as fully surveyed nor increases the
-failure streak, and sends no routine exit webhook. Existing failure history
-stays until a fully clean sweep.
+current board; it never resumes an old pick. Future retries alone cost no run
+or agent call and do not block new journal, chore or PR work. Project mode, the
+global pause and same-run ownership still bind a due retry. Stopping or
+unarming serve leaves its dates inert. Pure quota deferral neither acknowledges
+the board or PR checks as fully surveyed nor increases the failure streak, and
+sends no routine exit webhook. Existing failure history stays until a fully
+clean sweep.
 
 Failure cools itself off: consecutive failed sweeps back the one sweep off
 exponentially, so a dead network or unavailable quota interface does not mint

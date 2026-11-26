@@ -83,6 +83,9 @@ type Art struct {
 // Board is one complete board: its painted lines and the items on them,
 // ordered by Line.
 type Board struct {
+	PauseSummary  string
+	PauseRevision int
+	PauseError    string
 	// AgentLabel is optional Console metadata for an active temporary default.
 	AgentLabel    string
 	AgentSummary  string
@@ -125,11 +128,14 @@ const (
 	ActChoreDelete
 	ActChoreOpen
 	ActAgent
+	ActServePause
 )
 
 // Action is one mutation, bound to the identity it was captured against
 // when the operator committed to it. The console never retargets it.
 type Action struct {
+	Pause         bool
+	PauseRevision int
 	Agent         string
 	AgentRevision int
 	Kind          ActionKind
@@ -216,6 +222,8 @@ func (a Action) describe() string {
 		return "delete chore " + target
 	case ActChoreOpen:
 		return "open a run for chore " + target
+	case ActServePause:
+		return "set global automatic sweep pause"
 	case ActAgent:
 		return "set global default agent: " + a.Agent
 	}

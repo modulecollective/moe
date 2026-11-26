@@ -32,6 +32,7 @@ import (
 	"github.com/modulecollective/moe/internal/runcontrol"
 	"github.com/modulecollective/moe/internal/runopen"
 	"github.com/modulecollective/moe/internal/runsock"
+	"github.com/modulecollective/moe/internal/servepause"
 	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/ui"
 )
@@ -118,6 +119,17 @@ func runUI(args []string, stdout, stderr io.Writer) int {
 // the console's single worker.
 func uiDo(ctx context.Context, root string, a ui.Action) ui.Result {
 	switch a.Kind {
+	case ui.ActServePause:
+		s, err := servepause.Set(root, a.Pause, &a.PauseRevision, time.Now)
+		if err != nil {
+			current, readErr := servepause.Read(root)
+			var lines []string
+			if readErr == nil {
+				lines = append(lines, current.Summary(time.Now()))
+			}
+			return ui.Result{Uncertain: errors.Is(err, servepause.ErrRollback), Message: err.Error(), Lines: lines}
+		}
+		return ui.Result{OK: true, Message: s.Summary(time.Now())}
 	case ui.ActAgent:
 		desired := a.Agent
 		if desired == "reset" {

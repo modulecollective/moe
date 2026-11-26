@@ -11,7 +11,7 @@ func TestCommandCompletionVocabularyAndCycles(t *testing.T) {
 		line  string
 		words []string
 	}{
-		{"", []string{"agent", "close", "delete", "edit", "finish", "handoff", "help", "new-chore", "new-idea", "new-intent", "open", "park", "pause", "quit", "resume", "tag-design", "tag-sdlc", "terminal", "untag"}},
+		{"", []string{"agent", "close", "delete", "edit", "finish", "handoff", "help", "new-chore", "new-idea", "new-intent", "open", "park", "pause", "quit", "resume", "serve", "tag-design", "tag-sdlc", "terminal", "untag"}},
 		{"p", []string{"park", "pause"}},
 		{"new-i", []string{"new-idea", "new-intent"}},
 		{"tag-", []string{"tag-design", "tag-sdlc"}},

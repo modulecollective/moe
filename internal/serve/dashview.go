@@ -261,6 +261,7 @@ func newRowBuckets(now time.Time, rows []dash.Row, topCap int) rowBuckets {
 // putting the trace on every dash load was the same noise the CLI's
 // standalone status line was.
 type servePanelVM struct {
+	Pause pauseVM
 	// Armed distinguishes a serve that may pulse from one that is
 	// browse-only. An unarmed serve still renders the panel: "it's up but
 	// will never pulse" is exactly the confusion this is fixing.

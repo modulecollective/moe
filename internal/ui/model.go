@@ -1034,6 +1034,8 @@ func commandHint(line string, target *Item) string {
 		return "→ " + target.Label()
 	}
 	switch verb[0] {
+	case "serve":
+		return "global 24h pause; admitted sweeps and rides may finish"
 	case "agent":
 		return "global default for 24h; flags and run bindings still win"
 	case "finish":
@@ -1097,6 +1099,21 @@ func (m *model) runCommand(line string, target *Item) effect {
 		return ok
 	}
 	switch verb := f[0]; verb {
+	case "serve":
+		if !need(len(f) == 2 && (f[1] == "pause" || f[1] == "unpause" || f[1] == "status"), "usage: :serve pause|unpause|status") {
+			return effNone
+		}
+		if f[1] == "status" {
+			m.say(m.board.PauseSummary)
+			if m.board.PauseError != "" {
+				m.say(m.board.PauseError)
+			}
+			return effNone
+		}
+		if !need(m.board.PauseError == "", m.board.PauseError) {
+			return effNone
+		}
+		m.start(job{label: "global automatic sweep " + f[1], steps: []Action{{Kind: ActServePause, Pause: f[1] == "pause", PauseRevision: m.board.PauseRevision}}})
 	case "agent":
 		if !need(len(f) <= 2, "usage: :agent [codex|claude|reset]") {
 			return effNone

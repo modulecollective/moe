@@ -523,6 +523,8 @@ func (s *Server) registerRoutes() {
 	s.router.HandleFunc("POST /run/{project}/{slug}/control", s.handleRunControl)
 	s.router.HandleFunc("GET /run-status", s.handleRunStatuses)
 	s.router.HandleFunc("POST /agent", s.handleAgent)
+	s.router.HandleFunc("POST /serve/pause", s.handlePause)
+	s.router.HandleFunc("POST /serve/unpause", s.handlePause)
 	// Chore pages. A chore isn't a run, so it has its own /chore
 	// namespace. The page edits and deletes the definition and can open
 	// its run now; none of it starts an agent. Create hangs off the
@@ -640,7 +642,7 @@ func (s *Server) handleDash(w http.ResponseWriter, r *http.Request) {
 	}
 	// From memory, not from the state file: serve holds the record, and a
 	// round trip through its own snapshot would only add a beat of lag.
-	vm.Serve = s.activity.panel(now)
+	vm.Serve = s.pausePanel(now)
 	vm.InputCount = s.openPingCount("")
 	vm.Agent = defaultAgentView(s.opts.Root, now)
 	s.render(w, r, "dash.html", vm)
@@ -652,7 +654,7 @@ func (s *Server) handleDash(w http.ResponseWriter, r *http.Request) {
 // single operator, at most 50 events, so one page and one scan beat a
 // per-project filter.
 func (s *Server) handleServePage(w http.ResponseWriter, r *http.Request) {
-	s.render(w, r, "serve.html", s.activity.panel(time.Now().UTC()))
+	s.render(w, r, "serve.html", s.pausePanel(time.Now().UTC()))
 }
 
 // render runs a named template with data and surfaces template

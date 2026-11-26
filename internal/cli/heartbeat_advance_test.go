@@ -77,8 +77,8 @@ func TestHeartbeatHTTPAdvanceWakesSurveyedBoard(t *testing.T) {
 	}
 	mark := postHeartbeatAdvance(t, root, h)
 	decisions := dueDecisions(t, g, testTick)
-	if !heldFor(decisions, "moe") || len(sweepIDs(decisions)) != 0 {
-		t.Fatalf("advance missed quiet window: %+v", decisions)
+	if heldFor(decisions, "moe") || len(sweepIDs(decisions)) != 1 {
+		t.Fatalf("fresh advance was held: %+v", decisions)
 	}
 	if got := dueProjectsPastTheWindow(t, g); len(got) != 1 {
 		t.Fatalf("empty advance did not wake surveyed board: %v", got)
@@ -131,15 +131,15 @@ func TestHeartbeatHTTPAdvanceDuringSweep(t *testing.T) {
 	}
 }
 
-func TestHeartbeatHTTPAdvanceMaskedOperatorWindow(t *testing.T) {
+func TestHeartbeatHTTPAdvanceMaskedByMachineCommit(t *testing.T) {
 	t.Parallel()
 	root, h, g := heartbeatAdvanceServer(t)
 	g.Swept("moe", true)
 	postHeartbeatAdvance(t, root, h)
 	journalCommit(t, root, "moe", "machine: masks advance", "MoE-Consent: dynamic")
 	decisions := dueDecisions(t, g, testTick)
-	if !heldFor(decisions, "moe") || len(sweepIDs(decisions)) != 0 {
-		t.Fatalf("masked advance missed window: %+v", decisions)
+	if heldFor(decisions, "moe") || len(sweepIDs(decisions)) != 1 {
+		t.Fatalf("masked advance was held: %+v", decisions)
 	}
 	if got := dueProjectsPastTheWindow(t, g); len(got) != 1 {
 		t.Fatalf("masked window did not expire: %v", got)
@@ -184,9 +184,6 @@ func TestHeartbeatProjectJournalScopeAndOrder(t *testing.T) {
 			}
 			if operator, ride := journalActs(root, "moe", mark+"..HEAD"); operator || ride {
 				t.Fatalf("foreign marks counted: %v %v", operator, ride)
-			}
-			if operatorActedSince(root, "moe", when.Add(time.Second)) {
-				t.Fatal("old advance held a later window")
 			}
 			trailerstest.CommitTrailer(t, root, "machine bookkeeping", "MoE-Project: moe\nMoE-Workflow: pulse\nMoE-Consent: dynamic", when)
 			if tip, _, operator, ok := projectJournalTip(root, "moe"); !ok || tip != headSHA(t, root) || operator {
@@ -241,8 +238,8 @@ func TestHeartbeatHTTPAdvanceWithSameSecondFutureQuotaRetry(t *testing.T) {
 	when := gittest.Output(t, root, "log", "-1", "--format=%cI")
 	postHeartbeatAdvance(t, root, h)
 	gittest.RunWithEnv(t, root, []string{"GIT_COMMITTER_DATE=" + when, "GIT_AUTHOR_DATE=" + when}, "commit", "--amend", "--no-edit", "--allow-empty", "--date="+when)
-	if !heldFor(dueDecisions(t, newHeartbeatGate(root), testTick), "moe") {
-		t.Fatal("quota retry bypassed advance quiet window")
+	if heldFor(dueDecisions(t, newHeartbeatGate(root), testTick), "moe") {
+		t.Fatal("fresh advance held by quota retry")
 	}
 	if got := dueProjectsPastTheWindow(t, newHeartbeatGate(root)); len(got) != 1 {
 		t.Fatalf("future retry swallowed same-second empty advance on restart: %v", got)

@@ -1,0 +1,10 @@
+<div id="serve-pause" class="agent-default" role="group" aria-label="Global automatic sweep pause">
+  <div class="menu-label">Automatic sweeps</div>
+  <span data-pause-summary>{{.Summary}}</span>
+  <span data-pause-error role="status">{{.Error}}</span>
+  <form method="post" action="{{if .Active}}/serve/unpause{{else}}/serve/pause{{end}}">
+    <input type="hidden" name="revision" value="{{.Revision}}">
+    <button{{if .Error}} disabled{{end}}>{{if .Active}}Unpause{{else}}Pause for 24 hours{{end}}</button>
+  </form>
+  <p>An admitted sweep and its ride may finish. Pausing again does not extend expiry.</p>
+</div>

@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="en">
+<head>{{template "head" .}}<title>Automatic sweep pause changed — MoE</title></head>
+<body><main>
+<header class="page-header"><div class="banner"><div class="banner-bar">Automatic sweep pause changed</div></div>{{template "headeractions" false}}</header>
+<p role="status">{{.Error}}</p>
+{{template "pause_control.html" .Pause}}
+<p><a href="/serve">Return to serve</a></p>
+</main>{{template "themejs" .}}</body>
+</html>

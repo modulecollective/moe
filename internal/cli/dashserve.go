@@ -11,6 +11,7 @@ import (
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/serve"
+	"github.com/modulecollective/moe/internal/servepause"
 	"github.com/modulecollective/moe/internal/sync"
 )
 
@@ -47,9 +48,11 @@ const (
 // of the dash renders. A dashboard that refused to draw because a monitor
 // file was truncated would have the priorities backwards.
 type serveState struct {
-	snap serve.ActivitySnapshot
-	ok   bool // a serve has written a state file here
-	err  error
+	pause    servepause.State
+	pauseErr error
+	snap     serve.ActivitySnapshot
+	ok       bool // a serve has written a state file here
+	err      error
 	// live is the pid probe's verdict, taken once: the banner and the
 	// rows below it must not disagree about whether the process is
 	// still there.
@@ -72,7 +75,8 @@ type serveState struct {
 // readServeState reads the snapshot for one dash frame.
 func readServeState(root string) serveState {
 	snap, ok, err := serve.ReadActivitySnapshot(root)
-	st := serveState{snap: snap, ok: ok, err: err, live: serveDead}
+	pause, pauseErr := servepause.Read(root)
+	st := serveState{pause: pause, pauseErr: pauseErr, snap: snap, ok: ok, err: err, live: serveDead}
 	if ok {
 		st.live = probeLiveness(snap)
 	}
@@ -141,6 +145,18 @@ func probeLiveness(snap serve.ActivitySnapshot) serveLiveness {
 // drain still shows its uptime and next tick.
 func (s serveState) bannerCluster(now time.Time) string {
 	cluster, item := s.serveCluster(now), s.pushItem(now)
+	pause := ""
+	if s.pauseErr != nil {
+		pause = "automatic sweep pause unavailable: " + s.pauseErr.Error()
+	} else if s.pause.Active(now) {
+		pause = s.pause.Summary(now)
+	}
+	if pause != "" {
+		if cluster != "" {
+			cluster += " · "
+		}
+		cluster += pause
+	}
 	if cluster == "" || item == "" {
 		return cluster + item
 	}

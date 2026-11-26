@@ -125,6 +125,15 @@ func quietRoot() string {
 // tree completes). The returned slice is sorted and prefix-filtered.
 func completeWords(root string, words []string) []string {
 	partial := words[len(words)-1]
+	if len(words) == 2 && words[0] == "serve" {
+		var matches []string
+		for _, candidate := range []string{"pause", "status", "unpause"} {
+			if strings.HasPrefix(candidate, partial) {
+				matches = append(matches, candidate)
+			}
+		}
+		return matches
+	}
 	prior := words[:len(words)-1]
 
 	// 1. Flag-value completion runs ahead of positional resolution: the

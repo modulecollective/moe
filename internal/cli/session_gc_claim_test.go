@@ -251,8 +251,8 @@ func TestHeartbeatGCHoldsUncertainClaims(t *testing.T) {
 				uncertainGCClaim(t, s, kind)
 				retained := assertGCSessionRetained(t, s)
 				var log bytes.Buffer
-				if ids := sweepIDs(g.Due(testTick, &log)); len(ids) != 0 {
-					t.Errorf("occupied project offered: %v", ids)
+				if ids := sweepIDs(g.Due(&log)); len(ids) != 0 {
+					t.Errorf("unchanged surveyed board offered: %v", ids)
 				}
 				if log.Len() != 0 {
 					t.Errorf("held session reported as removed/failed: %s", log.String())
@@ -260,8 +260,8 @@ func TestHeartbeatGCHoldsUncertainClaims(t *testing.T) {
 				if g.surveyed["moe"] != cursor {
 					t.Errorf("held session cleared surveyed cursor")
 				}
-				if !openSessionProjects(root, time.Now())["moe"] {
-					t.Error("surviving ref did not hold occupancy")
+				if !git.HasRef(root, "refs/heads/"+s.Branch) {
+					t.Error("surviving session ref disappeared")
 				}
 				refs := gittest.Output(t, root, "for-each-ref", "--format=%(refname) %(objectname)")
 				registrations := gittest.Output(t, root, "worktree", "list", "--porcelain")

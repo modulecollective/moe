@@ -8,6 +8,11 @@ const summary = {textContent: 'Default: stylesheet'};
 const error = {textContent: ''};
 const revision = {value: '0'};
 const button = {};
+const pauseSummary = {textContent: ''}, pauseError = {textContent: ''}, pauseRevision = {value: '0'}, pauseButton = {}, pauseForm = {};
+const pause = {querySelector: s => ({
+ '[data-pause-summary]': pauseSummary, '[data-pause-error]': pauseError,
+ '[name="revision"]': pauseRevision, 'button': pauseButton, 'form': pauseForm
+})[s]};
 const cluster = {textContent: 'serve browse-only · up 0m'};
 const rows = [...page.matchAll(/<span class="note run-status" data-key="([^"]+)">([^<]*)<\/span>/g)]
   .map(m => ({dataset: {key: m[1]}, textContent: m[2]}));
@@ -22,7 +27,7 @@ const form = {querySelector: s => ({
 let visibility, timer, reply, polls = 0, starts = 0;
 const document = {
   hidden: false, activeElement: button,
-  getElementById: id => { assert.equal(id, 'agent-default'); return page.includes('id="agent-default"') ? form : null; },
+  getElementById: id => { if (id === 'serve-pause') return page.includes('id="serve-pause"') ? pause : null; assert.equal(id, 'agent-default'); return page.includes('id="agent-default"') ? form : null; },
   querySelector: s => { assert.equal(s, '[data-serve-cluster]'); return cluster; },
   querySelectorAll: s => {
     if (s === '.run-status[data-key]') return rows;
@@ -43,6 +48,8 @@ const flush = () => new Promise(setImmediate);
 async function refresh(text, rev, err = '', status = 'serve armed · up 4m · 3 unpushed', blocked = true, present = true) {
   timer();
   reply({ok: true, json: async () => ({
+    __pause_summary: 'new automatic sweeps ' + (rev % 2 ? 'paused until tomorrow' : 'unpaused'),
+    __pause_revision: String(rev), __pause_error: err, __pause_active: rev % 2 ? 'true' : 'false',
     __agent_summary: text, __agent_revision: String(rev), __agent_error: err,
     __serve_cluster: status, ...(present ? Object.fromEntries(rows.map(row => [row.dataset.key, {summary: '<working>', stage_blocked: blocked}])) : {})
   })});
@@ -51,6 +58,14 @@ async function refresh(text, rev, err = '', status = 'serve armed · up 4m · 3 
     assert.equal(summary.textContent, text);
     assert.equal(revision.value, String(rev));
     assert.equal(error.textContent, err);
+  }
+  if (page.includes('id="serve-pause"')) {
+    assert.equal(pauseSummary.textContent, 'new automatic sweeps ' + (rev % 2 ? 'paused until tomorrow' : 'unpaused'));
+    assert.equal(pauseError.textContent, err);
+    assert.equal(pauseRevision.value, String(rev));
+    assert.equal(pauseButton.textContent, rev % 2 ? 'Unpause' : 'Pause for 24 hours');
+    assert.equal(pauseButton.disabled, !!err);
+    assert.equal(pauseForm.action, rev % 2 ? '/serve/unpause' : '/serve/pause');
   }
   assert.equal(cluster.textContent, status);
   rows.forEach(row => assert.equal(row.textContent, present ? '<working>' : ''));

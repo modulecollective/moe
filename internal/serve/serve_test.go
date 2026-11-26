@@ -99,6 +99,7 @@ func TestServePagesRenderSharedHead(t *testing.T) {
 
 	paths := []string{
 		"/agent",                              // stale POST readback
+		"/serve/pause",                        // stale pause readback
 		"/",                                   // dash
 		"/idea/new",                           // new_idea
 		"/run/alpha/fix-it",                   // run
@@ -147,6 +148,11 @@ func TestServePagesRenderSharedHead(t *testing.T) {
 			want := http.StatusOK
 			if path == "/agent" {
 				req = httptest.NewRequest("POST", path, strings.NewReader("agent=codex&revision=1"))
+				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				want = http.StatusConflict
+			}
+			if path == "/serve/pause" {
+				req = httptest.NewRequest("POST", path, strings.NewReader("revision=1"))
 				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 				want = http.StatusConflict
 			}

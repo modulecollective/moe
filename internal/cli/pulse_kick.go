@@ -15,11 +15,6 @@ import (
 	"github.com/modulecollective/moe/internal/session"
 )
 
-// pulseQuietWindow is the operator's quiet tick, matching serve's baked
-// heartbeat cadence. The heartbeat holds a project for it, but the one
-// sweep can still see that project's board, so the ride asks again.
-const pulseQuietWindow = 5 * time.Minute
-
 // pulsePick is the survey's `next`, resolved against the board.
 type pulsePick struct {
 	Key    string
@@ -83,7 +78,7 @@ func ideaPickHold(root string, md *run.Metadata) string {
 	case md.Project == project.RootID:
 		return "is a top-level idea with no source — file its work into a project"
 	}
-	return quietWindowHold(root, md, modeHold(root, md))
+	return modeHold(root, md)
 }
 
 // modeHold is the project's standing cap on the clock. Empty for anything
@@ -99,20 +94,6 @@ func modeHold(root string, md *run.Metadata) string {
 	}
 	if mode == project.ModePaused {
 		return "is held by paused mode — the project starts nothing on its own"
-	}
-	return ""
-}
-
-// quietWindowHold keeps a clock ride off a board the operator touched
-// within the last tick. hold passes through when it is already set. A run
-// with an undelivered note is exempt: the window protects work still being
-// arranged, and a note is the operator pushing this run.
-func quietWindowHold(root string, md *run.Metadata, hold string) string {
-	if hold != "" || !clockInvoked || pendingInputOnRun(root, md) {
-		return hold
-	}
-	if operatorActedSince(root, md.Project, time.Now().Add(-pulseQuietWindow)) {
-		return "is held — an operator commit landed in " + md.Project + " within the last tick"
 	}
 	return ""
 }
@@ -189,7 +170,7 @@ func kickFloorHold(root, key string, sc *pulseScan) string {
 	if md == nil || md.Status != run.StatusInProgress {
 		return "has already settled — skipping"
 	}
-	if hold := quietWindowHold(root, md, kickModeHold(root, key, sc)); hold != "" {
+	if hold := kickModeHold(root, key, sc); hold != "" {
 		return hold
 	}
 	if settled, turnClosed := rootDesignSettled(root, md, sc.idx); !settled {
@@ -274,23 +255,6 @@ func kickableRuns(sc *pulseScan, projectID string) []string {
 	}
 	sort.Strings(keys)
 	return keys
-}
-
-// noteWaitingOnParkedWork reports whether a run a pick could name carries an
-// undelivered note, which lets the heartbeat look inside the quiet window.
-func noteWaitingOnParkedWork(sc *pulseScan, projectID string) bool {
-	for _, key := range kickableRuns(sc, projectID) {
-		if pendingInputOnRun(sc.root, sc.byKey[key]) {
-			return true
-		}
-	}
-	for _, md := range sc.mds {
-		if md.Project == projectID && md.Status == run.StatusInProgress &&
-			md.Workflow == dash.IdeaWorkflow && md.PromoteTo != "" && pendingInputOnRun(sc.root, md) {
-			return true
-		}
-	}
-	return false
 }
 
 // pendingInputOnRun reports whether the run carries operator prose no turn

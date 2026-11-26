@@ -14,8 +14,10 @@
     {{template "headeractions" false}}
   </header>
 
+  {{template "pause_control.html" .Pause}}
   {{template "servepanel" .}}
 </main>
 {{template "themejs" .}}
+{{template "dashstatusjs" .}}
 </body>
 </html>

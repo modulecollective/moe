@@ -114,16 +114,13 @@ func newHeartbeatGate(root string) *heartbeatGate {
 // Recorded pushed PRs also pay one bounded `gh pr view` per tick, outside
 // the journal lock, and a red one reads its run's input file; a project
 // without them pays no added network read.
-// A project whose tip is machine-authored and younger than one tick pays
-// two more logs, scanning the window for a masked operator act; a quiet
-// board never reaches it. A quiet board therefore costs no agent turn, no
-// run, and no journal noise, which is the whole reason a fixed cadence
+// A quiet board costs no agent turn, run or journal noise, which is the whole reason a fixed cadence
 // can be baked rather than tuned.
 //
 // Warn-only throughout, mirroring the pulse itself: a read that fails
 // drops the project from this tick rather than failing the tick. The
 // next one is a few minutes away and re-derives everything.
-func (g *heartbeatGate) Due(tick time.Duration, log io.Writer) []serve.HeartbeatDecision {
+func (g *heartbeatGate) Due(log io.Writer) []serve.HeartbeatDecision {
 	g.log = log
 	g.mu.Lock()
 	g.pending = map[string]string{}
@@ -142,7 +139,6 @@ func (g *heartbeatGate) Due(tick time.Duration, log io.Writer) []serve.Heartbeat
 		return nil
 	}
 	now := time.Now()
-	occupied := openSessionProjects(g.root, now)
 
 	// Every project's verdict comes back, not just the ones to sweep: the
 	// stand-downs are the trace that used to be invisible, and the loop
@@ -152,7 +148,7 @@ func (g *heartbeatGate) Due(tick time.Duration, log io.Writer) []serve.Heartbeat
 	decisions := make([]serve.HeartbeatDecision, 0, len(projects))
 	anySweep := false
 	for _, p := range projects {
-		sweep, held, reason := g.projectDue(sc, p, occupied, tick, now)
+		sweep, held, reason := g.projectDue(sc, p, now)
 		if sweep {
 			anySweep = true
 		}
@@ -206,8 +202,7 @@ func (g *heartbeatGate) Due(tick time.Duration, log io.Writer) []serve.Heartbeat
 // permanently misreads as its own, and a silent wedge. So the exit walks
 // the range the survey could not have seen and refuses both cursors if
 // anything in it is unseen work. Next tick the moved leg fires (exit tip
-// ≠ recorded tips), the quiet window gets its ordinary say, and the
-// follow-up sweep sees it.
+// ≠ recorded tips), and the follow-up sweep sees it.
 //
 // Two things land in that range, and they refuse on the same terms
 // because they are the same fact. One is an operator's hand-commit. The
@@ -312,11 +307,9 @@ func (g *heartbeatGate) sweptProject(projectID string, clean bool) {
 // the decision and land on both dashes. They are not parsed anywhere,
 // and one thing branches on them: Due reads "paused" to keep a paused
 // project's cursors still. Which of them is worth a reader's
-// attention is the held bit's job instead: the two stand-downs that name
-// something outside the machine (an operator commit in the quiet window,
-// somebody inside the project) are held; the rest are "nothing to do"
-// spelled three ways, and /serve collapses them to a count.
-func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied map[string]bool, tick time.Duration, now time.Time) (sweep, held bool, reason string) {
+// attention is the held bit's job instead. Normal quiet decisions collapse
+// to a count; the ticker may hold would-start decisions at admission.
+func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, now time.Time) (sweep, held bool, reason string) {
 	projectID := p.ID
 
 	// The operator's standing cap, ahead of every read: a paused project
@@ -329,30 +322,11 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 		return false, false, "paused"
 	}
 
-	tip, tipAt, operatorTip, ok := projectJournalTip(g.root, projectID)
+	tip, tipAt, _, ok := projectJournalTip(g.root, projectID)
 	if !ok {
 		// A project with no journal history at all — freshly registered,
 		// nothing to survey.
 		return false, false, "no journal history yet"
-	}
-
-	// One quiet tick. The operator gets a full tick with their hands on
-	// the board before the machine moves, which is what closes the
-	// staging race on loose runs: work minted, promoted or edited by
-	// hand is never picked up while it is still being arranged. Staging
-	// can skip the window entirely by minting straight into a chain head
-	// — the fence the groom step honours.
-	//
-	// The whole window, not just its tip: a machine commit landing on top
-	// of a hand-edit — a ride merging and closing while the operator
-	// stages loose runs — would otherwise mask the act it landed on and
-	// hand the half-arranged board straight to a sweep.
-	//
-	// A note on parked work lifts this for the sweep. The ride floor still
-	// holds every run in the project except the one carrying the note.
-	if now.Sub(tipAt) < tick && (operatorTip || operatorActedSince(g.root, projectID, now.Add(-tick))) &&
-		!noteWaitingOnParkedWork(sc, projectID) {
-		return false, true, "an operator commit landed within the last tick"
 	}
 
 	g.mu.Lock()
@@ -369,10 +343,7 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 	if log == nil {
 		log = io.Discard
 	}
-	var prs []ownedPRChecks
-	if !occupied[projectID] {
-		prs = gatherOwnedPRChecks(sc, projectID, log)
-	}
+	prs := gatherOwnedPRChecks(sc, projectID, log)
 	// A red head whose one repair attempt is spent, with no fresh note on
 	// the run, does not wake: the survey could only read its own repair
 	// hold and pick nothing. Only this durable hold suppresses; transient
@@ -510,32 +481,6 @@ func (g *heartbeatGate) projectDue(sc *pulseScan, p *project.Metadata, occupied 
 				return false, false, "the journal hasn't moved and nothing settled is parked"
 			}
 		}
-	}
-
-	// The stand-down. A ride mid-hop, an operator sitting in a stage and
-	// a survey mid-turn all look the same from here — a live session
-	// branch somewhere in the project — and all mean somebody else is
-	// already moving this project. A ride's commits move the journal tip
-	// when it lands, so the next tick's moved leg picks the project back
-	// up; standing down costs a tick, not the sweep. Live, not merely
-	// present: a branch whose claimant is provably dead has stopped
-	// owning anything, and openSessionProjects no longer counts it.
-	//
-	// Deliberately *not* also "no open pulse run", which is what the
-	// design's gate list says and what the recovery story it sits beside
-	// contradicts. A survey holds a session branch for its whole agent
-	// turn, so an in-flight one is already caught here and the ticker
-	// single-flights its own children besides; all a run-status check
-	// adds on top is the sweeps that *died*. Those are exactly the ones
-	// that must not block. A failed survey leaves its run open on the
-	// dash's ACTIVE list until a human closes it (escalation by
-	// visibility), so standing down on it would let the first vendor
-	// failure wedge this project's heartbeat indefinitely — and would
-	// leave the failure backoff pacing a loop that never gets to run.
-	// Repeat failures are bounded by that backoff instead, which is the
-	// job it was written for.
-	if occupied[projectID] {
-		return false, true, "somebody is already inside the project"
 	}
 
 	// This tick wants to sweep, so stage where the journal stands now
@@ -842,11 +787,9 @@ func (g *heartbeatGate) reap(log io.Writer) {
 // abandoned commits dangle rather than vanish, so session evidence stays
 // readable until gc prunes them. Archived diagnostics survive separately.
 //
-// The commit is machine-marked deliberately: MoE-Consent is *the*
-// machine marker, and an unmarked commit at the journal tip would read
-// as the operator's, holding the project for a quiet tick — the opposite
-// of what a reap is for. `dynamic` is the honest level, because the gate
-// this runs under only ticks on an armed serve (serve.Options.Dynamic).
+// The commit is machine-marked so sweep-exit accounting does not treat
+// recovery bookkeeping as unseen human work. `dynamic` is the honest
+// level: this gate only ticks on an armed serve (serve.Options.Dynamic).
 //
 // No MoE-Document trailer: the doc is in the subject and in the note,
 // and stamping one would offer this commit to every reader that treats
@@ -955,11 +898,8 @@ func (g *heartbeatGate) gc(log io.Writer) {
 // authored. ok is false when the project has no history yet or the read
 // failed.
 //
-// Operator-authored is the absence of both machine marks — no
-// MoE-Consent, no MoE-Spawned-By. Absence normally means *unknown*
-// rather than operator, and it still does for attribution; here the
-// unknown case is deliberately folded into "operator", because the only
-// thing it buys is one quiet tick of hesitation.
+// Operator-authored here means absence of both machine marks; attribution
+// still treats missing provenance as unknown.
 func projectJournalTip(root, projectID string) (sha string, at time.Time, operator bool, ok bool) {
 	head, err := git.HEAD(root)
 	if err != nil {
@@ -994,19 +934,6 @@ func projectJournalTip(root, projectID string) (sha string, at time.Time, operat
 	return parts[0], when, !machineAuthored(parts[2]), true
 }
 
-// operatorActedSince reports whether any journal commit concerning the
-// project since t is operator-authored. It is the quiet window's real
-// question — the tip alone answers a narrower one, and a machine commit
-// landing on top of a hand-edit is exactly how the two diverge.
-//
-// --since filters on committer date, the same field the tip read compares
-// (%cI), so both halves of the window agree on what "younger than one
-// tick" means.
-func operatorActedSince(root, projectID string, since time.Time) bool {
-	operator, _ := journalActs(root, projectID, "--since="+since.Format(time.RFC3339))
-	return operator
-}
-
 // unseenWorkIn reports whether anything landed in base..tip that the
 // sweep's own survey could not have seen. It is Swept's question, and
 // both halves reach it for the same reason: an operator commit arriving
@@ -1025,10 +952,9 @@ func unseenWorkIn(root, projectID, base, tip string) bool {
 // Duplicate bodies cannot change these boolean answers.
 //
 // Warn-only like every other read in this file, and in the same direction
-// for both callers: an unreadable log reports neither act, which leaves
-// the quiet window's tip answer standing and leaves Swept advancing its
-// cursors. Refusing on a persistent read failure would make the moved leg
-// fire — and sweep — every tick, the runaway rather than the safe default.
+// for both acts: an unreadable log reports neither, leaving Swept advancing
+// its cursors. Refusing on a persistent read failure would make the moved
+// leg fire — and sweep — every tick, the runaway rather than the safe default.
 func journalActs(root, projectID, rev string) (operator, ride bool) {
 	out, err := git.Output(root, "log", rev, "--format=%x00%B", "--", "projects/"+projectID)
 	if err != nil {
@@ -1091,16 +1017,10 @@ func rideAuthored(body string) bool {
 	return false
 }
 
-// machineAuthored reports whether a commit body carries either machine
-// mark. Its inverse is what both halves of the quiet window call
-// operator-authored, so the two cannot drift apart.
-//
-// It is only as good as the marks: a machine commit that lands unstamped
-// reads as the operator's here, which costs the sweep-exit walk a
-// redundant sweep and the quiet window a tick of hesitation. walkConsent
-// (ridemode.go) is the rule that keeps the journal honest for it — an
-// emit site that skips the stamp is what breaks this predicate, not
-// anything in this file.
+// machineAuthored reports whether a commit body carries either machine mark.
+// An unstamped machine commit reads as unknown/operator work here and costs
+// the sweep-exit walk a redundant sweep. walkConsent (ridemode.go) keeps the
+// journal honest; an emit site skipping the stamp breaks this predicate.
 func machineAuthored(body string) bool {
 	return strings.Contains(body, "\nMoE-Consent:") || strings.Contains(body, "\nMoE-Spawned-By:")
 }
@@ -1140,74 +1060,6 @@ func parkedKickableThread(root string, sc *pulseScan, projectID string, markedOn
 		}
 	}
 	return ""
-}
-
-// openSessionProjects reports which projects have a live session branch
-// anywhere in them — a ride mid-hop, or the operator sitting in a stage.
-// Either way somebody is already inside that project, and the heartbeat
-// stands down: the occupant's commits move the journal tip when they
-// land, so the next tick's moved leg picks the project back up —
-// standing down costs a tick, not the sweep.
-//
-// *Live* is the load-bearing word, and it is not the branch. A branch
-// whose claimant is provably dead is a corpse the reap deliberately
-// won't clear, because an operator's session may only ever be surfaced —
-// a Ctrl-C'd `moe pulse new`, a stage pane lost to a box reboot. Counting
-// it as occupancy is what stands the project's heartbeat down forever:
-// nothing but a human running `moe session abandon` ever moves it, and
-// nothing prompts them to. So a dead claim stops vouching for occupancy
-// here while the branch, the worktree and the claim stay exactly where
-// `moe session resolve` expects them.
-//
-// One `for-each-ref` for the whole bureaucracy rather than a HasRef per
-// run per stage: the tick asks this about every project, and the refs
-// are all in one namespace. Enumerating refs rather than session.List is
-// deliberate too — List walks `git worktree list`, so an orphan branch
-// with no worktree would vanish from the check entirely rather than
-// hold, the wrong direction for an ambiguous shape. A read failure
-// reports every project occupied — standing down on an unreadable ref
-// list is the answer that loses nothing.
-func openSessionProjects(root string, now time.Time, excluded ...string) map[string]bool {
-	out, err := git.Output(root, "for-each-ref", "--format=%(refname:short)", "refs/heads/session/")
-	if err != nil {
-		return allProjectsOccupied(root)
-	}
-	occupied := map[string]bool{}
-	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
-		branch := strings.TrimSpace(line)
-		if len(excluded) != 0 && branch == excluded[0] {
-			continue
-		}
-		rest, ok := strings.CutPrefix(branch, "session/")
-		if !ok {
-			continue
-		}
-		p, tail, found := strings.Cut(rest, "/")
-		if !found || p == "" {
-			continue
-		}
-		// The full triple is what keys a claim. A ref that doesn't carry
-		// one — hand-made, or a shape from some older binary — can't be
-		// probed, so it holds its project the way every session branch did
-		// before this.
-		if r, d, ok := strings.Cut(tail, "/"); ok && r != "" && d != "" && session.Dead(root, p, r, d, now) {
-			continue
-		}
-		occupied[p] = true
-	}
-	return occupied
-}
-
-func allProjectsOccupied(root string) map[string]bool {
-	occupied := map[string]bool{}
-	projects, _, err := project.List(root)
-	if err != nil {
-		return occupied
-	}
-	for _, p := range projects {
-		occupied[p.ID] = true
-	}
-	return occupied
 }
 
 // heartbeatGate satisfies the serve seam.

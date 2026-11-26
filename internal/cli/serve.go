@@ -29,6 +29,10 @@ func init() {
 }
 
 func runServe(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && (args[0] == "pause" || args[0] == "unpause" || args[0] == "status") {
+		return runServePause(args, stdout, stderr)
+	}
+
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	addr := fs.String("addr", "", "listen address override (host or host:port); default 127.0.0.1:4242")
@@ -37,6 +41,9 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe serve [--addr <host[:port]>] [--port <n>] [--dynamic]")
 		moePrintln(stderr, "")
+		moePrintln(stderr, "moe serve pause|unpause|status: global pause of new automatic sweeps for 24 hours.")
+		moePrintln(stderr, "Pausing again does not extend it. An admitted sweep and its ride may finish.")
+		moePrintln(stderr, "These commands work with serve stopped; unpause grants no consent.")
 		moePrintln(stderr, "Runs the moe server: serves the web UI, pushes pending bureaucracy")
 		moePrintln(stderr, "journal commits to origin, and optionally runs the heartbeat with")
 		moePrintln(stderr, "--dynamic. Journal pushing runs armed or unarmed; it does not ship")

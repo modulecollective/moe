@@ -13,6 +13,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/servepause"
 )
 
 // The resident heartbeat: the clock that makes MoE's find → order →
@@ -96,8 +97,7 @@ type HeartbeatDecision struct {
 // cli's heartbeatGate; nil on Options disables the heartbeat entirely,
 // which is how every test that doesn't care about it opts out.
 type Heartbeat interface {
-	// Due returns one decision per project the gate looked at, given the
-	// tick length (the one-quiet-tick rule needs it). It also runs the
+	// Due returns one decision per project the gate looked at. It runs the
 	// reap of dead machine sessions. Otherwise it only decides: it pins
 	// nothing for a sweep the ticker may still hold (see Dispatching).
 	// Warn-only: a failed read drops a project rather than the tick.
@@ -106,7 +106,7 @@ type Heartbeat interface {
 	// sweep. "Serve owns the clock, cli owns the judgement" is unchanged
 	// — the verdicts already crossed here; now they cross with their
 	// reasons attached instead of losing them to stderr.
-	Due(tick time.Duration, log io.Writer) []HeartbeatDecision
+	Due(log io.Writer) []HeartbeatDecision
 	// Dispatching tells the gate that the sweep the last Due asked for is
 	// about to spawn, so it pins the dispatch bases that tick offered.
 	// Only the ticker knows whether a sweep verdict survives the slot,
@@ -202,7 +202,7 @@ func (s *Server) runHeartbeat(ctx context.Context) {
 func (s *Server) heartbeatTick() {
 	hostErr := s.reconcileHost()
 	now := time.Now()
-	decisions := s.opts.Heartbeat.Due(heartbeatInterval, s.syncWriter())
+	decisions := s.opts.Heartbeat.Due(s.syncWriter())
 
 	var due []HeartbeatDecision
 	for _, d := range decisions {
@@ -264,6 +264,14 @@ func (s *Server) heartbeatTick() {
 		record()
 		return
 	}
+	// The successful locked read is the admission boundary. Release before
+	// host/process work; a later pause lets this sweep and its ride finish.
+	if err := servepause.Check(s.opts.Root, time.Now); err != nil {
+		holdDue(decisions, err.Error(), true)
+		record()
+		return
+	}
+
 	record()
 	// --heartbeat is the child saying who invoked it. The command is
 	// otherwise spelled exactly like the one an operator types, and each

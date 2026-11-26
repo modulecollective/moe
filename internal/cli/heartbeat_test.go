@@ -21,15 +21,7 @@ import (
 
 const testTick = 20 * time.Minute
 
-// quietFixture is spawnFixture with the project's registration commit
-// pushed back out of the quiet window.
-//
-// Registering a project is an operator act — no machine trailers on it —
-// and in a fixture it lands milliseconds before the gate looks, so every
-// board would otherwise read as "the operator's hands are still on it".
-// That reading is correct: a real board registered thirty seconds ago
-// does get one tick of hesitation. It just isn't what these tests are
-// about, and a board at rest is the shape they all start from.
+// quietFixture seeds a registration older than the timestamp-based journal probes.
 func quietFixture(t *testing.T) string {
 	t.Helper()
 	root := spawnFixture(t)
@@ -38,7 +30,7 @@ func quietFixture(t *testing.T) string {
 }
 
 // backdateHead rewrites HEAD's committer date to ago in the past, which
-// is the field the quiet window compares.
+// is the field the durable unswept-work probes compare.
 func backdateHead(t *testing.T, root string, ago time.Duration) {
 	t.Helper()
 	when := time.Now().Add(-ago).Format(time.RFC3339)
@@ -76,11 +68,7 @@ func dueProjects(t *testing.T, g *heartbeatGate) []string {
 	return sweepIDs(dueDecisions(t, g, testTick))
 }
 
-// dueProjectsPastTheWindow is dueProjects with a zero-length tick, which
-// makes any commit older than *now* quiet — the same predicate a real
-// tick applies twenty minutes later. Fixtures land fresh-dated commits,
-// so a test whose shape needs an operator commit in the history needs
-// this to reach the leg it is actually about.
+// dueProjectsPastTheWindow is the legacy helper used by cursor regressions.
 func dueProjectsPastTheWindow(t *testing.T, g *heartbeatGate) []string {
 	t.Helper()
 	return sweepIDs(dueDecisions(t, g, 0))
@@ -90,7 +78,7 @@ func dueProjectsPastTheWindow(t *testing.T, g *heartbeatGate) []string {
 func dueDecisions(t *testing.T, g *heartbeatGate, tick time.Duration) []serve.HeartbeatDecision {
 	t.Helper()
 	var log bytes.Buffer
-	got := g.Due(tick, &log)
+	got := g.Due(&log)
 	t.Logf("gate log:\n%s", log.String())
 	return got
 }
@@ -143,79 +131,23 @@ func TestHeartbeatFirstLookIsQuiet(t *testing.T) {
 	}
 }
 
-// TestHeartbeatStandDownReasonsCrossTheSeam: the gate's verdicts used to
-// leave only the sweeps behind, with every stand-down reason going to
-// stderr and dying there. That is why four heartbeat bugs had to be
-// diagnosed by reading code and inferring invisible cursor state. Now
-// every project's reason crosses with it, in the gate's own words.
-func TestHeartbeatStandDownReasonsCrossTheSeam(t *testing.T) {
+// Recent operator work is eligible immediately; a completed survey still
+// suppresses a second look at the same board.
+func TestHeartbeatRecentCommitAndSurveyReasons(t *testing.T) {
 	t.Parallel()
 	root := parallelQuietFixture(t)
+	groomFixture(t, root, "fix-a")
 	journalCommit(t, root, "moe", "operator: a note", "")
 	g := newHeartbeatGate(root)
-
-	// A hand-commit inside the window: the operator gets a full tick with
-	// their hands on the board before the machine moves.
-	if got := reasonFor(dueDecisions(t, g, testTick), "moe"); !strings.Contains(got, "operator commit") {
-		t.Errorf("reason = %q, want the quiet window named", got)
-	}
-
-	// Past the window, with a clean sweep on the current tip: whatever is
-	// parked, a survey already saw and left parked on purpose.
-	g.Swept("moe", true)
-	if got := reasonFor(dueDecisions(t, g, 0), "moe"); !strings.Contains(got, "surveyed the current tip") {
-		t.Errorf("reason = %q, want the surveyed cursor named", got)
-	}
-}
-
-// TestHeartbeatMarksTheHeldStandDowns: /serve renders only the
-// non-trivial, and this bit is what tells the two kinds of quiet apart.
-// A sweep blocked by something outside the machine — an operator commit
-// in the window, somebody inside the project — is news; "nothing to do"
-// spelled three ways is not. The split lives here rather than in a
-// reason-string match on the render side, which is what keeps the reason
-// strings free to be reworded.
-func TestHeartbeatMarksTheHeldStandDowns(t *testing.T) {
-	t.Parallel()
-	root := parallelQuietFixture(t)
-	journalCommit(t, root, "moe", "operator: a note", "")
-	g := newHeartbeatGate(root)
-
-	if !heldFor(dueDecisions(t, g, testTick), "moe") {
-		t.Error("an operator commit inside the window is a hold, not background hum")
-	}
-
-	// Past the window with a clean sweep on the tip: nothing to do, and
-	// nothing for the operator to act on either.
-	g.Swept("moe", true)
-	if heldFor(dueDecisions(t, g, 0), "moe") {
-		t.Error("a surveyed tip is the background hum, not a hold")
-	}
-}
-
-// TestHeartbeatMarksALiveSessionAsHeld: the other hold. Somebody is
-// inside the project, which is a fact about the board the operator can
-// see the consequence of, so it earns its row on /serve.
-func TestHeartbeatMarksALiveSessionAsHeld(t *testing.T) {
-	t.Parallel()
-	root := parallelQuietFixture(t)
-	minted := groomFixture(t, root, "fix-a")
-	g := sweptOnceOverParkedWork(t, root, true /*clean*/)
-
-	// The journal moved, so this tick wants to sweep — and then finds
-	// somebody inside. That is the shape a hold is for; a board with
-	// nothing to do never reaches the occupancy check at all.
-	journalCommit(t, root, "moe", "machine: a merge", "MoE-Consent: dynamic")
-	if _, err := session.Open(root, "moe", minted["fix-a"], "design"); err != nil {
-		t.Fatal(err)
-	}
-
 	decisions := dueDecisions(t, g, testTick)
-	if got := reasonFor(decisions, "moe"); !strings.Contains(got, "already inside") {
-		t.Fatalf("reason = %q, want the occupancy stand-down — the test isn't reaching it", got)
+	if len(sweepIDs(decisions)) != 1 || heldFor(decisions, "moe") {
+		t.Fatalf("fresh work held: %+v", decisions)
 	}
-	if !heldFor(decisions, "moe") {
-		t.Error("a live session holds a sweep that wanted to run — that is a hold")
+	g.Dispatching()
+	g.Swept("moe", true)
+	decisions = dueDecisions(t, g, testTick)
+	if len(sweepIDs(decisions)) != 0 || heldFor(decisions, "moe") || !strings.Contains(reasonFor(decisions, "moe"), "surveyed the current tip") {
+		t.Fatalf("surveyed board: %+v", decisions)
 	}
 }
 
@@ -816,91 +748,48 @@ func TestHeartbeatSurveyedShortCircuitsTheDelta(t *testing.T) {
 	}
 }
 
-// TestHeartbeatHoldsForOneQuietTick is the staging race, closed. The
-// operator's last act on this project is minutes old, so the machine
-// waits a full tick rather than picking work up from under their hands.
-func TestHeartbeatHoldsForOneQuietTick(t *testing.T) {
+// Recent operator work no longer imposes a courtesy window.
+func TestHeartbeatFreshOperatorCommitDoesNotHold(t *testing.T) {
 	t.Parallel()
 	root := parallelQuietFixture(t)
 	groomFixture(t, root, "fix-a")
 	// An operator-authored commit lands now: no machine trailers on it.
 	journalCommit(t, root, "moe", "chain: edit", "")
 
-	if got := dueProjects(t, newHeartbeatGate(root)); len(got) != 0 {
-		t.Errorf("due = %v while the operator's hands are on the board, want none", got)
+	if got := dueProjects(t, newHeartbeatGate(root)); len(got) != 1 {
+		t.Errorf("due = %v beside fresh operator work, want [moe]", got)
 	}
 }
 
-// TestHeartbeatMovesOnceTheOperatorIsQuiet: the same board a tick later.
-// The window is a hesitation, not a hold.
-func TestHeartbeatMovesOnceTheOperatorIsQuiet(t *testing.T) {
-	t.Parallel()
-	root := parallelQuietFixture(t)
-	groomFixture(t, root, "fix-a")
-	journalCommit(t, root, "moe", "chain: edit", "")
-
-	// A zero-length tick makes any commit older than "now" quiet, which
-	// is the same predicate a real tick applies twenty minutes later.
-	if got := dueProjectsPastTheWindow(t, newHeartbeatGate(root)); len(got) != 1 {
-		t.Errorf("due = %v once the quiet window passed, want [moe]", got)
-	}
-}
-
-// TestHeartbeatHoldsWhenAMachineCommitMasksTheOperator is the masking
-// case: the operator arranges loose runs by hand, and a ride merging and
-// closing lands its own commit on top before the next tick. Reading only
-// the tip, the machine sees a machine commit and helps itself to a board
-// whose arrangement is minutes old — the staging race the window exists
-// to close, arriving through the one door a tip-only read leaves open.
-func TestHeartbeatHoldsWhenAMachineCommitMasksTheOperator(t *testing.T) {
+// A machine tip covering human work also imposes no courtesy window.
+func TestHeartbeatMaskedOperatorCommitDoesNotHold(t *testing.T) {
 	t.Parallel()
 	root := parallelQuietFixture(t)
 	groomFixture(t, root, "fix-a")
 	journalCommit(t, root, "moe", "chain: edit", "")
 	journalCommit(t, root, "moe", "push: a ride merged", "MoE-Consent: dynamic")
 
-	if got := dueProjects(t, newHeartbeatGate(root)); len(got) != 0 {
-		t.Errorf("due = %v with the operator's act masked by a machine commit, want none", got)
+	if got := dueProjects(t, newHeartbeatGate(root)); len(got) != 1 {
+		t.Errorf("due = %v with a masked operator commit, want [moe]", got)
 	}
 }
 
-// TestHeartbeatMovesOnceAMaskedOperatorIsQuiet: the masked board a tick
-// later. The window scan is a hesitation like the tip check it joins, so
-// it must expire on the same terms.
-func TestHeartbeatMovesOnceAMaskedOperatorIsQuiet(t *testing.T) {
+// Another eligible run wakes the project beside a real human session.
+func TestHeartbeatOtherRunCanWakeBesideLiveSession(t *testing.T) {
 	t.Parallel()
 	root := parallelQuietFixture(t)
-	groomFixture(t, root, "fix-a")
-	journalCommit(t, root, "moe", "chain: edit", "")
-	journalCommit(t, root, "moe", "push: a ride merged", "MoE-Consent: dynamic")
-
-	if got := dueProjectsPastTheWindow(t, newHeartbeatGate(root)); len(got) != 1 {
-		t.Errorf("due = %v once the quiet window passed, want [moe]", got)
-	}
-}
-
-// TestHeartbeatStandsDownForALiveSession: a ride mid-hop or an operator
-// sitting in a stage means somebody is already inside the project; their
-// commits move the journal tip when they land, so the next tick's moved
-// leg picks the project back up.
-func TestHeartbeatStandsDownForALiveSession(t *testing.T) {
-	t.Parallel()
-	root := parallelQuietFixture(t)
-	minted := groomFixture(t, root, "fix-a")
+	minted := groomFixture(t, root, "fix-a", "fix-b")
 	if _, err := session.Open(root, "moe", minted["fix-a"], "design"); err != nil {
 		t.Fatal(err)
 	}
 
-	if got := dueProjects(t, newHeartbeatGate(root)); len(got) != 0 {
-		t.Errorf("due = %v with a live session in the project, want none", got)
+	if got := dueProjects(t, newHeartbeatGate(root)); len(got) != 1 {
+		t.Errorf("due = %v with a live session in the project, want [moe]", got)
 	}
 }
 
-// TestHeartbeatStandsDownForASurveyMidTurn: the pulse's single-flight,
-// read the only way that stays honest — a survey holds a session branch
-// for its whole agent turn, exactly like any other stage. A sweep
-// already running owns this generation.
-func TestHeartbeatStandsDownForASurveyMidTurn(t *testing.T) {
+// A typed pulse does not consume the automatic child slot.
+func TestHeartbeatTypedSurveyDoesNotHoldProject(t *testing.T) {
 	t.Parallel()
 	root := parallelQuietFixture(t)
 	groomFixture(t, root, "fix-a")
@@ -909,8 +798,8 @@ func TestHeartbeatStandsDownForASurveyMidTurn(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := dueProjects(t, newHeartbeatGate(root)); len(got) != 0 {
-		t.Errorf("due = %v with a survey mid-turn, want none", got)
+	if got := dueProjects(t, newHeartbeatGate(root)); len(got) != 1 {
+		t.Errorf("due = %v with a survey mid-turn, want [moe]", got)
 	}
 }
 
@@ -948,10 +837,8 @@ func TestHeartbeatSweepsPastAStrandedOperatorSession(t *testing.T) {
 	}
 }
 
-// TestHeartbeatStandsDownForAHeldOperatorSession is the direction where a
-// wrong answer costs something: an operator sitting in a live stage,
-// beating. Dead means provably dead, and a live pid is not it.
-func TestHeartbeatStandsDownForAHeldOperatorSession(t *testing.T) {
+// A live operator claim is preserved without holding another run.
+func TestHeartbeatSweepsBesideAHeldOperatorSession(t *testing.T) {
 	t.Parallel()
 	root := parallelQuietFixture(t)
 	groomFixture(t, root, "fix-a")
@@ -966,8 +853,8 @@ func TestHeartbeatStandsDownForAHeldOperatorSession(t *testing.T) {
 	}
 	t.Cleanup(release)
 
-	if got := dueProjects(t, newHeartbeatGate(root)); len(got) != 0 {
-		t.Errorf("due = %v with the operator inside the project, want none", got)
+	if got := dueProjects(t, newHeartbeatGate(root)); len(got) != 1 {
+		t.Errorf("due = %v with another run owned by the operator, want [moe]", got)
 	}
 }
 
@@ -1156,7 +1043,7 @@ func TestHeartbeatReapsADeadMachineSession(t *testing.T) {
 	writeDeadClaim(t, s, true /*machine*/)
 
 	var log bytes.Buffer
-	newHeartbeatGate(root).Due(testTick, &log)
+	newHeartbeatGate(root).Due(&log)
 
 	if git.HasRef(root, "refs/heads/"+s.Branch) {
 		t.Errorf("session branch survived the reap\n%s", log.String())
@@ -1188,7 +1075,7 @@ func TestHeartbeatLandsADeadMachineSessionThatCommitted(t *testing.T) {
 	writeDeadClaim(t, s, true /*machine*/)
 
 	var log bytes.Buffer
-	newHeartbeatGate(root).Due(testTick, &log)
+	newHeartbeatGate(root).Due(&log)
 
 	canvas := filepath.Join(root, run.ContentPath(s.Project, s.Run, s.Doc))
 	got, err := os.ReadFile(canvas)
@@ -1231,7 +1118,7 @@ func TestHeartbeatLeavesADeadMachineSessionThatWontLand(t *testing.T) {
 	writeDeadClaim(t, s, true /*machine*/)
 
 	var log bytes.Buffer
-	newHeartbeatGate(root).Due(testTick, &log)
+	newHeartbeatGate(root).Due(&log)
 
 	if !git.HasRef(root, "refs/heads/"+s.Branch) {
 		t.Errorf("a session that wouldn't land was destroyed anyway\n%s", log.String())
@@ -1270,7 +1157,7 @@ func TestHeartbeatNeverReapsAnUnmarkedSession(t *testing.T) {
 	}
 
 	var log bytes.Buffer
-	newHeartbeatGate(root).Due(testTick, &log)
+	newHeartbeatGate(root).Due(&log)
 
 	if !git.HasRef(root, "refs/heads/"+s.Branch) {
 		t.Errorf("an unclaimed session was reaped; only a proven robot corpse may go\n%s", log.String())
@@ -1343,7 +1230,7 @@ func TestHeartbeatGCFreesABoardAClaimlessBranchHeldForever(t *testing.T) {
 	}
 
 	var log bytes.Buffer
-	decisions := g.Due(testTick, &log)
+	decisions := g.Due(&log)
 
 	if git.HasRef(root, "refs/heads/"+s.Branch) {
 		t.Fatalf("a claimless branch on a merged run survived the tick\n%s", log.String())
@@ -1368,7 +1255,7 @@ func TestHeartbeatGCClearsARefWithNoWorktree(t *testing.T) {
 	gittest.Run(t, root, "branch", branch)
 
 	var log bytes.Buffer
-	newHeartbeatGate(root).Due(testTick, &log)
+	newHeartbeatGate(root).Due(&log)
 
 	if git.HasRef(root, "refs/heads/"+branch) {
 		t.Fatalf("the orphan ref survived the tick\n%s", log.String())
@@ -1398,7 +1285,7 @@ func TestHeartbeatGCHoldsALiveClaimOnATerminalRun(t *testing.T) {
 	t.Cleanup(release)
 
 	var log bytes.Buffer
-	decisions := newHeartbeatGate(root).Due(testTick, &log)
+	decisions := newHeartbeatGate(root).Due(&log)
 
 	if !git.HasRef(root, "refs/heads/"+s.Branch) {
 		t.Fatalf("a live session was reaped out from under its claimant\n%s", log.String())
@@ -1406,8 +1293,8 @@ func TestHeartbeatGCHoldsALiveClaimOnATerminalRun(t *testing.T) {
 	if _, err := os.Stat(s.WorktreePath); err != nil {
 		t.Errorf("the live session's worktree went with it: %v", err)
 	}
-	if got := sweepIDs(decisions); len(got) != 0 {
-		t.Errorf("due = %v with somebody inside the project, want none", got)
+	if got := sweepIDs(decisions); len(got) != 1 {
+		t.Errorf("due = %v with an unrelated retained session, want [moe]", got)
 	}
 }
 
@@ -1427,7 +1314,7 @@ func TestHeartbeatGCReapsATerminalRunWithADeadClaim(t *testing.T) {
 	writeDeadClaim(t, s, false /*operator*/)
 
 	var log bytes.Buffer
-	decisions := g.Due(testTick, &log)
+	decisions := g.Due(&log)
 
 	if git.HasRef(root, "refs/heads/"+s.Branch) {
 		t.Errorf("a dead claim on a finished run kept the branch alive\n%s", log.String())

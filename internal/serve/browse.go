@@ -250,7 +250,7 @@ func (s *Server) handleProjectHub(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	vm.Serve = s.activity.panel(now)
+	vm.Serve = s.pausePanel(now)
 	vm.InputCount = s.openPingCount(projectID)
 	// After the fragment return: the switch is full-page furniture, and a
 	// show-more fetch has no business re-reading project.json for it. A

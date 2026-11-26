@@ -109,6 +109,7 @@ func closedRootPulses(t *testing.T, root string) []string {
 }
 
 func TestNextPromotesOnlyThePickedTaggedIdea(t *testing.T) {
+	defer withClockInvoked()()
 	defer withRideMode(rideDynamic)()
 	root, stages := nextFixture(t)
 	tagIdea(t, root, "beta", "picked-idea")
@@ -501,7 +502,7 @@ func TestKickoffPutsARunWithAnOperatorNoteFirst(t *testing.T) {
 	}
 }
 
-func TestOperatorNoteLiftsTheQuietWindowForItsRunAlone(t *testing.T) {
+func TestFreshWorkNeedsNoNoteToRide(t *testing.T) {
 	defer withRideMode(rideDynamic)()
 	defer withClockInvoked()()
 	root, stages := nextFixture(t)
@@ -517,23 +518,24 @@ func TestOperatorNoteLiftsTheQuietWindowForItsRunAlone(t *testing.T) {
 		t.Fatal("scan failed")
 	}
 	g := newHeartbeatGate(root)
-	for id, wantSweep := range map[string]bool{"beta": true, "moe": false} {
+	for id, wantSweep := range map[string]bool{"beta": true, "moe": true} {
 		p, err := project.Load(root, id)
 		if err != nil {
 			t.Fatal(err)
 		}
-		sweep, held, why := g.projectDue(sc, p, map[string]bool{}, pulseQuietWindow, time.Now())
-		if sweep != wantSweep || held == wantSweep {
+		sweep, held, why := g.projectDue(sc, p, time.Now())
+		if sweep != wantSweep || held {
 			t.Errorf("%s: sweep=%v held=%v (%s), want sweep=%v", id, sweep, held, why, wantSweep)
 		}
 	}
 
 	for _, id := range []string{plain} {
 		code, stderr := sweepWithGate(t, root, `{"status":"ok","next":{"run":"beta/`+id+`","why":"try"}}`)
-		if code != 0 || len(*stages) != 0 || !strings.Contains(stderr, "within the last tick") {
+		if code != 0 || len(*stages) == 0 || (*stages)[0].runID != plain {
 			t.Fatalf("unnoted sibling: exit=%d stages=%+v stderr=%s", code, *stages, stderr)
 		}
 	}
+	*stages = nil
 	code, stderr := sweepWithGate(t, root, `{"status":"ok","next":{"run":"beta/`+noted+`","why":"the operator pushed it"}}`)
 	if code != 0 || len(*stages) == 0 || (*stages)[0].runID != noted {
 		t.Fatalf("noted run did not ride: exit=%d stages=%+v stderr=%s (other %s)", code, *stages, stderr, other)

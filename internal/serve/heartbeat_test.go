@@ -34,7 +34,7 @@ type fakeHeartbeat struct {
 	dispatchingAtSwept []int
 }
 
-func (f *fakeHeartbeat) Due(tick time.Duration, log io.Writer) []HeartbeatDecision {
+func (f *fakeHeartbeat) Due(log io.Writer) []HeartbeatDecision {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.passes++
@@ -569,7 +569,7 @@ type blockingHeartbeat struct {
 	release chan struct{}
 }
 
-func (b *blockingHeartbeat) Due(tick time.Duration, log io.Writer) []HeartbeatDecision {
+func (b *blockingHeartbeat) Due(log io.Writer) []HeartbeatDecision {
 	select {
 	case b.entered <- struct{}{}:
 	default:

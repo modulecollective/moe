@@ -184,19 +184,16 @@ func TestClockSurveyQuotaDisposalAndRestart(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if due, _, why := g.projectDue(sc, p, map[string]bool{}, 0, time.Now()); due || !strings.Contains(why, "deferred for quota") {
+			if due, _, why := g.projectDue(sc, p, time.Now()); due || !strings.Contains(why, "deferred for quota") {
 				t.Fatalf("future retry: due=%v %s", due, why)
 			}
 			// The retry leg outranks a clean cursor and needs no parked run.
 			g.Swept(project.RootID, true)
-			if due, _, why := g.projectDue(sc, p, map[string]bool{}, 0, retry.NotBefore); !due {
+			if due, _, why := g.projectDue(sc, p, retry.NotBefore); !due {
 				t.Fatalf("due retry hidden: %s", why)
 			}
-			if due, held, _ := g.projectDue(sc, p, map[string]bool{project.RootID: true}, 0, retry.NotBefore); due || !held {
-				t.Fatal("retry ignored occupancy")
-			}
 			p.Mode = string(project.ModePaused)
-			if due, _, _ := g.projectDue(sc, p, nil, 0, retry.NotBefore); due {
+			if due, _, _ := g.projectDue(sc, p, retry.NotBefore); due {
 				t.Fatal("retry ignored pause")
 			}
 			// A failed retry leaves the token. A clean new survey discharges
@@ -279,8 +276,8 @@ func TestQuotaRetryAggregationAndObservedTokens(t *testing.T) {
 	if got := dueProjectsPastTheWindow(t, g); len(got) != 1 {
 		t.Fatalf("future retry swallowed new work: %v", got)
 	}
-	if !heldFor(dueDecisions(t, newHeartbeatGate(root), testTick), "moe") {
-		t.Fatal("retry bypassed quiet window")
+	if heldFor(dueDecisions(t, newHeartbeatGate(root), testTick), "moe") {
+		t.Fatal("fresh work held by retry")
 	}
 	// Force the operator edit into the retry event's exact second. A
 	// restarted gate has no cursor and must compare commits, not dates.
@@ -460,7 +457,7 @@ func TestCIRepairClaimsAfterQuotaAdmission(t *testing.T) {
 				wantCode = exitQuotaDeferred
 				wantRetries = 1
 			}
-			if scenario == "review blocked" {
+			if scenario == "review blocked" || scenario == "occupied" {
 				wantClaims, wantExec, wantReads = 1, 1, 2
 			}
 			// A claimed repair that leaves build unstamped parks at the
@@ -482,7 +479,7 @@ func TestCIRepairClaimsAfterQuotaAdmission(t *testing.T) {
 			if scenario == "no change" && !strings.Contains(log.String(), "no repair commit or nominated close") {
 				t.Fatal(log.String())
 			}
-			if scenario == "review blocked" || scenario == "build unstamped" || scenario == "no change" {
+			if scenario == "review blocked" || scenario == "occupied" || scenario == "build unstamped" || scenario == "no change" {
 				if !strings.Contains(log.String(), "attempt remains spent") {
 					t.Fatal(log.String())
 				}

@@ -29,6 +29,7 @@ import (
 	"github.com/modulecollective/moe/internal/input"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runsock"
+	"github.com/modulecollective/moe/internal/servepause"
 	"github.com/modulecollective/moe/internal/ui"
 )
 
@@ -404,6 +405,19 @@ func (s *uiSource) buildBoard(now time.Time) (ui.Board, []cliout.ProgramStatus) 
 	artStart := dash.RenderOverview(buf, histogram, s.artFrames[0])
 	b.Art = ui.Art{Start: artStart, Height: len(s.artFrames[0]), Frames: s.artFrames}
 	b.Overview = strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n")
+	pauseState, pauseErr := servepause.Read(s.root)
+	b.PauseSummary, b.PauseRevision = pauseState.Summary(now), pauseState.Revision
+	if pauseErr != nil {
+		b.PauseSummary, b.PauseError = "automatic sweep pause unavailable", pauseErr.Error()
+		b.Issues = append(b.Issues, b.PauseSummary+": "+b.PauseError)
+	}
+	if pauseErr != nil || pauseState.Active(now) {
+		label := "new automatic sweeps paused (:serve status)"
+		if pauseErr != nil {
+			label = "automatic sweep pause unavailable (:serve status)"
+		}
+		b.Overview = append(b.Overview, label)
+	}
 	defaultState, err := agentdefault.Read(s.root)
 	b.AgentSummary, b.AgentRevision = defaultState.Summary(now), defaultState.Revision
 	if err != nil {

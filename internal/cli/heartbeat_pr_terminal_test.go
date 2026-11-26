@@ -15,6 +15,7 @@ import (
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/session"
 )
 
 func TestHeartbeatKeepsOfferingTerminalPRUntilReconciled(t *testing.T) {
@@ -93,18 +94,20 @@ func TestHeartbeatTerminalPRPreservesHolds(t *testing.T) {
 		name      string
 		mode      project.Mode
 		occupied  bool
-		tick      time.Duration
 		wantSweep bool
 		wantReads int
 	}{
-		{"paused", project.ModePaused, false, 0, false, 0},
-		{"quiet-window", project.ModeAuto, false, testTick, false, 0},
-		{"occupied", project.ModeAuto, true, 0, false, 0},
-		{"safe", project.ModeSafe, false, 0, true, 1},
+		{"paused", project.ModePaused, false, false, 0},
+		{"fresh-commit", project.ModeAuto, false, true, 1},
+		{"occupied", project.ModeAuto, true, true, 1},
+		{"safe", project.ModeSafe, false, true, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reads = 0
-			sweep, _, reason := gate.projectDue(sc, &project.Metadata{ID: "moe", Mode: string(tc.mode)}, map[string]bool{"moe": tc.occupied}, tc.tick, time.Now())
+			if tc.occupied {
+				gittest.Run(t, root, "branch", session.BranchName("moe", "other-run", "design"))
+			}
+			sweep, _, reason := gate.projectDue(sc, &project.Metadata{ID: "moe", Mode: string(tc.mode)}, time.Now())
 			if sweep != tc.wantSweep || reads != tc.wantReads {
 				t.Fatalf("sweep=%t, reads=%d, reason=%s; want %t/%d", sweep, reads, reason, tc.wantSweep, tc.wantReads)
 			}

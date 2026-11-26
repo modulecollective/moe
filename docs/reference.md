@@ -188,6 +188,18 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   it succeeded. Pure quota deferrals send nothing. A sweep serve interrupted on
   its way down also sends nothing: an `ok:false` there would report a failure
   the operator caused. A failed POST is logged and blocks nothing.
+- `moe serve pause|unpause|status` controls a global pause of new automatic
+  sweeps. Pause lasts 24 hours; repeating it while active does not extend it.
+  Unpause clears it early; status prints the expiry in local date/time/zone.
+  These commands work with serve stopped. An admitted survey and its ride may
+  finish; human commands, journal pushing and hygiene remain usable. Expiry or
+  unpause permits the next eligible tick without arming serve, resetting
+  backoff/quota history or bypassing project modes. Web controls beside Agent
+  default and on `/serve`, and terminal `:serve pause|unpause|status`, share
+  this setting. Active pause/errors appear directly in status observations.
+  Web/UI controls carry a revision and refuse stale opposing actions. The
+  tracked root `serve-pause.json` holds its revision and optional UTC expiry;
+  malformed state holds automatic admission and reports an error.
 - `moe project mode <id> [paused|safe|auto]` caps what the heartbeat may start
   in one project, without stopping the process. See below.
 - `moe chore list|check|open|skip` lists due project chores, dry-runs a chore

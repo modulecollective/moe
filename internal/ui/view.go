@@ -48,6 +48,7 @@ Editor
   Alt-Left/Right or Alt-b/f move by a word
 
 Commands (:)
+  serve pause|unpause|status                 global 24h pause; admitted work may finish
   agent [codex|claude|reset]                  global default for 24h; no argument shows status
   Tab / Shift-Tab complete command names, cycle forward / backward
   Type a space before arguments; Enter submits

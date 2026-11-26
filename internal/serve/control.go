@@ -135,9 +135,13 @@ func (s *Server) handleRunStatuses(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now()
 	view := defaultAgentView(s.opts.Root, now)
-	out["__serve_cluster"] = s.activity.panel(now).Cluster
+	out["__serve_cluster"] = s.pausePanel(now).Cluster
 	out["__agent_summary"], out["__agent_error"] = view.Summary, view.Error
 	out["__agent_revision"] = strconv.Itoa(view.Revision)
+	pause := pauseView(s.opts.Root, now)
+	out["__pause_summary"], out["__pause_error"] = pause.Summary, pause.Error
+	out["__pause_revision"] = strconv.Itoa(pause.Revision)
+	out["__pause_active"] = strconv.FormatBool(pause.Active)
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	json.NewEncoder(w).Encode(out)

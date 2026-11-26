@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
 
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/input"
@@ -137,9 +136,6 @@ func claimCIRepair(root string, observed ownedPRChecks, reserved ...*session.Ses
 			}
 		}
 		md = sc.byKey[current.Run]
-		if openSessionProjects(root, time.Now(), ownBranch)[md.Project] {
-			return errors.New("somebody is already inside the project")
-		}
 		payload, _ := json.Marshal(run.CIRepairAttempt{PR: current.PR, Head: current.Head, InputIDs: ids})
 		msg := fmt.Sprintf("claim CI repair: %s\n\n", current.Run) + trailers.Block{
 			Run: md.ID, Project: md.Project, Workflow: md.Workflow, Consent: walkConsent(), CIRepair: string(payload),

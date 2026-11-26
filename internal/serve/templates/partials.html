@@ -303,6 +303,16 @@ document.getElementById('theme-toggle').addEventListener('click', function () {
           agent.querySelector('[data-agent-error]').textContent = m.__agent_error;
           agent.querySelector('[name="revision"]').value = m.__agent_revision;
         }
+        var pause = document.getElementById('serve-pause');
+        if (pause) {
+          pause.querySelector('[data-pause-summary]').textContent = m.__pause_summary;
+          pause.querySelector('[data-pause-error]').textContent = m.__pause_error;
+          pause.querySelector('[name="revision"]').value = m.__pause_revision;
+          pause.querySelector('form').action = m.__pause_active === 'true' ? '/serve/unpause' : '/serve/pause';
+          var button = pause.querySelector('button');
+          button.textContent = m.__pause_active === 'true' ? 'Unpause' : 'Pause for 24 hours';
+          button.disabled = !!m.__pause_error;
+        }
         document.querySelectorAll('.run-status[data-key]').forEach(function (el) {
           var status = m[el.dataset.key];
           el.textContent = status ? status.summary : '';

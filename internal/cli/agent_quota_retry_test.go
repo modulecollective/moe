@@ -47,7 +47,7 @@ func TestChangedDefaultWakesDeferredSurveyAcrossRestart(t *testing.T) {
 		g := newHeartbeatGate(root)
 		sc := mustPulseScan(t, root)
 		g.Swept(project.RootID, true)
-		due, _, why := g.projectDue(sc, p, nil, 0, time.Now())
+		due, _, why := g.projectDue(sc, p, time.Now())
 		if due != want {
 			t.Fatalf("due %v want %v: %s", due, want, why)
 		}
@@ -60,11 +60,8 @@ func TestChangedDefaultWakesDeferredSurveyAcrossRestart(t *testing.T) {
 	// The ordinary guards still bind a changed selection.
 	sc := mustPulseScan(t, root)
 	g := newHeartbeatGate(root)
-	if due, held, _ := g.projectDue(sc, p, map[string]bool{project.RootID: true}, 0, time.Now()); due || !held {
-		t.Fatal("ignored occupancy")
-	}
 	p.Mode = "paused"
-	if due, _, _ := g.projectDue(sc, p, nil, 0, time.Now()); due {
+	if due, _, _ := g.projectDue(sc, p, time.Now()); due {
 		t.Fatal("ignored pause")
 	}
 	p.Mode = ""
@@ -176,7 +173,7 @@ func TestChangedDefaultWakesJournaledRideRetryAcrossRestart(t *testing.T) {
 	check := func(want bool) {
 		t.Helper()
 		g := newHeartbeatGate(root)
-		due, _, why := g.projectDue(mustPulseScan(t, root), p, nil, 0, time.Now())
+		due, _, why := g.projectDue(mustPulseScan(t, root), p, time.Now())
 		if due != want {
 			t.Fatalf("restart opportunity=%v want=%v: %s", due, want, why)
 		}
