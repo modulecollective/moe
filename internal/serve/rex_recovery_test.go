@@ -186,7 +186,7 @@ func TestRexLaunchRecoversMissingSession(t *testing.T) {
 	want := []string{
 		"run --json --focus=false --keep-open -s session:S --label heartbeat:_cabinet --cwd " + root + " -- /bin/echo two words",
 		"ls --json",
-		"new moe --json --keep-open --cwd " + root + " --window bootstrap -- /usr/bin/true",
+		"new moe --json --keep-open --cwd " + root + " --window bootstrap -- /usr/bin/env true",
 		"block close block:B1",
 		"run --json --focus=false --keep-open -s session:NEW --label heartbeat:_cabinet --cwd " + root + " -- /bin/echo two words",
 	}

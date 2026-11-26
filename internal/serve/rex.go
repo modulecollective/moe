@@ -310,7 +310,7 @@ func (h *rexHost) launch(label string, argv []string) (string, error) {
 
 func (h *rexHost) establish() error {
 	if h.candidate == "" {
-		out, err := h.call(context.Background(), "new", rexSessionLabel, "--json", "--keep-open", "--cwd", h.root, "--window", "bootstrap", "--", "/usr/bin/true")
+		out, err := h.call(context.Background(), "new", rexSessionLabel, "--json", "--keep-open", "--cwd", h.root, "--window", "bootstrap", "--", "/usr/bin/env", "true")
 		if err != nil {
 			return err
 		}

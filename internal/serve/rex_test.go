@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -422,7 +423,7 @@ func TestRexFirstLaunchCreatesTheSession(t *testing.T) {
 	s.heartbeatTick()
 	waitFor(t, "the sweep to be recorded", func() bool { return len(gate.sweptList()) == 1 })
 
-	if !fake.called("new moe --json --keep-open --cwd " + root + " --window bootstrap -- /usr/bin/true") {
+	if !slices.Contains(fake.calls(), "new moe --json --keep-open --cwd "+root+" --window bootstrap -- /usr/bin/env true") {
 		t.Errorf("rex calls = %q, want harmless session establishment", fake.calls())
 	}
 	if !fake.called("run --json --focus=false --keep-open -s session:NEW --label heartbeat:_cabinet ") {

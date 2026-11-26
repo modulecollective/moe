@@ -103,7 +103,7 @@ func TestRexCommandIDsRequired(t *testing.T) {
 				t.Fatal("invalid creation launched work or published identity")
 			}
 			calls := fake.calls()
-			if len(calls) != 1 || !strings.HasSuffix(calls[0], "--window bootstrap -- /usr/bin/true") {
+			if len(calls) != 1 || !strings.HasSuffix(calls[0], "--window bootstrap -- /usr/bin/env true") {
 				t.Fatalf("unsafe creation: %q", calls)
 			}
 		})
