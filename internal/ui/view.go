@@ -14,6 +14,7 @@ const helpText = `Keys
   PgUp/PgDn      page the focused pane; Home/End jump to its ends
   Tab/Shift-Tab  cycle board, details and console
   n              write a note to the selected run or idea
+  p              write a note to the next pulse (no selection needed)
   a              answer the selected run's open question
   e              edit the selected open idea, intent or chore
   g              set the selected open idea's SDLC licence
@@ -49,6 +50,7 @@ Editor
 
 Commands (:)
   serve pause|unpause|status                 global 24h pause; admitted work may finish
+  pulse-note                                  a note the next sweep reads; starts nothing
   agent [codex|claude|reset]                  global default for 24h; no argument shows status
   Tab / Shift-Tab complete command names, cycle forward / backward
   Type a space before arguments; Enter submits
@@ -371,6 +373,8 @@ func reopenKey(purpose string) string {
 	switch purpose {
 	case "note":
 		return "n"
+	case "pulse-note":
+		return "p"
 	case "answer":
 		return "a"
 	case "body", "chore":

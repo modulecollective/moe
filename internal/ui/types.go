@@ -129,6 +129,8 @@ const (
 	ActChoreOpen
 	ActAgent
 	ActServePause
+	// ActPulseNote writes Text to the pulse-notes record; it names no run.
+	ActPulseNote
 )
 
 // Action is one mutation, bound to the identity it was captured against
@@ -198,6 +200,8 @@ func outcomeWord(r Result) string {
 func (a Action) describe() string {
 	target := a.Project + "/" + a.Run
 	switch a.Kind {
+	case ActPulseNote:
+		return "note to the pulse"
 	case ActNote:
 		return "note to " + target
 	case ActAnswer:

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"github.com/modulecollective/moe/internal/input"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
+	"github.com/modulecollective/moe/internal/ui"
 )
 
 func seedParkedRun(t *testing.T, root, slug string) *run.Metadata {
@@ -527,5 +529,21 @@ func TestPulseNoteVerbAndListing(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "for the pulse") {
 		t.Fatalf("project-filtered listing shows pulse notes:\n%s", out.String())
+	}
+}
+
+// The console's pulse note goes through the same writer as the CLI and
+// says the same line; an empty one is a definite refusal.
+func TestUIPulseNoteWritesTheRecord(t *testing.T) {
+	root := spawnFixture(t)
+	r := uiDo(context.Background(), root, ui.Action{Kind: ui.ActPulseNote, Text: "bump Go everywhere"})
+	if !r.OK || r.Message != "note #1 saved for the pulse — the next sweep reads it" {
+		t.Fatalf("result = %+v", r)
+	}
+	if f, _ := input.LoadPulse(root); len(f.Notes) != 1 || f.Notes[0].Text != "bump Go everywhere" {
+		t.Fatalf("record = %+v", f.Notes)
+	}
+	if r := uiDo(context.Background(), root, ui.Action{Kind: ui.ActPulseNote, Text: "  "}); r.OK || r.Uncertain {
+		t.Fatalf("empty note result = %+v, want a definite refusal", r)
 	}
 }

@@ -147,6 +147,8 @@ func uiDo(ctx context.Context, root string, a ui.Action) ui.Result {
 		return ui.Result{OK: true, Message: s.Summary(time.Now())}
 	case ui.ActNote:
 		return uiNote(root, a)
+	case ui.ActPulseNote:
+		return uiPulseNote(root, a)
 	case ui.ActAnswer:
 		return uiAnswer(root, a)
 	case ui.ActControl:
@@ -239,6 +241,28 @@ func uiNote(root string, a ui.Action) ui.Result {
 		return failure(err, inputReadback(root, a))
 	}
 	return ui.Result{OK: true, Message: fmt.Sprintf("note #%d saved for %s/%s — it reaches the run's next prompt", e.ID, a.Project, a.Run)}
+}
+
+// uiPulseNote is `moe pulse note` from the console: the same writer and
+// confirmation line, with the same uncertain-outcome readback as a run
+// note.
+func uiPulseNote(root string, a ui.Action) ui.Result {
+	e, err := input.AddPulse(root, a.Text)
+	if err != nil {
+		return failure(err, func() []string {
+			f, err := input.LoadPulse(root)
+			if err != nil {
+				return []string{"readback: pulse-notes record unreadable: " + err.Error()}
+			}
+			for _, e := range slices.Backward(f.Notes) {
+				if e.Text == strings.TrimSpace(a.Text) {
+					return []string{fmt.Sprintf("readback: the record holds #%d with this text — check `git log` before sending it again", e.ID)}
+				}
+			}
+			return []string{"readback: the record holds no entry with this text"}
+		})
+	}
+	return ui.Result{OK: true, Message: pulseNoteSaved(e)}
 }
 
 func uiAnswer(root string, a ui.Action) ui.Result {

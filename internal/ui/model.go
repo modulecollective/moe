@@ -41,7 +41,7 @@ func keyOf(it Item) itemKey { return itemKey{it.Project, it.Run, it.Bucket} }
 // is also bound to the question it answers.
 type draftKey struct {
 	project, run string
-	purpose      string // note, answer, body, new-idea, new-intent, chore, new-chore
+	purpose      string // note, answer, body, new-idea, new-intent, chore, new-chore, pulse-note
 	question     int
 }
 
@@ -489,6 +489,9 @@ func (m *model) normalKey(k Key) effect {
 		case 'n':
 			m.startNote()
 			return effNone
+		case 'p':
+			m.startPulseNote()
+			return effNone
 		case 'a':
 			m.startAnswer()
 			return effNone
@@ -665,6 +668,12 @@ func (m *model) startNote() {
 	m.openDraft(draftKey{project: it.Project, run: it.Run, purpose: "note"}, "")
 }
 
+// pulseNoteKey addresses the one draft for the pulse. It names no run:
+// the note is for the survey, so it needs no selection.
+var pulseNoteKey = draftKey{purpose: "pulse-note"}
+
+func (m *model) startPulseNote() { m.openDraft(pulseNoteKey, "") }
+
 // reopenKept opens a draft already kept under key. Text outlives its
 // target's eligibility — a capture closed or a run finished mid-edit —
 // so reading and discarding it must not hinge on the flags that gate a
@@ -746,6 +755,8 @@ func (m *model) editKey(k Key) effect {
 
 func draftWhat(k draftKey) string {
 	switch k.purpose {
+	case "pulse-note":
+		return "note for the pulse"
 	case "note":
 		return "note for " + k.project + "/" + k.run
 	case "answer":
@@ -829,6 +840,8 @@ func (m *model) runDraft(d *draft, tag string, designOnly bool) {
 	switch k.purpose {
 	case "note":
 		a.Kind = ActNote
+	case "pulse-note":
+		a.Kind = ActPulseNote
 	case "answer":
 		a.Kind, a.QuestionID = ActAnswer, k.question
 	case "body":
@@ -1036,6 +1049,8 @@ func commandHint(line string, target *Item) string {
 	switch verb[0] {
 	case "serve":
 		return "global 24h pause; admitted sweeps and rides may finish"
+	case "pulse-note":
+		return "opens a note for the next pulse; starts nothing"
 	case "agent":
 		return "global default for 24h; flags and run bindings still win"
 	case "finish":
@@ -1132,6 +1147,11 @@ func (m *model) runCommand(line string, target *Item) effect {
 			return effNone
 		}
 		m.start(job{label: "set global default agent: " + f[1], steps: []Action{{Kind: ActAgent, Agent: f[1], AgentRevision: m.board.AgentRevision}}})
+	case "pulse-note":
+		if !need(len(f) == 1, "takes no arguments") {
+			return effNone
+		}
+		m.startPulseNote()
 	case "help":
 		if !need(len(f) == 1, "takes no arguments") {
 			return effNone

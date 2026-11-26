@@ -31,7 +31,7 @@ func dashboardBoard() Board {
 	start := dash.RenderOverview(&out, dash.BuildActivityHistogram(counts), frames[0])
 	b := Board{Seq: 1, Overview: strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n"), Art: Art{Start: start, Height: len(frames[0]), Frames: frames}, Header: "all projects · gathered 12:30:00 · 1 live"}
 	out.Reset()
-	banner.Dash(&out, now, "serve armed")
+	banner.Dash(&out, dash.Clock(now))
 	b.Banner = strings.TrimSuffix(out.String(), "\n")
 	out.Reset()
 	fmt.Fprintln(&out, "  service detail")
