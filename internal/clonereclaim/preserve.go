@@ -22,7 +22,7 @@ import (
 
 const scanOutputLimit = 16 << 20
 
-// Preservation describes why an unexpired clone may or may not be discarded.
+// Preservation describes why a preservation-required clone may be discarded.
 // A nonempty Reason is a policy hold, while unreadable/incomplete evidence
 // returns an error. Artifact hashes must come from validated generation-owned
 // receipts; a directory prefix such as .moe/ never proves ownership.

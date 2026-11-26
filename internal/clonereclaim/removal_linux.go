@@ -29,6 +29,13 @@ type DisposalBasis struct {
 	Preservation string               `json:"preservation"`
 }
 
+// RequiresPreservation applies after the caller validates terminal journal
+// authority. Merge makes local leftovers disposable; expiry remains factual.
+// Live rebind always requires preservation, regardless of terminal fields.
+func (b DisposalBasis) RequiresPreservation() bool {
+	return b.Purpose != "terminal" || (!b.Expired && b.Terminal.Status != run.StatusMerged)
+}
+
 type Disposal struct {
 	Version     int           `json:"version"`
 	Generation  string        `json:"generation"`
@@ -243,10 +250,13 @@ func (r *Registry) BeginDisposal(h *runowner.Handle, basis DisposalBasis, plan C
 	if basis.Purpose == "rebind" && basis.Expired {
 		return d, errors.New("live rebind cannot expire local work")
 	}
-	if !basis.Expired && basis.Preservation != "independently_preserved" {
+	if basis.RequiresPreservation() && basis.Preservation != "independently_preserved" {
 		return d, errors.New("missing preservation basis")
 	}
-	if _, err := r.CheckTree(h, !basis.Expired); err != nil {
+	if !basis.RequiresPreservation() {
+		basis.Preservation = ""
+	}
+	if _, err := r.CheckTree(h, basis.RequiresPreservation()); err != nil {
 		return d, err
 	}
 	base, err := privateChildDir(r.dir, "disposals", true)
@@ -281,7 +291,7 @@ func (r *Registry) AuthorizeRemoval(h *runowner.Handle, d Disposal, plan Cleanup
 	if !plan.CacheCleared && plan.Resources != nil {
 		return errors.New("resources are not durably cleared")
 	}
-	inventory, err := r.CheckTree(h, !d.Basis.Expired)
+	inventory, err := r.CheckTree(h, d.Basis.RequiresPreservation())
 	if err != nil {
 		return err
 	}
@@ -384,11 +394,11 @@ func (r *Registry) InspectRemoval(h *runowner.Handle, id string, basis DisposalB
 	if err := matchesTree(tree, physical); err != nil {
 		return err
 	}
-	current, err := scanTree(tree, r.mount(), !basis.Expired)
+	current, err := scanTree(tree, r.mount(), basis.RequiresPreservation())
 	if err != nil {
 		return err
 	}
-	if !basis.Expired {
+	if basis.RequiresPreservation() {
 		saved := map[string]TreeEntry{}
 		for _, e := range auth.Inventory {
 			saved[e.Path] = e
@@ -559,11 +569,11 @@ func (r *Registry) FinishRemoval(h *runowner.Handle, id string, basis DisposalBa
 	if err := persistRecord(attempt, "quarantined.json"); err != nil {
 		return err
 	}
-	current, err := scanTree(tree, r.mount(), !basis.Expired)
+	current, err := scanTree(tree, r.mount(), basis.RequiresPreservation())
 	if err != nil {
 		return err
 	}
-	if !basis.Expired {
+	if basis.RequiresPreservation() {
 		admitted := map[string]TreeEntry{}
 		for _, e := range auth.Inventory {
 			admitted[e.Path] = e

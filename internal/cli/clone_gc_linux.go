@@ -139,14 +139,14 @@ func disposeClone(h *runowner.Handle, apply, retry bool, purpose string, now tim
 		}
 		return hold("cleanup_recovery_required", err)
 	}
-	if _, err := r.CheckTree(h, !basis.Expired); err != nil {
+	if _, err := r.CheckTree(h, basis.RequiresPreservation()); err != nil {
 		if _, ok := errors.AsType[*clonereclaim.UnsafeTreeError](err); !ok {
 			return fail("tree_probe_failed", err)
 		}
 		return hold("unsafe_tree", err)
 	}
 	preserve := func() error {
-		if basis.Expired {
+		if !basis.RequiresPreservation() {
 			return nil
 		}
 		artifacts, err := r.Artifacts(h)
@@ -172,9 +172,12 @@ func disposeClone(h *runowner.Handle, apply, retry bool, purpose string, now tim
 	}
 	basis.Preservation = "independently_preserved"
 	result.Reason = "independently_preserved"
-	if basis.Expired {
+	if !basis.RequiresPreservation() {
 		basis.Preservation = ""
 		result.Reason = "retention_expired"
+		if basis.Terminal.Status == run.StatusMerged {
+			result.Reason = "merged_disposable"
+		}
 	}
 	result.Outcome = "eligible"
 	if !apply {
@@ -187,8 +190,8 @@ func disposeClone(h *runowner.Handle, apply, retry bool, purpose string, now tim
 	if err := devEnvTeardownOwned(context.Background(), h, md, purpose, retry, stdout, stderr); err != nil {
 		return fail("teardown_failed", err)
 	}
-	// Re-read lifecycle and original content after hooks, including newly emitted
-	// output. An early preservation hold prevents removal after successful teardown.
+	// Re-read lifecycle after hooks and, when required, preserve newly emitted
+	// output too. A preservation hold prevents removal after successful teardown.
 	fresh, err := cloneRunState(h)
 	if err != nil {
 		return fail("lifecycle_recheck_failed", err)

@@ -265,7 +265,8 @@ func TestCloneGCApplyOwnsHooksAgainstAnotherCollector(t *testing.T) {
 	gittest.Run(t, root, "add", script)
 	gittest.Commit(t, root, "blocking cleanup contract")
 	resources := allocateCloseResources(t, root, "tele", "finish")
-	commitGCState(t, root, run.StatusClosed, time.Now().UTC().Add(-time.Hour))
+	writeFile(t, filepath.Join(resources.clone, "local-output"), "disposable merged output")
+	commitGCState(t, root, run.StatusMerged, time.Now().UTC().Add(-time.Hour))
 	cmd := cloneCLICommand(t, root, "clone", "gc", "--apply", "--json", "tele/finish")
 	var stdout, stderr safeBuffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -310,7 +311,7 @@ func TestCloneGCApplyOwnsHooksAgainstAnotherCollector(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout.String()), &report); err != nil {
 		t.Fatal(err)
 	}
-	if report.Candidates[0].Outcome != "removed" {
+	if report.Candidates[0].Outcome != "removed" || report.Candidates[0].Reason != "merged_disposable" {
 		t.Fatalf("collector outcome: %+v", report)
 	}
 	resources.assertReleased(t)

@@ -780,16 +780,25 @@ lock is free. Shells publish `shell running` and `waiting for shell jobs`; exiti
 a shell starts no workflow continuation. Older MoE binaries do not take the lock.
 
 Nonterminal runs, including pushed and interrupted runs, remain indefinitely.
-For closed, merged and promoted runs, the latest committed terminal transition
-starts a fixed 168-hour interval. Before its deadline, cleanup requires clean
-local contents and independent canonical retention of every available Git
-object, including reflog-only and unreachable objects. Clean Git status alone
-does not suffice: actual tracked bytes must match retained blobs without content
-filters. Converted line endings or expanded ident strings can therefore hold
-cleanup until expiry. A preservation hold also prevents teardown. At the
-deadline, clone-local leftovers may be discarded; lifetime, generation, session,
-resource and path checks still apply. Missing or unprovable journal history
-holds. GC never closes or abandons a run.
+A proven merged transition committed in the canonical journal makes the private
+run clone immediately disposable, including tracked edits, untracked or ignored
+output, stashes and unique local Git history. Cleanup requires no content
+preservation proof or content fingerprints for that case; GC reports
+`merged_disposable`, even after the retention deadline. A remote push alone
+supplies no disposal authority.
+
+For closed and promoted runs, the latest committed terminal transition starts a
+fixed 168-hour interval. Before its deadline, cleanup requires clean local
+contents and independent canonical retention of every available Git object,
+including reflog-only and unreachable objects. Clean Git status alone does not
+suffice: actual tracked bytes must match retained blobs without content filters.
+Converted line endings or expanded ident strings can therefore hold cleanup
+until expiry. A preservation hold also prevents teardown. At the deadline,
+clone-local leftovers may be discarded. Live rebind always requires preservation.
+All disposal retains lifetime, generation, session, resource and path checks,
+including structural inventory bounds and refusal of nested repositories,
+mounts and special files. Missing or unprovable journal history holds. GC never
+closes or abandons a run.
 
 New clones enroll under ownership before setup or agent execution. After an
 upgrade, a normal stage command can encounter an existing unenrolled clone and

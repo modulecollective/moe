@@ -90,13 +90,21 @@ func TestCloneGCTwoTiersAndIndefiniteNonterminalRetention(t *testing.T) {
 			at := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
 			root, path := gcFixture(t, status, at)
 			writeFile(t, filepath.Join(path, "experiment.out"), "local work")
-			early := collectClone(root, "tele", "finish", true, true, at.Add(run.CloneRetention-time.Nanosecond), io.Discard, io.Discard)
-			if early.Outcome != "held" {
+			early := collectClone(root, "tele", "finish", false, true, at.Add(run.CloneRetention-time.Nanosecond), io.Discard, io.Discard)
+			if status == run.StatusMerged {
+				if early.Outcome != "eligible" || early.Reason != "merged_disposable" {
+					t.Fatalf("merged disposal: %+v", early)
+				}
+			} else if early.Outcome != "held" {
 				t.Fatalf("early disposal: %+v", early)
 			}
 			deadline := collectClone(root, "tele", "finish", true, true, at.Add(run.CloneRetention), io.Discard, io.Discard)
 			if run.IsTerminal(status) {
-				if deadline.Outcome != "removed" || deadline.Reason != "retention_expired" {
+				want := "retention_expired"
+				if status == run.StatusMerged {
+					want = "merged_disposable"
+				}
+				if deadline.Outcome != "removed" || deadline.Reason != want {
 					t.Fatalf("expiry: %+v", deadline)
 				}
 			} else {
@@ -200,7 +208,7 @@ func TestCloneGCRealResourcesAndNoisyJSON(t *testing.T) {
 	gittest.Run(t, root, "add", script)
 	gittest.Commit(t, root, "noisy teardown fixture")
 	resources := allocateCloseResources(t, root, "tele", "finish")
-	commitGCState(t, root, run.StatusClosed, time.Now().UTC().Add(-time.Hour))
+	commitGCState(t, root, run.StatusMerged, time.Now().UTC().Add(-time.Hour))
 	cache, err := os.ReadFile(filepath.Join(path, devEnvCacheRel))
 	if err != nil {
 		t.Fatal(err)

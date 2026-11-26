@@ -41,7 +41,7 @@ func TestCloneGCBindMountHelper(t *testing.T) {
 	if err := syscall.Mount("", "/", "", syscall.MS_PRIVATE|syscall.MS_REC, ""); err != nil {
 		t.Fatal(err)
 	}
-	_, path := gcFixture(t, run.StatusClosed, time.Now().UTC().Add(-10*24*time.Hour))
+	_, path := gcFixture(t, run.StatusMerged, time.Now().UTC().Add(-time.Hour))
 	outside := t.TempDir()
 	writeFile(t, filepath.Join(outside, "sentinel"), "survives")
 	target := filepath.Join(path, "mounted")
