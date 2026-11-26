@@ -182,8 +182,8 @@ func (a *activity) push(ev activityEvent) {
 // it in would push a failed sweep's exit and tail out of the ring within
 // hours.
 //
-// A hold repeats the same way — "somebody is already inside the
-// project" every tick for an afternoon — so a tick whose news equals the
+// A hold repeats the same way — "new automatic sweeps paused until …"
+// every tick for a day — so a tick whose news equals the
 // newest entry's folds into that entry instead of pushing its own. Only
 // the newest event, and only if it is a tick: folding past a spawn or
 // exit would leave one row straddling that sweep on the timeline.

@@ -76,7 +76,7 @@ const heartbeatChildPrefix = "heartbeat:"
 // sentence the gate already had to compose to make the call, so
 // returning them costs the gate nothing and buys the operator the whole
 // trace — "the journal moved", "a sweep already surveyed the current
-// tip", "somebody is already inside the project". Nothing parses them
+// tip", "new automatic sweeps paused until …". Nothing parses them
 // back, and nothing branches on them.
 //
 // Held is what keeps that true now that /serve renders only the

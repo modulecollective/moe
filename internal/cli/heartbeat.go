@@ -114,8 +114,8 @@ func newHeartbeatGate(root string) *heartbeatGate {
 // Recorded pushed PRs also pay one bounded `gh pr view` per tick, outside
 // the journal lock, and a red one reads its run's input file; a project
 // without them pays no added network read.
-// A quiet board costs no agent turn, run or journal noise, which is the whole reason a fixed cadence
-// can be baked rather than tuned.
+// A quiet board costs no agent turn, run or journal noise, which is the
+// whole reason a fixed cadence can be baked rather than tuned.
 //
 // Warn-only throughout, mirroring the pulse itself: a read that fails
 // drops the project from this tick rather than failing the tick. The
