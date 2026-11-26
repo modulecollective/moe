@@ -280,8 +280,9 @@ func TestPushRebasesAndMergesWhenDefaultMovedCleanly(t *testing.T) {
 	if f.originHasRef("refs/heads/" + f.branch) {
 		t.Fatalf("expected %s deleted on origin", f.branch)
 	}
-	if !sandbox.Exists(f.root, f.projectID, f.runID) {
-		t.Fatalf("rebased clone must retain its old unique objects before expiry")
+	// A recorded merge makes the old pre-rebase objects disposable too.
+	if sandbox.Exists(f.root, f.projectID, f.runID) {
+		t.Fatalf("merged rebased clone should be removed immediately")
 	}
 	if md := f.reloadRun(); md.Status != run.StatusMerged {
 		t.Fatalf("status: want %s, got %s", run.StatusMerged, md.Status)
@@ -332,8 +333,8 @@ fi
 	if f.originHasRef("refs/heads/" + f.branch) {
 		t.Fatalf("expected %s deleted on origin after the retry merged", f.branch)
 	}
-	if !sandbox.Exists(f.root, f.projectID, f.runID) {
-		t.Fatalf("rebased retry must retain its old unique objects before expiry")
+	if sandbox.Exists(f.root, f.projectID, f.runID) {
+		t.Fatalf("merged retry clone should be removed immediately")
 	}
 	// origin/main carries both the divergent commit and the rebased run
 	// commit on top of it.
