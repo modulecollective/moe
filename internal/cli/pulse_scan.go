@@ -40,15 +40,25 @@ const pulseKickoff = "Run the pulse for this bureaucracy: a delta-first, read-on
 	"one intent per run, an empty intent clearing the link. `\"intents\"` opens or closes intents: " +
 	"`{\"open\": \"<project>/<slug>\", \"title\": ..., \"body\": \"<markdown with a Done when>\", \"why\": ...}` or " +
 	"`{\"close\": \"<project>/<slug>\", \"why\": ...}`. Both bars are high and zero is the normal number; the stage " +
-	"guidance holds them."
+	"guidance holds them.\n\n" +
+	"Notes the operator wrote to the pulse itself, when there are any, come next: direction for this sweep, shown " +
+	"once. The stage guidance's \"Notes from the operator\" says what you may do with them."
 
 // pulseKickoffFromScan appends the harness-computed context to the static
 // kickoff: where each project's source lives, then one section per project
 // with a delta since the last pulse or live work. Every block reads the one
 // scan, so they all describe the same moment. A gather that fails drops its
 // own block rather than failing the sweep.
-func pulseKickoffFromScan(sc *pulseScan, canonicalRoot, runID string, stderr io.Writer) string {
+//
+// The operator's pulse notes sit directly after the static kickoff. The
+// returned ids are the notes rendered, which the sweep stamps as read
+// once its gate parses.
+func pulseKickoffFromScan(sc *pulseScan, canonicalRoot, runID string, stderr io.Writer) (string, []int) {
 	blocks := []string{pulseKickoff}
+	notes, noteIDs := pulseNotesBlock(sc.root, stderr)
+	if notes != "" {
+		blocks = append(blocks, notes)
+	}
 	mds, _, err := project.List(sc.root)
 	if err != nil {
 		moePrintf(stderr, "pulse: list projects: %v\n", err)
@@ -96,7 +106,7 @@ func pulseKickoffFromScan(sc *pulseScan, canonicalRoot, runID string, stderr io.
 	if ride := rideModeContextLine(); ride != "" {
 		blocks = append(blocks, ride)
 	}
-	return strings.Join(blocks, "\n\n")
+	return strings.Join(blocks, "\n\n"), noteIDs
 }
 
 // projectKickoffBlocks gathers one project's context blocks.

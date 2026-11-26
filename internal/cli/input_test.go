@@ -475,3 +475,57 @@ func TestPendingInputBlockLeavesOutTaggedIdeas(t *testing.T) {
 		t.Fatalf("block = %q, want empty — the tagged idea's note rides its promotion", got)
 	}
 }
+
+// `moe pulse note` writes the pulse record, from args or stdin, and
+// `moe input list` shows pending notes first under "for the pulse" —
+// but not under a project filter, since a pulse note names no project.
+func TestPulseNoteVerbAndListing(t *testing.T) {
+	root := spawnFixture(t)
+	t.Chdir(root)
+	seedParkedRun(t, root, "change-auth")
+	addOn(t, root, "moe", "change-auth", "skip the flake")
+
+	var out, errb bytes.Buffer
+	if code := runPulseNote([]string{"do", "the", "lightpool", "fix", "next"}, &out, &errb); code != 0 {
+		t.Fatalf("pulse note exited %d: %s", code, errb.String())
+	}
+	if got := out.String(); got != "note #1 saved for the pulse — the next sweep reads it\n" {
+		t.Fatalf("pulse note output = %q", got)
+	}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.WriteString("bump Go everywhere\n\nstart with moe\n"); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	saved := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() { os.Stdin = saved })
+	out.Reset()
+	if code := runPulseNote(nil, &out, &errb); code != 0 {
+		t.Fatalf("pulse note from stdin exited %d: %s", code, errb.String())
+	}
+	f, _ := input.LoadPulse(root)
+	if len(f.Notes) != 2 || f.Notes[1].Text != "bump Go everywhere\n\nstart with moe" {
+		t.Fatalf("pulse record = %+v", f.Notes)
+	}
+
+	out.Reset()
+	if code := runInputList(nil, &out, &errb); code != 0 {
+		t.Fatalf("input list exited %d: %s", code, errb.String())
+	}
+	want := "for the pulse:\n  #1 — do the lightpool fix next\n  #2 — bump Go everywhere\n\ngiven, awaiting pickup:\n"
+	if !strings.HasPrefix(out.String(), want) {
+		t.Fatalf("listing = %q, want it to open with %q", out.String(), want)
+	}
+	out.Reset()
+	if code := runInputList([]string{"moe"}, &out, &errb); code != 0 {
+		t.Fatalf("filtered input list exited %d: %s", code, errb.String())
+	}
+	if strings.Contains(out.String(), "for the pulse") {
+		t.Fatalf("project-filtered listing shows pulse notes:\n%s", out.String())
+	}
+}

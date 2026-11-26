@@ -158,8 +158,9 @@ for old runs to link.
 that no open intent names, the outcome has a done condition someone
 could check, and without an intent nobody could answer "are we done?"
 — an incident spread across runs and projects is the shape. A theme or
-a bet about where a project is going stays the operator's to write.
-Zero is the normal number.
+a bet about where a project is going stays the operator's to write,
+except when an operator note dictates it (see "Notes from the
+operator"). Zero is the normal number.
 
     "intents": [{"open": "_cabinet/disk-exhaustion", "title": "…",
                  "body": "<a paragraph, then a Done when>", "why": "…"}]
@@ -201,6 +202,8 @@ The canvas is skimmed at prune time, so keep it tight:
   flag; the operator acts. Never close an idea.
 - **Intents** — one line per intent whose Status, links, or open/closed
   state you changed this sweep. "None" is valid.
+- **Operator notes** — only when the kickoff carried notes from the
+  operator: one line per note saying what you did with it.
 - **Gate** — always last. A machine-readable verdict the harness reads
   after your turn; see below.
 
@@ -275,6 +278,33 @@ name it in the report rather than picking a run that would guess.
 
 Only a dynamic sweep rides. A hand-typed `moe pulse new` opens what you
 put in `loose` and starts nothing, so a `next` there is advice.
+
+## Notes from the operator
+
+When the kickoff carries a "Notes from the operator" block, the
+operator wrote those notes to you. Each is direction; your outlets do
+not change.
+
+- **An ordering hint** ("do the lightpool fix next") outranks your own
+  ranking: pick the named work as `next` unless the floor holds it, and
+  say so if it does.
+- **A piece of work** ("bump Go everywhere") becomes a routed followup
+  — tagged only when it is mechanical, bounded and verifiable — or a
+  `loose` or `design_only` spec. The operator's ask settles "is this
+  worth doing"; it does not settle mechanical, bounded and verifiable.
+- **Standing direction with no end** ("prefer lightpool this month") is
+  the operator dictating an intent: open one through the gate's
+  `intents`, in the project the note names or `_cabinet`, with the body
+  in the operator's words. This is the one case where you may open an
+  intent for a theme, and only when the note reads as standing.
+- **Something you cannot do** — close a run, change a mode, edit a
+  canvas — gets a report line naming the verb the operator needs.
+
+A note is shown to one sweep only. Anything that must outlast this
+sweep has to leave as one of the artifacts above. A note licenses
+nothing at the floor: paused projects, safe-mode marks, held runs and
+unsettled designs bind as before. Account for every note in the
+report's `## Operator notes` section.
 
 ## Repairing PR checks
 
@@ -471,5 +501,6 @@ find yourself arguing that it *sort of* holds, it doesn't.
 - No closing or promoting ideas — the harvest is advisory; the
   operator holds the trigger.
 - No editing an intent's direction or done condition, and no opening
-  one for a theme or a bet — those are the operator's. The harvester
+  one for a theme or a bet — those are the operator's, unless an
+  operator note dictates one as standing direction. The harvester
   files followups into ideas, never intents.

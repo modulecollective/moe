@@ -144,7 +144,7 @@ func TestPulseKickoffCarriesSettledBlock(t *testing.T) {
 	trailerstest.SeedProject(t, root, "moe")
 	seedRun(t, root, "moe", "settled-drop", "sdlc", run.StatusClosed, time.Now().Local(), nil)
 
-	got := pulseKickoffFromScan(mustPulseScan(t, root), root, "pulse-x", io.Discard)
+	got, _ := pulseKickoffFromScan(mustPulseScan(t, root), root, "pulse-x", io.Discard)
 	if !strings.HasPrefix(got, pulseKickoff) {
 		t.Fatal("kickoff no longer leads with the static prompt")
 	}

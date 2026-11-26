@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/modulecollective/moe/internal/git"
+	"github.com/modulecollective/moe/internal/input"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/runopen"
@@ -78,6 +79,11 @@ func init() {
 		Name:    "new",
 		Summary: "run the pulse: open due chores, then a headless survey of every project",
 		Run:     runPulseNew,
+	})
+	g.Register(&Command{
+		Name:    "note",
+		Summary: "tell the next pulse something: work to start, what comes first",
+		Run:     runPulseNote,
 	})
 	// The pulse has no stage-opener verb. A sweep is machine-paced:
 	// `moe pulse new` runs one, `cat` / `log` read it, `close` ends it.
@@ -405,6 +411,15 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 		moePrintln(stderr, "hint: moe pulse new   (run a fresh one)")
 		return 1
 	}
+	// The survey concluded, so the notes it was shown are read. Stamped
+	// here, after the gate parses and before the close: every failure
+	// above leaves them pending for the next sweep, and stamping ahead of
+	// the close keeps the close commit as the project tip, which the
+	// heartbeat's restart comparison reads. Warn-only — a failed stamp
+	// shows the note again next sweep, which is the safe direction.
+	if err := input.MarkPulseDelivered(root, projectID+"/"+md.ID, survey.pulseNotes, walkConsent()); err != nil {
+		moePrintf(stderr, "pulse: mark operator notes read by %s/%s: %v\n", projectID, md.ID, err)
+	}
 	// Mint, then resolve the pick against the board the mints produced.
 	minted := applyPulseGate(root, md.ID, gate, stdout, stderr)
 	var pick *pulsePick
@@ -615,7 +630,8 @@ var openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt,
 				if err != nil {
 					return "", err
 				}
-				prompt := pulseKickoffFromScan(sc, canonical, runID, stderr)
+				prompt, noteIDs := pulseKickoffFromScan(sc, canonical, runID, stderr)
+				out.pulseNotes = noteIDs
 				out.prChecks = sc.allPRChecks(stderr)
 				return prompt, nil
 			},
@@ -637,6 +653,9 @@ type surveyOutcome struct {
 	// canvas worth a human's eyes no matter how it ended.
 	agentStarted bool
 	prChecks     []ownedPRChecks
+	// pulseNotes are the operator's pulse-note ids the kickoff rendered,
+	// stamped as read once the gate parses.
+	pulseNotes []int
 }
 
 func runPulseNew(args []string, stdout, stderr io.Writer) int {

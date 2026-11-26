@@ -305,7 +305,7 @@ func TestPulseKickoffMapsWork(t *testing.T) {
 	if strings.Contains(unmappedBlock(sc, time.Now().Add(time.Hour), ""), "loose-end") {
 		t.Error("work with no activity since the last pulse is not new")
 	}
-	full := pulseKickoffFromScan(sc, root, "pulse-x", io.Discard)
+	full, _ := pulseKickoffFromScan(sc, root, "pulse-x", io.Discard)
 	if !strings.Contains(full, "Open intents") || !strings.Contains(full, "Unmapped") || !strings.Contains(full, `"serves"`) {
 		t.Errorf("kickoff lacks the intent blocks:\n%s", full)
 	}

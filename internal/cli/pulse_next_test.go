@@ -275,7 +275,7 @@ func TestKickoffShowsACrossProjectWaitAfterItsPrerequisiteLands(t *testing.T) {
 	if !ok {
 		t.Fatal("scan failed")
 	}
-	got := pulseKickoffFromScan(sc, root, "pulse-now", io.Discard)
+	got, _ := pulseKickoffFromScan(sc, root, "pulse-now", io.Discard)
 	for _, want := range []string{"`moe/" + blocked + "`", prereq, filepath.Join(root, "projects", "beta", "src")} {
 		if !strings.Contains(got, want) {
 			t.Errorf("kickoff missing %q:\n%s", want, got)
@@ -307,7 +307,7 @@ func TestKickoffSkipsQuietAndPausedProjects(t *testing.T) {
 	if !ok {
 		t.Fatal("scan failed")
 	}
-	got := pulseKickoffFromScan(sc, root, "pulse-now", io.Discard)
+	got, _ := pulseKickoffFromScan(sc, root, "pulse-now", io.Discard)
 	if !strings.Contains(got, "# Project `beta`") {
 		t.Errorf("project with live work has no section:\n%s", got)
 	}
@@ -487,7 +487,7 @@ func TestKickoffPutsARunWithAnOperatorNoteFirst(t *testing.T) {
 	if !ok {
 		t.Fatal("scan failed")
 	}
-	got := pulseKickoffFromScan(sc, root, "pulse-now", io.Discard)
+	got, _ := pulseKickoffFromScan(sc, root, "pulse-now", io.Discard)
 	for _, want := range []string{
 		"`beta/" + noted + "` (sdlc) — operator note waiting",
 		"`beta/noted-idea` (idea tagged sdlc) — operator note waiting",

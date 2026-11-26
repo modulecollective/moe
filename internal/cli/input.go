@@ -148,14 +148,65 @@ func inputWrite(fs *flag.FlagSet, args []string, stdout, stderr io.Writer, verb 
 	return 0
 }
 
+func runPulseNote(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("pulse note", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		moePrintln(stderr, "usage: moe pulse note [text ...]")
+		moePrintln(stderr, "")
+		moePrintln(stderr, "Writes a note to the pulse itself: a piece of work to get done, or what")
+		moePrintln(stderr, "should come next. With no text arguments the note is read from stdin.")
+		moePrintln(stderr, "The next sweep that concludes reads it in full, once, and says in its")
+		moePrintln(stderr, "report what it did with it.")
+		moePrintln(stderr, "")
+		moePrintln(stderr, "Starts nothing: the commit wakes an armed serve's next heartbeat tick.")
+		moePrintln(stderr, "A paused serve holds it like everything else.")
+	}
+	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+		return 2
+	}
+	text := strings.Join(fs.Args(), " ")
+	if strings.TrimSpace(text) == "" {
+		body, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			moePrintf(stderr, "pulse note: read stdin: %v\n", err)
+			return 1
+		}
+		text = string(body)
+	}
+	if strings.TrimSpace(text) == "" {
+		moePrintln(stderr, "pulse note: nothing to write — pass text or pipe it on stdin")
+		return 2
+	}
+	root, err := findRoot(stderr)
+	if err != nil {
+		return 1
+	}
+	e, err := input.AddPulse(root, text)
+	if err != nil {
+		moePrintf(stderr, "pulse note: %v\n", err)
+		return 1
+	}
+	moePrintf(stdout, "%s\n", pulseNoteSaved(e))
+	return 0
+}
+
+// pulseNoteSaved is the one confirmation line every surface that writes
+// a pulse note prints.
+func pulseNoteSaved(e input.Entry) string {
+	return fmt.Sprintf("note #%d saved for the pulse — the next sweep reads it", e.ID)
+}
+
 func runInputList(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("input list", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	fs.Usage = func() {
 		moePrintln(stderr, "usage: moe input list [project]")
 		moePrintln(stderr, "")
-		moePrintln(stderr, "Two lists, oldest first. Questions runs have asked you and you haven't")
-		moePrintln(stderr, "answered, then notes already given that no turn has picked up yet.")
+		moePrintln(stderr, "Notes for the pulse no sweep has read yet, then two lists, oldest first.")
+		moePrintln(stderr, "Questions runs have asked you and you haven't answered, then notes")
+		moePrintln(stderr, "already given that no turn has picked up yet. A project filter leaves")
+		moePrintln(stderr, "out the pulse notes, which name no project.")
 		moePrintln(stderr, "Neither holds anything — a run with an unanswered question still runs,")
 		moePrintln(stderr, "on the agent's best judgment.")
 	}
@@ -181,10 +232,28 @@ func runInputList(args []string, stdout, stderr io.Writer) int {
 	for _, err := range errs {
 		moePrintf(stderr, "input list: %v\n", err)
 	}
+	// Pulse notes name no run, so a project filter leaves them out.
+	var forPulse []input.Entry
+	if projectFilter == "" {
+		pf, err := input.LoadPulse(root)
+		if err != nil {
+			moePrintf(stderr, "input list: %v\n", err)
+		}
+		forPulse = pf.Pending()
+	}
 	open, pending := partitionWaiting(waiting)
-	if len(open) == 0 && len(pending) == 0 {
+	if len(forPulse) == 0 && len(open) == 0 && len(pending) == 0 {
 		moePrintln(stdout, "input: nothing waiting")
 		return 0
+	}
+	if len(forPulse) > 0 {
+		moePrintln(stdout, "for the pulse:")
+		for _, e := range forPulse {
+			moePrintf(stdout, "  #%d — %s\n", e.ID, e.FirstLine())
+		}
+		if len(open) > 0 || len(pending) > 0 {
+			moePrintln(stdout, "")
+		}
 	}
 	if len(open) > 0 {
 		moePrintln(stdout, "asked you:")
@@ -352,4 +421,34 @@ func dropTaggedIdeas(sc *pulseScan, waiting []input.Waiting) []input.Waiting {
 		out = append(out, w)
 	}
 	return out
+}
+
+// pulseNotesBlock is the kickoff's operator-notes block: every pending
+// pulse note in full, numbered by id, with the instruction to account
+// for each in the report. Returns the ids it rendered, which the sweep
+// stamps once its gate parses. Empty when nothing is pending — the
+// normal sweep. A malformed record warns and drops the block rather
+// than failing the sweep, like every other kickoff gather.
+func pulseNotesBlock(root string, stderr io.Writer) (string, []int) {
+	f, err := input.LoadPulse(root)
+	if err != nil {
+		moePrintf(stderr, "pulse: operator notes: %v\n", err)
+		return "", nil
+	}
+	pending := f.Pending()
+	if len(pending) == 0 {
+		return "", nil
+	}
+	var b strings.Builder
+	b.WriteString("# Notes from the operator\n\n")
+	b.WriteString("The operator wrote these to the pulse itself. Each is shown in full, and only to this " +
+		"sweep: anything that must outlast it has to leave as a filing, a gate entry, or a report line. " +
+		"Act on each as the stage guidance's \"Notes from the operator\" says. Add an `## Operator notes` " +
+		"section to the report, ahead of the Gate, with one line per note saying what you did with it.\n\n")
+	ids := make([]int, 0, len(pending))
+	for _, e := range pending {
+		ids = append(ids, e.ID)
+		fmt.Fprintf(&b, "- #%d: %s\n", e.ID, indentContinuation(e.Text))
+	}
+	return strings.TrimRight(b.String(), "\n"), ids
 }
