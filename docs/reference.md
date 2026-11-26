@@ -41,38 +41,39 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   board opens with the same PULSE section as `moe dash`. `n` writes a note to
   the selected run or idea, `p` writes a note to the next pulse with no
   selection needed, `a` answers its open question, `e` edits an open idea or
-  intent, and `t` reveals the run's existing Rex terminal. On an open idea, `g` sets the SDLC licence, `d` sets design only,
-  and `u` clears either licence. Repeating a setting leaves it unchanged. These
-  keys keep the selection and work from any pane in normal navigation; in
-  editors and the command line they remain text. `:` opens a closed command
-  line — `pause|handoff|park|finish|resume` for the selected run,
-  `pulse-note`, `new-idea <project>/<slug>`, `new-intent <project>/<slug>`, `edit`, `close`,
+  intent, and `t` reveals the run's existing Rex terminal. On an open idea, `g`
+  sets the SDLC licence, `d` sets design only, and `u` clears either licence.
+  Repeating a setting leaves it unchanged. These keys keep the selection and
+  work from any pane in normal navigation; in editors and the command line they
+  remain text. `:` opens a closed command line —
+  `pause|handoff|park|finish|resume` for the selected run, `pulse-note`,
+  `new-idea <project>/<slug>`, `new-intent <project>/<slug>`, `edit`, `close`,
   `tag-sdlc`, `tag-design`, `untag` — never a shell. Creation requires a
   lowercase slug using letters, digits and hyphens, e.g. `:new-idea p/my-idea`;
   uppercase is refused before a draft opens. These go through the same writers
   as `moe input`, `moe control` and `moe idea|intent`, so they mean the same
-  thing: a note reaches the run's next prompt, resume and tagging start
-  nothing, and only submitting `finish` ships. Text is edited inline (`Ctrl-S`
-  saves, `Esc` keeps the draft, `Ctrl-X` discards). Alt-Backspace or Ctrl-W
-  deletes the previous word; Alt-Left/Right or Alt-b/f moves by
-  whitespace-delimited words. Saving an idea offers save only, save and tag
-  sdlc, or save and tag design-only. Enter opens a labelled draft and Ctrl-S
-  creates it. An edit refuses to overwrite a canvas someone else changed
-  meanwhile. Runs update as their owners publish, not only on the 3s refresh;
-  a lost owner's facts stay, labelled stale. Smoke cycles cached art every
-  500 ms without scans, socket reads or status reports. The shared dash banner
-  stays visible; the complete histogram and factory are pinned above the
-  scrolling board when they fit, and collapse together on short or narrow
-  terminals. Resizing restores them. Pane separators have a blank row on either
-  side, and the console shows six message rows. The minimum terminal size is
-  40 columns by 20 rows. Moving to the first board item reveals the section
-  headings above it. A heavy, bright amber pane heading identifies where keys
-  go; without color the heavy rule remains. The selected target retains its
-  `>` marker. A board heading's `lines … of …` counts scrollable display lines
-  (including headings and blanks), not runs. The console retains 100 events in
-  memory, with bounded, labelled message truncation; it never logs note or
-  capture bodies. It needs a terminal on stdout (Linux or macOS) and restores
-  it on every exit; quitting mid-save waits for and prints that save's outcome.
+  thing: a note reaches the run's next prompt, resume and tagging start nothing,
+  and only submitting `finish` ships. Text is edited inline (`Ctrl-S` saves,
+  `Esc` keeps the draft, `Ctrl-X` discards). Alt-Backspace or Ctrl-W deletes the
+  previous word; Alt-Left/Right or Alt-b/f moves by whitespace-delimited words.
+  Saving an idea offers save only, save and tag sdlc, or save and tag
+  design-only. Enter opens a labelled draft and Ctrl-S creates it. An edit
+  refuses to overwrite a canvas someone else changed meanwhile. Runs update as
+  their owners publish, not only on the 3s refresh; a lost owner's facts stay,
+  labelled stale. Smoke cycles cached art every 500 ms without scans, socket
+  reads or status reports. The shared dash banner stays visible; the complete
+  histogram and factory are pinned above the scrolling board when they fit, and
+  collapse together on short or narrow terminals. Resizing restores them. Pane
+  separators have a blank row on either side, and the console shows six message
+  rows. The minimum terminal size is 40 columns by 20 rows. Moving to the first
+  board item reveals the section headings above it. A heavy, bright amber pane
+  heading identifies where keys go; without color the heavy rule remains. The
+  selected target retains its `>` marker. A board heading's `lines … of …`
+  counts scrollable display lines (including headings and blanks), not runs. The
+  console retains 100 events in memory, with bounded, labelled message
+  truncation; it never logs note or capture bodies. It needs a terminal on
+  stdout (Linux or macOS) and restores it on every exit; quitting mid-save waits
+  for and prints that save's outcome.
 
   On a CHORES row, `e` (or `:edit`) opens the chore's definition in the text
   form described under [Chore definitions](#chore-definitions) and `Ctrl-S`
@@ -197,12 +198,12 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   These commands work with serve stopped. An admitted survey and its ride may
   finish; human commands, journal pushing and hygiene remain usable. Expiry or
   unpause permits the next eligible tick without arming serve, resetting
-  backoff/quota history or bypassing project modes. Web controls in the
-  dash's PULSE section and on `/serve`, and terminal
-  `:serve pause|unpause|status`, share this setting. Active pause/errors appear directly in status observations.
-  Web/UI controls carry a revision and refuse stale opposing actions. The
-  tracked root `serve-pause.json` holds its revision and optional UTC expiry;
-  malformed state holds automatic admission and reports an error.
+  backoff/quota history or bypassing project modes. Web controls in the dash's
+  PULSE section and on `/serve`, and terminal `:serve pause|unpause|status`,
+  share this setting. Active pause/errors appear directly in status
+  observations. Web/UI controls carry a revision and refuse stale opposing
+  actions. The tracked root `serve-pause.json` holds its revision and optional
+  UTC expiry; malformed state holds automatic admission and reports an error.
 - `moe project mode <id> [paused|safe|auto]` caps what the heartbeat may start
   in one project, without stopping the process. See below.
 - `moe chore list|check|open|skip` lists due project chores, dry-runs a chore
