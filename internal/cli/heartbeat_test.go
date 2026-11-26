@@ -444,6 +444,115 @@ func TestHeartbeatSweptMovesTheCursorOverItsOwnBookkeeping(t *testing.T) {
 	}
 }
 
+// sweepThatMints dispatches a delta sweep, lets mint land the survey's
+// gate mints inside its window with the survey's own open/close around
+// them, and exits clean. Returns the gate, ready for the tick after.
+func sweepThatMints(t *testing.T, root string, mint func()) *heartbeatGate {
+	t.Helper()
+	g := newHeartbeatGate(root)
+	dueProjectsPastTheWindow(t, g) // seeds the cursor
+
+	journalCommit(t, root, "moe", "machine: a merge", "MoE-Consent: dynamic")
+	if got := dueProjectsPastTheWindow(t, g); len(got) != 1 || got[0] != "moe" {
+		t.Fatalf("due = %v, want the delta sweep", got)
+	}
+	g.Dispatching()
+
+	journalCommit(t, root, "moe", "work: update pulse", "MoE-Workflow: pulse\nMoE-Consent: dynamic")
+	mint()
+	journalCommit(t, root, "moe", "close: pulse-1", "MoE-Workflow: pulse\nMoE-Consent: dynamic")
+	g.Swept("moe", true)
+	return g
+}
+
+// TestHeartbeatSweepsARunItsOwnSweepMinted is the readme-update wedge.
+// A survey mints a run and leaves it out of `next`; the mint is the
+// sweep's own commit, so tips advances over it, but the survey read the
+// board before the run existed. Stamping that board surveyed stood the
+// parked leg down on a kickable run until something unrelated moved the
+// journal.
+func TestHeartbeatSweepsARunItsOwnSweepMinted(t *testing.T) {
+	t.Parallel()
+	root := parallelQuietFixture(t)
+	g := sweepThatMints(t, root, func() { groomFixture(t, root, "fix-a") })
+
+	tip, _, _, _ := projectJournalTip(root, "moe")
+	if g.tips["moe"] != tip {
+		t.Errorf("tips = %q, want %q — the mint is the sweep's own commit", g.tips["moe"], tip)
+	}
+	if g.surveyed["moe"] == tip {
+		t.Errorf("surveyed = tip after a sweep that minted onto the board it read")
+	}
+	decisions := dueDecisions(t, g, testTick)
+	if got := sweepIDs(decisions); len(got) != 1 || got[0] != "moe" {
+		t.Fatalf("due = %v, want [moe] — the minted run is kickable and no survey saw it", got)
+	}
+	if r := reasonFor(decisions, "moe"); !strings.Contains(r, "parked at moe/fix-a") {
+		t.Errorf("reason = %q, want the parked leg naming the mint", r)
+	}
+	g.Dispatching()
+
+	// The follow-up survey sees the run, parks it and mints nothing: its
+	// exit sets surveyed and the board goes quiet.
+	journalCommit(t, root, "moe", "close: pulse-2", "MoE-Workflow: pulse\nMoE-Consent: dynamic")
+	g.Swept("moe", true)
+	if got := dueProjectsPastTheWindow(t, g); len(got) != 0 {
+		t.Errorf("due = %v after the follow-up sweep saw the mint, want none", got)
+	}
+}
+
+// TestHeartbeatMintThatIsNotKickableStaysQuiet: holding surveyed only
+// hands the next tick to the parked leg. A mint nothing can start costs
+// no turn.
+func TestHeartbeatMintThatIsNotKickableStaysQuiet(t *testing.T) {
+	t.Parallel()
+	root := parallelQuietFixture(t)
+	g := sweepThatMints(t, root, func() {
+		journalCommit(t, root, "moe", "Open run moe/readme-update", "MoE-Run: readme-update\nMoE-Project: moe\nMoE-Consent: dynamic\nMoE-Chore: moe/readme-update")
+	})
+
+	tip, _, _, _ := projectJournalTip(root, "moe")
+	if g.tips["moe"] != tip || g.surveyed["moe"] == tip {
+		t.Errorf("cursors = %q/%q, want tips at %q and surveyed held", g.tips["moe"], g.surveyed["moe"], tip)
+	}
+	decisions := dueDecisions(t, g, testTick)
+	if got := sweepIDs(decisions); len(got) != 0 {
+		t.Errorf("due = %v, want none — nothing kickable is parked", got)
+	}
+	if r := reasonFor(decisions, "moe"); !strings.Contains(r, "nothing settled is parked") {
+		t.Errorf("reason = %q, want the parked leg's quiet answer", r)
+	}
+}
+
+// TestSweptRunOpen pins the mint census. The first four rows are the
+// verbatim journal range b01046322..005d7be1b, the observed wedge: only
+// the chore mint matches.
+func TestSweptRunOpen(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		body string
+		want bool
+	}{
+		{"pulse session start", "work: start session for pulse\n\nMoE-Run: pulse-2026-11-25-16\nMoE-Project: _cabinet\nMoE-Workflow: pulse\nMoE-Document: pulse\nMoE-Session: a7f660c0\nMoE-Consent: dynamic\n", false},
+		{"pulse turn", "work: update pulse\n\nMoE-Run: pulse-2026-11-25-16\nMoE-Project: _cabinet\nMoE-Workflow: pulse\nMoE-Document: pulse\nMoE-Session: d8a3bc15\nMoE-Consent: dynamic\n", false},
+		{"chore nomination", "Open run moe/readme-update-2026-11-25-4\n\nMoE-Run: readme-update-2026-11-25-4\nMoE-Project: moe\nMoE-Consent: dynamic\nMoE-Chore: moe/readme-update\n", true},
+		{"pulse close", "Close pulse run _cabinet/pulse-2026-11-25-16\n\nMoE-Run: pulse-2026-11-25-16\nMoE-Project: _cabinet\nMoE-Workflow: pulse\nMoE-Consent: dynamic\n", false},
+		{"gate mint", "Open run lightpool/non-alive-belief-duration\n\nMoE-Run: non-alive-belief-duration\nMoE-Project: lightpool\nMoE-Spawned-By: lightpool/pulse-2026-11-21-4\nMoE-Consent: dynamic\n", true},
+		{"idea promotion", "Open run moe/slow-tab-complete-2026-11-25 from idea slow-tab-complete\n\nMoE-Run: slow-tab-complete-2026-11-25\nMoE-Project: moe\nMoE-Idea: slow-tab-complete\nMoE-Spawned-By: _cabinet/pulse-2026-11-25-14\nMoE-Consent: dynamic\n", true},
+		{"followup harvest", "Open run moe/declare-run-prerequisites\n\nMoE-Run: declare-run-prerequisites\nMoE-Project: moe\nMoE-From-Run: lightpool/pulse-2026-11-21-4\nMoE-Consent: dynamic\n", true},
+		{"the sweep's own open", "Open run _cabinet/pulse-2026-11-25-16\n\nMoE-Run: pulse-2026-11-25-16\nMoE-Project: _cabinet\nMoE-Consent: dynamic\n", false},
+		{"an intent link", "Link 1 run(s) to intents\n\nMoE-Spawned-By: _cabinet/pulse-2026-11-25-14\nMoE-Consent: dynamic\n", false},
+		{"an operator open", "Open run moe/why-is-readme-stuck\n\nMoE-Run: why-is-readme-stuck\nMoE-Project: moe\n", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sweptRunOpen(tc.body); got != tc.want {
+				t.Errorf("sweptRunOpen = %v, want %v:\n%s", got, tc.want, tc.body)
+			}
+		})
+	}
+}
+
 // TestRideAuthored pins the trailer census the refusal reads. Every row
 // is a real commit shape from the journal: the top three are how a ride
 // lands work, the rest are a sweep describing itself.

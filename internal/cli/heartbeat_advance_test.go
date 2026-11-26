@@ -179,17 +179,17 @@ func TestHeartbeatProjectJournalScopeAndOrder(t *testing.T) {
 			if tip, at, operator, ok := projectJournalTip(root, "moe"); !ok || tip != mark || !at.Equal(when) || !operator {
 				t.Fatalf("same-second selection = %s %s %v %v, want %s", tip, at, operator, ok, mark)
 			}
-			if operator, ride := journalActs(root, "moe", base+"..HEAD"); !operator || !ride {
+			if operator, ride, _ := journalActs(root, "moe", base+"..HEAD"); !operator || !ride {
 				t.Fatalf("empty advance acts = %v %v", operator, ride)
 			}
-			if operator, ride := journalActs(root, "moe", mark+"..HEAD"); operator || ride {
+			if operator, ride, _ := journalActs(root, "moe", mark+"..HEAD"); operator || ride {
 				t.Fatalf("foreign marks counted: %v %v", operator, ride)
 			}
 			trailerstest.CommitTrailer(t, root, "machine bookkeeping", "MoE-Project: moe\nMoE-Workflow: pulse\nMoE-Consent: dynamic", when)
 			if tip, _, operator, ok := projectJournalTip(root, "moe"); !ok || tip != headSHA(t, root) || operator {
 				t.Fatalf("newest machine mark lost: %s %v %v", tip, operator, ok)
 			}
-			if operator, ride := journalActs(root, "moe", "HEAD^..HEAD"); operator || ride {
+			if operator, ride, _ := journalActs(root, "moe", "HEAD^..HEAD"); operator || ride {
 				t.Fatalf("empty bookkeeping counted as unseen work: %v %v", operator, ride)
 			}
 		})
@@ -214,7 +214,7 @@ func TestHeartbeatJournalReadFailureAbstains(t *testing.T) {
 	if _, _, _, ok := projectJournalTip(root, "moe"); ok {
 		t.Fatal("failed tip read reported history")
 	}
-	if operator, ride := journalActs(root, "moe", "HEAD"); operator || ride {
+	if operator, ride, _ := journalActs(root, "moe", "HEAD"); operator || ride {
 		t.Fatalf("failed log reported acts: %v %v", operator, ride)
 	}
 }

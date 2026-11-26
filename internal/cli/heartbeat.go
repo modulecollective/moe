@@ -220,6 +220,15 @@ func (g *heartbeatGate) Due(log io.Writer) []serve.HeartbeatDecision {
 // generation per tick at most, and it ends the first time a survey kicks
 // nothing.
 //
+// A run the sweep minted in that range — a chore it nominated, a run its
+// gate opened, a followup it harvested — is the sweep's own, so tips
+// advances over it. Surveyed does not: the survey read the board before
+// the mint, so the minted run is a thread it never saw, let alone
+// parked. Holding surveyed drops the next tick past the surveyed
+// early-return to the parked leg, which sweeps once if the mint is
+// kickable and stays quiet if not. The follow-up survey sees the run,
+// picks or parks it and mints nothing, and its exit sets surveyed.
+//
 // Refusing tips too, not just surveyed, is what makes the mid-sweep case
 // exactly equivalent to the ordinary one — with tips advanced, only the
 // parked leg would re-look, and it fires solely on a parked kickable
@@ -286,14 +295,18 @@ func (g *heartbeatGate) sweptProject(projectID string, clean bool) {
 	// follows a Dispatching that pinned one — so falling through to the
 	// advance keeps a direct-call test fixture honest rather than silently
 	// wedged.
-	if dispatched && base != tip && unseenWorkIn(g.root, projectID, base, tip) {
-		return
+	minted := false
+	if dispatched && base != tip {
+		var unseen bool
+		if unseen, minted = unseenWorkIn(g.root, projectID, base, tip); unseen {
+			return
+		}
 	}
 
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.tips[projectID] = tip
-	if clean {
+	if clean && !minted {
 		g.surveyed[projectID] = tip
 	}
 }
@@ -940,9 +953,14 @@ func projectJournalTip(root, projectID string) (sha string, at time.Time, operat
 // after the board read, and a ride commit — work the sweep itself
 // kicked, which by construction lands after the board it was chosen
 // from.
-func unseenWorkIn(root, projectID, base, tip string) bool {
-	operator, ride := journalActs(root, projectID, base+".."+tip)
-	return operator || ride
+//
+// minted is the third thing a sweep's window can hold: a run the sweep
+// itself opened (sweptRunOpen). It is not unseen work — the survey
+// asked for it — so Swept still advances tips, but it is a board no
+// survey read, so Swept leaves surveyed where it was.
+func unseenWorkIn(root, projectID, base, tip string) (unseen, minted bool) {
+	operator, ride, minted := journalActs(root, projectID, base+".."+tip)
+	return operator || ride, minted
 }
 
 // journalActs walks the bodies of the project-scoped commits selected by
@@ -955,14 +973,14 @@ func unseenWorkIn(root, projectID, base, tip string) bool {
 // for both acts: an unreadable log reports neither, leaving Swept advancing
 // its cursors. Refusing on a persistent read failure would make the moved
 // leg fire — and sweep — every tick, the runaway rather than the safe default.
-func journalActs(root, projectID, rev string) (operator, ride bool) {
+func journalActs(root, projectID, rev string) (operator, ride, minted bool) {
 	out, err := git.Output(root, "log", rev, "--format=%x00%B", "--", "projects/"+projectID)
 	if err != nil {
-		return false, false
+		return false, false, false
 	}
 	marked, err := git.Output(root, "log", rev, "--format=%x00%B", "--grep", trailers.GrepPattern("MoE-Project", projectID), "--")
 	if err != nil {
-		return false, false
+		return false, false, false
 	}
 	for body := range strings.SplitSeq(out+marked, "\x00") {
 		if strings.TrimSpace(body) == "" {
@@ -977,11 +995,40 @@ func journalActs(root, projectID, rev string) (operator, ride bool) {
 		if rideAuthored(body) {
 			ride = true
 		}
+		if sweptRunOpen(body) {
+			minted = true
+		}
 		if operator && ride {
 			break
 		}
 	}
-	return operator, ride
+	return operator, ride, minted
+}
+
+// sweptRunOpen reports whether a commit body opens a run a sweep caused:
+// a judged chore it nominated (MoE-Chore), a run its gate minted or an
+// idea it promoted (MoE-Spawned-By), or a followup it harvested
+// (MoE-From-Run). Those are every run-open a survey's own turn lands, and
+// none of them was on the board the survey read — so the survey cannot
+// have parked them, and the sweep's exit must not stamp the post-mint
+// board as surveyed. Without this, a mint the survey left out of `next`
+// sits unstarted until something unrelated moves the journal.
+//
+// The subject pin is the journal index's own (run.go pins OpenConsent
+// the same way). It keeps out the trailered commits that follow an open
+// — a promote's idea mark, an intent link — and the sweep's own pulse
+// open, which carries none of the three.
+//
+// Over-matches one shape on purpose: an intent the gate opened carries
+// MoE-Spawned-By too. Holding surveyed for it costs nothing unless
+// something else kickable is parked, and then one follow-up sweep.
+func sweptRunOpen(body string) bool {
+	if !strings.HasPrefix(body, "Open run ") {
+		return false
+	}
+	return strings.Contains(body, "\nMoE-Chore:") ||
+		strings.Contains(body, "\nMoE-Spawned-By:") ||
+		strings.Contains(body, "\nMoE-From-Run:")
 }
 
 // rideAuthored reports whether a commit body is a ride's: its
