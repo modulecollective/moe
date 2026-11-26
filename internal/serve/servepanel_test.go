@@ -54,31 +54,47 @@ func getBody(t *testing.T, s *Server, path string) string {
 	return rec.Body.String()
 }
 
-// TestServeClusterRidesTheBoardHeaders: the boards spend one muted line
-// on serve — the same cluster the CLI banner carries — and link it to the
-// page that owns the trace. A day of ticks on every dash load was the
-// noise this change exists to stop.
-func TestServeClusterRidesTheBoardHeaders(t *testing.T) {
+// TestTopLineIsTheClockAndTheClusterLivesInThePulseSection: every
+// page's top line is the logo and the local date and time; the serve
+// cluster moved to the dash's PULSE section, ahead of ACTIVE, and is
+// gone from every other board's header. The trace stays on /serve.
+func TestTopLineIsTheClockAndTheClusterLivesInThePulseSection(t *testing.T) {
 	s := panelServer(t)
-	for _, path := range []string{"/", "/projects/alpha"} {
+	panel := s.activity.panel(time.Now())
+	for _, path := range []string{"/", "/projects/alpha", "/input"} {
 		body := getBody(t, s, path)
-		cluster := s.activity.panel(time.Now()).Cluster
-		clusterMarkup := `<div class="banner-serve"><a href="/serve" data-serve-cluster>` + cluster + `</a></div>`
-		if !strings.Contains(body, clusterMarkup) {
-			t.Errorf("%s is missing the header cluster %q", path, cluster)
+		clockMarkup := `<div class="banner-serve"><span data-clock>` + panel.Clock + `</span></div>`
+		if !strings.Contains(body, clockMarkup) {
+			t.Errorf("%s is missing the header clock %q", path, panel.Clock)
 		}
 		sub := strings.Index(body, `<div class="banner-sub">`)
-		clusterPos := strings.Index(body, clusterMarkup)
+		clockPos := strings.Index(body, clockMarkup)
 		menu := strings.Index(body, `class="menu"`)
-		if sub < 0 || clusterPos < 0 || menu < 0 || !(sub < clusterPos && clusterPos < menu) ||
-			strings.Count(body[sub:clusterPos], `</div>`) != 2 {
-			t.Errorf("%s header order is banner, serve cluster, menu", path)
+		if sub < 0 || clockPos < 0 || menu < 0 || !(sub < clockPos && clockPos < menu) {
+			t.Errorf("%s header order is banner, clock, menu", path)
+		}
+		header := body[:strings.Index(body, "</header>")]
+		if strings.Contains(header, "data-serve-cluster") || strings.Contains(header, panel.Cluster) {
+			t.Errorf("%s header still carries the serve cluster", path)
+		}
+		if strings.Contains(header, `id="serve-pause"`) {
+			t.Errorf("%s menu still carries the pause control", path)
 		}
 		for _, unwanted := range []string{"serve-panel", "the journal moved", "credit limit reached"} {
 			if strings.Contains(body, unwanted) {
 				t.Errorf("%s still carries %q — the trace belongs on /serve", path, unwanted)
 			}
 		}
+		if path != "/" && strings.Contains(body, "data-serve-cluster>") {
+			t.Errorf("%s renders the serve cluster; only the dash and /serve do", path)
+		}
+	}
+	body := getBody(t, s, "/")
+	clusterMarkup := `<p class="pulse-status"><a href="/serve" data-serve-cluster>` + panel.Cluster + `</a>`
+	pulse, cluster, pause, active := strings.Index(body, `id="pulse"`), strings.Index(body, clusterMarkup),
+		strings.Index(body, `id="serve-pause"`), strings.Index(body, `<span>active`)
+	if pulse < 0 || cluster < pulse || pause < cluster || active < pause {
+		t.Errorf("dash order is PULSE section (cluster, pause) then active: pulse=%d cluster=%d pause=%d active=%d", pulse, cluster, pause, active)
 	}
 }
 
@@ -333,8 +349,8 @@ func TestProjectModeRouteWritesConfig(t *testing.T) {
 }
 
 // TestModeCountsRideTheHeaderCluster: the boards' whole spend on the
-// modes is a count in the line they already carry, and only when
-// something deviates.
+// modes is a count in the serve cluster — the dash's PULSE line and
+// /serve — and only when something deviates.
 func TestModeCountsRideTheHeaderCluster(t *testing.T) {
 	s := modeServer(t)
 	for _, path := range []string{"/", "/projects/alpha", "/serve"} {
@@ -349,7 +365,7 @@ func TestModeCountsRideTheHeaderCluster(t *testing.T) {
 	if rec := postForm(t, s, "/projects/beta/mode", "mode=safe"); rec.Code != http.StatusSeeOther {
 		t.Fatal(rec.Body.String())
 	}
-	for _, path := range []string{"/", "/projects/alpha", "/serve"} {
+	for _, path := range []string{"/", "/serve"} {
 		body := getBody(t, s, path)
 		if !strings.Contains(body, "1 paused") || strings.Contains(body, "· 1 safe") {
 			t.Errorf("%s header missing the mode counts:\n%s", path, body)

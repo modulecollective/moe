@@ -16,6 +16,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -34,6 +35,9 @@ type inputQueueVM struct {
 	Project string
 	Asked   []openPingVM
 	Given   []pendingVM
+	// Pulse is the whole pulse-note history, newest first. Board-wide
+	// only: a pulse note names no project.
+	Pulse []pulseNoteVM
 }
 
 // openPingVM is one unanswered question with its run link and a reply
@@ -95,6 +99,15 @@ func (s *Server) handleInputQueue(w http.ResponseWriter, r *http.Request) {
 			URL:  "/run/" + wt.Project + "/" + wt.Run,
 			Line: wt.Entry.FirstLine(),
 		})
+	}
+	if projectID == "" {
+		f, err := input.LoadPulse(s.opts.Root)
+		if err != nil {
+			s.logf("input: %v", err)
+		}
+		for _, e := range slices.Backward(f.Notes) {
+			vm.Pulse = append(vm.Pulse, pulseNoteVM{ID: e.ID, Text: e.Text, ReadBy: e.DeliveredTo})
+		}
 	}
 	s.render(w, r, "input.html", vm)
 }

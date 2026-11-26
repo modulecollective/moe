@@ -18,6 +18,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/modulecollective/moe/internal/dash"
 )
 
 // RunRowStatus is the typed per-run payload in the compact refresh.
@@ -136,6 +138,7 @@ func (s *Server) handleRunStatuses(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	view := defaultAgentView(s.opts.Root, now)
 	out["__serve_cluster"] = s.pausePanel(now).Cluster
+	out["__clock"] = dash.Clock(now)
 	out["__agent_summary"], out["__agent_error"] = view.Summary, view.Error
 	out["__agent_revision"] = strconv.Itoa(view.Revision)
 	pause := pauseView(s.opts.Root, now)

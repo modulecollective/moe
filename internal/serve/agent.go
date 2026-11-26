@@ -12,7 +12,6 @@ import (
 )
 
 type agentVM struct {
-	Pause    pauseVM
 	Summary  string
 	Revision int
 	Error    string
@@ -21,9 +20,9 @@ type agentVM struct {
 func defaultAgentView(root string, now time.Time) agentVM {
 	s, err := agentdefault.Read(root)
 	if err != nil {
-		return agentVM{Pause: pauseView(root, now), Summary: "Default: unavailable", Error: err.Error()}
+		return agentVM{Summary: "Default: unavailable", Error: err.Error()}
 	}
-	return agentVM{Pause: pauseView(root, now), Summary: s.Summary(now), Revision: s.Revision}
+	return agentVM{Summary: s.Summary(now), Revision: s.Revision}
 }
 
 func (s *Server) handleAgent(w http.ResponseWriter, r *http.Request) {

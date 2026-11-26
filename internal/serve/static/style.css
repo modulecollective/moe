@@ -147,7 +147,7 @@ a.banner-bar:hover, a.banner-bar:focus { color: var(--accent); }
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.banner-serve a { color: var(--muted); }
+.banner-serve a, .banner-serve [data-clock] { color: var(--muted); }
 .banner-serve a:hover, .banner-serve a:focus { color: var(--accent); }
 .meta {
   margin: 0.25rem 0 0;
@@ -723,6 +723,30 @@ form.new-run button:hover, form.new-run button:focus {
 .input-reply textarea:focus { border-color: var(--accent); outline: none; }
 .input-reply button { align-self: flex-start; }
 .row.input-ping { flex-wrap: wrap; }
+
+/* The dash's PULSE section: status line, the pause control out of the
+   menu, the composer, then the operator's notes. Existing vocabulary
+   only — amber accent, hairline rows, block glyphs for state. */
+.pulse-status { margin: 0 0 0.25rem; color: var(--muted); font-size: 0.92rem; overflow-wrap: anywhere; }
+.pulse-status a { color: var(--muted); }
+.pulse-status a:hover, .pulse-status a:focus { color: var(--accent); }
+.pulse-section .agent-default {
+  width: auto;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.75rem;
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+.pulse-section .agent-default p { display: none; }
+.pulse-section .agent-default button { padding: 0.25rem 0; }
+.pulse-section .input-reply { margin: 0.25rem 0 0.5rem; }
+.pulse-state { color: var(--accent); font-size: 0.85rem; }
+.pulse-note.read .pulse-state { color: var(--muted); }
+.pulse-note.read .pulse-text { opacity: 0.7; }
+.row .note.pulse-text { color: var(--fg); white-space: pre-wrap; flex-basis: 100%; }
 .row.input-ping .input-reply { flex-basis: 100%; }
 
 /* Usage tables. The rest of the app is flex rows, but the spend report

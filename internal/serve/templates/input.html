@@ -15,6 +15,21 @@
     {{template "headeractions" false}}
   </header>
 
+  {{if .Pulse}}
+  <section class="dash-section">
+    <h2><span>for the pulse <span class="count">({{len .Pulse}})</span></span><a class="section-action" href="/#pulse">write one</a></h2>
+    <ul class="rows pulse-notes">
+      {{range .Pulse}}
+      <li class="row pulse-note{{if .ReadBy}} read{{end}}">
+        <span class="slug">#{{.ID}}</span>
+        <span class="pulse-state">{{if .ReadBy}}░ read by <a href="/run/{{.ReadBy}}">{{.ReadBy}}</a>{{else}}▒ waiting{{end}}</span>
+        <span class="note pulse-text">{{.Text}}</span>
+      </li>
+      {{end}}
+    </ul>
+  </section>
+  {{end}}
+
   <section class="dash-section">
     <h2><span>asked you <span class="count">({{len .Asked}})</span></span></h2>
     {{if .Asked}}

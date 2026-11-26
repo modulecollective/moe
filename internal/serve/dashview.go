@@ -281,9 +281,11 @@ type servePanelVM struct {
 	// line unchanged for an operator who never sets one.
 	Paused int
 	Safe   int
-	// Cluster is the brief status the page headers link to /serve with —
-	// the same line, byte for byte, that the CLI dash's banner carries.
+	// Cluster is the serve status the dash's PULSE section leads with —
+	// the same line, byte for byte, that the CLI dash's section carries.
 	Cluster string
+	// Clock is the page header's date and time in the box's local zone.
+	Clock string
 	// Push is the drain to origin: the item that rides the cluster, and
 	// the row the panel spends when the push is being refused. Item is
 	// empty when there is nothing to say; State is empty when the drain
@@ -381,7 +383,7 @@ func (a *activity) panel(now time.Time) servePanelVM {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	vm := servePanelVM{Armed: a.armed, Host: a.host, HostError: a.hostErr, Up: dash.HumanDuration(now.Sub(a.started))}
+	vm := servePanelVM{Armed: a.armed, Host: a.host, HostError: a.hostErr, Up: dash.HumanDuration(now.Sub(a.started)), Clock: dash.Clock(now)}
 	if next := a.nextTick(); !next.IsZero() {
 		vm.NextSweep = dash.HumanDuration(max(next.Sub(now), 0))
 	}
@@ -585,6 +587,7 @@ type dashVM struct {
 	bannerArtVM
 	rowBuckets
 	Serve          servePanelVM
+	Pulse          pulseVM
 	ProjectCount   int
 	ActiveProjects int
 	// InputCount is how many questions are waiting on an answer. The

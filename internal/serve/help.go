@@ -27,6 +27,8 @@ var tips = map[string]string{
 
 	// Operator input; answer renders in two templates.
 	"answer": "Answer the open question; delivered at the run's next turn.",
+	// The dash's PULSE composer.
+	"pulse-note": "Send to the next pulse; the next sweep reads it once. Starts nothing; Ctrl/Cmd+Enter sends.",
 }
 
 // tip is the template func behind title="{{tip .}}".

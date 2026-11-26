@@ -80,10 +80,57 @@
   </script>
 {{end}}
 
-{{/* The boards' whole spend on serve: the same status cluster the CLI
-     dash's banner carries, in the page header, linked to the trace. */}}
+{{/* Every page's top line beside the logo: the date and time in the
+     box's local zone. Serve state lives in the dash's PULSE section and
+     on /serve, not here. */}}
 {{define "serveheader"}}
-  <div class="banner-serve"><a href="/serve" data-serve-cluster>{{.Cluster}}</a></div>
+  <div class="banner-serve"><span data-clock>{{.Clock}}</span></div>
+{{end}}
+
+{{/* The dash's first section: the survey's state, its pause, and what the
+     operator has told it. The status line keeps data-serve-cluster so the
+     five-second refresh keeps the countdown and pause summary current. */}}
+{{define "pulsesection"}}
+  <section class="dash-section pulse-section" id="pulse">
+    <h2><span>pulse</span></h2>
+    <p class="pulse-status"><a href="/serve" data-serve-cluster>{{.Serve.Cluster}}</a>{{with .Pulse.LastRun}} · last <a href="/run/{{.}}">{{.}}</a> {{$.Pulse.LastAgo}}{{end}}</p>
+    {{template "pause_control.html" .Serve.Pause}}
+    <form method="post" action="/pulse/note" class="input-reply pulse-note-form">
+      <textarea name="text" rows="2" placeholder="tell the next pulse — work to start, what comes first" required></textarea>
+      <button class="action" type="submit" title="{{tip "pulse-note"}}">send</button>
+    </form>
+    {{if or .Pulse.Pending .Pulse.Read}}
+    <ul class="rows pulse-notes">
+      {{range .Pulse.Pending}}
+      <li class="row pulse-note">
+        <span class="slug">#{{.ID}}</span>
+        <span class="pulse-state">▒ waiting · {{$.Pulse.Waiting}}</span>
+        <span class="note pulse-text">{{.Text}}</span>
+      </li>
+      {{end}}
+      {{range .Pulse.Read}}
+      <li class="row pulse-note read">
+        <span class="slug">#{{.ID}}</span>
+        <span class="pulse-state">░ read by <a href="/run/{{.ReadBy}}">{{.ReadBy}}</a></span>
+        <span class="note pulse-text">{{.Text}}</span>
+      </li>
+      {{end}}
+    </ul>
+    {{end}}
+  </section>
+  <script>
+  // Ctrl/Cmd+Enter sends the note; the plain form works without this.
+  (function () {
+    var form = document.querySelector('.pulse-note-form');
+    if (!form) return;
+    form.querySelector('textarea').addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && this.value.trim()) {
+        e.preventDefault();
+        form.submit();
+      }
+    });
+  })();
+  </script>
 {{end}}
 
 {{define "servepanel"}}
@@ -297,6 +344,8 @@ document.getElementById('theme-toggle').addEventListener('click', function () {
         if (!m || document.hidden) return;
         var cluster = document.querySelector('[data-serve-cluster]');
         if (cluster) cluster.textContent = m.__serve_cluster;
+        var clock = document.querySelector('[data-clock]');
+        if (clock && m.__clock) clock.textContent = m.__clock;
         var agent = document.getElementById('agent-default');
         if (agent) {
           agent.querySelector('[data-agent-summary]').textContent = m.__agent_summary;
