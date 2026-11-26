@@ -945,22 +945,23 @@ without a sweep since — one probe per expiry, not one per tick); or when
 startable work is parked with nobody inside it *and no sweep has looked at that
 board since it last changed* — a settled run, or an open idea you tagged, since
 the tag is the licence to start it. A run a survey saw and did not pick is not
-re-offered until something moves; every release from a hold is a journal
-commit. A human session or owner on one run holds that run, while another run
-in the same project can be surveyed and ridden. Fresh human commits require no
-quiet window. Human and ride commits arriving during a survey remain unsurveyed
-and wake a later eligible tick. A quiet board costs no agent turn, run or
-journal line. Recorded pushed PRs are polled at this cadence outside the
-journal lock. A merged or closed owned PR wakes a pulse to reconcile its
-still-pushed run before the survey reads the board. It keeps waking eligible
-ticks until reconciliation succeeds, including after a restart. This follows
-the five-minute cadence and existing holds and failure backoff; it is not an
-immediate refresh. Run `moe sync` for immediate reconciliation. A new
-actionable failure can also wake a survey even when the journal has not moved.
-Stable failure observations are acknowledged only after a successful sweep,
-against the exact snapshot handed to that survey; failures arriving during its
-rides remain visible to the next tick. Healthy and pending changes alone spend
-no turn. No recorded pushed PR means no added network read.
+re-offered until something moves; every release from a hold is a journal commit.
+A human session or owner on one run holds that run, while another run in the
+same project can be surveyed and ridden. Fresh human commits require no quiet
+window. Human and ride commits arriving during a survey remain unsurveyed and
+wake a later eligible tick. So does a run the survey itself opens: if it is
+startable and the survey did not pick it, the next tick sweeps once to look at
+it. A quiet board costs no agent turn, run or journal line. Recorded pushed PRs
+are polled at this cadence outside the journal lock. A merged or closed owned PR
+wakes a pulse to reconcile its still-pushed run before the survey reads the
+board. It keeps waking eligible ticks until reconciliation succeeds, including
+after a restart. This follows the five-minute cadence and existing holds and
+failure backoff; it is not an immediate refresh. Run `moe sync` for immediate
+reconciliation. A new actionable failure can also wake a survey even when the
+journal has not moved. Stable failure observations are acknowledged only after a
+successful sweep, against the exact snapshot handed to that survey; failures
+arriving during its rides remain visible to the next tick. Healthy and pending
+changes alone spend no turn. No recorded pushed PR means no added network read.
 
 Known quota exhaustion yields the session and records a retry in the journal.
 The first ordinary heartbeat at or after its date can commission a fresh
