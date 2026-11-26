@@ -451,7 +451,8 @@ condition, not restate the criterion.
 This is a nomination rather than a create: with the chore's run already
 open, the entry lands on that run. A chore run can be your `next` like
 any other, and the operator wrote its prompt, so its design is settled
-by construction.
+by construction. Nominating it does not start it: it starts in this
+sweep only if `next` names it, and left out it waits for a later sweep.
 
 **Quiet is the normal answer.** A judged chore whose condition didn't
 fire is not a finding, and a pulse that nominates nothing is a
