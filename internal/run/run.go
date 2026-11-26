@@ -1148,6 +1148,9 @@ type WorkTurnKey struct {
 // and run.json lands on main as part of the opening commit, so any
 // MoE-Run-tagged commit dash cares about is reachable from HEAD.
 // Mirrors the scope LastActivityMap walked.
+// An unborn current branch is valid empty history, even if other refs
+// carry commits. Its empty index is not memoized; the first commit is
+// visible on the next call.
 //
 // Memoized per root on HEAD — see journalMemo. **The returned index is
 // shared between callers and must be treated as read-only.** Nothing
@@ -1156,9 +1159,15 @@ type WorkTurnKey struct {
 func BuildJournalIndex(root string) (*JournalIndex, error) {
 	head, err := git.HEAD(root)
 	if err != nil {
-		// No readable HEAD (unborn branch, not a repo) — nothing to key
-		// on. Fall through to the walk, which fails the way callers
-		// already handle.
+		unborn, err := git.UnbornHEAD(root)
+		if err != nil {
+			return nil, err
+		}
+		if unborn {
+			return newJournalWalk().finish(), nil
+		}
+		// No readable HEAD to key on. Preserve the uncached walk's
+		// errors for states other than a confirmed unborn branch.
 		return buildJournalIndex(root)
 	}
 	journalMemo.Lock()

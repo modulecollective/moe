@@ -2,12 +2,17 @@ package cli
 
 import (
 	"bytes"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/modulecollective/moe/internal/bureaucracy"
+	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/git/gittest"
+	"github.com/modulecollective/moe/internal/serve"
 )
 
 // TestStdinIsTerminalRejectsDevNull is the targeted regression: the
@@ -62,6 +67,74 @@ func TestRunInitWithDevNullStdinLeavesStaged(t *testing.T) {
 	log := gittest.Output(t, dir, "rev-list", "--all", "--pretty=%s")
 	if strings.Contains(log, "Initialize bureaucracy") {
 		t.Fatalf("init self-committed under /dev/null stdin; log:\n%s", log)
+	}
+
+	staged := gittest.Output(t, dir, "diff", "--cached", "--binary")
+	if staged == "" {
+		t.Fatal("init must leave a staged scaffold")
+	}
+	srv, err := serve.New(serveOptions(dir, &stderr))
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestDash := func() *httptest.ResponseRecorder {
+		t.Helper()
+		response := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+		return response
+	}
+	response := requestDash()
+	if response.Code != http.StatusOK {
+		t.Fatalf("fresh init GET / = %d: %s", response.Code, response.Body.String())
+	}
+	for _, section := range []string{"active", "intents", "chores", "backlog"} {
+		if !strings.Contains(response.Body.String(), section+` <span class="count">(0)</span>`) {
+			t.Errorf("missing empty %s section", section)
+		}
+	}
+	if !strings.Contains(response.Body.String(), "0 projects registered") {
+		t.Fatal("missing empty project count")
+	}
+	t.Setenv("MOE_HOME", dir)
+	stdout.Reset()
+	stderr.Reset()
+	if code := runDash(nil, &stdout, &stderr); code != 0 {
+		t.Fatalf("fresh init dash exit=%d: %s", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "BACKLOG") || !strings.Contains(stdout.String(), "ACTIVE") {
+		t.Fatalf("missing CLI board: %s", stdout.String())
+	}
+	if _, err := git.HEAD(dir); err == nil {
+		t.Fatal("observation committed the scaffold")
+	}
+	if after := gittest.Output(t, dir, "diff", "--cached", "--binary"); after != staged {
+		t.Fatal("observation changed the staged scaffold")
+	}
+	gittest.Commit(t, dir, "Initialize bureaucracy")
+	if response := requestDash(); response.Code != http.StatusOK {
+		t.Fatalf("same server after first commit GET / = %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestInitDashboardBrokenHEAD(t *testing.T) {
+	gittest.SetupEnv(t)
+	dir := t.TempDir()
+	if err := bureaucracy.Init(dir, ""); err != nil {
+		t.Fatal(err)
+	}
+	// A branch ref naming an absent object is corruption, not empty history.
+	if err := os.WriteFile(filepath.Join(dir, ".git", "refs", "heads", "main"), []byte(strings.Repeat("1", 40)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stderr bytes.Buffer
+	srv, err := serve.New(serveOptions(dir, &stderr))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/", nil))
+	if response.Code != http.StatusInternalServerError || !strings.Contains(response.Body.String(), "git") {
+		t.Fatalf("broken HEAD GET / = %d: %s", response.Code, response.Body.String())
 	}
 }
 

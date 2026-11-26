@@ -359,6 +359,32 @@ func HEAD(dir string) (string, error) {
 	return RevParse(dir, "HEAD")
 }
 
+// UnbornHEAD reports whether HEAD names a branch whose ref does not yet
+// exist. Detached HEAD is not unborn; Git failures remain errors.
+func UnbornHEAD(dir string) (bool, error) {
+	ref, err := Output(dir, "symbolic-ref", "--quiet", "HEAD")
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+			return false, nil // Detached HEAD.
+		}
+		return false, err
+	}
+	ref = strings.TrimSpace(ref)
+	if !strings.HasPrefix(ref, "refs/heads/") {
+		return false, nil
+	}
+	_, err = Output(dir, "show-ref", "--verify", "--quiet", ref)
+	if err == nil {
+		return false, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return true, nil
+	}
+	return false, err
+}
+
 // HasRef reports whether ref resolves in dir. Probe sugar for
 // `rev-parse --verify --quiet <ref>` — the most-common Probe shape and
 // worth naming so callers don't open-code the flags every time.
