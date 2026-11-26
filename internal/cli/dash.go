@@ -11,6 +11,7 @@ import (
 	"github.com/modulecollective/moe/internal/banner"
 	"github.com/modulecollective/moe/internal/bureaucracy"
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/input"
 )
 
 func init() {
@@ -69,7 +70,7 @@ func runDash(args []string, stdout, stderr io.Writer) int {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	renderDashFrame(stdout, now, snap, *all, readServeState(root))
+	renderDashFrame(stdout, now, snap, *all, readServeState(root), readPulseNotes(root, stderr))
 	return 0
 }
 
@@ -83,22 +84,21 @@ type ttyFrameBuffer struct {
 
 func (b *ttyFrameBuffer) Unwrap() io.Writer { return b.terminal }
 
-// renderDashFrame writes one full dashboard frame — banner, serve lines,
-// factory art, sections — to its destination.
-func renderDashFrame(stdout io.Writer, now time.Time, snap DashSnapshot, all bool, serveState serveState) {
+// renderDashFrame writes one full dashboard frame — banner, the PULSE
+// section, factory art, sections — to its destination.
+func renderDashFrame(stdout io.Writer, now time.Time, snap DashSnapshot, all bool, serveState serveState, notes input.File) {
 	state := dash.FactoryStateFromRows(snap.Rows)
 	// Fresh rand per render varies the factory's smoke.
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	// Mark the dash render with the same one-line gradient bar every
-	// stage session opens with, carrying the render timestamp and serve's
-	// status in its tail. Serve status is ambient context, not an event —
-	// it belongs with the render metadata rather than on a line of its
-	// own, and this way it costs the frame nothing.
-	banner.Dash(stdout, now, serveState.bannerCluster(now))
-	// Directly under the banner, above the art: the projects a sweep is
-	// working, holding back, or has killed. The banner's serve cluster is
-	// their label.
-	serveState.renderLines(stdout, now)
+	// The same one-line gradient bar every stage session opens with,
+	// carrying only the clock.
+	banner.Dash(stdout, dash.Clock(now))
+	// Directly under the banner, first on the board: the pulse's state —
+	// the serve cluster and the projects a sweep is working, holding back,
+	// or has killed — and what the operator has told it.
+	var detail bytes.Buffer
+	serveState.renderLines(&detail, now)
+	dash.RenderPulse(stdout, now, serveState.pulse(now, snap.Rows, notes, detail.String()))
 	histogram := dash.BuildActivityHistogram(snap.Histogram)
 	dash.Render(stdout, now, histogram, snap.Rows, snap.ProjectCount, snap.ActiveProjects, all, state, r)
 }

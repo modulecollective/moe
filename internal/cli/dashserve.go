@@ -8,6 +8,7 @@ import (
 
 	"github.com/modulecollective/moe/internal/cliout"
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/input"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/serve"
@@ -197,6 +198,36 @@ func (s serveState) serveCluster(now time.Time) string {
 	}
 	return dash.ServeCluster(s.snap.Armed, dash.HumanDuration(now.Sub(s.snap.Started)),
 		s.snap.Host, next, s.modes, s.failing(now))
+}
+
+// pulse assembles the PULSE section from this read of serve, the board's
+// rows and the pulse-notes record. Status is the same cluster the
+// banner's tail used to carry; detail is the serve trouble rows the
+// caller rendered, if any.
+func (s serveState) pulse(now time.Time, rows []dash.Row, notes input.File, detail string) dash.Pulse {
+	p := dash.Pulse{Status: s.bannerCluster(now), Detail: detail, Last: dash.LastPulse(rows)}
+	p.Pending, p.Read = dash.SplitPulseNotes(notes)
+	armed := s.ok && s.live != serveDead && s.snap.Armed
+	var next, pause string
+	if armed && !s.snap.NextTick.IsZero() {
+		next = dash.HumanDuration(max(s.snap.NextTick.Sub(now), 0))
+	}
+	if s.pauseErr == nil && s.pause.Active(now) {
+		pause = s.pause.Summary(now)
+	}
+	p.Waiting = dash.PulseWaiting(armed, next, pause)
+	return p
+}
+
+// readPulseNotes reads the pulse-notes record for a board render.
+// Warn-only: a malformed record costs the section its notes, not the
+// frame.
+func readPulseNotes(root string, stderr io.Writer) input.File {
+	f, err := input.LoadPulse(root)
+	if err != nil && stderr != nil {
+		moePrintf(stderr, "dash: %v\n", err)
+	}
+	return f
 }
 
 // pushItem reports the current origin queue. Only a live or unknown serve

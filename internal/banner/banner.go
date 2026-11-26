@@ -78,23 +78,16 @@ func titleSeq(status, run string) string {
 	return "\x1b]2;" + title + "\x07"
 }
 
-// Dash prints the dash-render mark: the gradient bar, the render
-// timestamp, and — when the caller has one — a serve-status cluster.
-// The factory art directly below is unmistakable, so the `dash` label
-// the line used to carry was spending a word to say what the art
-// already says; the timestamp is what tells a stale tab from a fresh
-// one (and a dash render from a stage-entry banner, which carries none).
+// Dash prints the dash-render mark: the gradient bar and the clock,
+// nothing else. The factory art directly below is unmistakable, and the
+// clock is what tells a stale tab from a fresh one (and a dash render
+// from a stage-entry banner, which carries none). Serve status lives in
+// the board's PULSE section, not here.
 //
-// serve is preformatted by the caller — this package stays
-// serve-ignorant — and joins with the wide dot the stage-entry banner
-// uses between clusters. An operator with no serve passes an empty
-// string and the banner is the timestamp alone.
-func Dash(w io.Writer, now time.Time, serve string) {
-	line := bar + "  " + now.Format("2006-01-02 15:04")
-	if serve != "" {
-		line += "  ·  " + serve
-	}
-	cliout.Printf(w, "%s\n", line)
+// clock is preformatted by the caller (dash.Clock), so the terminal and
+// the web header spell it the same way.
+func Dash(w io.Writer, clock string) {
+	cliout.Printf(w, "%s  %s\n", bar, clock)
 }
 
 // HookSection prints the section header for a hook-walker pass:

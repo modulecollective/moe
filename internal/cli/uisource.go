@@ -384,7 +384,7 @@ func (s *uiSource) buildBoard(now time.Time) (ui.Board, []cliout.ProgramStatus) 
 	snap.Rows, snap.Observations = rows, obs
 
 	buf := &ttyFrameBuffer{terminal: s.terminal}
-	banner.Dash(buf, now, ui.SafeText(s.serveNow.bannerCluster(now)))
+	banner.Dash(buf, dash.Clock(now))
 	// Printf's reset may follow its newline. This is exactly one banner row.
 	b.Banner = strings.ReplaceAll(buf.String(), "\n", "")
 	buf.Reset()
@@ -393,6 +393,16 @@ func (s *uiSource) buildBoard(now time.Time) (ui.Board, []cliout.ProgramStatus) 
 	if s.gerr != nil {
 		moePrintf(buf, "observation failed: %s (showing the last good board)\n", ui.SafeText(s.gerr.Error()))
 	}
+	// The PULSE section opens the board, above ACTIVE: the same renderer
+	// `moe dash` uses, with serve's trouble rows left to the Console.
+	pulse := s.serveNow.pulse(now, rows, readPulseNotes(s.root, nil), "")
+	pulse.Status = ui.SafeText(pulse.Status)
+	for _, notes := range [][]input.Entry{pulse.Pending, pulse.Read} {
+		for i := range notes {
+			notes[i].Text, notes[i].DeliveredTo = ui.SafeText(notes[i].Text), ui.SafeText(notes[i].DeliveredTo)
+		}
+	}
+	dash.RenderPulse(buf, now, pulse)
 	serviceLines := buf.String()
 	buf.Reset()
 	state := dash.FactoryStateFromRows(rows)

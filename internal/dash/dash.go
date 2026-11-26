@@ -141,6 +141,7 @@ const (
 type Row struct {
 	Project    string
 	Run        string
+	Workflow   string    // the run's workflow; empty on intent and chore rows, which are not runs on the board
 	Note       string    // for runs: next stage name, or "done"; for backlog: idea title.
 	Stage      string    // bare next-stage name for active runs (no workflow prefix); "" for backlog/completed. Drives the factory art's station glyph.
 	RunningDoc string    // doc with an open session that "wins" the liveness slot; "" when no session is open. The factory art reads this to decide whether the station smokes and which doc's glyph to draw.
@@ -305,6 +306,7 @@ func BuildRows(in Inputs) ([]Row, error) {
 		rows = append(rows, Row{
 			Project:    md.Project,
 			Run:        md.ID,
+			Workflow:   md.Workflow,
 			Note:       note,
 			Stage:      stage,
 			RunningDoc: runningDoc,

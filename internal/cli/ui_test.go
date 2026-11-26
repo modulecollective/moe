@@ -1005,7 +1005,9 @@ func TestUIBoardOmitsRoutineSweeps(t *testing.T) {
 					t.Fatalf("routine sweep leaked %q:\n%s", unwanted, all)
 				}
 			}
-			if !strings.HasPrefix(b.Lines[0], "ACTIVE (1)") || len(b.Items) != 1 || len(b.Issues) != 0 {
+			// The board opens with the PULSE section — heading, status
+			// line, blank — and ACTIVE follows it.
+			if b.Lines[0] != "PULSE" || !strings.HasPrefix(b.Lines[3], "ACTIVE (1)") || len(b.Items) != 1 || len(b.Issues) != 0 {
 				t.Fatalf("unexpected board prefix, items or issues: %+v", b)
 			}
 			line := b.Lines[b.Items[0].Line]
@@ -1014,8 +1016,8 @@ func TestUIBoardOmitsRoutineSweeps(t *testing.T) {
 					t.Fatalf("run lost %q: %q", want, line)
 				}
 			}
-			if !strings.Contains(b.Banner, tc.banner) {
-				t.Fatalf("banner = %q, want %q", b.Banner, tc.banner)
+			if !strings.Contains(b.Lines[1], tc.banner) || strings.Contains(b.Banner, "serve") {
+				t.Fatalf("status line = %q, want %q; banner = %q, want logo and clock only", b.Lines[1], tc.banner, b.Banner)
 			}
 			if tc.live == serveAlive && tc.filter == (DashFilter{}) {
 				if activity := reportSlot(reports, "activity"); activity.Message != "Live sweeps: moe, other-sweeper" {
@@ -1056,10 +1058,12 @@ func TestUIBoardLogsServiceExceptionsAsIssues(t *testing.T) {
 			}}
 			s.snap.Rows = []dash.Row{{Project: "moe", Run: "change-auth", Bucket: dash.BucketActiveRuns, When: now}}
 			b, _ := s.buildBoard(now)
-			if !strings.HasPrefix(b.Lines[0], "ACTIVE (1)") || len(b.Items) != 1 || b.Items[0].Line != 1 {
+			// The PULSE section's status line names the serve cluster; its
+			// trouble rows stay off the board, so ACTIVE follows at once.
+			if b.Lines[0] != "PULSE" || !strings.HasPrefix(b.Lines[3], "ACTIVE (1)") || len(b.Items) != 1 || b.Items[0].Line != 4 {
 				t.Fatalf("service lines displaced the board: %q %+v", b.Lines, b.Items)
 			}
-			if all := strings.Join(b.Lines, "\n"); strings.Contains(all, "rex") || strings.Contains(all, "push") || strings.Contains(all, "cooler") {
+			if all := strings.Join(b.Lines[2:], "\n"); strings.Contains(all, "rex") || strings.Contains(all, "push") || strings.Contains(all, "cooler") {
 				t.Fatalf("service text left in the board:\n%s", all)
 			}
 			at := now.Add(-time.Hour).Local().Format("15:04")
@@ -1082,8 +1086,8 @@ func TestUIBoardLogsServiceExceptionsAsIssues(t *testing.T) {
 			if !slices.Equal(later.Issues, b.Issues) {
 				t.Fatalf("issues moved with the clock:\n%q\n%q", b.Issues, later.Issues)
 			}
-			if live == serveUnknown && !strings.Contains(b.Banner, "serve unknown (sandbox)") {
-				t.Fatalf("unknown banner lost: %q", b.Banner)
+			if live == serveUnknown && !strings.Contains(b.Lines[1], "serve unknown (sandbox)") {
+				t.Fatalf("unknown serve state lost from the PULSE status line: %q", b.Lines[1])
 			}
 		})
 	}
@@ -1108,7 +1112,7 @@ func TestUIBoardSeparatesPinnedRegionsAndEscapesLabels(t *testing.T) {
 	s.snap.Histogram[59] = 5
 	b, _ := s.buildBoard(now)
 	var expected strings.Builder
-	banner.Dash(&expected, now, s.serveNow.bannerCluster(now))
+	banner.Dash(&expected, dash.Clock(now))
 	if b.Banner != strings.TrimSuffix(expected.String(), "\n") {
 		t.Fatalf("not the shared dash banner: %q", b.Banner)
 	}

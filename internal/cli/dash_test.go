@@ -13,7 +13,9 @@ import (
 
 	"github.com/modulecollective/moe/internal/cliout"
 	"github.com/modulecollective/moe/internal/dash"
+	"github.com/modulecollective/moe/internal/input"
 	"github.com/modulecollective/moe/internal/run"
+	"github.com/modulecollective/moe/internal/serve"
 	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
@@ -1278,8 +1280,7 @@ func TestDashBannerTimestampIsLocal(t *testing.T) {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 
-	// The stamp is the banner's first cluster after the gradient mark;
-	// a serve cluster (absent here) would follow it behind a wide dot.
+	// The banner is the logo and the clock, nothing else.
 	const marker = "░▒▓  "
 	var stamp string
 	for line := range strings.SplitSeq(out.String(), "\n") {
@@ -1290,22 +1291,51 @@ func TestDashBannerTimestampIsLocal(t *testing.T) {
 		if !ok {
 			t.Fatalf("banner line has no %q marker: %q", marker, line)
 		}
-		stamp, _, _ = strings.Cut(strings.TrimSpace(after), "  ·  ")
+		stamp = strings.TrimSpace(after)
 	}
 	if stamp == "" {
 		t.Fatalf("no banner line in output:\n%s", out.String())
 	}
-
-	got, err := time.ParseInLocation("2006-01-02 15:04", stamp, time.Local)
-	if err != nil {
-		t.Fatalf("banner stamp %q: %v", stamp, err)
+	// Minute-truncated, so it names either end of the call window. A UTC
+	// stamp would be off by the zone's 7h30m and match neither.
+	if stamp != dash.Clock(before) && stamp != dash.Clock(after) {
+		t.Fatalf("banner stamp %q, want the local clock %q", stamp, dash.Clock(after))
 	}
-	// The stamp is minute-truncated, so it may trail `before` by up to
-	// a minute and still name the right moment. It must never lead the
-	// call, which is what a UTC stamp read as local would do.
-	if got.Before(before.Add(-time.Minute)) || got.After(after) {
-		t.Fatalf("banner stamp %q parsed local = %v, outside call window [%v, %v]",
-			stamp, got, before, after)
+}
+
+// TestDashOpensWithThePulseSection: the serve cluster moved off the
+// banner into the PULSE section, which sits first on the board — above
+// the art and ACTIVE — and carries a dead serve's state and the
+// operator's pending pulse notes.
+func TestDashOpensWithThePulseSection(t *testing.T) {
+	root := newMoeHome(t)
+	t.Setenv("NO_COLOR", "1")
+	now := time.Now()
+	pid := deadPid(t)
+	writeServeState(t, root, serve.ActivitySnapshot{Pid: pid, Armed: true, Started: now.Add(-time.Hour), WrittenAt: now.Add(-3 * time.Hour)})
+	if _, err := input.AddPulse(root, "do the lightpool fix next\n\nit blocks the release"); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if code := Run([]string{"dash"}, &out, &errb); code != 0 {
+		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	}
+	lines := strings.Split(out.String(), "\n")
+	if strings.Contains(lines[0], "serve") || strings.Contains(lines[0], "·") {
+		t.Fatalf("banner carries more than logo and clock: %q", lines[0])
+	}
+	if lines[1] != "PULSE" {
+		t.Fatalf("board does not open with PULSE:\n%s", out.String())
+	}
+	if want := fmt.Sprintf("  serve dead (pid %d) · stale 3h 0m", pid); lines[2] != want {
+		t.Fatalf("status line = %q, want %q", lines[2], want)
+	}
+	if !strings.HasPrefix(lines[3], "  ▒ #1  do the lightpool fix next  · waiting — serve is not armed") {
+		t.Fatalf("pending note line = %q", lines[3])
+	}
+	if pulse, active := strings.Index(out.String(), "PULSE"), strings.Index(out.String(), "ACTIVE ("); pulse > active {
+		t.Fatalf("PULSE is not above ACTIVE:\n%s", out.String())
 	}
 }
 
