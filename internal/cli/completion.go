@@ -155,7 +155,7 @@ func completeWords(root string, words []string) []string {
 			return nil
 		}
 		if firstPositional(prior[2:]) {
-			return filterPrefix(valueCandidates(root, leaf.argKind), partial)
+			return filterPrefix(valueCandidates(root, leaf.argKind, partial), partial)
 		}
 		return nil
 	}
@@ -164,7 +164,7 @@ func completeWords(root string, words []string) []string {
 		return nil
 	}
 	if firstPositional(prior[1:]) {
-		return filterPrefix(valueCandidates(root, leaf.argKind), partial)
+		return filterPrefix(valueCandidates(root, leaf.argKind, partial), partial)
 	}
 	return nil
 }
@@ -186,7 +186,7 @@ func completeFlagValue(root string, prior []string, partial string) (cands []str
 	if strings.HasPrefix(partial, "--") && strings.Contains(partial, "=") {
 		name, val, _ := strings.Cut(partial, "=")
 		if k, ok := flagArgKind[name]; ok {
-			out := filterPrefix(valueCandidates(root, k), val)
+			out := filterPrefix(valueCandidates(root, k, val), val)
 			for i, c := range out {
 				out[i] = name + "=" + c
 			}
@@ -202,13 +202,13 @@ func completeFlagValue(root string, prior []string, partial string) (cands []str
 	if last == "=" && len(prior) >= 2 {
 		name := prior[len(prior)-2]
 		if k, ok := flagArgKind[name]; ok {
-			return filterPrefix(valueCandidates(root, k), partial), true
+			return filterPrefix(valueCandidates(root, k, partial), partial), true
 		}
 		return nil, valueFlags[name]
 	}
 	// Space form: the previous token is the flag itself.
 	if k, ok := flagArgKind[last]; ok {
-		return filterPrefix(valueCandidates(root, k), partial), true
+		return filterPrefix(valueCandidates(root, k, partial), partial), true
 	}
 	return nil, valueFlags[last]
 }
@@ -234,32 +234,32 @@ func firstPositional(toks []string) bool {
 	return true
 }
 
-func valueCandidates(root string, k argKind) []string {
+func valueCandidates(root string, k argKind, partial string) []string {
 	if root == "" {
 		return nil
 	}
 	switch k {
 	case argProjectRun:
-		return projectRunCandidates(root)
+		return projectRunCandidates(root, partial)
 	case argWorkspace:
 		return workspaceCandidates(root)
 	case argIdea:
-		return ideaCandidates(root)
+		return ideaCandidates(root, partial)
 	case argIntent:
-		return intentCandidates(root)
+		return intentCandidates(root, partial)
 	default:
 		return nil
 	}
 }
 
-// projectRunCandidates lists every non-idea run as `project/run`. Idea
+// projectRunCandidates lists matching non-capture runs as `project/run`. Idea
 // runs are excluded — they share the slug shape but are a different
 // token kind (completed via argIdea), and an sdlc verb can't act on
 // one. No status filter: cat, log, and reopen legitimately target
 // closed and merged runs, so hiding them would cost more than the noise
 // of listing them.
-func projectRunCandidates(root string) []string {
-	mds, err := run.Scan(root)
+func projectRunCandidates(root, partial string) []string {
+	mds, err := run.ScanPrefix(root, partial)
 	if err != nil {
 		return nil
 	}
@@ -276,12 +276,12 @@ func projectRunCandidates(root string) []string {
 	return out
 }
 
-// ideaCandidates lists open ideas as `project/slug`. Only in-progress
+// ideaCandidates lists matching open ideas as `project/slug`. Only in-progress
 // ideas are offered: a promoted or closed idea is a dead target for
 // `--from-idea` and `idea edit`, and the live set is what either verb
 // wants.
-func ideaCandidates(root string) []string {
-	mds, err := run.Scan(root)
+func ideaCandidates(root, partial string) []string {
+	mds, err := run.ScanPrefix(root, partial)
 	if err != nil {
 		return nil
 	}
@@ -298,14 +298,14 @@ func ideaCandidates(root string) []string {
 	return out
 }
 
-// intentCandidates lists open intents as `project/slug`. Only in-progress
+// intentCandidates lists matching open intents as `project/slug`. Only in-progress
 // intents are offered: edit/close/cat legitimately target a parked
 // intent, and a closed one is a dead target for the write verbs — the
 // live set is what the operator reaches for. (cat also reads closed ones,
 // but the open set is the useful completion default, same call idea's
 // argIdea makes.)
-func intentCandidates(root string) []string {
-	mds, err := run.Scan(root)
+func intentCandidates(root, partial string) []string {
+	mds, err := run.ScanPrefix(root, partial)
 	if err != nil {
 		return nil
 	}

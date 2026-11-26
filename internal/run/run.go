@@ -874,6 +874,60 @@ func Scan(root string) ([]*Metadata, error) {
 	return out, nil
 }
 
+// ScanPrefix reads runs whose project/run directory names match prefix.
+// Before a slash, prefix selects project names; after it, the project must
+// match exactly and the remainder selects run names. Only enumerated names
+// enter paths, so traversal and glob-looking text remain literal prefixes.
+//
+// Unlike Scan, this one-shot reader prunes before opening metadata and has
+// no stat memo or copying cost. Each call returns freshly parsed metadata.
+func ScanPrefix(root, prefix string) ([]*Metadata, error) {
+	projectPrefix, runPrefix, qualified := strings.Cut(prefix, "/")
+	if strings.Contains(runPrefix, "/") {
+		return nil, nil
+	}
+	projectsDir := filepath.Join(root, "projects")
+	projects, err := os.ReadDir(projectsDir)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("run: scan: %w", err)
+	}
+	var out []*Metadata
+	for _, p := range projects {
+		if qualified {
+			if p.Name() != projectPrefix {
+				continue
+			}
+		} else if !strings.HasPrefix(p.Name(), projectPrefix) {
+			continue
+		}
+		runsDir := filepath.Join(projectsDir, p.Name(), "runs")
+		runs, err := os.ReadDir(runsDir)
+		if err != nil {
+			if notDir(err) {
+				continue
+			}
+			return nil, fmt.Errorf("run: scan: %w", err)
+		}
+		for _, r := range runs {
+			if !strings.HasPrefix(r.Name(), runPrefix) {
+				continue
+			}
+			md, err := parseRunFile(filepath.Join(runsDir, r.Name(), "run.json"))
+			if err != nil {
+				if notDir(err) {
+					continue
+				}
+				return nil, err
+			}
+			out = append(out, md)
+		}
+	}
+	return out, nil
+}
+
 // notDir reports whether a ReadDir or Stat error means "nothing here"
 // — the path is missing, or a component that should be a directory is
 // a file. The glob Scan used to run skipped both silently.
@@ -925,12 +979,12 @@ type scanMemoEntry struct {
 // tick works; a second is git's margin.
 const scanRacyWindow = time.Second
 
-// readRunFile is the file read Scan's parse goes through. A var so
+// readRunFile is the read seam shared by both scans. A var so
 // tests can count reads; nothing on disk tells a memo hit from a
 // re-read.
 var readRunFile = os.ReadFile
 
-// parseRunFile reads and validates one run.json for Scan.
+// parseRunFile reads and validates one run.json for the scans.
 func parseRunFile(path string) (*Metadata, error) {
 	b, err := readRunFile(path)
 	if err != nil {

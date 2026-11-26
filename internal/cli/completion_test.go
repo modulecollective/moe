@@ -14,7 +14,7 @@ import (
 	"github.com/modulecollective/moe/internal/workspace"
 )
 
-// seedRunJSON writes a minimal run.json directly so run.Scan picks it
+// seedRunJSON writes a minimal run.json directly so the run reader picks it
 // up, without paying for run.New's clean-tree + project-registration
 // preconditions. completeWords only reads Project / ID / Workflow /
 // Status, so a hand-written metadata file is the cheapest fixture.
@@ -89,7 +89,7 @@ func TestCompleteGroupSubcommands(t *testing.T) {
 }
 
 // TestCompleteProjectRunValues: a leaf annotated argProjectRun draws
-// `project/run` candidates from run.Scan, excluding idea-workflow runs,
+// `project/run` candidates from run.ScanPrefix, excluding idea-workflow runs,
 // prefix-filtered on the partial.
 func TestCompleteProjectRunValues(t *testing.T) {
 	root := newTestBureaucracy(t)
@@ -336,5 +336,102 @@ func TestCompletionSnippetPrintsShims(t *testing.T) {
 	errb.Reset()
 	if code := Run([]string{"completion"}, &out, &errb); code == 0 {
 		t.Fatal("expected nonzero exit when no shell named")
+	}
+}
+
+// Poisoned nonmatching metadata makes this a pruning check, not just an
+// output filter check. Every value path must pass its own partial down.
+func TestCompletePrunesRunMetadata(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	t.Setenv("MOE_HOME", root)
+	seedRunJSON(t, root, "tele", "run", "sdlc", run.StatusMerged)
+	seedRunJSON(t, root, "tele", "idea", dash.IdeaWorkflow, run.StatusInProgress)
+	seedRunJSON(t, root, "tele", "intent", dash.IntentWorkflow, run.StatusInProgress)
+	for _, project := range []string{"other", "tele"} {
+		seedRunJSON(t, root, project, "poison", "sdlc", run.StatusClosed)
+		if err := os.WriteFile(filepath.Join(root, "projects", project, "runs", "poison", "run.json"), []byte("{bad"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tt := range []struct {
+		words []string
+		want  []string
+	}{
+		{[]string{"sdlc", "build", "tele/r"}, []string{"tele/run"}},
+		{[]string{"idea", "edit", "tele/i"}, []string{"tele/idea"}},
+		{[]string{"intent", "edit", "tele/i"}, []string{"tele/intent"}},
+		{[]string{"sdlc", "new", "--from-idea", "tele/i"}, []string{"tele/idea"}},
+		{[]string{"sdlc", "new", "--from-idea=tele/i"}, []string{"--from-idea=tele/idea"}},
+		{[]string{"sdlc", "new", "--from-idea", "=", "tele/i"}, []string{"tele/idea"}},
+		{[]string{"sdlc", "build", "absent/"}, nil},
+		{[]string{"sdlc", "build", "tele/poison"}, nil},
+		{[]string{"sdlc", "build", "tele/"}, nil},
+		{[]string{"sdlc", "build", ""}, nil},
+		{[]string{"sd"}, []string{"sdlc"}},
+	} {
+		t.Run(strings.Join(tt.words, " "), func(t *testing.T) {
+			if got := completeWords(root, tt.words); !slices.Equal(got, tt.want) {
+				t.Fatalf("completeWords = %v, want %v", got, tt.want)
+			}
+			var stdout, stderr bytes.Buffer
+			if code := Run(append([]string{"__complete"}, tt.words...), &stdout, &stderr); code != 0 || stderr.Len() != 0 {
+				t.Fatalf("callback exit %d, stderr %q", code, stderr.String())
+			}
+			want := strings.Join(tt.want, "\n")
+			if len(tt.want) > 0 {
+				want += "\n"
+			}
+			if stdout.String() != want {
+				t.Fatalf("callback stdout %q, want %q", stdout.String(), want)
+			}
+		})
+	}
+	// Repair then retry through the public callback, with no process cache reset.
+	seedRunJSON(t, root, "tele", "poison", "sdlc", run.StatusClosed)
+	var stdout, stderr bytes.Buffer
+	if code := Run([]string{"__complete", "sdlc", "build", "tele/"}, &stdout, &stderr); code != 0 || stderr.Len() != 0 || stdout.String() != "tele/poison\ntele/run\n" {
+		t.Fatalf("retry: exit %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestCompletePrefixPolicyAndFreshness(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	seedRunJSON(t, root, "tele", "shared", "sdlc", run.StatusClosed)
+	seedRunJSON(t, root, "telemetry", "shared", "sdlc", run.StatusMerged)
+	seedRunJSON(t, root, "tele", "z-run", "sdlc", run.StatusInProgress)
+	for _, workflow := range []string{dash.IdeaWorkflow, dash.IntentWorkflow} {
+		seedRunJSON(t, root, "tele", workflow+"-open", workflow, run.StatusInProgress)
+		seedRunJSON(t, root, "tele", workflow+"-closed", workflow, run.StatusClosed)
+		seedRunJSON(t, root, "tele", workflow+"-promoted", workflow, run.StatusPromoted)
+	}
+	for _, tt := range []struct {
+		words []string
+		want  []string
+	}{
+		{[]string{"sdlc", "build", ""}, []string{"tele/shared", "tele/z-run", "telemetry/shared"}},
+		{[]string{"sdlc", "build", "tel"}, []string{"tele/shared", "tele/z-run", "telemetry/shared"}},
+		{[]string{"sdlc", "build", "tele/"}, []string{"tele/shared", "tele/z-run"}},
+		{[]string{"sdlc", "build", "tele/sh"}, []string{"tele/shared"}},
+		{[]string{"sdlc", "build", "../"}, nil},
+		{[]string{"sdlc", "build", "tele/../"}, nil},
+		{[]string{"sdlc", "build", "tele/*"}, nil},
+		{[]string{"idea", "edit", "tele/"}, []string{"tele/idea-open"}},
+		{[]string{"intent", "edit", "tele/"}, []string{"tele/intent-open"}},
+	} {
+		if got := completeWords(root, tt.words); !slices.Equal(got, tt.want) {
+			t.Errorf("%v: got %v, want %v", tt.words, got, tt.want)
+		}
+	}
+	// A same-length workflow rewrite and a status rewrite must immediately
+	// change which completion kind offers the run.
+	seedRunJSON(t, root, "tele", "shared", dash.IdeaWorkflow, run.StatusInProgress)
+	if got := completeWords(root, []string{"idea", "edit", "tele/sh"}); !slices.Equal(got, []string{"tele/shared"}) {
+		t.Fatalf("rewritten workflow: %v", got)
+	}
+	seedRunJSON(t, root, "tele", "shared", dash.IdeaWorkflow, run.StatusClosed)
+	if got := completeWords(root, []string{"idea", "edit", "tele/sh"}); len(got) != 0 {
+		t.Fatalf("closed idea still offered: %v", got)
 	}
 }
