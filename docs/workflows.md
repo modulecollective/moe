@@ -1098,15 +1098,15 @@ that mask a default change keep their selection; executing agents stay put.
 Heartbeat-invoked stages instead read once and yield immediately when blocked.
 The pulse journals the earliest retry among its deferred roots, using each
 stage's latest blocking reset plus five seconds. If any blocking reset is
-missing or past, the next ordinary tick can retry. Weekly resets may defer
-for days without retaining a process. Unavailable quota, including unresolved
-high model scope, refuses without transport sleeps and uses failure backoff.
-Every later stage admission reads fresh quota; a retry date never admits work
-on its own. A different effective backend/model on a deferred target offers a
-fresh survey on the next otherwise eligible tick, including after restart;
-mode, occupancy, quiet-window and backoff guards still apply. Configuration
-errors preserve the obligation rather than claiming a changed choice. Typed
-dynamic pulses keep the ordinary wait policy.
+missing or past, the next ordinary tick can retry. Weekly resets may defer for
+days without retaining a process. Unavailable quota, including unresolved high
+model scope, refuses without transport sleeps and uses failure backoff. Every
+later stage admission reads fresh quota; a retry date never admits work on its
+own. A different effective backend/model on a deferred target offers a fresh
+survey on the next otherwise eligible tick, including after restart; project
+mode, the global pause, same-run ownership and failure backoff still apply.
+Configuration errors preserve the obligation rather than claiming a changed
+choice. Typed dynamic pulses keep the ordinary wait policy.
 
 At an interactive stage's attached terminal, `c` + Enter continues that stage
 now, `a` + Enter skips checks for the rest of this invocation, and `q` + Enter
