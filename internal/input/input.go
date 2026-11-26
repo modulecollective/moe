@@ -163,19 +163,24 @@ func Path(projectID, runID string) string {
 // walks past silently. A record that exists but violates the invariants
 // is ErrMalformed: it is machine-written, so a violation is a bug.
 func Load(root, projectID, runID string) (File, error) {
-	body, err := os.ReadFile(filepath.Join(root, Path(projectID, runID)))
+	return loadPath(root, Path(projectID, runID), projectID+"/"+runID)
+}
+
+// loadPath reads and validates one record; label names it in errors.
+func loadPath(root, rel, label string) (File, error) {
+	body, err := os.ReadFile(filepath.Join(root, rel))
 	if errors.Is(err, os.ErrNotExist) {
 		return File{}, nil
 	}
 	if err != nil {
-		return File{}, fmt.Errorf("input: read %s/%s: %w", projectID, runID, err)
+		return File{}, fmt.Errorf("input: read %s: %w", label, err)
 	}
 	var f File
 	if err := json.Unmarshal(body, &f); err != nil {
-		return File{}, fmt.Errorf("%w: %s/%s: %v", ErrMalformed, projectID, runID, err)
+		return File{}, fmt.Errorf("%w: %s: %v", ErrMalformed, label, err)
 	}
 	if err := f.validate(); err != nil {
-		return File{}, fmt.Errorf("%w: %s/%s: %v", ErrMalformed, projectID, runID, err)
+		return File{}, fmt.Errorf("%w: %s: %v", ErrMalformed, label, err)
 	}
 	return f, nil
 }
@@ -222,7 +227,7 @@ func Add(root, projectID, runID, text string) (Entry, error) {
 		return Entry{}, fmt.Errorf("%w: note has no text", ErrEmpty)
 	}
 	var e Entry
-	err := commit(root, projectID, runID, "input-add", func() (File, string, error) {
+	err := commit(root, Path(projectID, runID), projectID+"/"+runID, "input-add", func() (File, string, error) {
 		md, f, err := loadLive(root, projectID, runID)
 		if err != nil {
 			return File{}, "", err
@@ -260,7 +265,7 @@ func Ask(root, projectID, runID, askedBy, question, consent string) (Entry, erro
 		return Entry{}, fmt.Errorf("%w: question has no text", ErrEmpty)
 	}
 	var e Entry
-	err := commit(root, projectID, runID, "input-ask", func() (File, string, error) {
+	err := commit(root, Path(projectID, runID), projectID+"/"+runID, "input-ask", func() (File, string, error) {
 		md, f, err := loadLive(root, projectID, runID)
 		if err != nil {
 			return File{}, "", err
@@ -301,7 +306,7 @@ func Answer(root, projectID, runID string, id int, text string) (Entry, error) {
 		return Entry{}, fmt.Errorf("%w: answer has no text", ErrEmpty)
 	}
 	var answered Entry
-	err := commit(root, projectID, runID, "input-answer", func() (File, string, error) {
+	err := commit(root, Path(projectID, runID), projectID+"/"+runID, "input-answer", func() (File, string, error) {
 		md, f, err := loadLive(root, projectID, runID)
 		if err != nil {
 			return File{}, "", err
@@ -360,7 +365,7 @@ func MarkDelivered(root, projectID, runID, docID string, ids []int, consent stri
 	for _, id := range ids {
 		want[id] = true
 	}
-	return commit(root, projectID, runID, "input-delivered", func() (File, string, error) {
+	return commit(root, Path(projectID, runID), projectID+"/"+runID, "input-delivered", func() (File, string, error) {
 		f, err := Load(root, projectID, runID)
 		if err != nil {
 			return File{}, "", err
@@ -419,7 +424,7 @@ func Carry(root, srcProject, srcRun, dstProject, dstRun, consent string) (int, e
 	var carried int
 	// One prepare closure reads both records: the lock is repo-wide, so
 	// a single hold covers the source read and the destination rewrite.
-	err := commit(root, dstProject, dstRun, "input-carry", func() (File, string, error) {
+	err := commit(root, Path(dstProject, dstRun), dstProject+"/"+dstRun, "input-carry", func() (File, string, error) {
 		src, err := Load(root, srcProject, srcRun)
 		if err != nil {
 			return File{}, "", err
@@ -502,11 +507,13 @@ var testLocked func()
 // A staging/commit failure restores the destination's prior bytes,
 // existence and index entry before releasing the lock. Only successful
 // restoration may report that nothing was recorded.
-func commit(root, projectID, runID, purpose string, prepare func() (File, string, error)) error {
-	rel := Path(projectID, runID)
+//
+// rel is the record's path relative to root; label is the lock's
+// advisory scope ("<project>/<run>" for a run's record).
+func commit(root, rel, label, purpose string, prepare func() (File, string, error)) error {
 	err := repolock.With(root, repolock.Options{
 		Purpose: purpose,
-		Run:     projectID + "/" + runID,
+		Run:     label,
 	}, func() error {
 		if testLocked != nil {
 			testLocked()

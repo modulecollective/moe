@@ -463,7 +463,7 @@ func TestInputNothingToCommitRemainsNoOp(t *testing.T) {
 	before := readInputPath(t, root, Path("moe", "destination"))
 	head := gittest.HeadSHA(t, root)
 	rejectInputCommits(t, root, "touch hook-ran")
-	err := commit(root, "moe", "destination", "input-test", func() (File, string, error) {
+	err := commit(root, Path("moe", "destination"), "moe/destination", "input-test", func() (File, string, error) {
 		f, err := Load(root, "moe", "destination")
 		return f, "no change", err
 	})
