@@ -853,6 +853,26 @@ starts no agent and does not clear an explicit pause or handoff.
 There is no dismiss verb. A question you'd rather not answer is discharged by
 answering it — "not relevant, proceed" is prose the next turn can read.
 
+### Notes to the pulse
+
+A run note steers one run. To steer the survey that decides what runs next,
+write to the pulse itself:
+
+```
+moe pulse note "do the lightpool fix next"
+moe pulse note                                   # no text: reads stdin
+```
+
+The web dash's PULSE section has the same composer (Ctrl/Cmd+Enter sends), and
+`moe ui` opens one with `p`. The next sweep that concludes reads every pending
+note in full, once. An ordering hint outranks the survey's own ranking unless
+the floor holds the named work; a piece of work becomes a filing or a `loose`
+spec; standing direction ("prefer lightpool this month") becomes an intent in
+your words; anything the survey cannot do comes back as the verb you need. The
+report's `## Operator notes` section says what happened to each, and the PULSE
+section links every read note to that report. A note is shown once: what must
+outlast the sweep has to leave as one of those artifacts.
+
 ### The heartbeat
 
 `moe serve --dynamic` is the standing consent rung, and it licenses exactly one
@@ -871,10 +891,10 @@ the session, checking the host, and reading failed blocks.
 `moe serve pause` pauses new automatic sweeps across the bureaucracy for 24
 hours; `moe serve unpause` clears it early, and `moe serve status` reports its
 expiry in local time. The commands work with serve stopped. Pausing an active
-pause is a no-op and does not extend the window. The web dashboard's global menu
-and `/serve` offer **Pause for 24 hours** / **Unpause**; `moe ui` offers
+pause is a no-op and does not extend the window. The web dashboard's PULSE
+section and `/serve` offer **Pause for 24 hours** / **Unpause**; `moe ui` offers
 `:serve pause`, `:serve unpause`, and `:serve status` without a selected run.
-Active pause or unreadable state appears in the status cluster and terminal
+Active pause or unreadable state appears in the PULSE status line and terminal
 overview; refresh observes remote writes and expiry. Stale opposing web/UI
 controls refuse and show current state.
 
@@ -913,21 +933,23 @@ default. The mode binds the clock, not you: bangs, stage verbs and a hand-typed
 consent. Serve's **advance mark** is that same consent from the phone: it
 records the stage you just read as done — one journal commit, no agent — and
 `safe` starts on exactly such a mark. The project hub carries the same
-three-way switch. The boards' serve cluster counts paused projects; safe mode
+three-way switch. The PULSE status line counts paused projects; safe mode
 remains visible in project controls.
 
-Both surfaces show what the heartbeat is doing. `moe dash` reads the snapshot
-serve keeps on disk and carries its status in the banner's tail — armed or not,
-how long it has been up, when the next tick lands — spending a line on a project
-only when that project is sweeping, cooling off after a failure, or its last
-sweep died. The same tail reports `N unpushed` while commits are waiting and
-`push failing 12m · 3 unpushed` with a row carrying git's reason when origin is
-refusing. An empty queue stays quiet. The count comes from git at render, so it
-is honest about a serve that has crashed or was never running; the rest comes
-from the pusher's own record. Web headers carry the same cluster and refresh
-every five seconds while visible, plus on return to the tab. Without JavaScript,
-reload refreshes status. The cluster links to `/serve`, which holds the trace:
-what each recent tick decided and the output tail of any sweep that failed.
+Both surfaces show what the heartbeat is doing, in the PULSE section that opens
+the board. `moe dash` reads the snapshot serve keeps on disk and carries its
+status on the section's first line — armed or not, how long it has been up, when
+the next tick lands — spending a line on a project only when that project is
+sweeping, cooling off after a failure, or its last sweep died. The same line
+reports `N unpushed` while commits are waiting and `push failing 12m · 3
+unpushed` with a row carrying git's reason when origin is refusing. An empty
+queue stays quiet. The count comes from git at render, so it is honest about a
+serve that has crashed or was never running; the rest comes from the pusher's
+own record. The web dash's PULSE section carries the same line and refreshes
+every five seconds while visible, plus on return to the tab; other pages' top
+line is the logo and the local date and time. Without JavaScript, reload
+refreshes status. The line links to `/serve`, which holds the trace: what each
+recent tick decided and the output tail of any sweep that failed.
 Repeated identical tick decisions can share one row, dated by the latest tick
 and showing the count and first occurrence (for example,
 `48 ticks, first 4h ago`). Quiet ticks add no rows, and a sweep event separates

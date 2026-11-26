@@ -16,13 +16,15 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
 - `moe dash [--all] [--project <id>] [--workflow <name>]` prints a snapshot
   of the terminal dashboard, with all registered chores in CHORES and a daily
   histogram of recent run activity (`--project` scopes the chart to one
-  project). BACKLOG counts ideas only; workflow filters omit chores. When a
-  `moe serve` is running against this bureaucracy, its status rides the
-  banner's tail — armed or not, uptime, next sweep — and a project earns a
-  line of its own only when it is sweeping, cooling off, or its last sweep
-  died. The tail also carries the drain to origin: `N unpushed` when commits
-  are waiting (read from git, so it shows with or without a serve). An empty
-  queue stays quiet. A push origin is refusing earns a row with git's reason.
+  project). BACKLOG counts ideas only; workflow filters omit chores. The
+  banner is the logo and the local date and time. The board opens with a
+  PULSE section: the serve status line — armed or not, uptime, next sweep,
+  the global pause, and the last pulse run — then your pending pulse notes
+  and the last one a sweep read. A project earns a line under the status
+  only when it is sweeping, cooling off, or its last sweep died. The status
+  line also carries the drain to origin: `N unpushed` when commits are waiting
+  (read from git, so it shows with or without a serve). An empty queue stays
+  quiet. A push origin is refusing earns a row with git's reason.
 - `moe agent [codex|claude|reset]` reports or sets the global default backend
   for 24 hours. Flags, persisted run bindings and `MOE_FORCE_AGENT` still win.
   Re-selecting an active backend keeps its expiry; choosing the other starts
@@ -35,15 +37,16 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   the whole board, every completed run included, above the selected item's
   details and a console of recent outcomes. Arrows or `j`/`k` select; `Tab` /
   `Shift-Tab` cycle board, details and console. In the console, arrows, page
-  keys and Home scroll history; End follows new messages. `?` lists keys. `n`
-  writes a note to the selected run or idea, `a` answers its open question, `e`
-  edits an open idea or intent, and `t` reveals the run's existing Rex
-  terminal. On an open idea, `g` sets the SDLC licence, `d` sets design only,
+  keys and Home scroll history; End follows new messages. `?` lists keys. The
+  board opens with the same PULSE section as `moe dash`. `n` writes a note to
+  the selected run or idea, `p` writes a note to the next pulse with no
+  selection needed, `a` answers its open question, `e` edits an open idea or
+  intent, and `t` reveals the run's existing Rex terminal. On an open idea, `g` sets the SDLC licence, `d` sets design only,
   and `u` clears either licence. Repeating a setting leaves it unchanged. These
   keys keep the selection and work from any pane in normal navigation; in
   editors and the command line they remain text. `:` opens a closed command
   line — `pause|handoff|park|finish|resume` for the selected run,
-  `new-idea <project>/<slug>`, `new-intent <project>/<slug>`, `edit`, `close`,
+  `pulse-note`, `new-idea <project>/<slug>`, `new-intent <project>/<slug>`, `edit`, `close`,
   `tag-sdlc`, `tag-design`, `untag` — never a shell. Creation requires a
   lowercase slug using letters, digits and hyphens, e.g. `:new-idea p/my-idea`;
   uppercase is refused before a draft opens. These go through the same writers
@@ -181,8 +184,8 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   instead requires fixing the host and restarting serve. The startup log, `moe
   dash` and `/serve` name which host is in use. A `/serve` page owns that
   ticker's status and trace — what each recent tick decided, and the output tail
-  of any sweep that failed — reachable from the menu and from the one-line
-  status cluster every board header carries. `MOE_SERVE_NOTIFY_URL` is the other
+  of any sweep that failed — reachable from the menu and from the status
+  line of the dash's PULSE section. `MOE_SERVE_NOTIFY_URL` is the other
   env var: set it and serve POSTs a small JSON body to that URL when a heartbeat
   sweep succeeds or fails, naming the sweep (`heartbeat:_cabinet`) and whether
   it succeeded. Pure quota deferrals send nothing. A sweep serve interrupted on
@@ -194,9 +197,9 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   These commands work with serve stopped. An admitted survey and its ride may
   finish; human commands, journal pushing and hygiene remain usable. Expiry or
   unpause permits the next eligible tick without arming serve, resetting
-  backoff/quota history or bypassing project modes. Web controls beside Agent
-  default and on `/serve`, and terminal `:serve pause|unpause|status`, share
-  this setting. Active pause/errors appear directly in status observations.
+  backoff/quota history or bypassing project modes. Web controls in the
+  dash's PULSE section and on `/serve`, and terminal
+  `:serve pause|unpause|status`, share this setting. Active pause/errors appear directly in status observations.
   Web/UI controls carry a revision and refuse stale opposing actions. The
   tracked root `serve-pause.json` holds its revision and optional UTC expiry;
   malformed state holds automatic admission and reports an error.
@@ -221,8 +224,9 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   where durable direction persists. `moe input answer <project>/<run>
   [text ...]` fills the run's open question, asked by a stopped review loop
   (one open per run, so the run is the address). `moe input list [project]`
-  shows both halves, oldest first: what has asked you, then what you have
-  given and no turn has picked up.
+  shows notes for the pulse no sweep has read (board-wide only), then both
+  halves, oldest first: what has asked you, then what you have given and no
+  turn has picked up.
 
   A question itself holds nothing. A stopped review loop's hold is separate;
   an answer or any note releases it for one more review turn. See [Blocked
@@ -334,6 +338,17 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
 - `moe intent new|edit|close|reopen|runs|list|cat|log|harvest` manages
   intents: standing direction and goals. `runs` lists the work linked to one,
   and `reopen` undoes a close, the pulse's included, with links intact.
+- `moe pulse note [text ...]` writes a note to the pulse itself — a piece of
+  work to get done, or what should come next; with no text arguments it reads
+  stdin. The next sweep whose gate concludes reads every pending note in full,
+  once, and its report's `## Operator notes` section says what it did with
+  each: a `next` pick, a filing, an intent for standing direction, or the verb
+  you need. A sweep that dies or concludes nothing stamps nothing, so the next
+  one rereads. The record is `projects/_cabinet/pulse-notes.json`; a note's
+  commit wakes an armed serve's next tick, and a global pause holds it like
+  everything else. A note licenses nothing at the floor and is not a `safe`
+  mode mark. The web dash's PULSE composer and `moe ui`'s `p` write the same
+  record; `/input` lists the history.
 - `moe pulse new|close|cat|log` runs and inspects the bureaucracy's one survey.
   It lives in the `_cabinet` root project and takes no project argument. The
   survey is read-only; opening due chore runs does not execute their stages.

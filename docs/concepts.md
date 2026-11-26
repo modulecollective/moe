@@ -107,6 +107,10 @@ MoE's memory improves through a few explicit channels:
   full-ride exception. See the [prerequisite rules](reference.md#workflows).
 - The idea backlog holds work that is worth remembering but not ready for a
   full run.
+- A pulse note is operator prose addressed to the survey rather than a run:
+  work to start or what comes first. The next concluded sweep reads it once
+  and reports what it did with it. See [Notes to the
+  pulse](workflows.md#notes-to-the-pulse).
 - The digital twin records project intent in `vision`, `architecture`,
   `patterns`, `operations`, and `glossary` documents. When code and twin
   disagree, the twin wins until a deliberate edit updates it. An sdlc stage
