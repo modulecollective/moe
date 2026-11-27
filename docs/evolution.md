@@ -236,32 +236,11 @@ retreat is built in: stop typing the fourth bang, stop the armed serve so no new
 sweep starts, or Ctrl-C a sweep already in flight — in its Rex block, when Rex
 hosts it.
 
-## What we're still finding out
+## After the ladder: the clock is the only trigger
 
-There is deliberately no source filter on grooming. An operator-parked run
-whose design is settled can be groomed into a thread and ride a confident
-self-kick with no human look in between. That was argued both ways inside a
-single session and settled toward empowering the agent, and the design canvas
-records the supersession rather than quietly rewriting itself, because that
-consequence *is* the bet.
-
-The bars that decide all of this — is this work mechanical and bounded enough
-to spawn, is this order settled enough to kick — are prose in a stage fragment,
-not thresholds in Go. That is on purpose, and it is also the open question. The
-only way to learn whether those bars are trustworthy is to let them root real
-rides and watch what merges.
-
-So that's where MoE is: somewhere on step 4's lower slopes, with the loop
-closed and the trigger still typed. The standing direction from here is that
-over time the pulses chain work we kick off nearly unchanged — and that the
-agent decides more and more of its own work. Every unchanged kick is evidence.
-Every one that needed editing first is a fragment that needs a better sentence.
-
-The bottleneck, as the table promised, has moved again. It is no longer
-attention, or review, or the backlog. It's judgment about what's worth doing —
-and that is a much better problem to have.
-
-## Step 5: the clock is the only trigger
+*This section describes mid-August 2026, when serve's heartbeat became the only
+automatic pulse (`287bd27`, `c9b1476`, `4952b08`). What came after is in the
+next section.*
 
 Step 4 left two mechanisms firing pulses: the heartbeat, and the older
 ride-tail path, where every run-traffic verb inside a ride swept at its
@@ -295,3 +274,59 @@ sweep's kick loop rides the whole board, each ride's commits re-arm the moved
 leg — but the clock owns the pacing. That is the point, not the cost: the
 direction is that more and more happens automatically, and the clock is where
 that autonomy grows, not the bang grammar.
+
+## One run at a time
+
+The August shape still had chains: a sweep could groom parked runs into an
+ordered thread, and its kick loop rode every thread on the board. By November
+the operator wanted something simpler: a server that works through authorized
+work one thing at a time. Chains, it turned out, mostly worked around not having
+a server that picks the next run.
+
+So in November the chain went (`f817535`). There is now one survey, in a root
+project called `_cabinet` that stands for the bureaucracy itself (`04637eb`).
+It reads every project, names one `next` run with a reason, and the harness
+rides that run and nothing else. The next sweep picks again. Order is
+recomputed every time and never stored; a dependency between runs is a
+sentence on the blocked run's canvas, and the survey is its reader. What that
+costs is throughput: a survey before every run. What it buys is that nothing
+has to be hand-sequenced.
+
+The typed grammar shrank with it. The three-bang rung existed to ride a chain,
+so with no chains it had nothing left to say. `!!` is the ship gesture now, and
+an old `!!!` typed at the prompt is read as `!!` (`e448159`).
+
+The rest of November filled in what one survey needed to be steerable from
+outside a terminal:
+
+- **The pulse keeps intents.** It writes each intent's status, links the runs
+  that serve it, and may open or close an outcome-shaped intent when it can
+  show the case (`5c2b581`, `c2dd77e`). The operator writes direction; the
+  pulse keeps score.
+- **Notes to the pulse.** `moe pulse note` addresses the survey rather than a
+  run: "do this next", "this matters more". The next sweep reads each note
+  once and says in its report what it did with it (`0fa107f`).
+- **Automatic work beside human sessions.** The heartbeat used to hold a project
+  out of a tick while anything was live in it or after a human commit there. Now
+  a human session holds only its own run, and the operator who wants the machine
+  quiet says so with a journaled 24-hour pause (`9beb54d`, `f548428`).
+- **Filings land at once.** Every successful turn harvests its followups, lore
+  and twin notes as it ends, with no review screen in between (`a4cef47`).
+
+## What we're still finding out
+
+The bars that decide what the machine does — is this work mechanical and
+bounded enough to open, is this run ready enough to ride, is this the one that
+should go next — are prose in a stage fragment, not thresholds in Go. That is on
+purpose, and it is also the open question. The only way to learn whether those
+bars are trustworthy is to let them pick real runs and watch what merges.
+
+By the count the level-4 intent keeps, the machine already opened most runs on
+its own in mid-August: eleven of the last thirteen. That is the first half of
+step 4. The second half — the operator steers by intent and monitors by
+exception, with no routine kicking left — is the live edge, and it is not yet
+shown.
+
+The bottleneck, as the table promised, has moved again. It is no longer
+attention, or review, or the backlog. It's judgment about what's worth doing —
+and that is a much better problem to have.

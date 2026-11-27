@@ -91,6 +91,13 @@ happening has already run the experiment. What survived these workflows was a
 smaller vocabulary tied to real habits, plus markdown guidance cheap enough to
 reshape when the habit changes.
 
+Commands follow the same rule. `moe dash` printed the board once to the
+terminal, and for a while a watch mode redrew it. The operator read the board in
+`moe ui` or on the web, and the only steady reader of the one-shot print was an
+agent that needed runs as plain text. The watch mode went first (`83312d1`);
+then `moe dash` was replaced by `moe run list`, a tab-separated listing built
+from the same helpers the console paints with (`ac47209`).
+
 The last four went for a different reason: their deliverables were fine and
 the machinery around them was the problem. `kb` wrapped an engine — an
 evolving doc schema, a changelog, a checkpoint, a separate lint session — around
@@ -165,12 +172,22 @@ what remained was the relation the consumers actually read
 (`second-guessing-queue`).
 
 Then we deleted the pulse report's `## Pull next` section. It ranked work in
-prose, but no mechanism consumed the ranking. Grooming now records actual
-order rather than asking a human to reproduce it in another surface
-(`robo-grooming`). The two queues were different implementations and died for
-different reasons: one was an unused runner, the other a misleading name for
-persisted ordering. Their shared lesson is that a list is not leverage until
-we can name what consumes it.
+prose, but no mechanism consumed the ranking. Grooming recorded actual order
+instead of asking a human to reproduce it in another surface (`robo-grooming`).
+
+Recorded order did not last either. A chain was consumed, but it was a list
+written down once and defended against a board that kept changing. In November
+2026 the chain verbs, edges and grooming went, and one survey now names the
+single next run each time it sweeps (`f817535`). Order is recomputed rather than
+stored, and a dependency between runs is a sentence on the waiting run's canvas
+that the survey reads.
+
+The queues were different implementations and died for different reasons: one
+was an unused runner, the other a misleading name for persisted ordering, and
+the chain that replaced it kept an order the next sweep could simply recompute.
+Their shared lesson is that a list is not leverage until we can name what
+consumes it, and that a consumer which can re-derive the list does not need it
+stored.
 
 ## Synthetic memory usually became another thing to maintain
 
@@ -208,6 +225,26 @@ because they might be useful.
 the companion forward story: a bounded essay written from the durable record,
 not a field or managed document the product promises to keep current.
 
+## The machine should not guess whether you are watching
+
+An unattended server has to know when to hold back, and our first answers all
+guessed. `moe serve snooze` wrote an ignored `.moe/snooze` file that told the
+heartbeat to stand down; five days later it was replaced by a per-project mode
+that the journal records (`1acf970`, `9fc2047`).
+
+The guess that lasted longer was the quiet window. The heartbeat held a whole
+project out of a tick while anything was live in it, and for a tick after any
+human commit, on the theory that the operator was probably working there. It
+held back work that had nothing to do with the operator's session, and an
+operator note had to be taught to lift it for its own run (`16febf5`). In
+November 2026 the window went. A human session now holds only its own run, and
+an operator who wants the machine quiet says so with a global pause that expires
+after 24 hours and lives in the journal (`9beb54d`, `f548428`).
+
+What survived is explicit state the operator wrote: a project mode, a pause, a
+hold on one run. Inference about presence is cheap to build and impossible to
+check, and an unattended system needs something it can check.
+
 ## Trust did not come from adding another judge
 
 Some removals began as safety features. `moe twin claim` let an operator
@@ -233,6 +270,20 @@ time it fired and deleted the verb, rubric, trailers, and special-case storage
 (`1ab1950`). The experiment said something encouraging about the staged
 process: design-to-code drift was rare and minor. It also said the extra judge
 did not earn a permanent seat.
+
+The same lesson showed up inside sdlc. Code and test were separate stages with
+separate sessions, and one change passed test three times and still took five
+blocked reviews: implementation and verification were owned by different
+sessions, so neither proved the whole change. In November 2026 they became one
+build stage that implements, exercises and repairs the change, and leaves two
+canvases with their own gates (`ddf2a3c`). Adding a stage had added a judge;
+merging them put the proof back with the person who made the change.
+
+A smaller version: harvesting a run's followups used to open an editor so the
+operator could review them before they became ideas. The operator never used it,
+and an idea filed early sometimes waited behind its source run's close. Now
+every successful turn files its captures directly, and triage happens on the
+backlog where the ideas already live (`a4cef47`).
 
 That is narrower than “judgment cannot be automated.” MoE asks agents to
 review work constantly. The lesson is that a report about a completed
