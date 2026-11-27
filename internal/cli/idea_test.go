@@ -408,7 +408,7 @@ func TestIdeaListPrintsSlugs(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "list", "tele"}, &out, &errb)
+	code := Run([]string{"idea", "list", "--project", "tele"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -424,6 +424,47 @@ func TestIdeaListPrintsSlugs(t *testing.T) {
 			t.Fatalf("output not slug-sorted (looking for %q after offset %d):\n%s", slug, last, got)
 		}
 		last = idx
+	}
+}
+
+// TestCaptureListsSpanProjects: with no --project, `moe idea list` and
+// `moe intent list` print every project's open entries as sorted
+// <project>/<slug>, the argument form `idea cat` and the rest take;
+// --project narrows; a positional project is a stray argument.
+func TestCaptureListsSpanProjects(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedProject(t, root, "alpha")
+	trailerstest.SeedProject(t, root, "beta")
+	t.Setenv("MOE_HOME", root)
+	t.Setenv("NO_COLOR", "1")
+	stubEditor(t)
+
+	for _, noun := range []string{"idea", "intent"} {
+		t.Run(noun, func(t *testing.T) {
+			for _, key := range []string{"beta/" + noun + "-b", "alpha/" + noun + "-a"} {
+				if code := Run([]string{noun, "new", key}, &bytes.Buffer{}, &bytes.Buffer{}); code != 0 {
+					t.Fatalf("setup %s new %s failed", noun, key)
+				}
+			}
+			list := func(args ...string) (string, string, int) {
+				var out, errb bytes.Buffer
+				code := Run(append([]string{noun, "list"}, args...), &out, &errb)
+				return out.String(), errb.String(), code
+			}
+			if got, errs, code := list(); code != 0 || got != "alpha/"+noun+"-a\nbeta/"+noun+"-b\n" {
+				t.Fatalf("%s list = %q (exit %d, stderr %q)", noun, got, code, errs)
+			}
+			if got, errs, code := list("--project", "beta"); code != 0 || got != "beta/"+noun+"-b\n" {
+				t.Fatalf("%s list --project beta = %q (exit %d, stderr %q)", noun, got, code, errs)
+			}
+			if got, errs, code := list("--project", "gamma"); code != 1 || got != "" || !strings.Contains(errs, "project gamma not registered") {
+				t.Fatalf("unknown project: out=%q stderr=%q exit=%d", got, errs, code)
+			}
+			if got, errs, code := list("alpha"); code != 2 || got != "" || !strings.Contains(errs, "usage: moe "+noun+" list [--project <id>]") {
+				t.Fatalf("positional project: out=%q stderr=%q exit=%d", got, errs, code)
+			}
+		})
 	}
 }
 
@@ -450,7 +491,7 @@ func TestIdeaListHidesClosedAndPromoted(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "list", "tele"}, &out, &errb)
+	code := Run([]string{"idea", "list", "--project", "tele"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -474,7 +515,7 @@ func TestIdeaListEmptyProjectIsZero(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"idea", "list", "tele"}, &out, &errb)
+	code := Run([]string{"idea", "list", "--project", "tele"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
@@ -1293,7 +1334,7 @@ func TestIdeaReopenFlipsPromotedToInProgress(t *testing.T) {
 
 	// Round-trip: the idea is back on `moe idea list`.
 	var listOut, listErr bytes.Buffer
-	if code := Run([]string{"idea", "list", "tele"}, &listOut, &listErr); code != 0 {
+	if code := Run([]string{"idea", "list", "--project", "tele"}, &listOut, &listErr); code != 0 {
 		t.Fatalf("idea list exit=%d stderr=%q", code, listErr.String())
 	}
 	if !strings.Contains(listOut.String(), "abandoned-feature") {

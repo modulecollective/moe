@@ -55,7 +55,7 @@ func init() {
 	})
 	g.Register(&Command{
 		Name:    "list",
-		Summary: "list this project's open ideas",
+		Summary: "list open ideas as <project>/<slug> (--project narrows)",
 		Run:     ideaKind.runList,
 	})
 	g.Register(&Command{
@@ -464,7 +464,7 @@ func runIdeaReopen(args []string, stdout, stderr io.Writer) int {
 
 	if err := runopen.ReopenIdea(root, projectID, slug); err != nil {
 		if errors.Is(err, run.ErrRunNotFound) {
-			moePrintf(stderr, "idea %s/%s does not exist; run `moe idea list %s` to see open ideas\n", projectID, slug, projectID)
+			moePrintf(stderr, "idea %s/%s does not exist; run `moe idea list --project %s` to see open ideas\n", projectID, slug, projectID)
 		} else {
 			moePrintf(stderr, "idea: reopen: %v\n", err)
 		}

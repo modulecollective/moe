@@ -203,7 +203,7 @@ func TestIntentListPrintsOpenSlugsSorted(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"intent", "list", "tele"}, &out, &errb)
+	code := Run([]string{"intent", "list", "--project", "tele"}, &out, &errb)
 	if code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}

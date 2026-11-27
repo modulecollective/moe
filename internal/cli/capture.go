@@ -317,41 +317,44 @@ func (k captureKind) openChat(projectID, slug, agentOverride string, stdout, std
 func (k captureKind) runList(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet(k.noun+" list", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	projectID := fs.String("project", "", "list only this project's open "+k.noun+"s")
 	fs.Usage = func() {
-		moePrintf(stderr, "usage: moe %s list <project>\n", k.noun)
+		moePrintf(stderr, "usage: moe %s list [--project <id>]\n", k.noun)
 	}
-	if err := fs.Parse(reorderFlags(fs, args)); err != nil {
+	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if fs.NArg() != 1 {
+	if fs.NArg() != 0 {
 		fs.Usage()
 		return 2
 	}
-	projectID := fs.Arg(0)
 
 	root, err := findRoot(stderr)
 	if err != nil {
 		return 1
 	}
-	if err := requireProject(root, projectID); err != nil {
-		moePrintf(stderr, "%v\n", err)
-		return 1
+	if *projectID != "" {
+		if err := requireProject(root, *projectID); err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 1
+		}
 	}
 
-	entries, err := k.scanOpen(root, projectID)
+	entries, err := k.scanOpen(root, *projectID)
 	if err != nil {
 		moePrintf(stderr, "%v\n", err)
 		return 1
 	}
-	for _, slug := range entries {
-		fmt.Fprintln(stdout, slug)
+	for _, key := range entries {
+		fmt.Fprintln(stdout, key)
 	}
 	return 0
 }
 
-// scanOpen returns the slugs of projectID's in-progress runs of this
-// kind, sorted. (The dash gatherers don't come through here — they
-// project the caller's existing scan instead.)
+// scanOpen returns the in-progress runs of this kind as sorted
+// <project>/<slug> keys — the argument form every other verb takes —
+// narrowed to projectID unless it is empty. (The dash gatherers don't
+// come through here — they project the caller's existing scan instead.)
 func (k captureKind) scanOpen(root, projectID string) ([]string, error) {
 	mds, err := run.Scan(root)
 	if err != nil {
@@ -359,8 +362,8 @@ func (k captureKind) scanOpen(root, projectID string) ([]string, error) {
 	}
 	var out []string
 	for _, md := range mds {
-		if md.Workflow == k.workflow && md.Status == run.StatusInProgress && md.Project == projectID {
-			out = append(out, md.ID)
+		if md.Workflow == k.workflow && md.Status == run.StatusInProgress && (projectID == "" || md.Project == projectID) {
+			out = append(out, md.Project+"/"+md.ID)
 		}
 	}
 	sort.Strings(out)
@@ -373,7 +376,7 @@ func (k captureKind) loadRun(root, projectID, slug string) (*run.Metadata, error
 	md, err := run.Load(root, projectID, slug)
 	if err != nil {
 		if errors.Is(err, run.ErrRunNotFound) {
-			return nil, fmt.Errorf("%s %s/%s does not exist; run `moe %s list %s` to see open %ss", k.noun, projectID, slug, k.noun, projectID, k.noun)
+			return nil, fmt.Errorf("%s %s/%s does not exist; run `moe %s list --project %s` to see open %ss", k.noun, projectID, slug, k.noun, projectID, k.noun)
 		}
 		return nil, err
 	}

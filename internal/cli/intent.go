@@ -64,7 +64,7 @@ func init() {
 	})
 	g.Register(&Command{
 		Name:    "list",
-		Summary: "list this project's open intents",
+		Summary: "list open intents as <project>/<slug> (--project narrows)",
 		Run:     intentKind.runList,
 	})
 	g.Register(&Command{
