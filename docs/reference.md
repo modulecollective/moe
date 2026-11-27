@@ -650,7 +650,7 @@ sibling read verbatim, not folded into `chore.json`. Use `moe chore check` as
 the dry-run loop rather than opening a run to test a definition.
 
 Three surfaces write definitions through one writer, each change one commit
-(`chore: add|edit|remove <project>/<name>`) touching only the chore's
+(`Add|Edit|Remove chore <project>/<name>`) touching only the chore's
 directory:
 
 ```
