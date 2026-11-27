@@ -13,8 +13,7 @@ import (
 
 func animatedBoard() Board {
 	b := board(1, run("p", "a"))
-	b.Overview = []string{"star *", "fixed bars"}
-	b.Art = Art{Start: 0, Height: 2, Frames: [][]string{{"star *", "fixed bars"}, {"star ✦", "fixed bars"}}}
+	b.Overview = fixedOverview([]string{"star *", "fixed bars"}, Art{Start: 0, Height: 2, Frames: [][]string{{"star *", "fixed bars"}, {"star ✦", "fixed bars"}}})
 	return b
 }
 
@@ -48,7 +47,7 @@ func TestAnimationPatchesOnlyVisibleArt(t *testing.T) {
 		t.Fatal("scroll hid pinned art")
 	}
 	m.boardTop = 0
-	m.board.Art.Frames[1] = slices.Clone(m.board.Art.Frames[0])
+	m.art.Frames[1] = slices.Clone(m.art.Frames[0])
 	old = m.view()
 	if p := m.animate(&old); len(p) != 0 {
 		t.Fatalf("identical frame wrote: %q", p)

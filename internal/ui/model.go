@@ -106,7 +106,10 @@ type model struct {
 	focus pane
 	mode  mode
 
-	animation int // index into the board's cached art frames
+	animation int // index into the overview's cached art frames
+	// overview and art are the raw board's Overview at the current width.
+	overview  []string
+	art       Art
 	boardTop  int // first board line in view
 	detailTop int
 
@@ -189,7 +192,17 @@ func (m *model) setBoard(b Board) {
 	}
 	m.observed = issues
 	m.raw = b
+	m.measureOverview()
 	m.applyBoard()
+}
+
+// measureOverview renders the raw board's overview at the current
+// width. It runs when the board or the width changes, never per paint.
+func (m *model) measureOverview() {
+	m.overview, m.art = nil, Art{}
+	if m.raw.Overview != nil && m.width > 0 {
+		m.overview, m.art = m.raw.Overview(m.width)
+	}
 }
 
 // keptBucket marks an item withKept added: no dash bucket is negative.
@@ -369,16 +382,16 @@ func (m *model) layout() layout {
 	l := layout{console: m.consoleHeight(), overviewRow: 2}
 	// Banner, three rules, footer; a blank on each side of every rule.
 	body := m.high - 5 - 6 - l.console
-	if len(m.board.Overview) > 0 && body-len(m.board.Overview)-1 >= 6 {
+	if len(m.overview) > 0 && body-len(m.overview)-1 >= 6 {
 		fits := true
-		for _, line := range m.board.Overview {
+		for _, line := range m.overview {
 			if textWidth(line) > m.width-1 {
 				fits = false
 				break
 			}
 		}
 		if fits {
-			l.overview = len(m.board.Overview)
+			l.overview = len(m.overview)
 		}
 	}
 	l.boardRule = 2
@@ -411,6 +424,7 @@ func (m *model) tooSmall() bool { return m.width < 40 || m.high < 20 }
 
 func (m *model) resize(rows, cols int) {
 	m.width, m.high = cols, rows
+	m.measureOverview()
 	m.clampBoard()
 	m.scrollToSelection()
 }

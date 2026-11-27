@@ -57,14 +57,17 @@ type uiSource struct {
 	boards chan ui.Board // one slot, latest wins
 	poke   chan struct{} // a subscription heard something
 
-	mu        sync.Mutex
-	live      map[string]*liveRun
-	tokens    int
-	snap      DashSnapshot
-	serveNow  serveState
-	extra     map[string]uiExtra
-	gathered  time.Time
-	gerr      error
+	mu       sync.Mutex
+	live     map[string]*liveRun
+	tokens   int
+	snap     DashSnapshot
+	serveNow serveState
+	extra    map[string]uiExtra
+	gathered time.Time
+	gerr     error
+	// artMu guards the frame cache: the board's Overview closure runs on
+	// the console's goroutine, not under mu.
+	artMu     sync.Mutex
 	artKey    []string // the built histogram artFrames was styled from
 	artColor  bool
 	artFrames [][]string
@@ -73,6 +76,58 @@ type uiSource struct {
 
 	handshakes chan struct{} // bounds concurrent subscription handshakes
 	wg         sync.WaitGroup
+}
+
+// overview is the board's pinned overview as a function of terminal
+// width: the activity chart one column per day across the terminal, less
+// histMargin on each side, capped at a year and centred beyond that,
+// then the pause label. It runs on the console's goroutine, so the frame
+// cache it shares across boards has its own lock; within one board it
+// memoises on cols.
+func (s *uiSource) overview(counts []int, live bool, tail []string) func(cols int) ([]string, ui.Art) {
+	lastCols := -1
+	var lines []string
+	var art ui.Art
+	return func(cols int) ([]string, ui.Art) {
+		if cols == lastCols {
+			return lines, art
+		}
+		field := max(cols-2*histMargin, 1)
+		days := min(field, dash.HistMaxDays)
+		histogram := dash.BuildActivityHistogram(trailingDays(counts, days), live)
+		if pad := strings.Repeat(" ", (field-days)/2); pad != "" {
+			for i, l := range histogram {
+				if l != "" {
+					histogram[i] = pad + l
+				}
+			}
+		}
+		frames := s.histogramFrames(histogram)
+		lastCols = cols
+		lines = append(slices.Clone(frames[0]), tail...)
+		// Only the star's cell differs between frames; the console swaps
+		// the chart's rows on its animation tick.
+		art = ui.Art{Start: 0, Height: len(frames[0]), Frames: frames}
+		return lines, art
+	}
+}
+
+// histMargin is the blank columns either side of moe ui's chart: the
+// board's two-space gutter, mirrored on the right.
+const histMargin = 2
+
+// histogramFrames styles a built chart into its twinkle frames, reusing
+// the last set while the chart and the colour gate are unchanged.
+func (s *uiSource) histogramFrames(histogram []string) [][]string {
+	s.artMu.Lock()
+	defer s.artMu.Unlock()
+	w := &ttyFrameBuffer{terminal: s.terminal}
+	color := cliout.Enabled(w)
+	if s.artFrames == nil || color != s.artColor || !slices.Equal(histogram, s.artKey) {
+		s.artFrames = dash.StyledHistogramFrames(w, histogram)
+		s.artKey, s.artColor = histogram, color
+	}
+	return s.artFrames
 }
 
 // uiExtra is per-item data the board needs beyond the snapshot, read at
@@ -407,29 +462,21 @@ func (s *uiSource) buildBoard(now time.Time) (ui.Board, []cliout.ProgramStatus) 
 	dash.RenderPulse(buf, now, pulse)
 	serviceLines := buf.String()
 	buf.Reset()
-	histogram := dash.BuildActivityHistogram(trailingDays(snap.Histogram, dash.HistDays), dash.Live(rows))
-	color := cliout.Enabled(buf)
-	if s.artFrames == nil || color != s.artColor || !slices.Equal(histogram, s.artKey) {
-		s.artFrames = dash.StyledHistogramFrames(buf, histogram)
-		s.artKey, s.artColor = histogram, color
-	}
-	// The styled frames are the overview: only the star's cell differs
-	// between them, and the UI swaps the bar rows on its animation tick.
-	b.Art = ui.Art{Start: 0, Height: len(s.artFrames[0]), Frames: s.artFrames}
-	b.Overview = slices.Clone(s.artFrames[0])
 	pauseState, pauseErr := servepause.Read(s.root)
 	b.PauseSummary, b.PauseRevision = pauseState.Summary(now), pauseState.Revision
 	if pauseErr != nil {
 		b.PauseSummary, b.PauseError = "automatic sweep pause unavailable", pauseErr.Error()
 		b.Issues = append(b.Issues, b.PauseSummary+": "+b.PauseError)
 	}
+	var pauseLabel []string
 	if pauseErr != nil || pauseState.Active(now) {
 		label := "new automatic sweeps paused (:serve status)"
 		if pauseErr != nil {
 			label = "automatic sweep pause unavailable (:serve status)"
 		}
-		b.Overview = append(b.Overview, label)
+		pauseLabel = []string{label}
 	}
+	b.Overview = s.overview(snap.Histogram, dash.Live(rows), pauseLabel)
 	defaultState, err := agentdefault.Read(s.root)
 	b.AgentSummary, b.AgentRevision = defaultState.Summary(now), defaultState.Revision
 	if err != nil {

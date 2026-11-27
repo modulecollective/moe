@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -53,7 +54,8 @@ func TestPauseOverviewAndNarrowStatusPreserveSelection(t *testing.T) {
 		m.resize(50, width)
 		b := dashboardBoard()
 		b.PauseSummary = "new automatic sweeps paused until 2026-11-26 12:00 PST"
-		b.Overview = append(b.Overview, "new automatic sweeps paused (:serve status)")
+		lines, art := b.Overview(width)
+		b.Overview = fixedOverview(append(slices.Clone(lines), "new automatic sweeps paused (:serve status)"), art)
 		m.setBoard(b)
 		selected := m.sel
 		frame := m.view()

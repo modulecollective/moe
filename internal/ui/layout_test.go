@@ -26,7 +26,7 @@ func dashboardBoard() Board {
 		counts[i] = i + 1
 	}
 	frames := dash.StyledHistogramFrames(&bytes.Buffer{}, dash.BuildActivityHistogram(counts, dash.Live(rows)))
-	b := Board{Seq: 1, Overview: slices.Clone(frames[0]), Art: Art{Start: 0, Height: len(frames[0]), Frames: frames}, Header: "all projects · gathered 12:30:00 · 1 live"}
+	b := Board{Seq: 1, Overview: fixedOverview(slices.Clone(frames[0]), Art{Start: 0, Height: len(frames[0]), Frames: frames}), Header: "all projects · gathered 12:30:00 · 1 live"}
 	var out bytes.Buffer
 	banner.DashBar(&out)
 	b.Banner = out.String()
@@ -49,7 +49,7 @@ func assertPinned(t *testing.T, m *model) {
 	if f.rows[0] != m.titleRow(m.width-1) || !strings.HasPrefix(stripSGR(f.rows[0]), "▓▒░ MINISTRY") {
 		t.Fatal("shared banner moved")
 	}
-	for i, line := range m.board.Overview {
+	for i, line := range m.overview {
 		if stripSGR(f.rows[m.layout().overviewRow+i]) != stripSGR(line) {
 			t.Fatalf("overview row %d moved or clipped: %q", i, f.rows[m.layout().overviewRow+i])
 		}
@@ -102,11 +102,12 @@ func TestDashboardOverviewSurvivesBoardScroll(t *testing.T) {
 
 func TestDashboardCollapseAndEditorGeometry(t *testing.T) {
 	b := dashboardBoard()
+	overview, _ := b.Overview(0)
 	wide := 0
-	for _, r := range b.Overview {
+	for _, r := range overview {
 		wide = max(wide, textWidth(r))
 	}
-	threshold := len(b.Overview) + 5 + 6 + 6 + 1 + 6
+	threshold := len(overview) + 5 + 6 + 6 + 1 + 6
 	sizes := [][2]int{{120, 90}, {100, 40}, {80, 24}, {40, 20}, {40, 21}, {40, 22}, {40, 23}, {wide, 40}, {wide + 1, 40}, {120, threshold - 1}, {120, threshold}}
 	for _, size := range sizes {
 		t.Run(fmt.Sprintf("%dx%d", size[0], size[1]), func(t *testing.T) {
@@ -115,7 +116,7 @@ func TestDashboardCollapseAndEditorGeometry(t *testing.T) {
 			m.setBoard(b)
 			keyboard(m, "nkept text")
 			l := m.layout()
-			want := size[0]-1 >= wide && size[1]-5-6-m.consoleHeight()-len(b.Overview)-1 >= 6
+			want := size[0]-1 >= wide && size[1]-5-6-m.consoleHeight()-len(overview)-1 >= 6
 			if (l.overview > 0) != want || l.board < min(size[1]-19, 4) || l.detail < 2 {
 				t.Fatalf("invalid layout: %+v", l)
 			}
@@ -135,14 +136,14 @@ func TestDashboardCollapseAndEditorGeometry(t *testing.T) {
 				assertPinned(t, m)
 			} else {
 				screen := strings.Join(f.rows, "\n")
-				if strings.Contains(screen, "last 60 days") || strings.Contains(screen, b.Overview[0]) {
+				if strings.Contains(screen, "last 60 days") || strings.Contains(screen, overview[0]) {
 					t.Fatal("partial overview in compact mode")
 				}
 			}
 			// Renderer SGR consumes no terminal cells and must not change collapse.
-			m.board.Overview = slices.Clone(b.Overview)
-			for i, row := range m.board.Overview {
-				m.board.Overview[i] = cliout.Mid + row + cliout.Reset
+			m.overview = slices.Clone(overview)
+			for i, row := range m.overview {
+				m.overview[i] = cliout.Mid + row + cliout.Reset
 			}
 			if m.layout() != l {
 				t.Fatal("color changed collapse geometry")
@@ -244,7 +245,7 @@ func TestPinnedAnimationAgreesAfterScrollAndResize(t *testing.T) {
 		t.Fatal("no star patch")
 	}
 	for i := range before {
-		if i < m.layout().overviewRow+m.board.Art.Start || i >= m.layout().overviewRow+m.board.Art.Start+m.board.Art.Height {
+		if i < m.layout().overviewRow+m.art.Start || i >= m.layout().overviewRow+m.art.Start+m.art.Height {
 			if old.rows[i] != before[i] {
 				t.Fatalf("animation touched non-art row %d", i)
 			}
@@ -435,5 +436,29 @@ func TestTitleRowRightJustifiesClock(t *testing.T) {
 				t.Errorf("color=%v width %d: %q", color, width, plainRow)
 			}
 		}
+	}
+}
+
+// A resize with no new board re-renders the overview at the new width;
+// the board's closure is asked once per width.
+func TestResizeRemeasuresOverview(t *testing.T) {
+	var asked []int
+	b := board(1, run("p", "a"))
+	b.Overview = func(cols int) ([]string, Art) {
+		asked = append(asked, cols)
+		return []string{"  " + strings.Repeat("#", cols-4)}, Art{}
+	}
+	m, _ := testModel(t)
+	m.resize(40, 80)
+	m.setBoard(b)
+	if got := stripSGR(m.view().rows[m.layout().overviewRow]); got != "  "+strings.Repeat("#", 76) {
+		t.Fatalf("80 columns: %q", got)
+	}
+	m.resize(40, 120)
+	if got := stripSGR(m.view().rows[m.layout().overviewRow]); got != "  "+strings.Repeat("#", 116) {
+		t.Fatalf("120 columns: %q", got)
+	}
+	if !slices.Equal(asked, []int{80, 120}) {
+		t.Fatalf("closure asked for %v", asked)
 	}
 }

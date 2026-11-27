@@ -511,7 +511,9 @@ func TestUIAgentDefaultPresentationLifecycle(t *testing.T) {
 		if b.AgentLabel != label || !strings.Contains(b.AgentSummary, summary) {
 			t.Fatalf("label=%q summary=%q", b.AgentLabel, b.AgentSummary)
 		}
-		if !slices.Equal(b.Overview, baseline.Overview) || b.Art.Start != baseline.Art.Start || b.Art.Height != baseline.Art.Height || !slices.Equal(b.Lines, baseline.Lines) {
+		lines, art := b.Overview(120)
+		baseLines, baseArt := baseline.Overview(120)
+		if !slices.Equal(lines, baseLines) || art.Start != baseArt.Start || art.Height != baseArt.Height || !slices.Equal(b.Lines, baseline.Lines) {
 			t.Fatal("agent state changed overview, artwork or board geometry")
 		}
 		if !strings.Contains(b.AgentSummary, "this process forces claude") && b.AgentError == "" {

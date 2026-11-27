@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/modulecollective/moe/internal/banner"
 	"github.com/modulecollective/moe/internal/dash"
@@ -931,12 +932,13 @@ func TestUIHistogramFrameCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := takeBoard(t, s)
+	lines, art := b.Overview(120)
 	// No open session: one still frame, so the board never repaints.
-	if len(b.Art.Frames) != 1 || b.Art.Start != 0 || b.Art.Height != len(b.Art.Frames[0]) {
-		t.Fatalf("idle board art = %+v", b.Art)
+	if len(art.Frames) != 1 || art.Start != 0 || art.Height != len(art.Frames[0]) {
+		t.Fatalf("idle board art = %+v", art)
 	}
-	for i, line := range b.Art.Frames[0] {
-		if b.Overview[b.Art.Start+i] != line {
+	for i, line := range art.Frames[0] {
+		if lines[art.Start+i] != line {
 			t.Fatal("renderer span does not match board art")
 		}
 		if strings.ContainsRune(line, '\x1b') {
@@ -948,14 +950,14 @@ func TestUIHistogramFrameCache(t *testing.T) {
 	s.mu.Lock()
 	again, _ := s.buildBoard(time.Now().Add(time.Second))
 	s.mu.Unlock()
-	if &b.Art.Frames[0][0] != &again.Art.Frames[0][0] {
+	if _, a := again.Overview(120); &art.Frames[0][0] != &a.Frames[0][0] {
 		t.Fatal("publish regenerated frames")
 	}
 	if err := s.refresh(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	again = takeBoard(t, s)
-	if &b.Art.Frames[0][0] != &again.Art.Frames[0][0] {
+	if _, a := again.Overview(120); &art.Frames[0][0] != &a.Frames[0][0] {
 		t.Fatal("unchanged gather regenerated frames")
 	}
 	// A session opening caps today with the star: new frames, one per
@@ -964,18 +966,72 @@ func TestUIHistogramFrameCache(t *testing.T) {
 	s.snap.Rows = append(slices.Clone(s.snap.Rows), dash.Row{Project: "moe", Run: "lit", Bucket: dash.BucketActiveRuns, RunningDoc: "build", When: time.Now()})
 	s.snap.Histogram = make([]int, dash.HistMaxDays)
 	s.snap.Histogram[dash.HistMaxDays-1] = 2
-	live, _ := s.buildBoard(time.Now())
+	board, _ := s.buildBoard(time.Now())
 	s.mu.Unlock()
-	if len(live.Art.Frames) < 2 {
-		t.Fatalf("live board has %d frames", len(live.Art.Frames))
+	_, live := board.Overview(120)
+	if len(live.Frames) < 2 {
+		t.Fatalf("live board has %d frames", len(live.Frames))
 	}
-	if !strings.HasSuffix(live.Art.Frames[0][0], "*") {
-		t.Fatalf("live frame 0 top row %q, want the star", live.Art.Frames[0][0])
+	if !strings.HasSuffix(live.Frames[0][0], "*") {
+		t.Fatalf("live frame 0 top row %q, want the star", live.Frames[0][0])
 	}
-	for _, frame := range live.Art.Frames {
-		if len(frame) != live.Art.Height || !slices.Equal(frame[1:], live.Art.Frames[0][1:]) {
+	for _, frame := range live.Frames {
+		if len(frame) != live.Height || !slices.Equal(frame[1:], live.Frames[0][1:]) {
 			t.Fatal("a frame moved more than the star")
 		}
+	}
+}
+
+// TestUIHistogramFillsWidth: moe ui charts one day per column across the
+// terminal, two columns of margin each side, capped at a year and
+// centred beyond it. The caption names the window it drew, nothing is
+// wider than the painted width, and the star stays on today's column.
+func TestUIHistogramFillsWidth(t *testing.T) {
+	t.Setenv("NO_COLOR", "1")
+	now := time.Date(2026, 11, 27, 12, 0, 0, 0, time.Local)
+	s := newUISource(t.TempDir(), DashFilter{}, os.Stdout)
+	s.gathered = now
+	s.snap.Rows = []dash.Row{{Project: "p", Run: "r", Bucket: dash.BucketActiveRuns, RunningDoc: "build", When: now}}
+	s.snap.Histogram = make([]int, dash.HistMaxDays)
+	for i := range s.snap.Histogram {
+		s.snap.Histogram[i] = 1 + i%4
+	}
+	b, _ := s.buildBoard(now)
+	for _, cols := range []int{40, 80, 120, 400} {
+		lines, art := b.Overview(cols)
+		days := min(cols-4, dash.HistMaxDays)
+		lead := 2 + (cols-4-days)/2
+		for r := range dash.HistRows {
+			if w := utf8.RuneCountInString(lines[r]); w != lead+days {
+				t.Errorf("%d cols: bar row %d is %d wide, want %d", cols, r, w, lead+days)
+			}
+			if strings.TrimLeft(lines[r][:lead], " ") != "" {
+				t.Errorf("%d cols: bar row %d margin not blank: %q", cols, r, lines[r])
+			}
+		}
+		if caption := lines[dash.HistRows+1]; !strings.Contains(caption, fmt.Sprintf("last %d days", days)) {
+			t.Errorf("%d cols: caption %q", cols, caption)
+		}
+		for _, l := range lines {
+			if utf8.RuneCountInString(l) > cols-1 {
+				t.Errorf("%d cols: line wider than the painted width: %q", cols, l)
+			}
+		}
+		stars := 0
+		for r := range dash.HistRows {
+			if strings.HasSuffix(lines[r], "*") {
+				stars++
+			}
+		}
+		if stars != 1 || len(art.Frames) < 2 {
+			t.Errorf("%d cols: %d stars on today's column, %d frames", cols, stars, len(art.Frames))
+		}
+	}
+	// Memoised per width within one board.
+	first, _ := b.Overview(120)
+	second, _ := b.Overview(120)
+	if &first[0] != &second[0] {
+		t.Error("same width rebuilt the overview")
 	}
 }
 
@@ -1127,7 +1183,7 @@ func TestUIBoardSeparatesPinnedRegionsAndEscapesLabels(t *testing.T) {
 		t.Fatalf("not the shared dash bar and clock: %q %q", b.Banner, b.Clock)
 	}
 	all := strings.Join(b.Lines, "\n")
-	if strings.Contains(all, "MINISTRY OF EVERYTHING") || strings.Contains(all, "last 60 days") {
+	if strings.Contains(all, "MINISTRY OF EVERYTHING") || strings.Contains(all, "activity · last") {
 		t.Fatal("pinned content leaked into scrolling lines")
 	}
 	if strings.ContainsRune(all, '\x1b') || !strings.Contains(all, "^[[31m") || !strings.Contains(all, "^Jnext^Icolumn") {
@@ -1136,17 +1192,24 @@ func TestUIBoardSeparatesPinnedRegionsAndEscapesLabels(t *testing.T) {
 	if len(b.Items) != 1 || !strings.Contains(b.Lines[b.Items[0].Line], "p/r") {
 		t.Fatalf("service lines displaced item: %+v", b.Items)
 	}
-	if len(b.Overview) != dash.HistRows+2 {
+	overview, art := b.Overview(100)
+	if len(overview) != dash.HistRows+2 {
 		t.Fatal("chart or internal spacing lost")
 	}
-	for _, line := range b.Overview {
+	for _, line := range overview {
 		if strings.Contains(line, "Default:") {
 			t.Fatal("global default leaked into pinned overview")
 		}
 	}
-	for i, line := range b.Art.Frames[0] {
-		if b.Overview[b.Art.Start+i] != line {
+	for i, line := range art.Frames[0] {
+		if overview[art.Start+i] != line {
 			t.Fatal("art boundary wrong")
 		}
 	}
+}
+
+// overviewAt is the board's pinned overview lines on a terminal cols wide.
+func overviewAt(b ui.Board, cols int) []string {
+	lines, _ := b.Overview(cols)
+	return lines
 }

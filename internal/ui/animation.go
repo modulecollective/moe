@@ -9,7 +9,7 @@ import (
 // never call view: layout reads drafts and wraps details, and belongs to
 // normal input/observation paints. last holds the cursor from that paint.
 func (m *model) animate(last *frame) []byte {
-	art := m.board.Art
+	art := m.art
 	if len(art.Frames) < 2 {
 		return nil
 	}

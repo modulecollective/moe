@@ -116,8 +116,8 @@ func (m *model) view() frame {
 	bh, dh := l.board, l.detail
 	f.rows[0] = m.titleRow(w)
 	for i := range l.overview {
-		line := m.board.Overview[i]
-		art := m.board.Art
+		line := m.overview[i]
+		art := m.art
 		if i >= art.Start && i < art.Start+art.Height && len(art.Frames) > 0 {
 			line = art.Frames[m.animation%len(art.Frames)][i-art.Start]
 		}

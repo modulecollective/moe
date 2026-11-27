@@ -78,7 +78,7 @@ type Question struct {
 // activity chart, whose live star changes from frame to frame. One frame
 // never animates.
 type Art struct {
-	Start, Height int        // explicit zero-based line span in Board.Overview
+	Start, Height int        // explicit zero-based line span in the overview
 	Frames        [][]string // identical dimensions; already styled by the renderer
 }
 
@@ -95,10 +95,13 @@ type Board struct {
 	AgentError    string
 	// Banner, Clock and Overview are trusted renderer output, separate
 	// from scrolling lines. The title row puts Clock at its right edge.
-	Banner   string
-	Clock    string
-	Overview []string
-	Art      Art
+	Banner string
+	Clock  string
+	// Overview renders the pinned overview for a terminal cols wide: its
+	// lines and the animated span within them. The console calls it when
+	// a board arrives and on resize, and keeps the result; it never needs
+	// to know what the overview is. nil means no overview.
+	Overview func(cols int) ([]string, Art)
 	Lines    []string
 	Items    []Item
 	// Issues are current observation failures, without captured text. Unchanged issues are logged once.
