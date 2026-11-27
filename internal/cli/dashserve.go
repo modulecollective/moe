@@ -218,7 +218,7 @@ func (s serveState) pulse(now time.Time, rows []dash.Row, notes input.File, deta
 		pause = s.pause.Summary(now)
 	}
 	p.Quota = s.quota.Summary(now)
-	if s.ok && s.live != serveDead {
+	if p.Quota != "" && s.ok && s.live != serveDead {
 		for _, project := range s.snap.Projects {
 			if project.Sweeping() {
 				p.Quota = "survey running"

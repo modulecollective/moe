@@ -60,7 +60,7 @@ func (s *Server) pulseView(now time.Time, rows []dash.Row, panel servePanelVM) p
 		vm.Quota = s.opts.SurveyAdmission(now).Summary(now)
 	}
 	for _, p := range s.activity.snapshot(now).Projects {
-		if p.Sweeping() {
+		if vm.Quota != "" && p.Sweeping() {
 			vm.Quota = "survey running"
 			break
 		}

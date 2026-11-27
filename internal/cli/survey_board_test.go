@@ -105,4 +105,10 @@ func TestSurveyQuotaOnWebDashAndUI(t *testing.T) {
 	if !strings.Contains(pulse.Waiting, "paused until") || !strings.Contains(pulse.Quota, "unavailable") {
 		t.Fatal(pulse)
 	}
+	// Running replaces recorded quota context without adding routine activity rows.
+	state.ok, state.live = true, serveAlive
+	state.snap.Projects = []serve.ActivityProject{{Project: project.RootID, SweepStarted: now}}
+	if got := state.pulse(now, rows, notes, "").Quota; got != "survey running" {
+		t.Fatal(got)
+	}
 }
