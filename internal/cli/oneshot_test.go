@@ -216,9 +216,9 @@ func TestRunBuildOneShot(t *testing.T) {
 		t.Fatalf("build stage mutated design canvas:\nbefore: %q\nafter: %q", beforeDesign, afterDesign)
 	}
 
-	log := gitLog(t, root, "--format=%s%n%b", "--grep=^work: update build")
+	log := gitLog(t, root, "--format=%s%n%b", "--grep=^Update build for ")
 	for _, want := range []string{
-		"work: update build",
+		"Update build for ",
 		"MoE-Document: build",
 		"MoE-Run: per-stage-code",
 		"MoE-Workflow: sdlc",
@@ -281,7 +281,7 @@ func TestRunBuildRefusesWithoutDesignCanvas(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, "projects", "tele", "runs", "no-design", "documents", "build")); !os.IsNotExist(err) {
 		t.Fatalf("build dir should not exist after refusals: err=%v", err)
 	}
-	if log := gitLog(t, root, "--format=%s", "--grep=^work: update build"); strings.TrimSpace(log) != "" {
+	if log := gitLog(t, root, "--format=%s", "--grep=^Update build for "); strings.TrimSpace(log) != "" {
 		t.Fatalf("no build commit should land on refusal; got:\n%s", log)
 	}
 }

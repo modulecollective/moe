@@ -56,7 +56,7 @@ func TestCommitTrailer_ZeroTimeUsesNow(t *testing.T) {
 
 // TestCommitWorkTurnAt_TrailerBlockAndSHA confirms CommitWorkTurnAt
 // renders the canonical Run/Project/Workflow/Document trailer block,
-// uses the `work: update <doc>` subject convention, and returns the
+// uses the run.WorkTurnSubject convention, and returns the
 // HEAD SHA of the commit it just made.
 func TestCommitWorkTurnAt_TrailerBlockAndSHA(t *testing.T) {
 	root := gittest.Init(t)
@@ -68,8 +68,8 @@ func TestCommitWorkTurnAt_TrailerBlockAndSHA(t *testing.T) {
 		t.Fatalf("returned SHA %q != HEAD %q", sha, gittest.HeadSHA(t, root))
 	}
 	subject := gittest.Output(t, root, "log", "-1", "--format=%s")
-	if subject != "work: update design" {
-		t.Fatalf("subject = %q, want %q", subject, "work: update design")
+	if subject != "Update design for proj-x/run-y" {
+		t.Fatalf("subject = %q, want %q", subject, "Update design for proj-x/run-y")
 	}
 	body := gittest.Output(t, root, "log", "-1", "--format=%B")
 	want := "MoE-Run: run-y\nMoE-Project: proj-x\nMoE-Workflow: sdlc\nMoE-Document: design"

@@ -42,7 +42,7 @@ func TestBackendSwitchRoundTrip(t *testing.T) {
 				if md.Documents["design"].Session != "" {
 					t.Fatal("new metadata wrote legacy scalar")
 				}
-				msg := gittest.Output(t, root, "log", "-1", "--format=%B", "--grep=^work: update design")
+				msg := gittest.Output(t, root, "log", "-1", "--format=%B", "--grep=^Update design for ")
 				if !strings.Contains(msg, "MoE-Session: "+f.id) {
 					t.Fatalf("wrong turn trailer: %s", msg)
 				}

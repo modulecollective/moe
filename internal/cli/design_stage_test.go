@@ -105,7 +105,7 @@ func TestDesignEntrySeedsPreservesAndResets(t *testing.T) {
 			if code := promptNextStageOverride(root, md, "design", "review", true, &out, io.Discard); code != 0 || !strings.Contains(out.String(), "parked at design") {
 				t.Fatalf("recovery tail %d: %s", code, &out)
 			}
-			if log := gitLog(t, root, "--format=%s", "--grep=^work: update design"); !strings.Contains(log, "work: update design") {
+			if log := gitLog(t, root, "--format=%s", "--grep=^Update design for "); !strings.Contains(log, "Update design for ") {
 				t.Fatal("authored blocked explanation did not land")
 			}
 			if _, err := os.Stat(filepath.Join(root, run.ContentDir(md.Project, md.ID, "design"))); !os.IsNotExist(err) {
@@ -136,10 +136,10 @@ func TestDesignPreparationDoesNotCountAsOutput(t *testing.T) {
 			if code, out := designTurn(t, "nothing"); code == 0 || !strings.Contains(out, "unchanged since dispatch") || !strings.Contains(out, "content.md") {
 				t.Fatalf("no-op exit %d: %s", code, out)
 			}
-			if log := gitLog(t, root, "--format=%s", "--grep=^work: update design"); strings.TrimSpace(log) != "" {
+			if log := gitLog(t, root, "--format=%s", "--grep=^Update design for "); strings.TrimSpace(log) != "" {
 				t.Fatalf("preparation landed as work: %s", log)
 			}
-			if log := gitLog(t, root, "--format=%s", "--grep=^diagnostic: tele/design-gate design canvas unchanged"); strings.TrimSpace(log) == "" {
+			if log := gitLog(t, root, "--format=%s", "--grep=^Archive design diagnostic for tele/design-gate — canvas unchanged"); strings.TrimSpace(log) == "" {
 				t.Fatal("missing refusal diagnostic")
 			}
 		})
@@ -154,7 +154,7 @@ func TestDesignResetThenRestoreIsNotNewConclusion(t *testing.T) {
 	if code, out := designTurn(t, "restamp"); code == 0 || !strings.Contains(out, "unchanged") {
 		t.Fatalf("restoring old bytes counted as new conclusion: exit %d %s", code, out)
 	}
-	if log := gitLog(t, root, "--format=%s", "--grep=^work: update design"); strings.TrimSpace(log) != "" {
+	if log := gitLog(t, root, "--format=%s", "--grep=^Update design for "); strings.TrimSpace(log) != "" {
 		t.Fatalf("restamp-only landed as work: %s", log)
 	}
 }
@@ -173,7 +173,7 @@ func TestDesignRecoveryEntryAlsoPreparesAndGates(t *testing.T) {
 	if string(before) != resetGate(readyDesign) {
 		t.Fatalf("recovery agent saw stale verdict: %s", before)
 	}
-	if log := gitLog(t, root, "--format=%s", "--grep=^work: update design"); strings.TrimSpace(log) == "" {
+	if log := gitLog(t, root, "--format=%s", "--grep=^Update design for "); strings.TrimSpace(log) == "" {
 		t.Fatal("blocked recovery reason did not land")
 	}
 }

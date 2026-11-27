@@ -249,7 +249,7 @@ func (k captureKind) runEdit(args []string, stdout, stderr io.Writer) int {
 	}
 
 	docDir := run.DocDir(projectID, slug, k.docID)
-	msg := fmt.Sprintf("work: update %s\n\n", k.docID) +
+	msg := run.WorkTurnSubject(projectID, slug, k.docID) + "\n\n" +
 		trailers.Block{
 			Run:      slug,
 			Project:  projectID,

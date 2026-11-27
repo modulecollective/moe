@@ -205,7 +205,7 @@ func TestPushMergeFFAdvancesOriginAndMarksMerged(t *testing.T) {
 		t.Fatalf("operator merge push stamped MoE-Consent:\n%s", mergeBody)
 	}
 	bumpBody := lastCommitMessage(t, f.root)
-	if !strings.Contains(bumpBody, "sync: bump project pointers") {
+	if !strings.Contains(bumpBody, "Bump project pointers") {
 		t.Fatalf("expected sync bump commit at HEAD, got:\n%s", bumpBody)
 	}
 	if !strings.Contains(bumpBody, f.projectID+":") {
@@ -415,7 +415,7 @@ func assertRejectedMergeLeftNothing(t *testing.T, f *pushFixture) {
 		t.Fatalf("root dirty after a rejected ff-push (err=%v):\n%s", err, gittest.Output(t, f.root, "status", "--porcelain"))
 	}
 	log := gittest.Output(t, f.root, "log", "--format=%H",
-		"--grep=^harvest: capture follow-ups, lore, and twin observations for "+f.projectID+"/"+f.runID)
+		"--grep=^Harvest "+f.projectID+"/"+f.runID+"$")
 	if got := len(strings.Fields(log)); got != 1 {
 		t.Fatalf("harvest commits: want 1, got %d:\n%s", got, log)
 	}
@@ -955,7 +955,7 @@ func TestCascadePushStampsConsentOnMergeRecord(t *testing.T) {
 		t.Fatalf("exit=%d\nstdout=%s\nstderr=%s", code, stdout.String(), stderr.String())
 	}
 	mergeBody := gittest.Output(t, f.root, "log", "-1", "--format=%B", "HEAD~1")
-	if !strings.Contains(mergeBody, "push: "+f.projectID+"/"+f.runID+" merged") {
+	if !strings.Contains(mergeBody, "Push "+f.projectID+"/"+f.runID+" — merged") {
 		t.Fatalf("HEAD~1 is not the merge record:\n%s", mergeBody)
 	}
 	if !strings.Contains(mergeBody, "MoE-Consent: dynamic") {

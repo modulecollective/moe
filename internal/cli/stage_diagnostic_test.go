@@ -134,7 +134,7 @@ func TestMissingCanvasRetainsDiagnostic(t *testing.T) {
 				t.Fatal(err)
 			}
 			body := gitLogFormat(t, root, 1, "HEAD", "%B")
-			if strings.Contains(body, "MoE-Document:") || strings.Contains(body, "work: update") {
+			if strings.Contains(body, "MoE-Document:") || strings.Contains(body, "Update design for") {
 				t.Fatalf("diagnostic counts as work: %s", body)
 			}
 			if !strings.Contains(body, "MoE-Consent: dynamic") {
@@ -204,7 +204,7 @@ func TestMissingCanvasRetainsDiagnostic(t *testing.T) {
 			}
 			body = gitLogFormat(t, root, 1, "HEAD", "%B")
 			for _, want := range []string{
-				"reap: tele/fix-it design turn unfinished — abandoned " + git.ShortSHA(md.Reaped.Tip),
+				"Reap unfinished design turn for tele/fix-it — abandoned " + git.ShortSHA(md.Reaped.Tip),
 				"moe sdlc log tele/fix-it design",
 				"recorded outcome, when available",
 				"Reaping alone does not establish the cause",
@@ -408,7 +408,7 @@ func TestDiagnosticSerializesWithJournalWriter(t *testing.T) {
 		t.Fatalf("ordinary writer: %v %s", err, childErr.String())
 	}
 	subjects := gittest.Output(t, root, "log", "-2", "--format=%s")
-	if !strings.HasPrefix(subjects, "diagnostic:") || !strings.Contains(subjects, "\nordinary locked writer") {
+	if !strings.HasPrefix(subjects, "Archive design diagnostic for ") || !strings.Contains(subjects, "\nordinary locked writer") {
 		t.Fatalf("diagnostic bypassed ordinary writer's lock: %s", subjects)
 	}
 	diagnosticAttempts(t, root, 1)

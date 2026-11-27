@@ -76,7 +76,7 @@ func commitFollowupAudit(root, projectID, runID, workflow string, lines []string
 	if err := os.WriteFile(abs, []byte(strings.Join(lines, "\n")), 0o644); err != nil {
 		return err
 	}
-	msg := fmt.Sprintf("harvest: link follow-up to its live owner for %s/%s\n\n", projectID, runID) +
+	msg := fmt.Sprintf("Link follow-up to its live owner for %s/%s\n\n", projectID, runID) +
 		trailers.Block{Project: projectID, Run: runID, Workflow: workflow, Consent: walkConsent()}.String()
 	err = run.Stage(root, rel)
 	if err == nil {

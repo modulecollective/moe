@@ -277,7 +277,7 @@ func TestSurveyAdmissionPinsExecutorSelection(t *testing.T) {
 			if mds[0].Status != status {
 				t.Fatal(mds[0])
 			}
-			if history := gittest.Output(t, root, "log", "--format=%s", "--grep=^MoE-Quota-Retry:"); strings.Count(history, "quota retry: survey admission") != 2 {
+			if history := gittest.Output(t, root, "log", "--format=%s", "--grep=^MoE-Quota-Retry:"); strings.Count(history, "Schedule quota retry for survey admission") != 2 {
 				t.Fatal("survey resolution duplicated or missing:", history)
 			}
 

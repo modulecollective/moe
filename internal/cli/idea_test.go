@@ -515,7 +515,7 @@ func TestIdeaEditCommitsEditorEdits(t *testing.T) {
 	}
 
 	head := gitLog(t, root, "-1", "--format=%s%n%b")
-	if !strings.Contains(head, "work: update idea") {
+	if !strings.Contains(head, "Update idea for tele/starter") {
 		t.Fatalf("commit subject wrong:\n%s", head)
 	}
 	for _, want := range []string{

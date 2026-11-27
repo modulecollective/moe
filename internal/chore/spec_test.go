@@ -81,7 +81,7 @@ func TestCreateCommitsOnlyTheChoreDir(t *testing.T) {
 		t.Fatalf("commits = %q, want 1", n)
 	}
 	subject, files := lastCommitFiles(t, root)
-	if subject != "chore: add moe/deps" {
+	if subject != "Add chore moe/deps" {
 		t.Errorf("subject %q", subject)
 	}
 	if strings.Join(files, " ") != "projects/moe/chores/deps/chore.json projects/moe/chores/deps/prompt.md" {
@@ -187,7 +187,7 @@ func TestUpdateRoundTripIsStable(t *testing.T) {
 	if string(b) != "{\n  \"cadence\": \"90d\",\n  \"cooldown\": \"30d\"\n}\n" {
 		t.Fatalf("chore.json = %q; cadence must stay as typed", b)
 	}
-	if subject, _ := lastCommitFiles(t, root); subject != "chore: edit moe/audit" {
+	if subject, _ := lastCommitFiles(t, root); subject != "Edit chore moe/audit" {
 		t.Errorf("subject %q", subject)
 	}
 }
@@ -282,7 +282,7 @@ func TestRemoveDeletesInOneCommit(t *testing.T) {
 		t.Fatalf("commits = %q", n)
 	}
 	subject, files := lastCommitFiles(t, root)
-	if subject != "chore: remove moe/audit" || len(files) != 2 {
+	if subject != "Remove chore moe/audit" || len(files) != 2 {
 		t.Errorf("subject %q files %v", subject, files)
 	}
 	if _, err := os.Stat(filepath.Join(root, "projects/moe/chores/audit")); !errors.Is(err, os.ErrNotExist) {

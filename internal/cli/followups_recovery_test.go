@@ -62,7 +62,7 @@ func TestSDLCRecoveryTaggedFollowups(t *testing.T) {
 							t.Fatalf("audit=%s", audit)
 						}
 					}
-					if got := gitLog(t, root, "--format=%s", "--grep=^work: update "+tc.stage); got == "" {
+					if got := gitLog(t, root, "--format=%s", "--grep=^Update "+tc.stage+" for "); got == "" {
 						t.Fatalf("recovery stage commit lost: %s", &out)
 					}
 					wf, _ := LookupWorkflow("sdlc")

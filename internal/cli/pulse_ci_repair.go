@@ -137,7 +137,7 @@ func claimCIRepair(root string, observed ownedPRChecks, reserved ...*session.Ses
 		}
 		md = sc.byKey[current.Run]
 		payload, _ := json.Marshal(run.CIRepairAttempt{PR: current.PR, Head: current.Head, InputIDs: ids})
-		msg := fmt.Sprintf("claim CI repair: %s\n\n", current.Run) + trailers.Block{
+		msg := fmt.Sprintf("Claim CI repair for %s\n\n", current.Run) + trailers.Block{
 			Run: md.ID, Project: md.Project, Workflow: md.Workflow, Consent: walkConsent(), CIRepair: string(payload),
 		}.String()
 		return git.Run(root, "commit", "--allow-empty", "-m", msg)

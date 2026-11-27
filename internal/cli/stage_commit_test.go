@@ -301,7 +301,7 @@ func TestCommitTurnWithoutTimeoutIsUnchanged(t *testing.T) {
 	}
 
 	body := gitLogFormat(t, root, 1, "HEAD", "%B")
-	want := "work: update code\n\n" +
+	want := "Update code for tele/fix-it\n\n" +
 		"MoE-Run: fix-it\n" +
 		"MoE-Project: tele\n" +
 		"MoE-Workflow: " + sdlcWorkflow + "\n" +

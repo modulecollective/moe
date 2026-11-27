@@ -29,7 +29,7 @@ import (
 // there's no work to do and no reason to fail the turn.
 func commitSessionStart(root string, md *run.Metadata, docID, sessionID string) error {
 	runJSON := filepath.Join(run.Dir(md.Project, md.ID), "run.json")
-	msg := fmt.Sprintf("work: start session for %s\n\n", docID) +
+	msg := fmt.Sprintf("Start %s for %s/%s\n\n", docID, md.Project, md.ID) +
 		trailers.Block{
 			Run:      md.ID,
 			Project:  md.Project,
@@ -146,7 +146,7 @@ func commitTurn(root string, md *run.Metadata, docID, backend string, timedOut t
 	if timedOut > 0 {
 		block.TimedOut = timedOut.String()
 	}
-	msg := fmt.Sprintf("work: update %s\n\n", docID) + block.String()
+	msg := run.WorkTurnSubject(md.Project, md.ID, docID) + "\n\n" + block.String()
 	allPaths := append([]string{docDir, runJSON}, extraPaths...)
 	// followups.md is sibling of run.json — stages append to it as
 	// they spot adjacent work to capture. Stage it conditionally so

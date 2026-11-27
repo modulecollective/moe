@@ -126,7 +126,7 @@ func (q *pulseQuotaRetries) commit(e run.QuotaRetry) error {
 		if err == nil {
 			// A resolution changes scheduling evidence, not necessarily
 			// canvas bytes, so the journal event may be an empty commit.
-			err = git.Run(q.root, "commit", "--allow-empty", "-m", "quota retry: "+q.project+"/"+q.pulse+"\n\n"+block.String())
+			err = git.Run(q.root, "commit", "--allow-empty", "-m", "Schedule quota retry for "+q.project+"/"+q.pulse+"\n\n"+block.String())
 		}
 		if err != nil {
 			restoreErr := os.WriteFile(path, before, 0o644)

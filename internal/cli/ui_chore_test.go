@@ -21,7 +21,7 @@ func TestUIChoreActionsLandCommits(t *testing.T) {
 
 	// Create from the text form.
 	form := chore.Spec{Cadence: "30d", Prompt: "# lint\n"}.Text()
-	if r := uiDo(ctx, root, ui.Action{Kind: ui.ActChoreCreate, Project: "moe", Run: "lint", Text: form}); !r.OK || subject() != "chore: add moe/lint" {
+	if r := uiDo(ctx, root, ui.Action{Kind: ui.ActChoreCreate, Project: "moe", Run: "lint", Text: form}); !r.OK || subject() != "Add chore moe/lint" {
 		t.Fatalf("create: %+v, subject %q", r, subject())
 	}
 
@@ -45,7 +45,7 @@ func TestUIChoreActionsLandCommits(t *testing.T) {
 
 	// Edit against the form it opened from.
 	edited := chore.Spec{Cadence: "30d", Cooldown: "7d", Prompt: "# lint\n"}.Text()
-	if r := uiDo(ctx, root, ui.Action{Kind: ui.ActChoreEdit, Project: "moe", Run: "lint", Expected: form, Text: edited}); !r.OK || subject() != "chore: edit moe/lint" {
+	if r := uiDo(ctx, root, ui.Action{Kind: ui.ActChoreEdit, Project: "moe", Run: "lint", Expected: form, Text: edited}); !r.OK || subject() != "Edit chore moe/lint" {
 		t.Fatalf("edit: %+v", r)
 	}
 	// A stale Expected is a definite Changed refusal.
@@ -72,7 +72,7 @@ func TestUIChoreActionsLandCommits(t *testing.T) {
 	}
 
 	// Delete.
-	if r := uiDo(ctx, root, ui.Action{Kind: ui.ActChoreDelete, Project: "moe", Run: "lint"}); !r.OK || subject() != "chore: remove moe/lint" {
+	if r := uiDo(ctx, root, ui.Action{Kind: ui.ActChoreDelete, Project: "moe", Run: "lint"}); !r.OK || subject() != "Remove chore moe/lint" {
 		t.Fatalf("delete: %+v", r)
 	}
 }

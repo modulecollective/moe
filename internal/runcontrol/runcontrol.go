@@ -537,7 +537,7 @@ func workflowOf(root, projectID, runID string) string {
 }
 
 func message(projectID, runID, workflow, what, consent string) string {
-	return fmt.Sprintf("control: %s %s/%s\n\n", what, projectID, runID) +
+	return fmt.Sprintf("Record control request for %s/%s — %s\n\n", projectID, runID, what) +
 		trailers.Block{
 			Run:      runID,
 			Project:  projectID,

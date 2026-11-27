@@ -345,7 +345,7 @@ func harvestLore(root, projectID, runID, workflow string) error {
 	relPath := run.FeedbackPath(projectID, runID, "lore")
 	spec := scratchHarvestSpec[parsedLore]{
 		relPath:                  relPath,
-		progressSubject:          fmt.Sprintf("harvest: capture lore for %s/%s", projectID, runID),
+		progressSubject:          fmt.Sprintf("Harvest lore for %s/%s", projectID, runID),
 		progressPaths:            []string{lore.DirRel},
 		writeErrorLeavesProgress: loreWriteErrorLeavesProgress,
 		writeErrPrefix:           "promote lore",

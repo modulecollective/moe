@@ -234,7 +234,7 @@ func TestSDLCFailedTurnDoesNotExtract(t *testing.T) {
 				if err != nil || !strings.Contains(string(b), "Blocked pending prerequisite") {
 					t.Fatalf("committed evidence lost: %q %v", b, err)
 				}
-				if got := gitLog(t, root, "--format=%s", "--grep=^work: update design"); got == "" {
+				if got := gitLog(t, root, "--format=%s", "--grep=^Update design for "); got == "" {
 					t.Fatal("stage commit lost")
 				}
 				if _, err := os.Stat(filepath.Join(root, run.ContentDir("tele", md.ID, "build"))); !os.IsNotExist(err) {
@@ -317,7 +317,7 @@ func TestFollowupReceiptRetry(t *testing.T) {
 			writeFollowups(t, root, "tele", "source", original)
 			gittest.Run(t, root, "add", run.FollowupsPath("tele", "source"))
 			gittest.Run(t, root, "commit", "-m", "file tagged work")
-			installCreateFailureHook(t, root, `case "$(head -n 1 "$1")" in 'harvest: capture follow-ups'*) echo reject-audit >&2; exit 1 ;; esac`)
+			installCreateFailureHook(t, root, `case "$(head -n 1 "$1")" in 'Harvest '*) echo reject-audit >&2; exit 1 ;; esac`)
 			if err := harvestTurnEnd(root, md); err == nil || !strings.Contains(err.Error(), "reject-audit") {
 				t.Fatalf("audit failure=%v", err)
 			}
@@ -473,7 +473,7 @@ func TestFollowupFailedLinkRejudgesOwner(t *testing.T) {
 			// its receipt resolves it on retry rather than minting later-2.
 			original := "- [ ] `later` — Needs judgment\n  An unresolved contract.\n- [ ] `fix` (sdlc) — Existing owner\n"
 			writeFollowups(t, root, "tele", "source", original)
-			installCreateFailureHook(t, root, `case "$(head -n 1 "$1")" in 'harvest: link follow-up'*) echo reject-link >&2; exit 1 ;; esac`)
+			installCreateFailureHook(t, root, `case "$(head -n 1 "$1")" in 'Link follow-up'*) echo reject-link >&2; exit 1 ;; esac`)
 			harvest := func() error {
 				if mode == "early" {
 					return harvestTurnEnd(root, md)
@@ -618,7 +618,7 @@ func TestBlockedSourceTaggedFollowupPulseHandoff(t *testing.T) {
 			t.Fatalf("%s build started: %v", source.ID, err)
 		}
 	}
-	if got := gitLog(t, root, "--format=%s", "--all-match", "--grep=^work: update design$", "--grep=^MoE-Run: design-gate$"); strings.Count(got, "work:") != 1 {
+	if got := gitLog(t, root, "--format=%s", "--all-match", "--grep=^Update design for tele/design-gate$", "--grep=^MoE-Run: design-gate$"); strings.Count(got, "Update design") != 1 {
 		t.Fatalf("source reran: %s", got)
 	}
 }

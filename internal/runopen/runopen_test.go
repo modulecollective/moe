@@ -32,11 +32,11 @@ func TestEditCaptureWritesCanvasAndCommits(t *testing.T) {
 		t.Fatalf("canvas body:\nwant: %q\ngot:  %q", want, string(got))
 	}
 
-	// HEAD commit carries the work: update idea subject + the trailers
+	// HEAD commit carries the work-turn subject + the trailers
 	// the CLI's runIdeaEdit produces.
 	msg := gittest.Output(t, root, "log", "-1", "--format=%s%n%b")
 	for _, want := range []string{
-		"work: update idea",
+		"Update idea for alpha/my-idea",
 		"MoE-Run: my-idea",
 		"MoE-Project: alpha",
 		"MoE-Workflow: idea",
@@ -177,7 +177,7 @@ func newCaptureBureaucracy(t *testing.T, workflow, projectID, slug, body string)
 
 // TestEditCaptureWritesIntentCanvas: the intent side of the same
 // helper. The commit must be byte-shape-identical to what `moe intent
-// edit` writes — subject `work: update intent`, workflow and document
+// edit` writes — subject `Update intent for <p>/<r>`, workflow and document
 // trailers both naming intent, canvas under the intent doc dir.
 func TestEditCaptureWritesIntentCanvas(t *testing.T) {
 	root := newCaptureBureaucracy(t, dash.IntentWorkflow, "alpha", "ship-faster", "# ship faster\n")
@@ -194,7 +194,7 @@ func TestEditCaptureWritesIntentCanvas(t *testing.T) {
 	}
 	msg := gittest.Output(t, root, "log", "-1", "--format=%s%n%b")
 	for _, want := range []string{
-		"work: update intent",
+		"Update intent for alpha/ship-faster",
 		"MoE-Run: ship-faster",
 		"MoE-Project: alpha",
 		"MoE-Workflow: intent",
@@ -470,7 +470,7 @@ func TestPromoteCarriesTheIdeasUndeliveredInput(t *testing.T) {
 	// The carry is its own commit, and it lands after the status bump —
 	// while the idea is still in progress both records would list the
 	// same entries.
-	if got := gittest.Output(t, root, "log", "-1", "--format=%s"); !strings.Contains(got, "input: carried alpha/my-idea#1") {
+	if got := gittest.Output(t, root, "log", "-1", "--format=%s"); !strings.Contains(got, "Carry alpha/my-idea#1") {
 		t.Fatalf("HEAD = %q, want the carry commit", got)
 	}
 	if got := gittest.Output(t, root, "log", "-1", "--skip=1", "--format=%s"); !strings.Contains(got, "Promote idea alpha/my-idea") {

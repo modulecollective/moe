@@ -837,12 +837,12 @@ func tombstoneReap(root string, s *session.Session, now time.Time) (string, erro
 		return "", fmt.Errorf("reap tombstone: %w", err)
 	}
 	runJSON := filepath.Join(run.Dir(s.Project, s.Run), "run.json")
-	msg := fmt.Sprintf("reap: %s/%s %s turn unfinished — abandoned %s\n\n"+
+	msg := fmt.Sprintf("Reap unfinished %s turn for %s/%s — abandoned %s\n\n"+
 		"Read the recorded outcome, when available: `moe %s log %s/%s %s`.\n"+
 		"Reaping alone does not establish the cause.\n"+
 		"The abandoned tip may contain session evidence readable until Git GC prunes it;\n"+
 		"archived diagnostics are retained separately.\n\n",
-		s.Project, s.Run, s.Doc, git.ShortSHA(tip), md.Workflow, s.Project, s.Run, s.Doc) +
+		s.Doc, s.Project, s.Run, git.ShortSHA(tip), md.Workflow, s.Project, s.Run, s.Doc) +
 		trailers.Block{
 			Run:      s.Run,
 			Project:  s.Project,

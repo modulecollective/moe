@@ -232,7 +232,7 @@ func gatherDashSnapshot(root string, now time.Time, filter DashFilter, cached li
 
 // sessionBranchTips maps every session branch to its tip's committer
 // date, in one for-each-ref rather than a rev-parse per session. The tip
-// is the "work: start session" commit at open, bumped by each committed
+// is the "Start <doc> for <p>/<r>" commit at open, bumped by each committed
 // turn and by every resume reconcile — the last activity *in* the
 // session, which is the honest date for a row whose whole claim is that
 // the session is live.

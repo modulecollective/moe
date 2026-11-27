@@ -155,12 +155,12 @@ func TestPushMergeCommitsHarvestBeforeFFPush(t *testing.T) {
 	assertRootCleanDuringHeldMerge(t, f)
 
 	harvest := gittest.Output(t, f.root, "log", "--format=%H",
-		"--grep=^harvest: capture follow-ups, lore, and twin observations for "+f.projectID+"/"+f.runID)
+		"--grep=^Harvest "+f.projectID+"/"+f.runID+"$")
 	if harvest == "" {
-		t.Fatalf("no harvest: commit in the journal:\n%s", gittest.Output(t, f.root, "log", "--format=%s"))
+		t.Fatalf("no Harvest commit in the journal:\n%s", gittest.Output(t, f.root, "log", "--format=%s"))
 	}
 	if strings.Contains(harvest, "\n") {
-		t.Fatalf("want one harvest: commit, got:\n%s", harvest)
+		t.Fatalf("want one Harvest commit, got:\n%s", harvest)
 	}
 	files := gittest.Output(t, f.root, "show", "--name-only", "--format=", harvest)
 	if !strings.Contains(files, followupsRel) {
@@ -171,7 +171,7 @@ func TestPushMergeCommitsHarvestBeforeFFPush(t *testing.T) {
 		t.Fatalf("harvest commit does not carry the [x] rewrite:\n%s", show)
 	}
 	merge := gittest.Output(t, f.root, "log", "--format=%H", "-1",
-		"--grep=^push: "+f.projectID+"/"+f.runID+" merged")
+		"--grep=^Push "+f.projectID+"/"+f.runID+" — merged$")
 	mergeFiles := gittest.Output(t, f.root, "show", "--name-only", "--format=", merge)
 	if strings.Contains(mergeFiles, followupsRel) {
 		t.Fatalf("merge record still touches %s:\n%s", followupsRel, mergeFiles)

@@ -1085,12 +1085,12 @@ type JournalIndex struct {
 	// QuotaRetries holds outstanding clock obligations by originating pulse.
 	QuotaRetries map[string]QuotaRetry
 	// WorkTurnTime maps (project, run, doc) → committer time of the
-	// most recent `work: update <doc>` commit scoped to that run.
+	// most recent work-turn commit (IsWorkTurnSubject) scoped to that run.
 	// Same contract as LatestWorkTurnSHA's `when` return — zero
 	// time means "no work turn on record yet."
 	WorkTurnTime map[WorkTurnKey]time.Time
 	// AdvanceTime maps (project, run, doc) → committer time of the
-	// most recent `advance: <doc>` marker commit scoped to that run.
+	// most recent advance marker (IsAdvanceSubject) scoped to that run.
 	// Same key and contract as WorkTurnTime, populated in the same
 	// scan and read by stageSatisfied's advance check, so dash's
 	// index path agrees with the per-call LatestAdvanceSHA fork.

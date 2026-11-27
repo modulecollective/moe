@@ -90,7 +90,7 @@ func TestReapStampsATombstone(t *testing.T) {
 	}
 
 	body := gitLogFormat(t, root, 1, "HEAD", "%B")
-	wantSubject := "reap: moe/" + slug + " design turn unfinished — abandoned " + git.ShortSHA(tip)
+	wantSubject := "Reap unfinished design turn for moe/" + slug + " — abandoned " + git.ShortSHA(tip)
 	for _, want := range []string{wantSubject, "MoE-Run: " + slug, "MoE-Project: moe", "MoE-Consent: dynamic", "moe sdlc log moe/" + slug + " design", "session evidence", "until Git GC prunes it"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("tombstone commit missing %q:\n%s", want, body)

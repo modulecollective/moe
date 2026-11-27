@@ -59,7 +59,7 @@ func TestPulseNotePostCommitsAndRedirects(t *testing.T) {
 	if rec.Code != http.StatusSeeOther || rec.Header().Get("Location") != "/#pulse" {
 		t.Fatalf("POST /pulse/note = %d %q, want 303 to /#pulse", rec.Code, rec.Header().Get("Location"))
 	}
-	if subj := gittest.Output(t, root, "log", "-1", "--format=%s"); strings.TrimSpace(subj) != "input: pulse note #1" {
+	if subj := gittest.Output(t, root, "log", "-1", "--format=%s"); strings.TrimSpace(subj) != "Note for pulse #1" {
 		t.Fatalf("tip = %q, want the note commit", subj)
 	}
 	if after := gittest.Output(t, root, "rev-list", "--count", "HEAD"); strings.TrimSpace(after) == strings.TrimSpace(before) {

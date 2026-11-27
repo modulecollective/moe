@@ -33,7 +33,7 @@ const receiptRefusal = "receipt <refused> by policy & hook"
 func refuseFailedReceipts(t *testing.T, root string) {
 	t.Helper()
 	hooks := t.TempDir()
-	script := "#!/bin/sh\ncase \"$(head -n 1 \"$1\")\" in 'control: failed '*) echo '" + receiptRefusal + "' >&2; exit 1;; esac\nexit 0\n"
+	script := "#!/bin/sh\ncase \"$(head -n 1 \"$1\")\" in 'Record control request for '*' — failed '*) echo '" + receiptRefusal + "' >&2; exit 1;; esac\nexit 0\n"
 	if err := os.WriteFile(filepath.Join(hooks, "commit-msg"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -384,7 +384,7 @@ func TestOwedHoldReceiptOutlivesItsOwner(t *testing.T) {
 				ownForTest(t, root)
 				submitControl(t, root, tc.kind, "h1")
 				hooks := t.TempDir()
-				script := "#!/bin/sh\ncase \"$(head -n 1 \"$1\")\" in 'control: completed '*) exit 1;; esac\nexit 0\n"
+				script := "#!/bin/sh\ncase \"$(head -n 1 \"$1\")\" in 'Record control request for '*' — completed '*) exit 1;; esac\nexit 0\n"
 				if err := os.WriteFile(filepath.Join(hooks, "commit-msg"), []byte(script), 0o755); err != nil {
 					t.Fatal(err)
 				}

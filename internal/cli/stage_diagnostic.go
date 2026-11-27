@@ -19,7 +19,7 @@ import (
 )
 
 // A diagnostic is evidence of a refusal, never a work turn. In particular,
-// its commit must not carry MoE-Document or a work: update subject.
+// its commit must not carry MoE-Document or a work-turn subject.
 type stageFailure struct {
 	Stage               string        `json:"stage"`
 	Agent               string        `json:"agent"`
@@ -159,7 +159,7 @@ func saveStageFailure(root string, in stageTurnInputs, spec stageTurnSpec, a age
 		if failure.Execution.Timeout != "" {
 			block.TimedOut = failure.Execution.Timeout
 		}
-		msg := fmt.Sprintf("diagnostic: %s/%s %s canvas %s\n\n", md.Project, md.ID, spec.DocID, refusal.Reason) + block.String()
+		msg := run.DiagnosticSubject(md.Project, md.ID, spec.DocID, refusal.Reason) + "\n\n" + block.String()
 		args := append([]string{"commit", "--only", "-m", msg, "--"}, paths...)
 		return git.Run(root, args...)
 	})

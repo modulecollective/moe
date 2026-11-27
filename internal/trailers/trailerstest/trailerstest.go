@@ -49,7 +49,7 @@ func CommitTrailer(t *testing.T, root, subject, trailers string, when time.Time)
 	gittest.RunWithEnv(t, root, env, "commit", "--allow-empty", "-m", subject+"\n\n"+trailers+"\n")
 }
 
-// CommitWorkTurnAt records a `work: update <docID>` commit with the
+// CommitWorkTurnAt records a run.WorkTurnSubject commit with the
 // trailers commitTurn writes in production (Run/Project/Workflow/
 // Document), dated to when. Returns HEAD's SHA so the caller can
 // assert it appears in the banner / log output it is exercising.
@@ -67,11 +67,11 @@ func CommitWorkTurnAt(t *testing.T, root, projectID, runID, workflow, docID stri
 	if n := len(block); n > 0 && block[n-1] == '\n' {
 		block = block[:n-1]
 	}
-	CommitTrailer(t, root, "work: update "+docID, block, when)
+	CommitTrailer(t, root, run.WorkTurnSubject(projectID, runID, docID), block, when)
 	return gittest.HeadSHA(t, root)
 }
 
-// CommitAdvanceAt records an `advance: <docID>` marker commit with the
+// CommitAdvanceAt records a run.AdvanceSubject marker commit with the
 // trailers commitAdvance writes in production (Run/Project/Workflow/
 // Document), dated to when. The marker subject is what stageSatisfied's
 // advance check matches; tests use this to drive the click-forward
@@ -89,7 +89,7 @@ func CommitAdvanceAt(t *testing.T, root, projectID, runID, workflow, docID strin
 	if n := len(block); n > 0 && block[n-1] == '\n' {
 		block = block[:n-1]
 	}
-	CommitTrailer(t, root, "advance: "+docID, block, when)
+	CommitTrailer(t, root, run.AdvanceSubject(projectID, runID, docID), block, when)
 }
 
 // SeedProject writes a minimal project.json so the project-registered

@@ -236,7 +236,7 @@ func Add(root, projectID, runID, text string) (Entry, error) {
 		f.Notes = append(f.Notes, e)
 
 		ref := fmt.Sprintf("%s/%s#%d", projectID, runID, e.ID)
-		return f, fmt.Sprintf("input: note %s\n\n", ref) +
+		return f, fmt.Sprintf("Note %s\n\n", ref) +
 			trailers.Block{
 				Run:        runID,
 				Project:    projectID,
@@ -277,7 +277,7 @@ func Ask(root, projectID, runID, askedBy, question, consent string) (Entry, erro
 		f.Notes = append(f.Notes, e)
 
 		ref := fmt.Sprintf("%s/%s#%d", projectID, runID, e.ID)
-		return f, fmt.Sprintf("input: ask %s\n\n", ref) +
+		return f, fmt.Sprintf("Ask %s\n\n", ref) +
 			trailers.Block{
 				Run:        runID,
 				Project:    projectID,
@@ -322,7 +322,7 @@ func Answer(root, projectID, runID string, id int, text string) (Entry, error) {
 		answered = f.Notes[open.ID-1]
 
 		ref := fmt.Sprintf("%s/%s#%d", projectID, runID, answered.ID)
-		return f, fmt.Sprintf("input: answer %s\n\n", ref) +
+		return f, fmt.Sprintf("Answer %s\n\n", ref) +
 			trailers.Block{
 				Run:           runID,
 				Project:       projectID,
@@ -387,7 +387,7 @@ func MarkDelivered(root, projectID, runID, docID string, ids []int, consent stri
 		// No MoE-Document trailer, deliberately: that trailer is how the
 		// harness reads "this stage's doc turn happened", and a bookkeeping
 		// stamp is not a turn. The doc rides the delivered value instead.
-		return f, fmt.Sprintf("input: delivered %s to %s\n\n", ref, docID) +
+		return f, fmt.Sprintf("Deliver %s to %s\n\n", ref, docID) +
 			trailers.Block{
 				Run:            runID,
 				Project:        projectID,
@@ -454,7 +454,7 @@ func Carry(root, srcProject, srcRun, dstProject, dstRun, consent string) (int, e
 
 		srcRef := fmt.Sprintf("%s/%s#%s", srcProject, srcRun, strings.Join(srcIDs, ","))
 		dstRef := fmt.Sprintf("%s/%s#%s", dstProject, dstRun, strings.Join(dstIDs, ","))
-		return dst, fmt.Sprintf("input: carried %s → %s\n\n", srcRef, dstRef) +
+		return dst, fmt.Sprintf("Carry %s → %s\n\n", srcRef, dstRef) +
 			trailers.Block{
 				Run:      dstRun,
 				Project:  dstProject,

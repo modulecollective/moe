@@ -181,7 +181,7 @@ func TestSDLCStagePersistsAgentWithCascadeFlag(t *testing.T) {
 			assertUnrelatedUnchanged()
 			log := gitLogFormat(t, root, 1, "HEAD", "%s%n%B")
 			for _, want := range []string{
-				"switch agent: tele/" + slug + " to codex",
+				"Switch agent for tele/" + slug + " to codex",
 				"MoE-Run: " + slug,
 				"MoE-Project: tele",
 				"MoE-Workflow: sdlc",
@@ -261,7 +261,7 @@ func TestSDLCStageAgentNoOpWhenAlreadyPersisted(t *testing.T) {
 	}
 	assertUnrelatedUnchanged := seedAgentSwitchStaging(t, root, "agent-noop")
 	installCreateFailureHook(t, root, `case "$(head -n 1 "$1")" in
-  "switch agent:"*) touch .git/agent-switch-hook-ran; echo reject-switch >&2; exit 1 ;;
+  "Switch agent for "*) touch .git/agent-switch-hook-ran; echo reject-switch >&2; exit 1 ;;
 esac
 `)
 	headBefore := gitLogFormat(t, root, 1, "HEAD", "%H")
@@ -708,7 +708,7 @@ func TestSDLCStageAgentCommitRejected(t *testing.T) {
 			assertUnrelatedUnchanged := seedAgentSwitchStaging(t, root, "rejected-agent")
 			rel, working, index := seedAgentSwitchTarget(t, root, "rejected-agent")
 			installCreateFailureHook(t, root, `case "$(head -n 1 "$1")" in
-  "switch agent:"*) echo reject-switch >&2; exit 1 ;;
+  "Switch agent for "*) echo reject-switch >&2; exit 1 ;;
 esac
 `)
 			before := gittest.HeadSHA(t, root)
@@ -722,7 +722,7 @@ esac
 				}
 				assertAgentSwitchCommit(t, root, "rejected-agent", before)
 				log := gitLogFormat(t, root, 1, "HEAD", "%B")
-				for _, want := range []string{"switch agent: tele/rejected-agent to codex", "MoE-Run: rejected-agent", "MoE-Project: tele", "MoE-Workflow: sdlc", "MoE-Document: design"} {
+				for _, want := range []string{"Switch agent for tele/rejected-agent to codex", "MoE-Run: rejected-agent", "MoE-Project: tele", "MoE-Workflow: sdlc", "MoE-Document: design"} {
 					if !strings.Contains(log, want) {
 						t.Errorf("commit missing %q before dispatch: %s", want, log)
 					}

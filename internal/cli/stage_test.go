@@ -527,8 +527,8 @@ func TestCommitSessionStartWritesTrailersAndKeepsTreeClean(t *testing.T) {
 	}
 
 	subject := gitLogFormat(t, root, 1, "HEAD", "%s")
-	if subject != "work: start session for design" {
-		t.Errorf("subject = %q, want %q", subject, "work: start session for design")
+	if subject != "Start design for tele/fix-it" {
+		t.Errorf("subject = %q, want %q", subject, "Start design for tele/fix-it")
 	}
 	body := gitLogFormat(t, root, 1, "HEAD", "%B")
 	for _, want := range []string{
@@ -658,7 +658,7 @@ func TestCommitSessionStartFollowedByCommitTurnYieldsTwoDistinctCommits(t *testi
 	log := gitLogFormat(t, root, 2, "HEAD", "%s")
 	subjects := strings.Split(strings.TrimSpace(log), "\n")
 	// git log is newest-first.
-	want := []string{"work: update design", "work: start session for design"}
+	want := []string{"Update design for tele/fix-it", "Start design for tele/fix-it"}
 	if len(subjects) != len(want) || subjects[0] != want[0] || subjects[1] != want[1] {
 		t.Errorf("subjects = %v, want %v", subjects, want)
 	}
@@ -715,15 +715,15 @@ func TestSecondTurnOnExistingDocumentSkipsEagerCommit(t *testing.T) {
 	if headBefore == headAfter {
 		t.Fatal("expected commitTurn to add a commit on second turn")
 	}
-	// Exactly one new commit, and its subject is `work: update …`.
+	// Exactly one new commit, and its subject is the work-turn headline.
 	subj := gitLogFormat(t, root, 1, "HEAD", "%s")
-	if subj != "work: update design" {
-		t.Errorf("second-turn HEAD subject = %q, want %q", subj, "work: update design")
+	if subj != "Update design for tele/fix-it" {
+		t.Errorf("second-turn HEAD subject = %q, want %q", subj, "Update design for tele/fix-it")
 	}
 	// HEAD~1 must still be the first-turn update, not a duplicate start-session.
 	prev := gitLogFormat(t, root, 1, "HEAD~1", "%s")
-	if prev != "work: update design" {
-		t.Errorf("HEAD~1 subject = %q, want %q (no eager commit on second turn)", prev, "work: update design")
+	if prev != "Update design for tele/fix-it" {
+		t.Errorf("HEAD~1 subject = %q, want %q (no eager commit on second turn)", prev, "Update design for tele/fix-it")
 	}
 }
 

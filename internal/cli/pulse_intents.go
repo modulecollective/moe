@@ -155,7 +155,7 @@ func applyPulseServes(root, spawnedBy string, serves []pulseServes, minted map[s
 				return restore(err)
 			}
 		}
-		msg := fmt.Sprintf("Link %d run(s) to intents\n\n", len(paths)) +
+		msg := "Link " + dash.Plural(len(paths), "run") + " to intents\n\n" +
 			trailers.Block{SpawnedBy: spawnedBy, Consent: spawnConsent(spawnedBy)}.String()
 		if err := run.StageAndCommit(root, msg, paths...); err != nil {
 			return restore(err)

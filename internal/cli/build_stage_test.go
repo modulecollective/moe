@@ -92,10 +92,10 @@ func TestBuildTurnRefusesWhenNoCanvasChanged(t *testing.T) {
 	if !strings.Contains(stderr, "unchanged since dispatch") {
 		t.Fatalf("expected the unchanged refusal, got %q", stderr)
 	}
-	if log := gitLog(t, root, "--format=%s", "--grep=^work: update build"); strings.TrimSpace(log) != "" {
+	if log := gitLog(t, root, "--format=%s", "--grep=^Update build for "); strings.TrimSpace(log) != "" {
 		t.Fatalf("no build work turn may land: %s", log)
 	}
-	if log := gitLog(t, root, "--format=%s", "--grep=^diagnostic: tele/noop-build build canvas unchanged"); strings.TrimSpace(log) == "" {
+	if log := gitLog(t, root, "--format=%s", "--grep=^Archive build diagnostic for tele/noop-build — canvas unchanged"); strings.TrimSpace(log) == "" {
 		t.Fatalf("expected a diagnostic commit for the refusal")
 	}
 }
@@ -139,8 +139,8 @@ func TestBuildTurnPersistsBothCanvasesAndResetsOnResume(t *testing.T) {
 	if ok, _ := wf.CheckStageGate(root, md, "build"); ok {
 		t.Fatal("a resumed build must not advance until restamped")
 	}
-	log := gitLog(t, root, "--format=%s%n%b", "--grep=^work: update build")
-	if strings.Count(log, "work: update build") != 2 || !strings.Contains(log, "MoE-Document: build") {
+	log := gitLog(t, root, "--format=%s%n%b", "--grep=^Update build for ")
+	if strings.Count(log, "Update build for ") != 2 || !strings.Contains(log, "MoE-Document: build") {
 		t.Fatalf("expected two build work turns under the build identity:\n%s", log)
 	}
 	if strings.Contains(gitLog(t, root, "--format=%b"), "MoE-Document: code") {

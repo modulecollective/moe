@@ -139,7 +139,7 @@ func syncWorktree(root string, stdout, stderr io.Writer) error {
 	// config can't re-enable it.
 	if sync.HasUpstream(root) {
 		// -c advice.skippedCherryPicks=false: when this pull rebases a
-		// local "sync: bump project pointers" commit over an identical
+		// local "Bump project pointers" commit over an identical
 		// bump that another machine already pushed, git deduplicates the
 		// patch and prints a "skipped previously applied commit" warning
 		// plus two hints to re-run with --reapply-cherry-picks. The dedup
@@ -359,7 +359,7 @@ func finalizePushedRunOwned(owner *runowner.Handle, root, projectID, runID, stat
 		extra.Project = projectID
 		extra.Document = "push"
 		extra.Consent = walkConsent()
-		msg := fmt.Sprintf("sync: %s/%s %s\n\n", projectID, runID, strings.ToLower(status)) +
+		msg := run.SyncSubject(projectID, runID, status) + "\n\n" +
 			extra.String()
 		if err := commitTerminal(root, md, priorStatus, msg, paths); err != nil {
 			return fmt.Errorf("moe sync: commit %s for %s/%s: %w", strings.ToLower(status), projectID, runID, err)

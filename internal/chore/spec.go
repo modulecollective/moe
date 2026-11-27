@@ -285,7 +285,7 @@ func Remove(root, projectID, name string) error {
 		if err := os.RemoveAll(filepath.Join(root, rel)); err != nil {
 			return snap.restore(root, fmt.Errorf("remove %s: %w", rel, err))
 		}
-		return commitDir(root, rel, "chore: remove "+key, snap)
+		return commitDir(root, rel, "Remove chore "+key, snap)
 	})
 }
 
@@ -299,9 +299,9 @@ func write(root, projectID, name string, expected *Spec, s Spec, create bool) er
 	s = s.normalized()
 	rel := Dir(projectID, name)
 	key := projectID + "/" + name
-	purpose, verb := "chore-edit", "edit"
+	purpose, verb := "chore-edit", "Edit"
 	if create {
-		purpose, verb = "chore-add", "add"
+		purpose, verb = "chore-add", "Add"
 	}
 	return repolock.With(root, repolock.Options{Purpose: purpose, Run: key}, func() error {
 		cur, err := LoadSpec(root, projectID, name)
@@ -334,7 +334,7 @@ func write(root, projectID, name string, expected *Spec, s Spec, create bool) er
 		if err := writeFiles(root, rel, s); err != nil {
 			return snap.restore(root, err)
 		}
-		return commitDir(root, rel, "chore: "+verb+" "+key, snap)
+		return commitDir(root, rel, verb+" chore "+key, snap)
 	})
 }
 

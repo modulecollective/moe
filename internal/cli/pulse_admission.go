@@ -57,7 +57,7 @@ func commitSurveyRetry(root string, e run.QuotaRetry) error {
 				return fmt.Errorf("journal has uncommitted changes at %s", entry.Path)
 			}
 		}
-		return git.Run(root, "commit", "--allow-empty", "-m", "quota retry: survey admission\n\n"+block.String())
+		return git.Run(root, "commit", "--allow-empty", "-m", "Schedule quota retry for survey admission\n\n"+block.String())
 	})
 }
 

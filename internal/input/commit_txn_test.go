@@ -176,7 +176,7 @@ func TestInputCommitSuccessPreservesUnrelatedStaging(t *testing.T) {
 						t.Fatalf("carried %d entries, want 1", n)
 					}
 					want.Notes = append(want.Notes, Entry{ID: id, Text: "carry me"})
-					trailer = "input: carried moe/source#1 → " + ref
+					trailer = "Carry moe/source#1 → " + ref
 				}
 				if err != nil {
 					t.Fatal(err)

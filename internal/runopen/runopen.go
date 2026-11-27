@@ -367,7 +367,7 @@ var ErrNotAdvanceable = errors.New("runopen: not an advanceable stage")
 // advanceMarker writes the empty stage-done commit. Only the guarded writer
 // below may call it, with the repository lock held.
 func advanceMarker(root string, md *run.Metadata, docID, consent string) error {
-	msg := fmt.Sprintf("advance: %s\n\n", docID) +
+	msg := run.AdvanceSubject(md.Project, md.ID, docID) + "\n\n" +
 		trailers.Block{
 			Run:      md.ID,
 			Project:  md.Project,
@@ -704,7 +704,7 @@ var ErrCaptureChanged = errors.New("runopen: capture changed since it was opened
 // The CLI's `moe idea edit` / `moe intent edit` do not migrate here:
 // their editor flow writes the file in place via $EDITOR and a body-in
 // API doesn't fit cleanly. The trailer block is the same shape
-// (work: update <doc>, MoE-Run / MoE-Project / MoE-Workflow / MoE-Document).
+// (run.WorkTurnSubject, MoE-Run / MoE-Project / MoE-Workflow / MoE-Document).
 func EditCapture(root, projectID, slug, body string) error {
 	return editCapture(root, projectID, slug, nil, body)
 }
@@ -759,7 +759,7 @@ func editCapture(root, projectID, slug string, expected *string, body string) er
 		if err := os.WriteFile(abs, []byte(body), 0o644); err != nil {
 			return fmt.Errorf("runopen: write canvas: %w", err)
 		}
-		msg := fmt.Sprintf("work: update %s\n\n", docID) +
+		msg := run.WorkTurnSubject(projectID, slug, docID) + "\n\n" +
 			trailers.Block{
 				Run:      slug,
 				Project:  projectID,

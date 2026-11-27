@@ -636,7 +636,7 @@ func openPRPath(root string, md *run.Metadata, pj *project.Metadata, branch, req
 		if firstPush {
 			consent = walkConsent()
 		}
-		msg := fmt.Sprintf("push: %s/%s\n\n", md.Project, md.ID) +
+		msg := run.PushSubject(md.Project, md.ID, "") + "\n\n" +
 			trailers.Block{
 				Run:      md.ID,
 				Project:  md.Project,
@@ -809,7 +809,7 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 	// that a re-run pushes again. Harvest runs under lock so each
 	// createIdea sees a held bureaucracy lock.
 	consent := walkConsent()
-	harvestMsg := fmt.Sprintf("harvest: capture follow-ups, lore, and twin observations for %s/%s\n\n", md.Project, md.ID) +
+	harvestMsg := fmt.Sprintf("Harvest %s/%s\n\n", md.Project, md.ID) +
 		trailers.Block{
 			Run:      md.ID,
 			Project:  md.Project,
@@ -868,7 +868,7 @@ func mergePath(root string, md *run.Metadata, pj *project.Metadata, clonePath, b
 	// the stamp doubles as the provenance claim the run page reads —
 	// unlike openPRPath there is no retry to disambiguate, so the plain
 	// rule stands.
-	msg := fmt.Sprintf("push: %s/%s merged\n\n", md.Project, md.ID) +
+	msg := run.PushSubject(md.Project, md.ID, "merged") + "\n\n" +
 		trailers.Block{
 			Run:          md.ID,
 			Project:      md.Project,

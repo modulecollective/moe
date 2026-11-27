@@ -306,6 +306,9 @@ func TestMarkDeliveredStampsOnlyRenderedPendingIDs(t *testing.T) {
 	}
 
 	msg := gittest.Output(t, root, "log", "-1", "--format=%B")
+	if !strings.HasPrefix(msg, "Deliver moe/change-auth#1 to code\n") {
+		t.Fatalf("delivery headline wrong:\n%s", msg)
+	}
 	if !strings.Contains(msg, "MoE-Input-Delivered: moe/change-auth#1 code") {
 		t.Fatalf("delivery commit missing its trailer:\n%s", msg)
 	}
@@ -460,7 +463,7 @@ func TestCarryCopiesUndeliveredEntriesWithDenseDestinationIDs(t *testing.T) {
 	}
 	msg := gittest.Output(t, root, "log", "-1", "--format=%B")
 	for _, want := range []string{
-		"input: carried moe/idea#2,3 → moe/destination#2,3",
+		"Carry moe/idea#2,3 → moe/destination#2,3",
 		"MoE-Run: destination",
 		"MoE-Project: moe",
 		"MoE-Workflow: sdlc",
@@ -661,7 +664,7 @@ func TestMarkDeliveredKeepsANoteAddedMidWindow(t *testing.T) {
 		commitRecord(t, root, "change-auth", File{Notes: []Entry{
 			{ID: 1, Text: "the flake is known"},
 			{ID: 2, Text: "and the ARM build is red"},
-		}}, "input: note moe/change-auth#2")
+		}}, "Note moe/change-auth#2")
 	})
 
 	if err := MarkDelivered(root, "moe", "change-auth", "code", []int{1}, ""); err != nil {
@@ -694,7 +697,7 @@ func TestAskRefusesAPingOpenedMidWindow(t *testing.T) {
 	onceLocked(t, func() {
 		commitRecord(t, root, "change-auth", File{Notes: []Entry{
 			{ID: 1, AskedBy: "moe/pulse-zero", Question: "Which compatibility policy?"},
-		}}, "input: ask moe/change-auth#1")
+		}}, "Ask moe/change-auth#1")
 	})
 
 	_, err := Ask(root, "moe", "change-auth", "moe/pulse-one",
@@ -726,7 +729,7 @@ func TestAddLandsAfterANoteAddedMidWindow(t *testing.T) {
 		commitRecord(t, root, "change-auth", File{Notes: []Entry{
 			{ID: 1, Text: "the flake is known"},
 			{ID: 2, Text: "and the ARM build is red"},
-		}}, "input: note moe/change-auth#2")
+		}}, "Note moe/change-auth#2")
 	})
 
 	e, err := Add(root, "moe", "change-auth", "skip the integration leg")
@@ -761,7 +764,7 @@ func TestAnswerRefusesAPingAnsweredMidWindow(t *testing.T) {
 	onceLocked(t, func() {
 		commitRecord(t, root, "change-auth", File{Notes: []Entry{
 			{ID: open.ID, AskedBy: open.AskedBy, Question: open.Question, Text: "Keep the old policy."},
-		}}, "input: answer moe/change-auth#1")
+		}}, "Answer moe/change-auth#1")
 	})
 
 	_, err := Answer(root, "moe", "change-auth", open.ID, "Break it.")
@@ -794,7 +797,7 @@ func TestCarryKeepsAnOpenPingLandedOnTheDestinationMidWindow(t *testing.T) {
 		commitRecord(t, root, "destination", File{Notes: []Entry{
 			{ID: 1, Text: "already here"},
 			{ID: 2, AskedBy: "moe/pulse-two", Question: "Ship behind a flag?"},
-		}}, "input: ask moe/destination#2")
+		}}, "Ask moe/destination#2")
 	})
 
 	n, err := Carry(root, "moe", "idea", "moe", "destination", "")

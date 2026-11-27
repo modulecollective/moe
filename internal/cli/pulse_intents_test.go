@@ -152,7 +152,7 @@ func TestApplyPulseGateIntents(t *testing.T) {
 	}
 	// One link commit, machine-marked, between the mint and the close.
 	subjects := gittest.Output(t, root, "log", "--format=%s", before+"..HEAD")
-	if n := strings.Count(subjects, "Link 2 run(s) to intents"); n != 1 {
+	if n := strings.Count(subjects, "Link 2 runs to intents"); n != 1 {
 		t.Errorf("link commits = %d in:\n%s", n, subjects)
 	}
 	link := gittest.Output(t, root, "log", "-1", "--format=%B", "--grep=^Link ")

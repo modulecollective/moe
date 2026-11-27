@@ -400,7 +400,7 @@ func runChoreSkip(args []string, stdout, stderr io.Writer) int {
 	}
 	key := state.Definition.Key()
 	block := trailers.Block{ChoreSkipped: key}
-	msg := "chore: skip " + key + "\n\n" + block.String()
+	msg := "Skip chore " + key + "\n\n" + block.String()
 	err = repolock.With(root, repolock.Options{Purpose: "chore-skip", Run: key}, func() error {
 		return git.Run(root, "commit", "--allow-empty", "-m", msg)
 	})

@@ -269,7 +269,7 @@ func renderStageLadder(stages []string, current string) string {
 //   - There has been at least one prior work turn for docID. First-turn
 //     sessions get no banner — the agent will read prerequisites fresh on
 //     its own; there is no "since" to compute against.
-//   - At least one prerequisite document had its latest `work: update`
+//   - At least one prerequisite document had its latest work-turn
 //     commit land *after* the active doc's last work turn.
 //
 // The banner is advisory. Per stages/code.md "Match the design" the

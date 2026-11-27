@@ -23,7 +23,7 @@ func failPRRecordCommits(t *testing.T, root, projectID, runID string) func() {
 	t.Helper()
 	hooks := t.TempDir()
 	hook := filepath.Join(hooks, "commit-msg")
-	subject := "push: " + projectID + "/" + runID
+	subject := run.PushSubject(projectID, runID, "")
 	script := fmt.Sprintf("#!/bin/sh\n[ \"$(head -1 \"$1\")\" = %q ] && exit 1\nexit 0\n", subject)
 	if err := os.WriteFile(hook, []byte(script), 0o755); err != nil {
 		t.Fatal(err)

@@ -81,7 +81,7 @@ func TestServeChoreCreateEditDelete(t *testing.T) {
 	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/chore/moe/new" {
 		t.Fatalf("create: %d %q %s", rr.Code, rr.Header().Get("Location"), rr.Body.String())
 	}
-	if subj := gittest.Output(t, root, "log", "-1", "--format=%s"); strings.TrimSpace(subj) != "chore: add moe/new" {
+	if subj := gittest.Output(t, root, "log", "-1", "--format=%s"); strings.TrimSpace(subj) != "Add chore moe/new" {
 		t.Fatalf("subject %q", subj)
 	}
 	if s, _ := chore.LoadSpec(root, "moe", "new"); s != (chore.Spec{Cadence: "30d", Prompt: "# new\n"}) {
@@ -101,7 +101,7 @@ func TestServeChoreCreateEditDelete(t *testing.T) {
 	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/chore/moe/new" {
 		t.Fatalf("edit: %d %s", rr.Code, rr.Body.String())
 	}
-	if subj := gittest.Output(t, root, "log", "-1", "--format=%s"); strings.TrimSpace(subj) != "chore: edit moe/new" {
+	if subj := gittest.Output(t, root, "log", "-1", "--format=%s"); strings.TrimSpace(subj) != "Edit chore moe/new" {
 		t.Fatalf("subject %q", subj)
 	}
 	before = headSHA(t, root)
@@ -121,7 +121,7 @@ func TestServeChoreCreateEditDelete(t *testing.T) {
 	if rr.Code != http.StatusSeeOther || rr.Header().Get("Location") != "/projects/moe" {
 		t.Fatalf("delete: %d", rr.Code)
 	}
-	if subj := gittest.Output(t, root, "log", "-1", "--format=%s"); strings.TrimSpace(subj) != "chore: remove moe/new" {
+	if subj := gittest.Output(t, root, "log", "-1", "--format=%s"); strings.TrimSpace(subj) != "Remove chore moe/new" {
 		t.Fatalf("subject %q", subj)
 	}
 	if rr := do(t, h, "POST", "/chore/moe/new/delete", url.Values{}); rr.Code != http.StatusNotFound {

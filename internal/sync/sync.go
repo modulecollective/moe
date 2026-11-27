@@ -355,7 +355,7 @@ func BumpProjectPointers(root string, stdout io.Writer) error {
 	}
 	// Scope the commit to just the gitlink paths so any unrelated
 	// changes the operator already had staged don't get swept into a
-	// "sync: bump project pointers" commit by accident.
+	// "Bump project pointers" commit by accident.
 	commitArgs := append([]string{"commit", "-m", pointerBumpCommitMessage(bumps, "" /*`moe sync` is an operator verb*/), "--"}, paths...)
 	if out, err := git.Combined(root, commitArgs...); err != nil {
 		return fmt.Errorf("moe sync: git commit: %w (%s)", err, out)
@@ -366,7 +366,7 @@ func BumpProjectPointers(root string, stdout io.Writer) error {
 
 // BumpOne is the single-project variant of BumpProjectPointers: it
 // brings projects/<projectID>/src up to its tracking branch on origin
-// and, when the gitlink moved, commits a "sync: bump project pointers"
+// and, when the gitlink moved, commits a "Bump project pointers"
 // record for just that project. Returns nil — without committing —
 // when projectID is absent from .gitmodules or the bump is a no-op.
 //
@@ -420,7 +420,7 @@ func BumpOne(root, projectID, consent string, stdout io.Writer) error {
 // pointerBumpCommitMessage formats a bump set as a sync commit body.
 // Format:
 //
-//	sync: bump project pointers
+//	Bump project pointers
 //
 //	moe: 4562047..d077102
 //	…
@@ -435,7 +435,7 @@ func BumpOne(root, projectID, consent string, stdout io.Writer) error {
 func pointerBumpCommitMessage(bumps []Bump, consent string) string {
 	sort.Slice(bumps, func(i, j int) bool { return bumps[i].Path < bumps[j].Path })
 	var sb strings.Builder
-	sb.WriteString("sync: bump project pointers\n\n")
+	sb.WriteString("Bump project pointers\n\n")
 	for _, b := range bumps {
 		id := ProjectIDForSubmodulePath(b.Path)
 		if id == "" {
@@ -535,7 +535,7 @@ func AutoPull(root string, stdout, stderr io.Writer) error {
 	}
 	// -c advice.skippedCherryPicks=false: session-open auto-pull hits the
 	// same patch-id dedup as `moe sync` when machine B opens a session
-	// after machine A pushed a "sync: bump project pointers" commit — the
+	// after machine A pushed a "Bump project pointers" commit — the
 	// rebase drops the duplicate bump and git would otherwise print two
 	// misleading --reapply-cherry-picks hints. Suppress the advice; keep
 	// the bare warning. See doSync for the full rationale.

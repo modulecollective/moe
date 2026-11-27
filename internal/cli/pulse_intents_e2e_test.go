@@ -71,7 +71,7 @@ exit 0
 		t.Errorf("a resolve agent was launched:\n%s", errb.String())
 	}
 
-	turn := strings.TrimSpace(gittest.Output(t, root, "log", "-1", "--format=%H", "--grep=^work: update pulse"))
+	turn := strings.TrimSpace(gittest.Output(t, root, "log", "-1", "--format=%H", "--grep=^Update pulse for "))
 	files := gittest.Output(t, root, "show", "--name-only", "--format=", turn)
 	if !strings.Contains(files, statusRel) {
 		t.Errorf("turn commit lacks the intent's status.md:\n%s", files)
@@ -91,7 +91,7 @@ exit 0
 	}
 
 	subjects := gittest.Output(t, root, "log", "--format=%s", turn+"..HEAD")
-	for _, want := range []string{"Open run _cabinet/incident", "Link 2 run(s) to intents", "Close intent tele/finished"} {
+	for _, want := range []string{"Open run _cabinet/incident", "Link 2 runs to intents", "Close intent tele/finished"} {
 		if !strings.Contains(subjects, want) {
 			t.Errorf("after the turn, missing %q in:\n%s", want, subjects)
 		}

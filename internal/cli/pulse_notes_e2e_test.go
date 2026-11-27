@@ -98,7 +98,7 @@ func TestPulseNotesReachTheSurveyOnceEndToEnd(t *testing.T) {
 	if subj := gittest.Output(t, root, "log", "-1", "--format=%s"); !strings.HasPrefix(subj, "Close pulse run") {
 		t.Fatalf("tip after the sweep = %q, want the pulse close", subj)
 	}
-	if stamp := gittest.Output(t, root, "log", "-1", "--format=%B", "--grep=^input: pulse notes #1 read by"); !strings.Contains(stamp, "MoE-Workflow: pulse") {
+	if stamp := gittest.Output(t, root, "log", "-1", "--format=%B", "--grep=^Read pulse notes #1 in "); !strings.Contains(stamp, "MoE-Workflow: pulse") {
 		t.Fatalf("stamp commit = %q", stamp)
 	}
 

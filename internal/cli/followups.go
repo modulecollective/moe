@@ -247,7 +247,7 @@ func harvestFollowups(root, projectID, runID, workflow string) error {
 
 	spec := scratchHarvestSpec[parsedFollowup]{
 		relPath:         relPath,
-		progressSubject: fmt.Sprintf("harvest: capture follow-ups for %s/%s", projectID, runID),
+		progressSubject: fmt.Sprintf("Harvest follow-ups for %s/%s", projectID, runID),
 		writeErrPrefix:  "create idea",
 		parse: func(body []byte) ([]string, []scratchItem[parsedFollowup], error) {
 			lines, todo, err := parseFollowups(body, projectID)

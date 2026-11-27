@@ -156,7 +156,7 @@ func harvestRunInProcess(root, workflow, projectID, runID string) error {
 		return fmt.Errorf("run %s/%s is a %s run, not %s", projectID, runID, md.Workflow, workflow)
 	}
 
-	msg := fmt.Sprintf("harvest: capture follow-ups, lore, and twin observations for %s/%s\n\n", projectID, runID) +
+	msg := fmt.Sprintf("Harvest %s/%s\n\n", projectID, runID) +
 		trailers.Block{
 			Run:      runID,
 			Project:  projectID,

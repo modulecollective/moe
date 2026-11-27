@@ -57,7 +57,7 @@ fi
 	if _, err := os.Lstat(filepath.Join(root, rel)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("failed idea survived: %v", err)
 	}
-	if got := gittest.Output(t, root, "log", "-1", "--format=%s"); !strings.HasPrefix(got, "harvest: capture follow-ups") {
+	if got := gittest.Output(t, root, "log", "-1", "--format=%s"); !strings.HasPrefix(got, "Harvest follow-ups for ") {
 		t.Fatalf("progress commit missing: %s", got)
 	}
 	gittest.Run(t, root, "config", "--unset", "core.hooksPath")

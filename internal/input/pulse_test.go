@@ -81,7 +81,7 @@ func TestMarkPulseDeliveredKeepsANoteAddedMidWindow(t *testing.T) {
 			t.Fatal(err)
 		}
 		gittest.Run(t, root, "add", "-A")
-		gittest.Run(t, root, "commit", "-m", "input: pulse note #2")
+		gittest.Run(t, root, "commit", "-m", "Note for pulse #2")
 	})
 	if err := MarkPulseDelivered(root, "_cabinet/pulse-a", []int{1}, ""); err != nil {
 		t.Fatalf("MarkPulseDelivered: %v", err)

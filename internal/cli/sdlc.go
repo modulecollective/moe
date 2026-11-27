@@ -200,7 +200,7 @@ func persistSDLCStageAgent(verb, stage, projectID, runID, agentName string, stdo
 			return "", nil
 		}
 		md.Agent = agentName
-		return fmt.Sprintf("switch agent: %s/%s to %s", md.Project, md.ID, agentName), nil
+		return fmt.Sprintf("Switch agent for %s/%s to %s", md.Project, md.ID, agentName), nil
 	}, stdout, stderr)
 	if changed {
 		moePrintf(stdout, "switched run agent to %s\n", agentName)
@@ -264,7 +264,7 @@ func persistSDLCStageWorkspace(verb, stage, projectID, runID, name string, stdou
 			old = &prev
 		}
 		md.Workspace = name
-		return fmt.Sprintf("bind workspace: %s/%s to %s", md.Project, md.ID, name), nil
+		return fmt.Sprintf("Bind workspace for %s/%s to %s", md.Project, md.ID, name), nil
 	}, stdout, stderr)
 	if code != 0 || !changed {
 		return resolvedRunID, code

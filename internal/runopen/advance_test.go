@@ -40,7 +40,7 @@ func stagedRunFixture(t *testing.T, workTurn bool) string {
 }
 
 // TestMarkAdvancedWritesTheMarker is the shape stageSatisfied reads: an
-// empty commit whose `advance: <doc>` subject and MoE-* trailers scope it
+// empty commit whose `Advance <doc> for <p>/<r>` subject and MoE-* trailers scope it
 // to one stage of one run.
 func TestMarkAdvancedWritesTheMarker(t *testing.T) {
 	root := stagedRunFixture(t, true)
@@ -51,7 +51,7 @@ func TestMarkAdvancedWritesTheMarker(t *testing.T) {
 
 	msg := gittest.Output(t, root, "log", "-1", "--format=%s%n%b")
 	for _, want := range []string{
-		"advance: design",
+		"Advance design for alpha/fix-it",
 		"MoE-Run: fix-it",
 		"MoE-Project: alpha",
 		"MoE-Workflow: sdlc",

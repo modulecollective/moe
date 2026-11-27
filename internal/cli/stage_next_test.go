@@ -591,8 +591,8 @@ func TestPromptStageNextStageAdvanceCommitsMarkerLocally(t *testing.T) {
 		t.Fatalf("origin main advanced to %s (was %s); the pusher owns that leg", got, originBefore)
 	}
 	subject := strings.TrimSpace(gittest.Output(t, root, "log", "-1", "--format=%s"))
-	if subject != "advance: design" {
-		t.Fatalf("local tip subject = %q, want %q", subject, "advance: design")
+	if subject != "Advance design for tele/fix-it" {
+		t.Fatalf("local tip subject = %q, want %q", subject, "Advance design for tele/fix-it")
 	}
 }
 

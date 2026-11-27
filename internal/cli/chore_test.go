@@ -100,6 +100,9 @@ func TestRunChoreSkipClearsDueChore(t *testing.T) {
 	}
 	// The marker is an empty commit carrying the trailer.
 	body := gittest.Output(t, root, "log", "-1", "--format=%B")
+	if !strings.HasPrefix(body, "Skip chore moe/readme-refresh\n") {
+		t.Errorf("skip headline wrong:\n%s", body)
+	}
 	if !bytes.Contains([]byte(body), []byte("MoE-Chore-Skipped: moe/readme-refresh")) {
 		t.Errorf("HEAD commit missing skip trailer:\n%s", body)
 	}

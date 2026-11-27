@@ -62,7 +62,7 @@ func AddPulse(root, text string) (Entry, error) {
 		}
 		e = Entry{ID: len(f.Notes) + 1, Text: text}
 		f.Notes = append(f.Notes, e)
-		return f, fmt.Sprintf("input: pulse note #%d\n\n", e.ID) +
+		return f, fmt.Sprintf("Note for pulse #%d\n\n", e.ID) +
 			trailers.Block{Project: project.RootID}.String(), nil
 	})
 	if err != nil {
@@ -110,7 +110,7 @@ func MarkPulseDelivered(root, pulseRun string, ids []int, consent string) error 
 		if len(marked) == 0 {
 			return File{}, "", run.ErrNothingToCommit
 		}
-		return f, fmt.Sprintf("input: pulse notes #%s read by %s\n\n", strings.Join(marked, ","), pulseRun) +
+		return f, fmt.Sprintf("Read pulse notes #%s in %s\n\n", strings.Join(marked, ","), pulseRun) +
 			trailers.Block{
 				Run:      runID,
 				Project:  projectID,

@@ -88,7 +88,7 @@ func harvestTwinFeedback(root, projectID, runID, workflow string) error {
 
 	spec := scratchHarvestSpec[parsedTwinNote]{
 		relPath:         relPath,
-		progressSubject: fmt.Sprintf("harvest: capture twin observations for %s/%s", projectID, runID),
+		progressSubject: fmt.Sprintf("Harvest twin observations for %s/%s", projectID, runID),
 		writeErrPrefix:  "create idea",
 		parse: func(body []byte) ([]string, []scratchItem[parsedTwinNote], error) {
 			lines, todo, err := parseTwinFeedback(body)

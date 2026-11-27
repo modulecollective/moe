@@ -84,7 +84,7 @@ func assertAgentSwitchTarget(t *testing.T, root, rel string, working []byte, ind
 func rejectAgentSwitch(t *testing.T, root string) {
 	t.Helper()
 	installCreateFailureHook(t, root, `case "$(head -n 1 "$1")" in
-  "switch agent:"*) echo reject-switch >&2; exit 1 ;;
+  "Switch agent for "*) echo reject-switch >&2; exit 1 ;;
 esac
 `)
 }

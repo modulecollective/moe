@@ -69,7 +69,7 @@ func TestChoreEditOneFlagChangesOneKey(t *testing.T) {
 	if got := readChoreJSON(t, root, "readme-refresh"); got != "{\n  \"trigger\": \"README.md\",\n  \"cooldown\": \"30d\"\n}\n" {
 		t.Fatalf("chore.json = %q", got)
 	}
-	if subj := gittest.Output(t, root, "log", "-1", "--format=%s"); strings.TrimSpace(subj) != "chore: edit moe/readme-refresh" {
+	if subj := gittest.Output(t, root, "log", "-1", "--format=%s"); strings.TrimSpace(subj) != "Edit chore moe/readme-refresh" {
 		t.Errorf("subject %q", subj)
 	}
 	// An empty value clears the field.

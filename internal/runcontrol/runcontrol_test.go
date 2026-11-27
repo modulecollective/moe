@@ -99,7 +99,7 @@ func TestPauseHoldsAtAcceptance(t *testing.T) {
 		t.Fatalf("record = %+v, want held by p1 at revision 1", f)
 	}
 	msg := gittest.Output(t, root, "log", "-1", "--format=%B")
-	if !strings.Contains(msg, "control: pause p1 moe/r1") || !strings.Contains(msg, "MoE-Run: r1") {
+	if !strings.Contains(msg, "Record control request for moe/r1 — pause p1") || !strings.Contains(msg, "MoE-Run: r1") {
 		t.Fatalf("commit message:\n%s", msg)
 	}
 	if strings.Contains(msg, "MoE-Consent") {

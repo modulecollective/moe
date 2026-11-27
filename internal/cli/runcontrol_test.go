@@ -156,7 +156,7 @@ func TestFinishWidensKickToBangBang(t *testing.T) {
 		t.Errorf("show missing exact shipped finish receipt:\n%s", out)
 	}
 	log := gittest.Output(t, root, "log", "--format=%s%n%b", "-12")
-	if !strings.Contains(log, "control: applied f1") || !strings.Contains(log, "MoE-Consent: dynamic") {
+	if !strings.Contains(log, "— applied f1") || !strings.Contains(log, "MoE-Consent: dynamic") {
 		t.Fatalf("applied receipt missing or lost machine attribution:\n%s", log)
 	}
 }

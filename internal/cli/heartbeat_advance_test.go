@@ -50,7 +50,7 @@ func postHeartbeatAdvance(t *testing.T, root string, h http.Handler) string {
 		t.Fatal("advance must change HEAD without changing its tree")
 	}
 	body := gittest.Output(t, root, "log", "-1", "--format=%B")
-	if body != "advance: design\n\nMoE-Run: advance-me\nMoE-Project: moe\nMoE-Workflow: sdlc\nMoE-Document: design" {
+	if body != "Advance design for moe/advance-me\n\nMoE-Run: advance-me\nMoE-Project: moe\nMoE-Workflow: sdlc\nMoE-Document: design" {
 		t.Fatalf("unexpected marker: %q", body)
 	}
 	md, err := run.Load(root, "moe", "advance-me")

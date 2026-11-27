@@ -91,7 +91,7 @@ func TestHarvestOpenCommitsExcludeScratch(t *testing.T) {
 			if got := gittest.Output(t, root, "show", "HEAD:lore/portable-fact.md"); !strings.Contains(got, "Lore body.") {
 				t.Fatalf("promoted lore missing body: %s", got)
 			}
-			if got := gittest.Output(t, root, "show", "-s", "--format=%s", "HEAD"); !strings.HasPrefix(got, "harvest: capture follow-ups") {
+			if got := gittest.Output(t, root, "show", "-s", "--format=%s", "HEAD"); !strings.HasPrefix(got, "Harvest ") {
 				t.Fatalf("final commit is not harvest: %s", got)
 			}
 			if got := runStatus(t, root, "tele", "ship-it"); got != run.StatusInProgress {

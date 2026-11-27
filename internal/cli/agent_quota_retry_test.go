@@ -166,6 +166,9 @@ func TestChangedDefaultWakesJournaledRideRetryAcrossRestart(t *testing.T) {
 	if err := q.record(quotaDeferral{target: run.QuotaTarget{Project: "moe", Run: ride.ID, Stage: "design", Backend: "claude", Reason: "spent"}, retryAt: time.Now().Add(48 * time.Hour)}, io.Discard); err != nil {
 		t.Fatal(err)
 	}
+	if subj := gittest.Output(t, root, "log", "-1", "--format=%s"); subj != "Schedule quota retry for "+project.RootID+"/"+pulse.ID {
+		t.Fatalf("quota retry headline = %q", subj)
+	}
 	p, err := project.Load(root, project.RootID)
 	if err != nil {
 		t.Fatal(err)

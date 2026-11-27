@@ -143,6 +143,9 @@ func TestRepairClaimBoundAndFreshNote(t *testing.T) {
 	if _, err := claimCIRepair(root, p); err != nil {
 		t.Fatal(err)
 	}
+	if subj := gittest.Output(t, root, "log", "-1", "--format=%s"); subj != "Claim CI repair for "+p.Run {
+		t.Fatalf("claim headline = %q", subj)
+	}
 	idx, err := run.BuildJournalIndex(root)
 	if err != nil {
 		t.Fatal(err)

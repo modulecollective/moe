@@ -129,7 +129,7 @@ func TestBumpProjectPointersHappyPath(t *testing.T) {
 
 	// Commit message should list the bumped project by id with short SHAs.
 	msg := lastCommitMessage(t, f.root)
-	if !strings.Contains(msg, "sync: bump project pointers") {
+	if !strings.Contains(msg, "Bump project pointers") {
 		t.Fatalf("commit subject wrong:\n%s", msg)
 	}
 	if !strings.Contains(msg, "proj: "+git.ShortSHA(beforeLink)+".."+git.ShortSHA(newHead)) {
@@ -930,7 +930,7 @@ func TestPushBumpStampsConsentOnlyInsideAWalk(t *testing.T) {
 				t.Fatalf("BumpOne: %v\nstdout=%s", err, stdout.String())
 			}
 			msg := lastCommitMessage(t, f.root)
-			if !strings.Contains(msg, "sync: bump project pointers") {
+			if !strings.Contains(msg, "Bump project pointers") {
 				t.Fatalf("wrong commit landed:\n%s", msg)
 			}
 			switch {

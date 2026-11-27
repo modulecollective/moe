@@ -113,7 +113,7 @@ func TestStageWorkspaceBindsUnboundRun(t *testing.T) {
 			}
 			log := gitLogFormat(t, root, 1, "HEAD", "%B")
 			for _, want := range []string{
-				"bind workspace: tele/fix-it to dev",
+				"Bind workspace for tele/fix-it to dev",
 				"MoE-Run: fix-it",
 				"MoE-Project: tele",
 				"MoE-Workflow: sdlc",

@@ -15,7 +15,7 @@ import (
 )
 
 // failMergeRecordCommits points root's core.hooksPath at a commit-msg
-// hook that refuses only the merge record commit (`push: <p>/<r>
+// hook that refuses only the merge record commit (`Push <p>/<r> —
 // merged`). Scoped like failCloseCommits rather than blanket: the
 // harvest's own commits and the auto-bump still work, so the push dies
 // on exactly the commit this resume path exists for. Returns a func
@@ -24,7 +24,7 @@ func failMergeRecordCommits(t *testing.T, root string) func() {
 	t.Helper()
 	hooks := t.TempDir()
 	hook := filepath.Join(hooks, "commit-msg")
-	script := "#!/bin/sh\ngrep -q '^push: .* merged' \"$1\" && exit 1\nexit 0\n"
+	script := "#!/bin/sh\ngrep -q '^Push .* — merged$' \"$1\" && exit 1\nexit 0\n"
 	if err := os.WriteFile(hook, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestPushResumesStrandedMergeRecord(t *testing.T) {
 		t.Fatalf("MoE-Merged after resume: want %s, got %q", f.tipSHA, sha)
 	}
 	log := gittest.Output(t, f.root, "log", "-3", "--format=%B")
-	if !strings.Contains(log, "push: "+f.projectID+"/"+f.runID+" merged") {
+	if !strings.Contains(log, "Push "+f.projectID+"/"+f.runID+" — merged") {
 		t.Fatalf("merge record commit missing from log:\n%s", log)
 	}
 	if !strings.Contains(log, "MoE-Consent") {
