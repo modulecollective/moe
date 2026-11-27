@@ -197,16 +197,16 @@ dirty tree — warns and leaves the run open. sdlc only.
 
 Every invocation that runs workflow work — a stage, the next-stage prompt, a
 kick, a CI repair, a push — serves a small live endpoint for its run while it
-owns it. `moe dash` appends what that owner reports to the run's row, in
-brackets: `[agent running build 4m]`, `[waiting for operator]`,
-`[pause pending]`, `[handed off]`, `[owned · no live status]`.
-`moe control show <project>/<run>` prints the long form: owner and generation,
-phase and since when, why it is waiting, its continuation (`prompt`, `!`, `!!`),
-where it came from (a terminal, serve's local pty, Rex; the parent sweep), its
-Rex block, any hold, the request log, and the exact command that returns to the
-last stage that ran. A reply proves the owner is alive, not that the agent is
-making progress, and an owner that does not answer is shown as unreachable —
-never as idle, and never as leave to start a replacement.
+owns it. The board (`moe ui`, and the note `moe run list` prints) appends what
+that owner reports to the run's row, in brackets: `[agent running build 4m]`,
+`[waiting for operator]`, `[pause pending]`, `[handed off]`, `[owned · no live
+status]`. `moe control show <project>/<run>` prints the long form: owner and
+generation, phase and since when, why it is waiting, its continuation (`prompt`,
+`!`, `!!`), where it came from (a terminal, serve's local pty, Rex; the parent
+sweep), its Rex block, any hold, the request log, and the exact command that
+returns to the last stage that ran. A reply proves the owner is alive, not that
+the agent is making progress, and an owner that does not answer is shown as
+unreachable — never as idle, and never as leave to start a replacement.
 
 The shared board shows `blocked` beside a stage after an authored turn leaves
 its gate unready. Fresh templates and ready stages parked before their
@@ -253,8 +253,8 @@ normal three-second discovery pass. The web dashboard offers the same controls
 and status inside its hamburger menu, including when serve is unarmed.
 
 The UI board carries no service rows. Service exceptions are logged to the
-Console instead; for routine sweep status, use `moe dash` or the web `/serve`
-page. See [Re-Entry And Supervision](reference.md#re-entry-and-supervision).
+Console instead; for routine sweep status, use the web `/serve` page. See
+[Re-Entry And Supervision](reference.md#re-entry-and-supervision).
 
 Press `/` from any pane to find a board item by a case-insensitive literal
 substring of `project/run`. Surrounding query spaces are ignored. Search
@@ -422,7 +422,7 @@ Tagging itself launches no agent; without dynamic consent a tagged idea waits.
 ```sh
 moe idea new <project>/<slug>
 moe idea edit [--chat] <project>/<slug>
-moe idea list <project>
+moe idea list [--project <id>]
 moe idea log <project>/<slug>
 moe idea move <project>/<slug> <to-project>
 moe idea tag <project>/<slug> [workflow] [--design-only]
@@ -472,7 +472,7 @@ The operator writes the direction; the pulse keeps where each one stands.
 ```sh
 moe intent new <project>/<slug>            # park a new intent in $EDITOR
 moe intent edit [--chat] <project>/<slug>  # sharpen it — intents are living docs
-moe intent list <project>                  # the open intents
+moe intent list [--project <id>]           # the open intents
 moe intent cat <project>/<slug>            # dump one to stdout
 moe intent log <project>/<slug>            # read back a --chat session
 moe intent runs <project>/<slug>           # the work linked to it, by state
@@ -534,12 +534,12 @@ recurring project maintenance into a run MoE knows how to open. A chore
 definition says what maintenance is due, when it becomes due, and which workflow
 run to open for it. MoE evaluates chores against the journal; `moe chore open`,
 or a pulse's chore auto-open, mints the seeded run. What happens after that is
-what you armed: with no `moe serve --dynamic` up, the run waits in `moe dash`
+what you armed: with no `moe serve --dynamic` up, the run waits on the board
 like any other until you start it, while under an armed serve the
 [heartbeat](#the-heartbeat) notices the chore coming due, sweeps, and that sweep
 both opens the run and rides it on through build, review, and ship. A chore
-coming due is a clock event on an otherwise quiet journal, so the heartbeat
-gate watches for it directly rather than waiting for something else to move.
+coming due is a clock event on an otherwise quiet journal, so the heartbeat gate
+watches for it directly rather than waiting for something else to move.
 
 A chore is a directory under `projects/<project>/chores/<name>/` holding a
 `chore.json` of scheduler scalars and a `prompt.md` seed:
@@ -577,14 +577,14 @@ chore it is the anti-flap on a judgment that over-fires).
 Every family shares the same guards: a chore never goes due while it is cooling
 down or already has an open run.
 
-All registrations appear in CHORES between INTENTS and BACKLOG on `moe dash`,
-`moe ui`, the web dashboard and each project hub. Due chores come first; the
-rest sort by project/name. Rows show an open run, a local cooldown eligibility
-time, a due reason, `judged — pulse decides`, or `not due`, alongside the
-condition or schedule. A judged row records no recent LLM verdict, and an
-eligibility time promises no execution time. A linked run keeps its ordinary
-run row; registrations count neither as active runs nor as backlog ideas.
-Project filters apply, while workflow filters omit registrations.
+All registrations appear in CHORES between INTENTS and BACKLOG on `moe ui`, the
+web dashboard and each project hub. Due chores come first; the rest sort by
+project/name. Rows show an open run, a local cooldown eligibility time, a due
+reason, `judged — pulse decides`, or `not due`, alongside the condition or
+schedule. A judged row records no recent LLM verdict, and an eligibility time
+promises no execution time. A linked run keeps its ordinary run row;
+registrations count neither as active runs nor as backlog ideas. Project filters
+apply, while workflow filters omit registrations.
 
 Select a chore in `moe ui` to inspect its full condition or trigger/cadence,
 cooldown, last completion, cooldown eligibility, linked run, workflow and seed
@@ -671,10 +671,10 @@ warranted; it does not automatically spend an LLM turn.
 Every pulse does three things:
 
 - **Chore auto-open (always).** Every *mechanically* due chore in a non-paused
-  project gets its run opened — the same seeded run `moe chore open` would mint — and
-  nothing more. No stage executes; the opened runs wait in `moe dash` like any
-  other. This is automation acting on a chore definition you authored, never a
-  fresh decision. Judged chores are not opened here: their condition is the
+  project gets its run opened — the same seeded run `moe chore open` would mint
+  — and nothing more. No stage executes; the opened runs wait on the board like
+  any other. This is automation acting on a chore definition you authored, never
+  a fresh decision. Judged chores are not opened here: their condition is the
   survey's to evaluate, below.
 - **PR reconcile (always).** Each non-paused project's `pushed` runs are
   checked against GitHub — the same walk `moe sync` does — so a PR you merged from your phone reads as `merged` before the survey looks at the
@@ -938,25 +938,22 @@ three-way switch. The PULSE status line counts paused projects; safe mode
 remains visible in project controls.
 
 Both surfaces show what the heartbeat is doing, in the PULSE section that opens
-the board. `moe dash` reads the snapshot serve keeps on disk and carries its
+the board. `moe ui` reads the snapshot serve keeps on disk and carries its
 status on the section's first line — armed or not, how long it has been up, when
-the next tick lands — spending a line on a project only when that project is
-sweeping, cooling off after a failure, or its last sweep died. The same line
-reports `N unpushed` while commits are waiting and `push failing 12m · 3
-unpushed` with a row carrying git's reason when origin is refusing. An empty
-queue stays quiet. The count comes from git at render, so it is honest about a
-serve that has crashed or was never running; the rest comes from the pusher's
-own record. The web dash's PULSE section carries the same line and refreshes
-every five seconds while visible, plus on return to the tab; other pages' top
-line is the logo and the local date and time. Without JavaScript, reload
-refreshes status. The line links to `/serve`, which holds the trace: what each
-recent tick decided and the output tail of any sweep that failed.
-Repeated identical tick decisions can share one row, dated by the latest tick
-and showing the count and first occurrence (for example,
-`48 ticks, first 4h ago`). Quiet ticks add no rows, and a sweep event separates
-groups. That trace is the running process's memory rather than history — a
-restart starts it over, and the durable record of a sweep is still the run it
-opened.
+the next tick lands. The same line reports `N unpushed` while commits are
+waiting and `push failing 12m · 3 unpushed` when origin is refusing; the Console
+logs git's reason. An empty queue stays quiet. The count comes from git at
+render, so it is honest about a serve that has crashed or was never running; the
+rest comes from the pusher's own record. The web dash's PULSE section carries
+the same line and refreshes every five seconds while visible, plus on return to
+the tab; other pages' top line is the logo and the local date and time. Without
+JavaScript, reload refreshes status. The line links to `/serve`, which holds the
+trace: what each recent tick decided and the output tail of any sweep that
+failed. Repeated identical tick decisions can share one row, dated by the latest
+tick and showing the count and first occurrence (for example, `48 ticks, first
+4h ago`). Quiet ticks add no rows, and a sweep event separates groups. That
+trace is the running process's memory rather than history — a restart starts it
+over, and the durable record of a sweep is still the run it opened.
 
 The tick decides nothing. It only asks the question you used to ask by typing a
 verb — everything about what a sweep may *do* is unchanged, including the
@@ -1022,17 +1019,17 @@ alone. Recovery first tries normal session close: if that succeeds, committed
 work lands in the bureaucracy journal. The run stays open at its stage;
 recovery itself neither advances nor ships it, and leaves no reap tombstone.
 
-If close refuses because there is no committed canvas change, recovery stamps
-a tombstone before abandoning the session so the run re-parks. The tombstone
-names the unfinished stage, the reap time (not the agent's exit time), and the
-abandoned branch tip. `moe dash` marks the row `· unfinished`; the run page and
-reap commit point to `moe <workflow> log <project>/<run> <stage>` for the recorded
-outcome, when available. Reaping alone does not establish why the turn stopped.
-Older turns may lack archived diagnostics; the abandoned tip may contain
-session evidence readable until Git GC prunes it. Archived diagnostics are
-retained separately. Other close failures leave the session in place for
-inspection and recovery; the log names `moe session resolve` and
-`moe session abandon`.
+If close refuses because there is no committed canvas change, recovery stamps a
+tombstone before abandoning the session so the run re-parks. The tombstone names
+the unfinished stage, the reap time (not the agent's exit time), and the
+abandoned branch tip. The board marks the row `· unfinished`; the run page and
+reap commit point to `moe <workflow> log <project>/<run> <stage>` for the
+recorded outcome, when available. Reaping alone does not establish why the turn
+stopped. Older turns may lack archived diagnostics; the abandoned tip may
+contain session evidence readable until Git GC prunes it. Archived diagnostics
+are retained separately. Other close failures leave the session in place for
+inspection and recovery; the log names `moe session resolve` and `moe session
+abandon`.
 
 For an abandoned session, the tombstone is a brake as well as a record, and that
 is what keeps one refusal from costing a stage turn every sweep: a headless

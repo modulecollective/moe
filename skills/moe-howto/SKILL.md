@@ -1,6 +1,6 @@
 ---
 name: moe-howto
-description: How to capture and groom the backlog from a MoE chat session — open, edit, close, and reopen idea runs, and read the dash/list surfaces that inform grooming. Use when the operator asks you to open an idea, track something, or tidy the idea backlog. Does not cover starting or driving coding work.
+description: How to capture and groom the backlog from a MoE chat session — open, edit, close, and reopen idea runs, and read the list surfaces that inform grooming. Use when the operator asks you to open an idea, track something, or tidy the idea backlog. Does not cover starting or driving coding work.
 ---
 
 # Capturing and grooming the backlog
@@ -15,7 +15,7 @@ You're interactive, so the operator sees every command before it runs.
 Propose the command, run it when they're on board, and report what it
 did. Grooming lands on the operator's **live** backlog: `moe idea new`
 commits to the real bureaucracy on this box, so a capture shows up in
-any other window's `moe dash` at once (and you see that window's commits
+any other window's `moe ui` at once (and you see that window's commits
 in turn). If a mutating command fails — another moe process holds the
 lock, or the main checkout has uncommitted changes (`moe idea new`
 refuses a dirty tree) — print the exact command and let the operator run
@@ -92,8 +92,10 @@ live owners of the same intent, so trust the refusal when it fires.
 Look before you capture, so you don't open a duplicate or re-decide a
 settled question:
 
-- `moe dash` — the board: every run and idea with status at a glance.
-- `moe idea list <project>` — the idea backlog specifically.
+- `moe idea list [--project <id>]` — the idea backlog, as
+  `<project>/<slug>`.
+- `moe run list [--project <id>] [--all]` — the runs, one line each with
+  workflow and status; `--all` adds completed ones.
 - `moe idea cat <project>/<slug>` — dump one idea's canvas.
 - `moe idea log <project>/<slug>` — render an idea's capture transcript.
 

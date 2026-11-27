@@ -51,8 +51,9 @@ The shape under `{{.BureaucracyRoot}}` is the same for every project:
 - `projects/<p>/runs/<slug>/documents/intent/content.md` — an **intent**:
   a short, operator-authored statement of where the project is going (a
   theme, a bet, a direction), parked while it's relevant. Intents are
-  runs in the single-stage `intent` workflow; `moe intent list <p>`
-  names the open ones and `moe intent cat <p>/<slug>` dumps one. They're
+  runs in the single-stage `intent` workflow; `moe intent list
+  --project <p>` names the open ones and `moe intent cat <p>/<slug>`
+  dumps one. They're
   read-only context — the operator authors them, agents never do (see
   the write-side rule in `moe-bureaucracy`). When you're making a
   judgment call about direction (what to propose, what to prioritise),

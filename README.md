@@ -134,14 +134,14 @@ moe project add <repo-url>
 The fallback backend is `claude`. Use `moe agent codex` to change global
 defaults for 24 hours, or choose it from the web dashboard or `moe ui`'s
 `:agent` command. Explicit `--agent codex` run bindings and the process override
-`MOE_FORCE_AGENT=codex` still win. A model-stylesheet `agent:` rule sets permanent
-policy. Codex needs no permissions-profile setup because MoE supplies it. See
-[docs/reference.md](docs/reference.md#codex-setup) for the sandbox details.
-`moe dash` is the terminal home screen for re-entry.
-[`moe ui`](docs/workflows.md#seeing-and-steering-a-running-run) is the
-interactive terminal console: select runs, follow live details, send notes and
-controls, edit ideas and intents, and manage chores. `moe serve` serves the web
-UI, pushes pending bureaucracy journal commits to origin armed or unarmed, and
+`MOE_FORCE_AGENT=codex` still win. A model-stylesheet `agent:` rule sets
+permanent policy. Codex needs no permissions-profile setup because MoE supplies
+it. See [docs/reference.md](docs/reference.md#codex-setup) for the sandbox
+details. [`moe ui`](docs/workflows.md#seeing-and-steering-a-running-run) is the
+terminal home screen for re-entry: select runs, follow live details, send notes
+and controls, edit ideas and intents, and manage chores. `moe run list` prints
+the runs as plain text for agents and scripts. `moe serve` serves the web UI,
+pushes pending bureaucracy journal commits to origin armed or unarmed, and
 optionally runs the heartbeat with `--dynamic`. `moe help` and per-command usage
 are the source of truth for the exact command surface.
 

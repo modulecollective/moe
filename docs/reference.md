@@ -13,19 +13,13 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
 
 ### Re-Entry And Supervision
 
-- `moe dash [--all] [--project <id>] [--workflow <name>]` prints a snapshot of
-  the terminal dashboard, with all registered chores in CHORES and a daily
-  histogram of the last 60 days of run activity (`--project` scopes the chart to
-  one project); while any run has an open session, today's bar is capped with a
-  `*`. BACKLOG counts ideas only; workflow filters omit chores. The banner is
-  the logo and the local date and time. The board opens with a PULSE section:
-  the serve status line — armed or not, uptime, next sweep, the global pause,
-  and the last pulse run — then your pending pulse notes and the last one a
-  sweep read. A project earns a line under the status only when it is sweeping,
-  cooling off, or its last sweep died. The status line also carries the drain to
-  origin: `N unpushed` when commits are waiting (read from git, so it shows with
-  or without a serve). An empty queue stays quiet. A push origin is refusing
-  earns a row with git's reason.
+- `moe run list [--project <id>] [--workflow <name>] [--all]` prints the
+  board's runs as text, for agents and scripts: one line per run,
+  `<project>/<slug>`, workflow and note separated by tabs, with no header,
+  colour or ages. It lists active runs newest first; `--all` adds every
+  completed run after them. The notes and filters are the board's own. An
+  unregistered `--project` is an error; an unknown workflow lists nothing.
+  Open ideas and intents have their own `list` verbs.
 - `moe agent [codex|claude|reset]` reports or sets the global default backend
   for 24 hours. Flags, persisted run bindings and `MOE_FORCE_AGENT` still win.
   Re-selecting an active backend keeps its expiry; choosing the other starts
@@ -39,14 +33,18 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   details and a console of recent outcomes. Arrows or `j`/`k` select; `Tab` /
   `Shift-Tab` cycle board, details and console. In the console, arrows, page
   keys and Home scroll history; End follows new messages. `?` lists keys. The
-  board opens with the same PULSE section as `moe dash`. `n` writes a note to
-  the selected run or idea, `p` writes a note to the next pulse with no
-  selection needed, `a` answers its open question, `e` edits an open idea or
-  intent, and `t` reveals the run's existing Rex terminal. On an open idea, `g`
-  sets the SDLC licence, `d` sets design only, and `u` clears either licence.
-  Repeating a setting leaves it unchanged. These keys keep the selection and
-  work from any pane in normal navigation; in editors and the command line they
-  remain text. `:` opens a closed command line —
+  board opens with a PULSE section: the serve status line — armed or not,
+  uptime, next sweep, the global pause, and the last pulse run — then your
+  pending pulse notes and the last one a sweep read. The status line also
+  carries the drain to origin: `N unpushed` when commits are waiting (read from
+  git, so it shows with or without a serve). `n` writes a note to the selected
+  run or idea, `p` writes a note to the next pulse with no selection needed, `a`
+  answers its open question, `e` edits an open idea or intent, and `t` reveals
+  the run's existing Rex terminal. On an open idea, `g` sets the SDLC licence,
+  `d` sets design only, and `u` clears either licence. Repeating a setting
+  leaves it unchanged. These keys keep the selection and work from any pane in
+  normal navigation; in editors and the command line they remain text. `:`
+  opens a closed command line —
   `pause|handoff|park|finish|resume` for the selected run, `pulse-note`,
   `new-idea <project>/<slug>`, `new-intent <project>/<slug>`, `edit`, `close`,
   `tag-sdlc`, `tag-design`, `untag` — never a shell. Creation requires a
@@ -101,7 +99,7 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   projects and host/origin errors are logged once to the Console, with clock
   times, when they appear or change; the banner's `N failing` count and push
   item are the standing signal. For routine `sweeping` status and standing
-  detail, use `moe dash` or the web `/serve` page.
+  detail, use the web `/serve` page.
 
   `/` opens temporary board search from any pane. Type a case-insensitive
   literal substring of `project/run`; surrounding spaces are ignored. Search
@@ -339,9 +337,12 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   backlog notes. `tag` stamps the workflow tag that licenses a pulse to start
   the idea (`untag` clears it), and `tag --design-only` narrows that licence to
   one design turn before the run holds; untagged ideas are operator-only.
+  `moe idea list [--project <id>]` prints every open idea as `<project>/<slug>`,
+  sorted; `--project` narrows it to one project.
 - `moe intent new|edit|close|reopen|runs|list|cat|log|harvest` manages
   intents: standing direction and goals. `runs` lists the work linked to one,
   and `reopen` undoes a close, the pulse's included, with links intact.
+  `moe intent list [--project <id>]` prints open intents the same way.
 - `moe pulse note [text ...]` writes a note to the pulse itself — a piece of
   work to get done, or what should come next; with no text arguments it reads
   stdin. The next sweep whose gate concludes reads every pending note in full,
