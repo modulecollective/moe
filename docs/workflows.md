@@ -36,29 +36,19 @@ moe sdlc review my-project/add-batch-support
 moe sdlc push my-project/add-batch-support
 ```
 
-The `new` command opens the run and writes the first files into the
-bureaucracy. `design` shapes the request into a reviewable plan with a
-single-file template and an explicit gate. `build` gives the agent write
-access inside an isolated clone of the target project, requires it to commit
-the implementation there, and has it exercise and repair the change in the
-same session. Build keeps two canvases, `content/code.md` (behavior,
-decisions, PR draft, test plan) and `content/test.md` (what was and wasn't
-verified), each with its own gate; the run moves on only when both are stamped
-ready, and every build entry resets both to blocked. `review` is the last
-judgment before push: an independent pass over the diff *and* build's
-evidence, ending in a ship verdict — trivial zero-risk findings (a typo,
-comment drift) it fixes and commits in place; anything bigger blocks the gate
-and kicks the run back to build. `push` ships the branch by the project's ship
-route. New registrations use a fast-forward merge; existing projects keep
-their settings, with an absent ship field still meaning PR. `moe project ship
-<id> pr` selects PRs, and `--pr` / `--merge` override the route for one
-invocation.
-
-`moe sdlc code` and `moe sdlc test` are retired: they print the build command
-and start nothing. A run started before build existed keeps its code and test
-canvases readable (`moe sdlc cat`, `moe sdlc log`, the web run page); its first
-build turn seeds `content/code.md` and `content/test.md` from them and must
-restamp both before the run can reach review.
+The `new` command opens the run and writes the first files into the bureaucracy.
+`design` shapes the request into a reviewable plan with a single-file template
+and an explicit gate. `build` gives the agent write access inside an isolated
+clone of the target project, requires it to commit the implementation there, and
+has it exercise and repair the change in the same session. Build keeps two
+canvases, `content/code.md` (behavior, decisions, PR draft, test plan) and
+`content/test.md` (what was and wasn't verified), each with its own gate; the
+run moves on only when both are stamped ready, and every build entry resets both
+to blocked. `review` is the last judgment before push: an independent pass over
+the diff *and* build's evidence, ending in a ship verdict — trivial zero-risk
+findings (a typo, comment drift) it fixes and commits in place; anything bigger
+blocks the gate and kicks the run back to build. `push` ships the branch by the
+project's [ship route](#project-mode-and-ship-route).
 
 Closing a run and marking a stage advanced both refuse while any session branch
 remains for that run, even after its claimant dies. This applies to terminal
@@ -231,77 +221,8 @@ moe control resume  moe/change-auth   # release a hold; starts nothing
 `moe ui` puts all of this on one screen: the board with a selection, the
 selected run's `control show` facts below it, updated as the owner publishes,
 and the same controls as `:pause`, `:finish` and so on, alongside notes, answers
-and the run's Rex terminal (`t`). A third pane keeps recent command outcomes and
-recovery messages. Tab and Shift-Tab cycle the three panes; the pane receiving
-input has a bright amber heading with a heavy rule (heavy even without color).
-The selection's `>` still marks the target when another pane has input. End in
-the console follows new messages after scrolling. The shared dash banner stays
-at the top, clock on the right; the activity histogram stays below it, one day
-per column across the terminal, while board lines scroll. When space is short,
-the whole overview collapses and returns on resize. The board heading's `lines …
-of …` counts scrollable display lines, including section headings and blanks,
-rather than runs. Pane separators have a blank row on each side, and the console
-keeps six message rows even on short terminals. The minimum size is 40 columns
-by 20 rows. Moving to the first board item reveals the headings above it.
-
-The Console heading quietly labels an active temporary default when space
-allows. `:agent codex` or `:agent claude` chooses that backend for 24 hours;
-`:agent reset` returns to the current stylesheet, and `:agent` shows full
-status and local expiry at every width. These work without a selected row,
-serve or Rex. Flags and run bindings still win. Status refreshes with the
-normal three-second discovery pass. The web dashboard offers the same controls
-and status inside its hamburger menu, including when serve is unarmed.
-
-The UI board carries no service rows. Service exceptions are logged to the
-Console instead; for routine sweep status, use the web `/serve` page. See
-[Re-Entry And Supervision](reference.md#re-entry-and-supervision).
-
-Press `/` from any pane to find a board item by a case-insensitive literal
-substring of `project/run`. Surrounding query spaces are ignored. Search
-includes off-screen rows, captures, completed items, chores and kept drafts
-within the current filters; it does not search titles or prose. The board
-keeps its order and groups. `*` marks matches; `>` marks the selected match.
-Up/Down move among matching occurrences, stopping at either end. Enter accepts
-the selection and returns to board navigation without starting an action.
-Esc or Ctrl-C cancels and restores the previous selection, pane and scroll
-positions against the latest board. Empty queries include all items without
-match marks. `No matches` clears the preview and keeps search open until you
-edit or cancel. The footer shows the query, cursor, position/count and hints.
-Use the single-line editor's movement, deletion and word keys; paste is
-literal, with newlines becoming spaces. Printable shortcuts remain query
-text; Tab, page and save/discard keys do nothing in search. Ctrl-L redraws
-and Ctrl-Z suspends. In editors and the command line, `/` remains text.
-
-Use `:new-idea <project>/<slug>` or `:new-intent <project>/<slug>` to open a
-capture draft. Slugs use lowercase letters, digits and hyphens, e.g.
-`:new-idea p/my-idea`; uppercase is refused before a draft opens. In
-multiline editors, Enter or Shift+Enter inserts a newline. Nothing is
-created until Ctrl-S. Ideas offer save only, save and tag sdlc, or save and
-tag design only. The draft names its target even on an empty or filtered
-board. Alt-Backspace or Ctrl-W deletes a word; Alt-arrows or Alt-b/f moves
-by words. Words are whitespace-delimited, including newlines, so
-project/run tokens stay together. Esc keeps a draft, Ctrl-X discards it.
-
-On the selected open idea, press `g` to set the SDLC licence, `d` to set a
-design-only licence, or `u` to clear either licence. These are explicit
-settings: repeating one creates no extra commit. They keep the selection,
-work from any pane in normal navigation, and launch nothing; a later sweep
-may pick up a tagged idea. Use `j`/`k` or arrows to continue to the next row.
-The command equivalents are `:tag-sdlc`, `:tag-design`, and `:untag`.
-In editors and the command line, the letters remain text.
-
-In the command prompt, Tab completes a command name and cycles matches in
-lexical order; Shift-Tab cycles backward. Type a space before arguments and
-press Enter to submit. `new-i` matches `new-idea` and `new-intent`; `tag-`
-matches `tag-design` and `tag-sdlc`. Project IDs, slugs and other values are
-typed in full. Completion replaces the word at the cursor and preserves
-surrounding text. For example, `:new-i<Tab> p/example` becomes
-`:new-idea p/example`.
-
-The board still gathers every three seconds and follows owner status
-subscriptions. While a run has an open session, a separate 500 ms timer twinkles
-the star on today's histogram bar from cached frames, without extra observation
-work; an idle board does not repaint.
+and the run's Rex terminal (`t`). Its keys, search, layout and service logging
+are in [The console](reference.md#the-console-moe-ui).
 
 None of them interrupts an agent. The owner finishes the turn it is on — commit,
 transcript, input stamps, any recovery that turn needs — and acts at its next
@@ -326,23 +247,23 @@ backend session behavior. Headless, machine and nested entries never clear a
 hold, and a resume that loses to another owner or an unresolved session leaves
 it in place.
 
-**Park** asks only the current owner to yield, holds nothing, and is retired
-if that owner is gone before it reaches a boundary. It is refused when no
-owner answers, since there is nothing to address. **Finish** is `!!` for this
-run alone: through the same gates and ship route. It applies at the next-stage
+**Park** asks only the current owner to yield, holds nothing, and is retired if
+that owner is gone before it reaches a boundary. It is refused when no owner
+answers, since there is nothing to address. **Finish** is `!!` for this run
+alone: through the same gates and ship route. It applies at the next-stage
 prompt, at the next ride (widening a `!`), from the stage after the one a
 running `!` ride is on, or on an open CI repair's existing PR; it does not start
 an idle run. A walk through the run that fails — a ride, a typed cascade, a
 stage entered on its own, or a CI repair — or a ride that meets a blocked gate
-or stops short of shipping is the finish's outcome: it is recorded as failed, not kept for a
-later ride. If that receipt cannot be committed, it is kept under
-`.moe/control-unrecorded/` and the finish grants nothing; the next owner
-records it before starting work, and yields while it still cannot. Until then
-the dash, `control show`, the run page and a repeated request report that
-known outcome — `[finish failed · receipt not recorded]` — with the error that
-refused the commit, never as pending. A hold wins over finish, and an applied
-finish whose owner died is reconciled — shipped, or "recovery required" until
-a resume, never replayed.
+or stops short of shipping is the finish's outcome: it is recorded as failed,
+not kept for a later ride. If that receipt cannot be committed, it is kept under
+`.moe/control-unrecorded/` and the finish grants nothing; the next owner records
+it before starting work, and yields while it still cannot. Until then the dash,
+`control show`, the run page and a repeated request report that known outcome —
+`[finish failed · receipt not recorded]` — with the error that refused the
+commit, never as pending. A hold wins over finish, and an applied finish whose
+owner died is reconciled — shipped, or "recovery required" until a resume, never
+replayed.
 
 `moe input add` starts no agent and does not clear a pause or handoff.
 
@@ -614,9 +535,9 @@ On the web, use the project's `new chore` link to create a definition. A chore's
 page offers edit, delete from the edit page, and open-now. In `moe ui`, use
 `:new-chore <project>/<name>` to create one, or select a CHORES row and use `e`
 or `:edit` to edit, `:delete` to remove, and `o` or `:open` to open its run now.
-Save the console form with `Ctrl-S`; see the
-[console reference](reference.md#re-entry-and-supervision) for details. Skip
-stays CLI-only with `moe chore skip`.
+Save the console form with `Ctrl-S`; see the [console
+reference](reference.md#the-console-moe-ui) for details. Skip stays CLI-only
+with `moe chore skip`.
 
 `moe chore open` refuses if the chore isn't due, already has an open run, or is
 cooling down. Pass `--now` to open it anyway when it's cooling down or not yet
@@ -676,10 +597,11 @@ Every pulse does three things:
   any other. This is automation acting on a chore definition you authored, never
   a fresh decision. Judged chores are not opened here: their condition is the
   survey's to evaluate, below.
-- **PR reconcile (always).** Each non-paused project's `pushed` runs are
-  checked against GitHub — the same walk `moe sync` does — so a PR you merged from your phone reads as `merged` before the survey looks at the
-  delta. Pointer bumps stay `moe sync`'s job. Offline or without `gh`, this
-  warns once and the sweep carries on.
+- **PR reconcile (always).** Each non-paused project's `pushed` runs are checked
+  against GitHub — the same walk `moe sync` does — so a PR you merged from your
+  phone reads as `merged` before the survey looks at the delta. Pointer bumps
+  stay `moe sync`'s job. Offline or without `gh`, this warns once and the sweep
+  carries on.
 - **The survey (every fire).** A headless, read-only agent sweep. Its kickoff
   lists each project's source and carries one section per project with a delta
   since the last pulse or live work; paused and quiet projects are named and
@@ -692,10 +614,11 @@ Every pulse does three things:
   filing a followup and proposing a fix. `next` names the one run to ride, with
   a reason. `serves` links work to intents, and `intents` opens or closes them;
   see [Intents](#intents). A clean sweep auto-closes its own run: the filed
-  followups harvest straight into ideas (review them by scrapping on the dash).
-  Every fire runs a fresh sweep unconditionally — a lingering open pulse run
-  means a failed or abandoned sweep, sitting visible on the dash's ACTIVE list
-  until you inspect and close it, but it never blocks the next survey.
+  followups harvest straight into ideas (close any you don't want with `moe idea
+  close`). Every fire runs a fresh sweep unconditionally — a lingering open
+  pulse run means a failed or abandoned sweep, sitting visible on the dash's
+  ACTIVE list until you inspect and close it, but it never blocks the next
+  survey.
 
 ```sh
 moe pulse new                            # run the whole pulse by hand (chore auto-open + survey)
@@ -764,18 +687,23 @@ stage, including a design-only one. It does not cap a run already eligible for
 a full ride. Once the note is delivered, the run is held again only if it is
 still unsettled and has no other admission.
 
-An otherwise-unsettled, operator-opened design that parked itself with an
-authored blocked first gate on a prerequisite it filed, naming that followup's
-slug in backticks inside its `## Gate` section, is admitted for the full ride
-once the prerequisite's run merges or closes (or its idea closes unpromoted)
-after the design's last turn. Design-only runs are excluded from this
-exception. The survey sees such a run marked `due` in its parked list; a
-dynamic pulse must pick it, and other holds still apply. The resumed design
-re-checks the evidence and stamps its own gate; a ready gate rides on to build.
-Closure may mean the prerequisite was dropped, so any code still needed must
-have landed on default; a pushed PR is not settled. One settlement buys one
-resume: a re-check that stays blocked cannot reuse that older settlement, but a
-newer settlement of a named filing or a waiting note may admit it again.
+A prerequisite is filed only when it belongs to another project, should land
+whether or not the source does, or must produce evidence before the source's
+design can finish; otherwise the source builds it in place. An
+otherwise-unsettled, operator-opened design that parked itself with an authored
+blocked first gate on a prerequisite it filed, naming that followup's slug in
+backticks inside its `## Gate` section, is admitted for the full ride once the
+prerequisite's run merges or closes (or its idea closes unpromoted) after the
+design's last turn. Design-only runs are excluded from this exception. The
+survey sees such a run marked `due` in its parked list; a dynamic pulse must
+pick it, and other holds still apply. The resumed design re-checks the evidence
+and stamps its own gate; a ready gate rides on to build. Closure may mean the
+prerequisite was dropped, so any code still needed must have landed on default;
+a pushed PR is not settled. One settlement buys one resume: a re-check that
+stays blocked cannot reuse that older settlement, but a newer settlement of a
+named filing or a waiting note may admit it again. A not-ready stage exit lists
+each unsettled filing with the command that starts it now, and says whether its
+settling will resume the run.
 
 A spec's `design_only` is skipped on a slug that already names live work, on a
 chore entry, and on a spec with no `design` body; on an already-design-only
@@ -834,7 +762,7 @@ advances a stage.
 
 Delivery is once. A pending note reaches exactly one *successful* turn, then
 lives on the web run page and in the selected item's details in
-[`moe ui`](reference.md#re-entry-and-supervision) as saved history. The canvas
+[`moe ui`](reference.md#the-console-moe-ui) as saved history. The canvas
 that turn writes is where durable direction is supposed to persist. A turn that
 fails marks nothing, so the next attempt redelivers.
 
@@ -846,10 +774,11 @@ run. Asking holds nothing by itself: turns are told the question was asked and
 no reply came, and they proceed on their best judgment and note the call on the
 canvas.
 
-A stopped review loop opens such a question on the run. Its hold is separate from the question; answering it or adding
-any note releases that hold for one more review turn. See
-[Blocked gates](#cascades-the-bang-vocabulary) for the recovery path. Input
-starts no agent and does not clear an explicit pause or handoff.
+A stopped review loop opens such a question on the run. Its hold is separate
+from the question; answering it or adding any note releases that hold for one
+more review turn. See [Blocked gates](#cascades-the-bang-vocabulary) for the
+recovery path. Input starts no agent and does not clear an explicit pause or
+handoff.
 
 There is no dismiss verb. A question you'd rather not answer is discharged by
 answering it — "not relevant, proceed" is prose the next turn can read.
@@ -874,20 +803,24 @@ report's `## Operator notes` section says what happened to each, and the PULSE
 section links every read note to that report. A note is shown once: what must
 outlast the sweep has to leave as one of those artifacts.
 
+A sweep that dies or concludes nothing stamps nothing, so the next one rereads.
+The record is `projects/_cabinet/pulse-notes.json`; a note's commit wakes an
+armed serve's next tick, and a global pause holds it like everything else. A
+note licenses nothing at the floor and is not a `safe` mode mark. `/input` lists
+the history.
+
 ### The heartbeat
 
 `moe serve --dynamic` is the standing consent rung, and it licenses exactly one
 thing: a resident heartbeat that looks at each project's board every five
 minutes and runs one `moe pulse new --dynamic` when any of them has something
 worth looking at. While a sweep or the ride it started is running, no other
-starts. That heartbeat is the only automatic pulse there is, and the
-only thing in the process that starts an agent at all — the web writes licences
-and marks, and the clock spends them. Stopping serve stops new sweeps. An
-existing Rex-hosted sweep and the rides it carries survive serve shutdown; an
-armed restart with a usable Rex host adopts them, and Ctrl-C in the sweep's Rex
-block cancels them. Local sweeps stop with serve. See
-[Re-Entry And Supervision](reference.md#re-entry-and-supervision) for finding
-the session, checking the host, and reading failed blocks.
+starts. That heartbeat is the only automatic pulse there is, and the only thing
+in the process that starts an agent at all — the web writes licences and marks,
+and the clock spends them. Stopping serve stops new sweeps. AnA sweep hosted in
+Rex, and the ride it carries, can finish after serve stops; Ctrl-C in its Rex
+block cancels them. [The server](reference.md#the-server-moe-serve) covers
+hosting.
 
 `moe serve pause` pauses new automatic sweeps across the bureaucracy for 24
 hours; `moe serve unpause` clears it early, and `moe serve status` reports its
@@ -904,38 +837,11 @@ its selected ride may finish. It does not stop current work, arm serve, clear
 project modes or reset failure/quota history. Unpause and expiry permit the next
 otherwise-eligible five-minute tick; neither starts anything immediately. Human
 stage commands and typed dynamic pulses remain usable, as do HTTP, journal
-pushing and reap/GC hygiene. The tracked root `serve-pause.json` stores a revision
-and optional UTC expiry; malformed or unreadable state holds automatic starts
-and reports an error. Expiry is read-time only and creates no commit. There is
-no migration from the ignored legacy `.moe/snooze` file.
+pushing and reap/GC hygiene. The tracked root `serve-pause.json` stores a
+revision and optional UTC expiry; malformed or unreadable state holds automatic
+starts and reports an error. Expiry is read-time only and creates no commit.
 
 An unarmed `moe serve` is a reader with a capture door.
-
-Per project, `moe project ship <id> pr|merge` picks how a finished run lands
-there. New registrations store `merge`: fast-forward the default branch,
-delete the remote branch, drop the sandbox. Existing projects keep their
-settings; an absent ship field still means `pr`. To select PRs, run
-`moe project ship <id> pr`. The PR route pushes the branch and opens a PR,
-leaving the run `pushed` with its sandbox until the PR merges (the pulse's
-reconcile then flips it to merged or closed). Every unflagged ship — bare
-`moe sdlc push`, `!!`, and the heartbeat's rides —
-follows the project setting. `--pr` / `--merge` on push, and `m` / `p` at the
-chain prompt, override it for one ship. The project hub carries the switch
-beside mode's.
-
-Per project, `moe project mode <id> paused|safe|auto` caps what that clock may
-do. `paused` means the survey leaves the project alone and a pick there starts
-nothing. `safe` means it is surveyed as ever but a pick starts only a run you
-marked — a stage you advanced, a chore's standing intent, a workflow tag on the
-idea a run came from, a note or answer you left on it that no turn has
-delivered yet — holding anything else with a named reason. `auto` is the
-default. The mode binds the clock, not you: bangs, stage verbs and a hand-typed
-`moe pulse new --dynamic` run in every mode, because the typed word is the
-consent. Serve's **advance mark** is that same consent from the phone: it
-records the stage you just read as done — one journal commit, no agent — and
-`safe` starts on exactly such a mark. The project hub carries the same
-three-way switch. The PULSE status line counts paused projects; safe mode
-remains visible in project controls.
 
 Both surfaces show what the heartbeat is doing, in the PULSE section that opens
 the board. `moe ui` reads the snapshot serve keeps on disk and carries its
@@ -983,17 +889,19 @@ successful sweep, against the exact snapshot handed to that survey; failures
 arriving during its rides remain visible to the next tick. Healthy and pending
 changes alone spend no turn. No recorded pushed PR means no added network read.
 
-Known survey quota exhaustion records a retry before opening a pulse run.
-Until its deadline, every automatic wake waits for the same effective survey
-backend/model, including new notes, journal changes, chores and PR changes.
-Held ticks make no provider calls or journal commits. A changed selection can
-recheck on the next eligible tick. Ride deferrals remain scoped to existing
-runs and do not hold other survey wakes. The survey rejudges the current board;
-it never resumes an old pick. Project mode, global pause, ownership and failure
-backoff still bind. Stopping or unarming serve leaves retry dates inert. Pure
-quota deferral neither acknowledges the board or PR checks as fully surveyed
-nor increases the failure streak, and sends no routine exit webhook. Existing
-failure history stays until a fully clean sweep.
+The per-stage wait policy, its controls and exit codes are in [Subscription
+quota cooldown](reference.md#subscription-quota-cooldown). Known survey quota
+exhaustion records a retry before opening a pulse run. Until its deadline, every
+automatic wake waits for the same effective survey backend/model, including new
+notes, journal changes, chores and PR changes. Held ticks make no provider calls
+or journal commits. A changed selection can recheck on the next eligible tick.
+Ride deferrals remain scoped to existing runs and do not hold other survey
+wakes. The survey rejudges the current board; it never resumes an old pick.
+Project mode, global pause, ownership and failure backoff still bind. Stopping
+or unarming serve leaves retry dates inert. Pure quota deferral neither
+acknowledges the board or PR checks as fully surveyed nor increases the failure
+streak, and sends no routine exit webhook. Existing failure history stays until
+a fully clean sweep.
 
 PULSE on the web and in `moe ui` shows the recorded backend/model, waiting
 reason and local, zone-marked eligibility time, even after restart or with serve
@@ -1037,14 +945,14 @@ stage that refuses because the work needs you can leave no committed canvas
 change, so with no brake a later pick could run the same stage again. While the
 note stands the floor holds the run and the heartbeat's pre-ask skips it. Any
 touch of your own on the run — a `moe input` note, an advance, anything landing
-a journal commit the machine didn't stamp — releases it for one retry,
-and opening a stage there clears it outright. If that retry refuses too, its
-fresh tombstone re-arms the hold: each thing you do buys one attempt and no more.
+a journal commit the machine didn't stamp — releases it for one retry, and
+opening a stage there clears it outright. If that retry refuses too, its fresh
+tombstone re-arms the hold: each thing you do buys one attempt and no more.
 
 Claim-based recovery leaves operator sessions and sessions with unknown
-ownership alone. Separately, the heartbeat runs the same orphan rules as
-`moe session gc`: registered sessions on terminal or missing runs/projects,
-and branches without worktrees, remain eligible when their claim is genuinely
+ownership alone. Separately, the heartbeat runs the same orphan rules as `moe
+session gc`: registered sessions on terminal or missing runs/projects, and
+branches without worktrees, remain eligible when their claim is genuinely
 absent. A present claim must name that exact branch and prove its owner dead,
 whether machine or operator. Unreadable, malformed, mismatched or uncertain
 claims hold the session for inspection, even on terminal runs. Release alone
@@ -1054,9 +962,28 @@ Reported paths describe Git's registrations, not directory health. Inspect and
 preserve unfinished work and stop its owner before explicit recovery; listing
 alone establishes no permission to discard it. `moe session resolve` can clean
 up a landed branch without a worktree, but an unlanded branch needs a worktree
-restored before resolve can land it. `moe session resolve` / `moe session abandon`
-are still yours. See [Cleanup And Recovery](reference.md#cleanup-and-recovery)
-for manual recovery conditions.
+restored before resolve can land it. `moe session resolve` / `moe session
+abandon` are still yours. See [Cleanup And
+Recovery](reference.md#cleanup-and-recovery) for manual recovery conditions.
+
+### Project mode and ship route
+
+Per project, `moe project ship <id> pr|merge` picks how a finished run lands
+there: fast-forwarded onto the default branch, or pushed as a PR that the
+pulse's reconcile flips to merged or closed. Every unflagged ship — bare `moe
+sdlc push`, `!!`, and the heartbeat's rides — follows the project setting.
+
+Per project, `moe project mode <id> paused|safe|auto` caps what the heartbeat's
+clock may do. The mode binds the clock, not you: bangs, stage verbs and a
+hand-typed `moe pulse new --dynamic` run in every mode, because the typed word
+is the consent. Serve's **advance mark** is that same consent from the phone: it
+records the stage you just read as done — one journal commit, no agent — and
+`safe` starts on exactly such a mark. Serve's arming stays above all three: an
+unarmed serve starts no agent anywhere. The PULSE status line counts paused
+projects; safe mode remains visible in project controls.
+
+[Project mode and ship route](reference.md#project-mode-and-ship-route) lists
+each value, the per-invocation overrides and where the setting is stored.
 
 ## Twin
 
@@ -1093,80 +1020,20 @@ Hooks are that layer — drop-in executable scripts with no manifest, discovered
 by directory.
 
 `moe hook fire <project> <event>` is the iteration loop: it creates a transient
-sandbox, runs one event's scripts once, prints `sandbox: <path>`, and exits. Each
-fire gets a unique wrapper at `.moe/hook-fire/<project>/hook-fire-<unique>/`, with
-the clone in its `sandbox/` child. The next fire removes only wrappers with a
-valid harness completion record written after successful dispatch. Failed,
-interrupted, ambiguous and legacy fires under `.moe/clones/` remain for manual
-inspection/removal; run clones are never scanned. Firing `dev-env` alone still
-leaves its resources running; completion is scratch-disposal permission, not a
-teardown receipt.
+sandbox, runs one event's scripts once, prints `sandbox: <path>`, and exits.
+Each fire gets a unique wrapper at
+`.moe/hook-fire/<project>/hook-fire-<unique>/`, with the clone in its `sandbox/`
+child. The next fire removes only wrappers with a valid harness completion
+record written after successful dispatch. Failed, interrupted, ambiguous and
+legacy fires under `.moe/clones/` remain for manual inspection/removal; run
+clones are never scanned. Firing `dev-env` alone still leaves its resources
+running; completion is scratch-disposal permission, not a teardown receipt.
 
 No run is needed to test a 30-line bash change. Landing a change is a plain file
 edit, or an sdlc run whose per-turn commit picks up `projects/<project>/hooks/`
-(`moe sdlc design → build → close`) when you want the edit journaled with a canvas.
+(`moe sdlc design → build → close`) when you want the edit journaled with a
+canvas.
 
 The hook events themselves (`dev-env.d`, `dev-env-teardown.d`, `pre-push.d`,
 `session-cleanup.d`) and per-project dev secrets are covered in
 [reference.md §Hooks And Environments](reference.md#hooks-and-environments).
-
-## Subscription quota cooldown
-
-Before each top-level agent stage, including the first stage of a ride,
-MoE checks the selected backend's subscription usage without running a
-model turn. At 95% used, operator-invoked stages and rides wait for all
-applicable blocking windows to reset, then read usage again. The wait has a
-six-hour total budget per stage; a reset beyond that budget stops immediately.
-Unsupported quota interfaces and malformed readings stop clearly. Transport
-errors retry twice, one minute apart. While waiting, configuration is checked
-once a minute and at temporary-default expiry. An effective backend or model
-change reconciles the session and checks the new selection's quota under the
-original budget. This does not increase provider polling. Explicit choices
-that mask a default change keep their selection; executing agents stay put.
-
-Heartbeat-invoked stages instead read once and yield immediately when blocked.
-A survey admits before minting its run, then carries that exact selection into
-its stage without a second quota read. Its deferral journals only survey
-admission evidence, preserving outstanding ride obligations until a real survey
-rejudges them. For rides, the pulse journals the earliest retry among deferred
-roots. Both use each stage's latest blocking reset plus five seconds. If any
-blocking reset is missing or past, the next ordinary tick can retry. Weekly
-resets may defer for days without retaining a process. Unavailable quota,
-including unresolved high model scope, refuses without transport sleeps and
-uses failure backoff. Every later stage admission reads fresh quota; a retry
-date never admits work on its own. A different effective backend/model on a
-deferred target offers a fresh survey on the next otherwise eligible tick,
-including after restart; project mode, the global pause, same-run ownership and
-failure backoff still apply. Configuration errors preserve the obligation
-rather than claiming a changed choice. Typed dynamic pulses keep the ordinary
-wait policy.
-
-At an interactive stage's attached terminal, `c` + Enter continues that stage
-now, `a` + Enter skips checks for the rest of this invocation, and `q` + Enter
-or Ctrl-C cancels. Headless and serve-hosted stages read no terminal input. Add
-`--no-cooldown` anywhere before `--` in the launch command to skip checks for
-the entire invocation, including its cascade and rides. For example:
-
-```sh
-moe sdlc build --no-cooldown --ship myproject/my-run
-```
-
-A quota refusal returns 75 and leaves the stage unstarted; a clock pulse with
-only quota deferrals returns 76; Ctrl-C returns 130. Re-run the printed stage
-command to resume an operator-invoked stage. Existing resumed work is
-preserved. Five percent headroom cannot reserve quota or guarantee that a
-stage finishes. Bypassing may consume paid credits if the agent's existing
-account settings allow it; MoE does not enable overage.
-
-The adapters target Claude Code 2.1.316's experimental `get_usage`
-control interface and Codex CLI 0.167.0's app-server
-`account/rateLimits/read`. They use the executor's authentication filter
-and dev-env overrides. An incompatible CLI or unsupported login stops
-with the bypass route rather than assuming zero usage.
-
-Claude's experimental response must establish freshness. Model-specific
-windows with no usable model identity remain unresolved: low readings
-can admit, while a reading at or above 95% stops with the bypass route.
-MoE never identifies a model from its display label. Codex snapshots
-from an unknown quota pool likewise stop rather than being treated as
-the selected model's allowance.

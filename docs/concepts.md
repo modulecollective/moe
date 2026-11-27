@@ -26,20 +26,9 @@ real history better than the journal.
 
 `moe <workflow> cat <project>/<run> <stage>` prints a canvas. For one-stage
 workflows, the stage can usually be omitted. `moe <workflow> log` renders the
-transcript; `--agent claude|codex` disambiguates if both transcript files
-exist. When a turn returns with a missing or empty canvas, it still fails:
-MoE saves its prompt, available transcript, and execution result in an
-immutable `diagnostics/<stage>/<attempt-id>/` directory under the run on
-main. Codex headless attempts also save raw `stdout-codex.jsonl` and
-`stderr-codex.log`, with capture errors recorded in `failure.json`. Raw
-streams are captured to private scratch files while live progress and stderr
-continue; scratch files are removed after successful turns or archival.
-These diagnostic commits never satisfy a stage. The log command shows the
-latest saved failure until a later normal turn supersedes it, using journal
-order rather than timestamps. Older attempts remain in Git after retries and
-session cleanup. If archival fails, stderr names the surviving worktree and
-raw capture directory holding the evidence. Other unsuccessful turns retain
-their raw capture directory and print its path.
+transcript; `--agent claude|codex` disambiguates if both transcript files exist.
+Failed-turn diagnostics are covered under [Cleanup And
+Recovery](reference.md#cleanup-and-recovery).
 
 ## Bureaucracy Repo And Target Repos
 
@@ -99,12 +88,9 @@ MoE's memory improves through a few explicit channels:
   and `moe <workflow> harvest` re-runs it by hand. A followup slug carrying a
   `<project>/` prefix routes the promoted idea to that project's backlog
   instead of the current one. A checked line means extracted, never completed.
-  For an otherwise-unsettled, operator-opened design, an authored blocked first
-  gate naming its own filed prerequisite in backticks inside the `## Gate`
-  section lets the pulse pick it for a re-check after a newer settlement. The
-  design checks the evidence before riding on; [design-only
-  runs](workflows.md#proposed-work-and-the-next-run) are excluded from this
-  full-ride exception. See the [prerequisite rules](reference.md#workflows).
+  A design that files a prerequisite and names it in its blocked gate can
+  resume when that filing settles; see [Proposed work and the next
+  run](workflows.md#proposed-work-and-the-next-run).
 - The idea backlog holds work that is worth remembering but not ready for a
   full run.
 - A pulse note is operator prose addressed to the survey rather than a run:
