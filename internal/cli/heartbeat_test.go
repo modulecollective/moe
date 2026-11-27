@@ -432,8 +432,8 @@ func TestHeartbeatSweptMovesTheCursorOverItsOwnBookkeeping(t *testing.T) {
 
 	journalCommit(t, root, "moe", "open: pulse-1", "MoE-Consent: dynamic")
 	journalCommit(t, root, "moe", "work: update pulse", "MoE-Workflow: pulse\nMoE-Consent: dynamic")
-	journalCommit(t, root, "moe", "Open run moe/a-chore", "MoE-Spawned-By: moe/pulse-1")
-	journalCommit(t, root, "moe", "Open run moe/an-idea", "MoE-From-Run: moe/pulse-1\nMoE-Consent: dynamic")
+	journalCommit(t, root, "moe", "x1", "MoE-Kind: open\nMoE-Spawned-By: moe/pulse-1")
+	journalCommit(t, root, "moe", "x2", "MoE-Kind: open\nMoE-From-Run: moe/pulse-1\nMoE-Consent: dynamic")
 	journalCommit(t, root, "moe", "Tag idea moe/an-idea (sdlc)", "MoE-Workflow: idea\nMoE-Consent: dynamic")
 	journalCommit(t, root, "moe", "sync: bump project pointers", "MoE-Consent: dynamic")
 	journalCommit(t, root, "moe", "close: pulse-1", "MoE-Workflow: pulse\nMoE-Consent: dynamic")
@@ -508,7 +508,7 @@ func TestHeartbeatMintThatIsNotKickableStaysQuiet(t *testing.T) {
 	t.Parallel()
 	root := parallelQuietFixture(t)
 	g := sweepThatMints(t, root, func() {
-		journalCommit(t, root, "moe", "Open run moe/readme-update", "MoE-Run: readme-update\nMoE-Project: moe\nMoE-Consent: dynamic\nMoE-Chore: moe/readme-update")
+		journalCommit(t, root, "moe", "x", "MoE-Run: readme-update\nMoE-Project: moe\nMoE-Kind: open\nMoE-Consent: dynamic\nMoE-Chore: moe/readme-update")
 	})
 
 	tip, _, _, _ := projectJournalTip(root, "moe")
@@ -525,8 +525,9 @@ func TestHeartbeatMintThatIsNotKickableStaysQuiet(t *testing.T) {
 }
 
 // TestSweptRunOpen pins the mint census. The first four rows are the
-// verbatim journal range b01046322..005d7be1b, the observed wedge: only
-// the chore mint matches.
+// journal range b01046322..005d7be1b, the observed wedge: only the chore
+// mint matches. Headlines are junk — the open is MoE-Kind's to say — and
+// the last row is a pre-kind open, which no longer reads as one.
 func TestSweptRunOpen(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -534,16 +535,17 @@ func TestSweptRunOpen(t *testing.T) {
 		body string
 		want bool
 	}{
-		{"pulse session start", "work: start session for pulse\n\nMoE-Run: pulse-2026-11-25-16\nMoE-Project: _cabinet\nMoE-Workflow: pulse\nMoE-Document: pulse\nMoE-Session: a7f660c0\nMoE-Consent: dynamic\n", false},
-		{"pulse turn", "work: update pulse\n\nMoE-Run: pulse-2026-11-25-16\nMoE-Project: _cabinet\nMoE-Workflow: pulse\nMoE-Document: pulse\nMoE-Session: d8a3bc15\nMoE-Consent: dynamic\n", false},
-		{"chore nomination", "Open run moe/readme-update-2026-11-25-4\n\nMoE-Run: readme-update-2026-11-25-4\nMoE-Project: moe\nMoE-Consent: dynamic\nMoE-Chore: moe/readme-update\n", true},
-		{"pulse close", "Close pulse run _cabinet/pulse-2026-11-25-16\n\nMoE-Run: pulse-2026-11-25-16\nMoE-Project: _cabinet\nMoE-Workflow: pulse\nMoE-Consent: dynamic\n", false},
-		{"gate mint", "Open run lightpool/non-alive-belief-duration\n\nMoE-Run: non-alive-belief-duration\nMoE-Project: lightpool\nMoE-Spawned-By: lightpool/pulse-2026-11-21-4\nMoE-Consent: dynamic\n", true},
-		{"idea promotion", "Open run moe/slow-tab-complete-2026-11-25 from idea slow-tab-complete\n\nMoE-Run: slow-tab-complete-2026-11-25\nMoE-Project: moe\nMoE-Idea: slow-tab-complete\nMoE-Spawned-By: _cabinet/pulse-2026-11-25-14\nMoE-Consent: dynamic\n", true},
-		{"followup harvest", "Open run moe/declare-run-prerequisites\n\nMoE-Run: declare-run-prerequisites\nMoE-Project: moe\nMoE-From-Run: lightpool/pulse-2026-11-21-4\nMoE-Consent: dynamic\n", true},
-		{"the sweep's own open", "Open run _cabinet/pulse-2026-11-25-16\n\nMoE-Run: pulse-2026-11-25-16\nMoE-Project: _cabinet\nMoE-Consent: dynamic\n", false},
-		{"an intent link", "Link 1 run(s) to intents\n\nMoE-Spawned-By: _cabinet/pulse-2026-11-25-14\nMoE-Consent: dynamic\n", false},
-		{"an operator open", "Open run moe/why-is-readme-stuck\n\nMoE-Run: why-is-readme-stuck\nMoE-Project: moe\n", false},
+		{"pulse session start", "x\n\nMoE-Run: pulse-2026-11-25-16\nMoE-Project: _cabinet\nMoE-Workflow: pulse\nMoE-Document: pulse\nMoE-Session: a7f660c0\nMoE-Consent: dynamic\n", false},
+		{"pulse turn", "x\n\nMoE-Run: pulse-2026-11-25-16\nMoE-Project: _cabinet\nMoE-Workflow: pulse\nMoE-Document: pulse\nMoE-Kind: turn\nMoE-Session: d8a3bc15\nMoE-Consent: dynamic\n", false},
+		{"chore nomination", "x\n\nMoE-Run: readme-update-2026-11-25-4\nMoE-Project: moe\nMoE-Kind: open\nMoE-Consent: dynamic\nMoE-Chore: moe/readme-update\n", true},
+		{"pulse close", "x\n\nMoE-Run: pulse-2026-11-25-16\nMoE-Project: _cabinet\nMoE-Workflow: pulse\nMoE-Consent: dynamic\n", false},
+		{"gate mint", "x\n\nMoE-Run: non-alive-belief-duration\nMoE-Project: lightpool\nMoE-Kind: open\nMoE-Spawned-By: lightpool/pulse-2026-11-21-4\nMoE-Consent: dynamic\n", true},
+		{"idea promotion", "x\n\nMoE-Run: slow-tab-complete-2026-11-25\nMoE-Project: moe\nMoE-Kind: open\nMoE-Idea: slow-tab-complete\nMoE-Spawned-By: _cabinet/pulse-2026-11-25-14\nMoE-Consent: dynamic\n", true},
+		{"followup harvest", "x\n\nMoE-Run: declare-run-prerequisites\nMoE-Project: moe\nMoE-Kind: open\nMoE-From-Run: lightpool/pulse-2026-11-21-4\nMoE-Consent: dynamic\n", true},
+		{"the sweep's own open", "x\n\nMoE-Run: pulse-2026-11-25-16\nMoE-Project: _cabinet\nMoE-Kind: open\nMoE-Consent: dynamic\n", false},
+		{"an intent link", "x\n\nMoE-Spawned-By: _cabinet/pulse-2026-11-25-14\nMoE-Consent: dynamic\n", false},
+		{"an operator open", "x\n\nMoE-Run: why-is-readme-stuck\nMoE-Project: moe\nMoE-Kind: open\n", false},
+		{"a pre-kind open", "Open run moe/readme-update-2026-11-25-4\n\nMoE-Run: readme-update-2026-11-25-4\nMoE-Project: moe\nMoE-Consent: dynamic\nMoE-Chore: moe/readme-update\n", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := sweptRunOpen(tc.body); got != tc.want {

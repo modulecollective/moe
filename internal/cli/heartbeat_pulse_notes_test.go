@@ -74,7 +74,7 @@ func TestHeartbeatPulseNoteStampEarnsNoFollowUp(t *testing.T) {
 		t.Fatalf("due = %v, want the note's sweep", got)
 	}
 	g.Dispatching()
-	journalCommit(t, root, project.RootID, "Open run _cabinet/pulse-1", "MoE-Consent: dynamic\nMoE-Project: _cabinet")
+	journalCommit(t, root, project.RootID, "x", "MoE-Kind: open\nMoE-Consent: dynamic\nMoE-Project: _cabinet")
 	journalCommit(t, root, project.RootID, "work: update pulse", "MoE-Workflow: pulse\nMoE-Consent: dynamic\nMoE-Project: _cabinet")
 	if err := input.MarkPulseDelivered(root, project.RootID+"/pulse-1", []int{1}, "dynamic"); err != nil {
 		t.Fatal(err)

@@ -31,7 +31,7 @@ func TestLogSparseNormalAndDiagnostic(t *testing.T) {
 		t.Fatal(err)
 	}
 	gittest.Run(t, root, "add", "--", filepath.Join(diagnostic, "failure.json"))
-	gittest.WriteAndCommit(t, root, filepath.Join(diagnostic, "thread-claude.jsonl"), `{"type":"user","message":{"role":"user","content":"diagnostic history"}}`+"\n", "diagnostic: moe/history code canvas missing\n\nMoE-Project: moe\nMoE-Run: history\n")
+	gittest.WriteAndCommit(t, root, filepath.Join(diagnostic, "thread-claude.jsonl"), `{"type":"user","message":{"role":"user","content":"diagnostic history"}}`+"\n", "x\n\nMoE-Project: moe\nMoE-Run: history\nMoE-Kind: diagnostic\n")
 	gittest.Run(t, root, "add", "-A")
 	gittest.Commit(t, root, "seed full bureaucracy")
 	s, err := session.Open(root, "moe", "active", "design")

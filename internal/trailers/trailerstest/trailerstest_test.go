@@ -55,9 +55,9 @@ func TestCommitTrailer_ZeroTimeUsesNow(t *testing.T) {
 }
 
 // TestCommitWorkTurnAt_TrailerBlockAndSHA confirms CommitWorkTurnAt
-// renders the canonical Run/Project/Workflow/Document trailer block,
-// uses the run.WorkTurnSubject convention, and returns the
-// HEAD SHA of the commit it just made.
+// renders the canonical Run/Project/Workflow/Document/Kind trailer
+// block under the junk headline, and returns the HEAD SHA of the commit
+// it just made.
 func TestCommitWorkTurnAt_TrailerBlockAndSHA(t *testing.T) {
 	root := gittest.Init(t)
 	gittest.Commit(t, root, "seed")
@@ -68,11 +68,11 @@ func TestCommitWorkTurnAt_TrailerBlockAndSHA(t *testing.T) {
 		t.Fatalf("returned SHA %q != HEAD %q", sha, gittest.HeadSHA(t, root))
 	}
 	subject := gittest.Output(t, root, "log", "-1", "--format=%s")
-	if subject != "Update design for proj-x/run-y" {
-		t.Fatalf("subject = %q, want %q", subject, "Update design for proj-x/run-y")
+	if subject != JunkSubject {
+		t.Fatalf("subject = %q, want %q", subject, JunkSubject)
 	}
 	body := gittest.Output(t, root, "log", "-1", "--format=%B")
-	want := "MoE-Run: run-y\nMoE-Project: proj-x\nMoE-Workflow: sdlc\nMoE-Document: design"
+	want := "MoE-Run: run-y\nMoE-Project: proj-x\nMoE-Workflow: sdlc\nMoE-Document: design\nMoE-Kind: turn"
 	if !strings.HasSuffix(body, want) {
 		t.Fatalf("body does not end with canonical block %q:\n%s", want, body)
 	}
@@ -120,8 +120,8 @@ func TestSeedRun_WritesMetadataAndCommitsWithTrailers(t *testing.T) {
 	if _, err := os.Stat(projectJSON); err != nil {
 		t.Fatalf("project.json missing: %v", err)
 	}
-	hits := gittest.Output(t, root, "log", "--grep=MoE-Run: run-y", "--format=%s")
-	if !strings.Contains(hits, "Open run proj-x/run-y") {
+	hits := gittest.Output(t, root, "log", "--grep=MoE-Run: run-y", "--format=%(trailers:key=MoE-Kind,valueonly)")
+	if !strings.Contains(hits, "open") {
 		t.Fatalf("expected open-run commit in trailer-grep output, got:\n%s", hits)
 	}
 }

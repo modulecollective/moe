@@ -10,14 +10,14 @@
 // The trailer-block fixture lives next to the trailer seam (not in
 // gittest) because every helper here is shaped by the MoE bureaucracy:
 // what fields the trailer carries, what files run/project metadata
-// produces, what subject convention work-turn commits use. gittest
-// owns the lower-level "throwaway git repo" primitives this package
-// builds on.
+// produces, which kind each fixture commit stamps. gittest owns the
+// lower-level "throwaway git repo" primitives this package builds on.
 package trailerstest
 
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,47 +49,45 @@ func CommitTrailer(t *testing.T, root, subject, trailers string, when time.Time)
 	gittest.RunWithEnv(t, root, env, "commit", "--allow-empty", "-m", subject+"\n\n"+trailers+"\n")
 }
 
-// CommitWorkTurnAt records a run.WorkTurnSubject commit with the
-// trailers commitTurn writes in production (Run/Project/Workflow/
-// Document), dated to when. Returns HEAD's SHA so the caller can
+// JunkSubject is the headline the fixtures below give the moe-written
+// commits they stand for. moe reads commits through their trailers
+// only, so a meaningless headline is what proves a reader under test
+// never parses one: a reader that did would miss every fixture.
+const JunkSubject = "x"
+
+// CommitWorkTurnAt records a work-turn commit with the trailers
+// commitTurn writes in production (Run/Project/Workflow/Document/Kind),
+// dated to when, under JunkSubject. Returns HEAD's SHA so the caller can
 // assert it appears in the banner / log output it is exercising.
 func CommitWorkTurnAt(t *testing.T, root, projectID, runID, workflow, docID string, when time.Time) string {
+	t.Helper()
+	commitKind(t, root, projectID, runID, workflow, docID, trailers.KindTurn, when)
+	return gittest.HeadSHA(t, root)
+}
+
+// CommitAdvanceAt records an advance marker commit with the trailers
+// advanceMarker writes in production (Run/Project/Workflow/Document/
+// Kind), dated to when, under JunkSubject. Tests use this to drive the
+// click-forward timeline the same way CommitWorkTurnAt drives the
+// work-turn timeline.
+func CommitAdvanceAt(t *testing.T, root, projectID, runID, workflow, docID string, when time.Time) {
+	t.Helper()
+	commitKind(t, root, projectID, runID, workflow, docID, trailers.KindAdvance, when)
+}
+
+func commitKind(t *testing.T, root, projectID, runID, workflow, docID, kind string, when time.Time) {
 	t.Helper()
 	block := trailers.Block{
 		Run:      runID,
 		Project:  projectID,
 		Workflow: workflow,
 		Document: docID,
+		Kind:     kind,
 	}.String()
 	// Block.String() ends in '\n'; CommitTrailer appends its own, so
 	// trim the trailing newline to keep the commit body's blank-line
 	// separator canonical (subject + "\n\n" + block + "\n").
-	if n := len(block); n > 0 && block[n-1] == '\n' {
-		block = block[:n-1]
-	}
-	CommitTrailer(t, root, run.WorkTurnSubject(projectID, runID, docID), block, when)
-	return gittest.HeadSHA(t, root)
-}
-
-// CommitAdvanceAt records a run.AdvanceSubject marker commit with the
-// trailers commitAdvance writes in production (Run/Project/Workflow/
-// Document), dated to when. The marker subject is what stageSatisfied's
-// advance check matches; tests use this to drive the click-forward
-// timeline the same way CommitWorkTurnAt drives the work-turn timeline.
-func CommitAdvanceAt(t *testing.T, root, projectID, runID, workflow, docID string, when time.Time) {
-	t.Helper()
-	block := trailers.Block{
-		Run:      runID,
-		Project:  projectID,
-		Workflow: workflow,
-		Document: docID,
-	}.String()
-	// Same trailing-newline shaping as CommitWorkTurnAt: Block.String()
-	// ends in '\n' and CommitTrailer appends its own.
-	if n := len(block); n > 0 && block[n-1] == '\n' {
-		block = block[:n-1]
-	}
-	CommitTrailer(t, root, run.AdvanceSubject(projectID, runID, docID), block, when)
+	CommitTrailer(t, root, JunkSubject, strings.TrimSuffix(block, "\n"), when)
 }
 
 // SeedProject writes a minimal project.json so the project-registered
@@ -141,7 +139,7 @@ func SeedRun(t *testing.T, root, projectID, runID, workflow, status string) *run
 	runJSONRel := filepath.Join(run.Dir(projectID, runID), "run.json")
 	projectJSONRel := filepath.Join("projects", projectID, "project.json")
 	gittest.Run(t, root, "add", runJSONRel, projectJSONRel)
-	CommitTrailer(t, root, "Open run "+projectID+"/"+runID,
-		"MoE-Run: "+runID+"\nMoE-Project: "+projectID, time.Time{})
+	CommitTrailer(t, root, JunkSubject,
+		"MoE-Run: "+runID+"\nMoE-Project: "+projectID+"\nMoE-Kind: "+trailers.KindOpen, time.Time{})
 	return md
 }

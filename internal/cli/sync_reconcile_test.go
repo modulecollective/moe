@@ -277,7 +277,7 @@ func TestReconcileTransitionsMerged(t *testing.T) {
 	if !strings.Contains(body, "MoE-Merged: abc1234deadbeef") {
 		t.Fatalf("merge trailer missing:\n%s", body)
 	}
-	if !strings.HasPrefix(body, run.SyncSubject(f.projectID, f.runID, "merged")+"\n") {
+	if !strings.HasPrefix(body, "Sync "+f.projectID+"/"+f.runID+" — merged\n") {
 		t.Fatalf("sync headline wrong:\n%s", body)
 	}
 	if strings.Contains(body, "MoE-Consent:") {

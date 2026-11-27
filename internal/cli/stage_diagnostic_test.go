@@ -298,7 +298,7 @@ func TestDiagnosticNormalTurnWithOnlyMetadata(t *testing.T) {
 	}
 	// The agent can commit its canvas itself, leaving commitTurn with only
 	// run.json. Such a work turn still supersedes a diagnostic in the log.
-	msg := "work: update design\n\nMoE-Project: tele\nMoE-Run: fix-it\nMoE-Document: design\n"
+	msg := "x\n\nMoE-Project: tele\nMoE-Run: fix-it\nMoE-Document: design\nMoE-Kind: turn\n"
 	if err := run.StageAndCommit(root, msg, filepath.Join(run.Dir("tele", "fix-it"), "run.json")); err != nil {
 		t.Fatal(err)
 	}

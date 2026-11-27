@@ -306,6 +306,7 @@ func TestCommitTurnWithoutTimeoutIsUnchanged(t *testing.T) {
 		"MoE-Project: tele\n" +
 		"MoE-Workflow: " + sdlcWorkflow + "\n" +
 		"MoE-Document: code\n" +
+		"MoE-Kind: turn\n" +
 		"MoE-Session: " + md.Documents["code"].Sessions["claude"] + "\n"
 	if strings.TrimRight(body, "\n") != strings.TrimRight(want, "\n") {
 		t.Fatalf("ordinary turn message drifted:\n got: %q\nwant: %q", body, want)

@@ -123,6 +123,29 @@ func TestRequireDesignCanvasAcceptsEditedCanvas(t *testing.T) {
 	}
 }
 
+// TestRequireDesignCanvasReadsTheKickoffKindNotItsHeadline: the
+// unchanged-stub check fires on a kickoff carrying MoE-Kind: open and
+// on nothing else. A canvas first added by a commit headed `Open run …`
+// with no kind — history written before the trailer — is not a seeded
+// stub to this reader, so the check stays quiet.
+func TestRequireDesignCanvasReadsTheKickoffKindNotItsHeadline(t *testing.T) {
+	root := newTestBureaucracy(t)
+	markBureaucracy(t, root)
+	trailerstest.SeedRun(t, root, "tele", "old-open", "sdlc", run.StatusInProgress)
+	t.Setenv("MOE_HOME", root)
+
+	canvasRel := run.ContentPath("tele", "old-open", "design")
+	gittest.WriteAndCommit(t, root, canvasRel, "# Design\n",
+		"Open run tele/old-open\n\nMoE-Run: old-open\nMoE-Project: tele\n")
+	t.Chdir(root)
+	if err := requireDesignCanvas("tele", "old-open"); err != nil {
+		t.Fatalf("kind-less kickoff read as a seeded stub: %v", err)
+	}
+	if sha, kind, err := canvasKickoffCommit(root, canvasRel); err != nil || sha == "" || kind != "" {
+		t.Fatalf("canvasKickoffCommit = %q, %q, %v; want the add with no kind", sha, kind, err)
+	}
+}
+
 // TestSDLCDesignNoOpSessionRefusesAndBlocksCascade is the end-to-end
 // regression for the incident this run targets: when the design agent
 // exits without writing to the canvas, openSdlcDesign must surface a

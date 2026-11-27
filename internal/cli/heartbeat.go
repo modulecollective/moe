@@ -1029,16 +1029,16 @@ func journalActs(root, projectID, rev string) (operator, ride, minted bool) {
 // board as surveyed. Without this, a mint the survey left out of `next`
 // sits unstarted until something unrelated moves the journal.
 //
-// The subject pin is the journal index's own (run.go pins OpenConsent
-// the same way). It keeps out the trailered commits that follow an open
-// — a promote's idea mark, an intent link — and the sweep's own pulse
-// open, which carries none of the three.
+// The kind pin is the journal index's own (run.go pins OpenConsent the
+// same way). It keeps out the trailered commits that follow an open — a
+// promote's idea mark, an intent link — and the sweep's own pulse open,
+// which carries none of the three.
 //
 // Over-matches one shape on purpose: an intent the gate opened carries
 // MoE-Spawned-By too. Holding surveyed for it costs nothing unless
 // something else kickable is parked, and then one follow-up sweep.
 func sweptRunOpen(body string) bool {
-	if !strings.HasPrefix(body, "Open run ") {
+	if !strings.Contains(body, "\nMoE-Kind: "+trailers.KindOpen+"\n") {
 		return false
 	}
 	return strings.Contains(body, "\nMoE-Chore:") ||

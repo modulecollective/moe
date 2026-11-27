@@ -25,7 +25,7 @@ func seedRun(t *testing.T, root, project, id, workflow, stage, agent, thread str
 	write(t, filepath.Join(root, run.ThreadPathFor(agent, project, id, stage)), thread)
 	gittest.Run(t, root, "add", "-A")
 	gittest.Run(t, root, "commit", "-q", "-m",
-		"work: update "+stage+"\n\nMoE-Run: "+id+"\nMoE-Project: "+project+"\nMoE-Document: "+stage+"\n")
+		"x\n\nMoE-Run: "+id+"\nMoE-Project: "+project+"\nMoE-Document: "+stage+"\nMoE-Kind: turn\n")
 }
 
 func write(t *testing.T, path, body string) {

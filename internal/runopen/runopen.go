@@ -367,12 +367,13 @@ var ErrNotAdvanceable = errors.New("runopen: not an advanceable stage")
 // advanceMarker writes the empty stage-done commit. Only the guarded writer
 // below may call it, with the repository lock held.
 func advanceMarker(root string, md *run.Metadata, docID, consent string) error {
-	msg := run.AdvanceSubject(md.Project, md.ID, docID) + "\n\n" +
+	msg := "Advance " + docID + " for " + md.Project + "/" + md.ID + "\n\n" +
 		trailers.Block{
 			Run:      md.ID,
 			Project:  md.Project,
 			Workflow: md.Workflow,
 			Document: docID,
+			Kind:     trailers.KindAdvance,
 			Consent:  consent,
 		}.String()
 	return git.Run(root, "commit", "--allow-empty", "-m", msg)
@@ -765,6 +766,7 @@ func editCapture(root, projectID, slug string, expected *string, body string) er
 				Project:  projectID,
 				Workflow: md.Workflow,
 				Document: docID,
+				Kind:     trailers.KindTurn,
 			}.String()
 		if err := run.StageAndCommit(root, msg, canvasRel); err != nil {
 			return prev.restore(root, err)

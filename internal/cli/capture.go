@@ -255,6 +255,7 @@ func (k captureKind) runEdit(args []string, stdout, stderr io.Writer) int {
 			Project:  projectID,
 			Workflow: k.workflow,
 			Document: k.docID,
+			Kind:     trailers.KindTurn,
 		}.String()
 	err = repolock.With(root, repolock.Options{
 		Purpose: k.noun + "-edit",

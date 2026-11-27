@@ -491,6 +491,7 @@ func New(root, projectID string, opts Options) (md *Metadata, err error) {
 	tr := opts.Trailers
 	tr.Run = id
 	tr.Project = projectID
+	tr.Kind = trailers.KindOpen
 	msg := subject + "\n\n" + tr.String()
 	commitArgs := append([]string{"commit", "--only", "-m", msg, "--"}, addPaths...)
 	if err := git.Run(root, commitArgs...); err != nil {
@@ -697,46 +698,39 @@ var ErrNothingToCommit = errors.New("run: nothing to commit")
 var ErrSlugTaken = errors.New("run: slug already used")
 
 // LatestWorkTurnSHA returns the SHA and committer time of the most recent
-// work-turn commit (IsWorkTurnSubject) for the run's document. Slugs are
+// work-turn commit (MoE-Kind: turn) for the run's document. Slugs are
 // unique per project across all workflows (the runs/<slug> directory
 // namespace is flat), so (project, run, document) is enough to key a
 // run's history; the workflow trailer is written but not filtered on.
-// An anchored subject grep keeps session-start, merge, and push commits
-// from slipping past. Returns ("", time.Time{}, nil) when there has been
-// no work turn yet — the caller treats that as "first turn, nothing to
-// diff against."
+// The kind keeps session-start, merge, and push commits from slipping
+// past. Returns ("", time.Time{}, nil) when there has been no work turn
+// yet — the caller treats that as "first turn, nothing to diff against."
 func LatestWorkTurnSHA(root, projectID, runID, docID string) (sha string, when time.Time, err error) {
-	return latestSubjectSHA(root, projectID, runID, docID,
-		WorkTurnSubject(projectID, runID, docID), "work: update "+docID)
+	return latestKindSHA(root, projectID, runID, docID, trailers.KindTurn)
 }
 
 // WorkTurnDocs returns the document of every work-turn commit for the
-// run, newest first. Same scoping as LatestWorkTurnSHA (project and run
-// trailers), with the document read from the subject so one log walk
-// answers every document — the review loop counts review turns and asks
-// whether review or build landed last. The walk has no -1 to lose, so
-// the subject is classified here rather than grepped. The MoE-Document
-// trailer must agree with the subject; a commit whose two disagree is
-// not a work turn this reader trusts.
+// run, newest first. Same scoping as LatestWorkTurnSHA (project, run and
+// kind trailers) without the document, so one log walk answers every
+// document — the review loop counts review turns and asks whether review
+// or build landed last. A turn carrying no MoE-Document, or more than
+// one, is not a turn this reader can attribute.
 func WorkTurnDocs(root, projectID, runID string) ([]string, error) {
 	out, err := git.Output(root,
 		"log",
 		"--all-match",
+		"--grep", trailers.GrepPattern("MoE-Kind", trailers.KindTurn),
 		"--grep", trailers.GrepPattern("MoE-Project", projectID),
 		"--grep", trailers.GrepPattern("MoE-Run", runID),
-		"--format=%s%x00%(trailers:key=MoE-Document,valueonly,separator=%x01)",
+		"--format=%(trailers:key=MoE-Document,valueonly,separator=%x01)",
 	)
 	if err != nil {
 		return nil, fmt.Errorf("run: git log: %w", err)
 	}
 	var docs []string
-	for line := range strings.SplitSeq(strings.TrimSpace(out), "\n") {
-		subject, docTrailer, ok := strings.Cut(line, "\x00")
-		if !ok {
-			continue
-		}
-		doc, ok := workTurnDoc(subject, projectID, runID)
-		if !ok || strings.TrimSpace(docTrailer) != doc {
+	for line := range strings.SplitSeq(out, "\n") {
+		doc := strings.TrimSpace(line)
+		if doc == "" || strings.Contains(doc, "\x01") {
 			continue
 		}
 		docs = append(docs, doc)
@@ -745,37 +739,24 @@ func WorkTurnDocs(root, projectID, runID string) ([]string, error) {
 }
 
 // LatestAdvanceSHA returns the SHA and committer time of the most recent
-// advance marker commit (IsAdvanceSubject) for the run — the click-forward marker
-// the chain prompt writes when the operator declines the next stage but
-// records the current one as done (commitAdvance). Mirrors
-// LatestWorkTurnSHA's scoping (anchored subject grep + the same
-// project/run/document trailer greps) but matches the advance subject
-// instead of the work-turn subject. Returns ("", time.Time{}, nil) when no
-// advance marker exists yet — the stage was never click-advanced.
+// advance marker commit (MoE-Kind: advance) for the run — the
+// click-forward marker the chain prompt writes when the operator declines
+// the next stage but records the current one as done (commitAdvance).
+// Same scoping as LatestWorkTurnSHA. Returns ("", time.Time{}, nil) when
+// no advance marker exists yet — the stage was never click-advanced.
 func LatestAdvanceSHA(root, projectID, runID, docID string) (sha string, when time.Time, err error) {
-	return latestSubjectSHA(root, projectID, runID, docID,
-		AdvanceSubject(projectID, runID, docID), "advance: "+docID)
+	return latestKindSHA(root, projectID, runID, docID, trailers.KindAdvance)
 }
 
-// latestSubjectSHA is the newest commit whose subject is exactly one of
-// subjects (the current headline and its legacy form) and whose
+// latestKindSHA is the newest commit of the given MoE-Kind whose
 // trailers name the run's project, run and document. ("", time.Time{},
-// nil) when there is none.
-//
-// The subject stays in the git-side grep so -1 stops the walk at the
-// newest match: without it git walks the whole journal (about 220ms
-// against 19k commits, where -1 answers in 3ms). Two exact headlines
-// need alternation, hence -E; QuoteMeta's escapes are all literal in
-// ERE, and the trailer patterns are plain slugs either way.
-func latestSubjectSHA(root, projectID, runID, docID string, subjects ...string) (sha string, when time.Time, err error) {
-	quoted := make([]string, len(subjects))
-	for i, s := range subjects {
-		quoted[i] = regexp.QuoteMeta(s)
-	}
+// nil) when there is none. Every filter is a git-side grep so -1 stops
+// the walk at the newest match rather than reading the whole journal.
+func latestKindSHA(root, projectID, runID, docID, kind string) (sha string, when time.Time, err error) {
 	out, err := git.Output(root,
 		"log", "-1",
-		"-E", "--all-match",
-		"--grep", "^("+strings.Join(quoted, "|")+")$",
+		"--all-match",
+		"--grep", trailers.GrepPattern("MoE-Kind", kind),
 		"--grep", trailers.GrepPattern("MoE-Project", projectID),
 		"--grep", trailers.GrepPattern("MoE-Run", runID),
 		"--grep", trailers.GrepPattern("MoE-Document", docID),
@@ -1085,12 +1066,12 @@ type JournalIndex struct {
 	// QuotaRetries holds outstanding clock obligations by originating pulse.
 	QuotaRetries map[string]QuotaRetry
 	// WorkTurnTime maps (project, run, doc) → committer time of the
-	// most recent work-turn commit (IsWorkTurnSubject) scoped to that run.
+	// most recent work-turn commit (MoE-Kind: turn) scoped to that run.
 	// Same contract as LatestWorkTurnSHA's `when` return — zero
 	// time means "no work turn on record yet."
 	WorkTurnTime map[WorkTurnKey]time.Time
 	// AdvanceTime maps (project, run, doc) → committer time of the
-	// most recent advance marker (IsAdvanceSubject) scoped to that run.
+	// most recent advance marker (MoE-Kind: advance) scoped to that run.
 	// Same key and contract as WorkTurnTime, populated in the same
 	// scan and read by stageSatisfied's advance check, so dash's
 	// index path agrees with the per-call LatestAdvanceSHA fork.
@@ -1137,7 +1118,7 @@ type JournalIndex struct {
 	// commit wins, and only an open commit ever carries the trailer.
 	FromRun map[string]string
 	// OpenConsent maps "<project>/<slug>" → the MoE-Consent value on the
-	// commit that opened the run — the one whose subject is `Open run …`.
+	// commit that opened the run — the one carrying MoE-Kind: open.
 	// Wider than SpawnConsent, which only keeps consent sitting beside a
 	// MoE-Spawned-By: a dynamic pulse survey, a harvested idea and a
 	// heartbeat chore run each open with consent and no spawner, and this
@@ -1307,13 +1288,13 @@ func buildJournalIndex(root string) (*JournalIndex, error) {
 // journalCommit is one journal commit's trailers, parsed once and read
 // by every fold step. No step writes to it.
 type journalCommit struct {
-	when    time.Time
-	subject string
+	when time.Time
 
 	// First-wins string trailers: the first line carrying the key sets
 	// the field, later duplicates are ignored.
-	slug, project, doc                      string
+	slug, project, doc, kind                string
 	promotedTo, prURL, reopenOf, fromRun    string
+	merged, closed                          string
 	spawnedBy, consent, chore, choreSkipped string
 
 	choreTouched []string
@@ -1357,10 +1338,6 @@ func parseJournalCommit(record string) (c journalCommit, ok bool, err error) {
 		return c, false, nil
 	}
 	c.when = time.Unix(epoch, 0).UTC()
-	c.subject = body
-	if before, _, ok := strings.Cut(body, "\n"); ok {
-		c.subject = before
-	}
 	for line := range strings.SplitSeq(body, "\n") {
 		// No trailer key contains a colon, so the text before a line's
 		// first colon is exactly its key.
@@ -1393,6 +1370,12 @@ func parseJournalCommit(record string) (c journalCommit, ok bool, err error) {
 			setFirst(&c.project, v)
 		case "MoE-Document":
 			setFirst(&c.doc, v)
+		case "MoE-Kind":
+			setFirst(&c.kind, v)
+		case "MoE-Merged":
+			setFirst(&c.merged, v)
+		case "MoE-Closed":
+			setFirst(&c.closed, v)
 		case "MoE-Promoted-To":
 			setFirst(&c.promotedTo, v)
 		case "MoE-From-Run":
@@ -1581,12 +1564,12 @@ func (w *journalWalk) foldProvenance(c *journalCommit) {
 	}
 	// The open commit is the one that says who caused the run to
 	// exist, so the consent that counts here is the one it carries
-	// and no other. Pinned by subject for the same reason the push
-	// arm below pins its own: every commit a machine walk lands is
+	// and no other. Pinned by kind for the same reason the push arm
+	// below pins its own: every commit a machine walk lands is
 	// consent-stamped, so without the pin the first such commit after
 	// an operator's open would stand in for an opening nobody
 	// stamped.
-	if c.consent != "" && strings.HasPrefix(c.subject, "Open run ") {
+	if c.consent != "" && c.kind == trailers.KindOpen {
 		if _, ok := idx.OpenConsent[runKey]; !ok {
 			idx.OpenConsent[runKey] = c.consent
 		}
@@ -1628,14 +1611,15 @@ func (w *journalWalk) foldProvenance(c *journalCommit) {
 	// push), so they key by runKey like the rest. Only machine-driven
 	// pushes carry consent, so a hit is the ship-under-a-ride fact.
 	//
-	// The subject pin is what keeps that fact about the *ship*: a
-	// push stage's own session-start and work-turn commits carry
-	// Document: push too, and every commit a machine walk lands is
-	// consent-stamped, so a ride whose push stage opened and then
-	// died would otherwise mint a "shipped under a machine walk"
-	// provenance hop for a run that never shipped. Same
-	// subject-pinning idiom foldTurns uses.
-	if c.consent != "" && c.doc == "push" && isPushRecordSubject(c.subject) {
+	// The record pin is what keeps that fact about the *ship*: a push
+	// stage's own session-start and work-turn commits carry Document:
+	// push too, and every commit a machine walk lands is
+	// consent-stamped, so a ride whose push stage opened and then died
+	// would otherwise mint a "shipped under a machine walk" provenance
+	// hop for a run that never shipped. Only the terminal records carry
+	// what a ship leaves behind — the PR (push), the merge (push, sync)
+	// or the close (sync) — so those trailers are the pin.
+	if c.consent != "" && c.doc == "push" && (c.prURL != "" || c.merged != "" || c.closed != "") {
 		if _, ok := idx.PushConsent[runKey]; !ok {
 			idx.PushConsent[runKey] = c.consent
 		}
@@ -1652,18 +1636,17 @@ func (w *journalWalk) foldTurns(c *journalCommit) {
 		return
 	}
 	k := WorkTurnKey{Project: c.project, Run: c.slug, Doc: c.doc}
-	// Work-turn keying is project-scoped, and the subject pin
-	// keeps session-start / merge / push commits out — same
-	// filter LatestWorkTurnSHA uses.
-	if IsWorkTurnSubject(c.subject, c.project, c.slug, c.doc) {
+	// Work-turn keying is project-scoped, and the kind pin keeps
+	// session-start / merge / push commits out — same filter
+	// LatestWorkTurnSHA uses.
+	if c.kind == trailers.KindTurn {
 		if _, ok := w.idx.WorkTurnTime[k]; !ok {
 			w.idx.WorkTurnTime[k] = c.when
 		}
 	}
-	// Advance markers share the work-turn keying; the distinct
-	// subject pin keeps them in their own map, mirroring
-	// LatestAdvanceSHA's grep.
-	if IsAdvanceSubject(c.subject, c.project, c.slug, c.doc) {
+	// Advance markers share the work-turn keying; their own kind
+	// keeps them in their own map, mirroring LatestAdvanceSHA's grep.
+	if c.kind == trailers.KindAdvance {
 		if _, ok := w.idx.AdvanceTime[k]; !ok {
 			w.idx.AdvanceTime[k] = c.when
 		}

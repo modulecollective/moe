@@ -67,8 +67,8 @@ func commitDesignTurn(t *testing.T, root, projectID, id, canvas, followups strin
 		}
 		paths = append(paths, p)
 	}
-	msg := "work: update design\n\n" + trailers.Block{
-		Run: id, Project: projectID, Workflow: "sdlc", Document: "design",
+	msg := "x\n\n" + trailers.Block{
+		Run: id, Project: projectID, Workflow: "sdlc", Document: "design", Kind: trailers.KindTurn,
 	}.String()
 	atTime(t, when, func() {
 		if err := run.StageAndCommit(root, msg, paths...); err != nil {
@@ -564,7 +564,7 @@ func TestParkedDueClauseMidLadder(t *testing.T) {
 		}
 		paths = append(paths, p)
 	}
-	msg := "work: update build\n\n" + trailers.Block{Run: id, Project: "beta", Workflow: "sdlc", Document: "build"}.String()
+	msg := "x\n\n" + trailers.Block{Run: id, Project: "beta", Workflow: "sdlc", Document: "build", Kind: trailers.KindTurn}.String()
 	atTime(t, t0.Add(10*time.Minute), func() {
 		if err := run.StageAndCommit(root, msg, paths...); err != nil {
 			t.Fatal(err)

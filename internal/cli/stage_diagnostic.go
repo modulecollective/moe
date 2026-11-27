@@ -19,7 +19,7 @@ import (
 )
 
 // A diagnostic is evidence of a refusal, never a work turn. In particular,
-// its commit must not carry MoE-Document or a work-turn subject.
+// its commit carries MoE-Kind: diagnostic and never MoE-Document.
 type stageFailure struct {
 	Stage               string        `json:"stage"`
 	Agent               string        `json:"agent"`
@@ -155,11 +155,11 @@ func saveStageFailure(root string, in stageTurnInputs, spec stageTurnSpec, a age
 		if err := run.Stage(root, paths...); err != nil {
 			return err
 		}
-		block := trailers.Block{Run: md.ID, Project: md.Project, Workflow: md.Workflow, Consent: walkConsent()}
+		block := trailers.Block{Run: md.ID, Project: md.Project, Workflow: md.Workflow, Kind: trailers.KindDiagnostic, Consent: walkConsent()}
 		if failure.Execution.Timeout != "" {
 			block.TimedOut = failure.Execution.Timeout
 		}
-		msg := run.DiagnosticSubject(md.Project, md.ID, spec.DocID, refusal.Reason) + "\n\n" + block.String()
+		msg := "Archive " + spec.DocID + " diagnostic for " + md.Project + "/" + md.ID + " — canvas " + refusal.Reason + "\n\n" + block.String()
 		args := append([]string{"commit", "--only", "-m", msg, "--"}, paths...)
 		return git.Run(root, args...)
 	})
@@ -191,18 +191,21 @@ func latestStageFailure(root, projectID, runID, stage, agentArg string) (string,
 	dir := diagnosticStageDir(projectID, runID, stage)
 	log, err := git.Output(root, "log", "--topo-order", "--all-match",
 		"--grep", trailers.GrepPattern("MoE-Project", projectID),
-		"--grep", trailers.GrepPattern("MoE-Run", runID), "--format=%H%x00%B%x00")
+		"--grep", trailers.GrepPattern("MoE-Run", runID),
+		"--format=%H%x00%(trailers:key=MoE-Kind,valueonly)%x00%(trailers:key=MoE-Document,valueonly)%x00")
 	if err != nil {
 		return "", nil, err
 	}
 	entries := strings.Split(log, "\x00")
-	for i := 0; i+1 < len(entries); i += 2 {
-		sha, body := strings.TrimSpace(entries[i]), entries[i+1]
-		subject, _, _ := strings.Cut(body, "\n")
-		if run.IsWorkTurnSubject(subject, projectID, runID, stage) && strings.Contains(body, "\nMoE-Document: "+stage+"\n") {
+	for i := 0; i+2 < len(entries); i += 3 {
+		sha := strings.TrimSpace(entries[i])
+		kind, doc := strings.TrimSpace(entries[i+1]), strings.TrimSpace(entries[i+2])
+		if kind == trailers.KindTurn && doc == stage {
 			return "", nil, nil
 		}
-		if !run.IsDiagnosticSubject(subject, projectID, runID, stage) {
+		// A diagnostic names no document; its stage is the archived
+		// path diff-tree reads below.
+		if kind != trailers.KindDiagnostic {
 			continue
 		}
 		names, err := git.Output(root, "diff-tree", "--no-commit-id", "--name-only", "-r", "--diff-filter=A", sha, "--", dir)

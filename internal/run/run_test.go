@@ -594,7 +594,7 @@ func TestJournalIndexCapturesPromotedToAndPRURL(t *testing.T) {
 	commitWith("Promote idea p/idea-x → p/run-y",
 		"MoE-Run: idea-x\nMoE-Project: p\nMoE-Workflow: idea\nMoE-Promoted-To: p/run-y\n")
 	// run pushed; the push commit carries MoE-PR alongside MoE-Run.
-	commitWith("push: shipped",
+	commitWith("x",
 		"MoE-Run: run-y\nMoE-Project: p\nMoE-PR: https://example.com/pr/42\n")
 
 	idx, err := BuildJournalIndex(root)
@@ -637,8 +637,8 @@ func TestJournalIndexWorkTurnTimeMatchesLatestWorkTurnSHA(t *testing.T) {
 	}
 	workTurn := func(projectID, runID, docID string, when time.Time) {
 		commitWith(
-			"work: update "+docID,
-			"MoE-Run: "+runID+"\nMoE-Project: "+projectID+"\nMoE-Workflow: sdlc\nMoE-Document: "+docID+"\n",
+			"x",
+			"MoE-Run: "+runID+"\nMoE-Project: "+projectID+"\nMoE-Workflow: sdlc\nMoE-Document: "+docID+"\nMoE-Kind: turn\n",
 			when,
 		)
 	}
@@ -650,10 +650,10 @@ func TestJournalIndexWorkTurnTimeMatchesLatestWorkTurnSHA(t *testing.T) {
 	workTurn("a", "fix-bug", "design", t0)
 	workTurn("a", "fix-bug", "code", t0.Add(time.Hour))
 	workTurn("b", "fix-bug", "design", t0.Add(2*time.Hour))
-	// Session-start commit must not register a work turn — the subject
-	// pin keeps it out, same as LatestWorkTurnSHA's anchored grep.
+	// Session-start commit must not register a work turn — it carries
+	// no kind, which keeps it out of both paths.
 	commitWith(
-		"work: start session for code",
+		"x",
 		"MoE-Run: fix-bug\nMoE-Project: c\nMoE-Workflow: sdlc\nMoE-Document: code\n",
 		t0.Add(3*time.Hour),
 	)
@@ -690,9 +690,8 @@ func TestJournalIndexWorkTurnTimeMatchesLatestWorkTurnSHA(t *testing.T) {
 // LatestAdvanceSHA returns for the same key. stageSatisfied's advance
 // check reads AdvanceTime on the dash index path and LatestAdvanceSHA on
 // the per-call fork — they must agree or dash picks a different next stage
-// than the chain prompt. Also pins that a `work: update` commit does not
-// register an advance time (and vice versa): the two subjects key disjoint
-// maps.
+// than the chain prompt. Also pins that a work turn does not register an
+// advance time (and vice versa): the two kinds key disjoint maps.
 func TestJournalIndexAdvanceTimeMatchesLatestAdvanceSHA(t *testing.T) {
 	root := newTestRoot(t)
 	commitWith := func(subject, body string, when time.Time) {
@@ -708,20 +707,20 @@ func TestJournalIndexAdvanceTimeMatchesLatestAdvanceSHA(t *testing.T) {
 		}
 		gittest.Run(t, root, args...)
 	}
-	commit := func(subject, projectID, runID, docID string, when time.Time) {
+	commit := func(kind, projectID, runID, docID string, when time.Time) {
 		commitWith(
-			subject,
-			"MoE-Run: "+runID+"\nMoE-Project: "+projectID+"\nMoE-Workflow: sdlc\nMoE-Document: "+docID+"\n",
+			"x",
+			"MoE-Run: "+runID+"\nMoE-Project: "+projectID+"\nMoE-Workflow: sdlc\nMoE-Document: "+docID+"\nMoE-Kind: "+kind+"\n",
 			when,
 		)
 	}
 	t0 := time.Date(2026, 4, 14, 12, 0, 0, 0, time.UTC)
 	// design advanced; code worked but never advanced.
-	commit("work: update design", "a", "fix-bug", "design", t0)
-	commit("advance: design", "a", "fix-bug", "design", t0.Add(time.Minute))
-	commit("work: update code", "a", "fix-bug", "code", t0.Add(time.Hour))
+	commit("turn", "a", "fix-bug", "design", t0)
+	commit("advance", "a", "fix-bug", "design", t0.Add(time.Minute))
+	commit("turn", "a", "fix-bug", "code", t0.Add(time.Hour))
 	// Same slug in another project must not cross-satisfy.
-	commit("advance: design", "b", "fix-bug", "design", t0.Add(2*time.Hour))
+	commit("advance", "b", "fix-bug", "design", t0.Add(2*time.Hour))
 
 	idx, err := BuildJournalIndex(root)
 	if err != nil {
@@ -746,7 +745,7 @@ func TestJournalIndexAdvanceTimeMatchesLatestAdvanceSHA(t *testing.T) {
 		}
 	}
 	// A work-turn commit must not leak into AdvanceTime, and the advance
-	// marker must not leak into WorkTurnTime — disjoint subjects, disjoint
+	// marker must not leak into WorkTurnTime — disjoint kinds, disjoint
 	// maps.
 	codeKey := WorkTurnKey{Project: "a", Run: "fix-bug", Doc: "code"}
 	if v, ok := idx.AdvanceTime[codeKey]; ok {
@@ -886,7 +885,7 @@ func TestSlugTakenIgnoresPrefixAndCrossProjectSiblings(t *testing.T) {
 func TestLatestWorkTurnSHAIgnoresPrefixSibling(t *testing.T) {
 	root := newTestRoot(t)
 	gittest.Run(t, root, "commit", "--allow-empty", "-m",
-		"work: update design\n\nMoE-Project: alpha\nMoE-Run: auth-2\nMoE-Workflow: sdlc\nMoE-Document: design\n")
+		"x\n\nMoE-Project: alpha\nMoE-Run: auth-2\nMoE-Workflow: sdlc\nMoE-Document: design\nMoE-Kind: turn\n")
 
 	sha, when, err := LatestWorkTurnSHA(root, "alpha", "auth", "design")
 	if err != nil {
@@ -913,10 +912,10 @@ func TestJournalIndexCrossProjectSameSlugDistinct(t *testing.T) {
 	tB := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
 	// alpha/shared: a promoted idea with a PR. beta/shared: a plain run,
 	// active a month later.
-	commit("push: alpha shared",
+	commit("x",
 		"MoE-Project: alpha\nMoE-Run: shared\nMoE-PR: https://example.com/pr/alpha\nMoE-Promoted-To: alpha/impl\n", tA)
-	commit("work: update code",
-		"MoE-Project: beta\nMoE-Run: shared\nMoE-Workflow: sdlc\nMoE-Document: code\n", tB)
+	commit("x",
+		"MoE-Project: beta\nMoE-Run: shared\nMoE-Workflow: sdlc\nMoE-Document: code\nMoE-Kind: turn\n", tB)
 
 	idx, err := BuildJournalIndex(root)
 	if err != nil {
@@ -975,7 +974,8 @@ func TestJournalIndexChoreSkipped(t *testing.T) {
 // MoE-Consent: a push stage's own session-start and work-turn commits
 // carry MoE-Document: push too, so a ride whose push stage opened and
 // then died would otherwise mint a shipped-by-machine hop for a run that
-// never shipped.
+// never shipped. The pin is the ship's own trailers (PR, Merged or
+// Closed); every headline here is junk so none of it can be read.
 func TestJournalIndexPushConsentPinsTheTerminalRecord(t *testing.T) {
 	root := newTestRoot(t)
 	commit := func(subject, body string) {
@@ -983,31 +983,35 @@ func TestJournalIndexPushConsentPinsTheTerminalRecord(t *testing.T) {
 		gittest.Run(t, root, "commit", "--allow-empty", "-m", subject+"\n\n"+body)
 	}
 	// A ride that reached the push stage and got no further.
-	commit("work: start session for push",
+	commit("x",
 		"MoE-Project: a\nMoE-Run: stalled\nMoE-Workflow: sdlc\nMoE-Document: push\nMoE-Session: 0f1e\nMoE-Consent: dynamic\n")
-	commit("work: update push",
-		"MoE-Project: a\nMoE-Run: stalled\nMoE-Workflow: sdlc\nMoE-Document: push\nMoE-Session: 0f1e\nMoE-Consent: dynamic\n")
-	// A ride that shipped, and an upstream merge `moe sync` reconciled.
-	commit("push: a/shipped merged",
+	commit("x",
+		"MoE-Project: a\nMoE-Run: stalled\nMoE-Workflow: sdlc\nMoE-Document: push\nMoE-Kind: turn\nMoE-Session: 0f1e\nMoE-Consent: dynamic\n")
+	// A ride that opened a PR, a ride that shipped, an upstream merge
+	// `moe sync` reconciled and an upstream close it reconciled.
+	commit("x",
+		"MoE-Project: a\nMoE-Run: opened\nMoE-Workflow: sdlc\nMoE-Document: push\nMoE-PR: https://example.com/pr/9\nMoE-Consent: dynamic\n")
+	commit("x",
 		"MoE-Project: a\nMoE-Run: shipped\nMoE-Workflow: sdlc\nMoE-Document: push\nMoE-Merged: deadbeef\nMoE-Consent: dynamic\n")
-	commit("sync: a/reconciled merged",
+	commit("x",
 		"MoE-Project: a\nMoE-Run: reconciled\nMoE-Workflow: sdlc\nMoE-Document: push\nMoE-Merged: cafebabe\nMoE-Consent: static\n")
+	commit("x",
+		"MoE-Project: a\nMoE-Run: dropped\nMoE-Workflow: sdlc\nMoE-Document: push\nMoE-Closed: https://example.com/pr/8\nMoE-Consent: static\n")
 	// The gitlink bump sync.BumpOne lands right after a ride's merge
 	// record, and is consent-stamped so the heartbeat's sweep-exit walk
-	// reads it as the machine's. Its subject matches the `sync: ` arm,
-	// so pin that it still isn't a ship record. Two things keep it out
-	// and the first is the load-bearing one: it carries no MoE-Run, so
-	// the slug gate above drops it before any of these arms; and it
-	// carries no MoE-Document either. A pin, not a discriminating test
-	// — no single-line mutation of the push arm makes it fail.
+	// reads it as the machine's. Pin that it still isn't a ship record:
+	// it carries no MoE-Run, so the slug gate above drops it before any
+	// of these arms, and no MoE-Document either. A pin, not a
+	// discriminating test — no single-line mutation of the push arm
+	// makes it fail.
 	commit("sync: bump project pointers", "a: 782f4cb..f07455f\n\nMoE-Consent: dynamic\n")
 
 	idx, err := BuildJournalIndex(root)
 	if err != nil {
 		t.Fatalf("BuildJournalIndex: %v", err)
 	}
-	if len(idx.PushConsent) != 2 {
-		t.Errorf("PushConsent = %v, want exactly the two ship records — a pointer bump is not a ship", idx.PushConsent)
+	if len(idx.PushConsent) != 4 {
+		t.Errorf("PushConsent = %v, want exactly the four ship records — a pointer bump is not a ship", idx.PushConsent)
 	}
 	if got, ok := idx.PushConsent["a/stalled"]; ok {
 		t.Errorf("PushConsent[a/stalled] = %q, want absent — the run never shipped", got)
@@ -1015,8 +1019,10 @@ func TestJournalIndexPushConsentPinsTheTerminalRecord(t *testing.T) {
 	if got, want := idx.PushConsent["a/shipped"], "dynamic"; got != want {
 		t.Errorf("PushConsent[a/shipped] = %q, want %q", got, want)
 	}
-	if got, want := idx.PushConsent["a/reconciled"], "static"; got != want {
-		t.Errorf("PushConsent[a/reconciled] = %q, want %q", got, want)
+	for key, want := range map[string]string{"a/opened": "dynamic", "a/reconciled": "static", "a/dropped": "static"} {
+		if got := idx.PushConsent[key]; got != want {
+			t.Errorf("PushConsent[%s] = %q, want %q", key, got, want)
+		}
 	}
 }
 
@@ -1187,17 +1193,17 @@ func TestJournalIndexOpenCommitMarks(t *testing.T) {
 		gittest.Run(t, root, "commit", "--allow-empty", "-m", subject+"\n\n"+body)
 	}
 	// A followups harvest inside a bang cascade's close.
-	commit("Open run a/harvested",
-		"MoE-Run: harvested\nMoE-Project: a\nMoE-From-Run: a/source\nMoE-Consent: none\n")
+	commit("x",
+		"MoE-Run: harvested\nMoE-Project: a\nMoE-Kind: open\nMoE-From-Run: a/source\nMoE-Consent: none\n")
 	// A survey a dynamic sweep minted: consent and nothing else.
-	commit("Open run a/pulse-1", "MoE-Run: pulse-1\nMoE-Project: a\nMoE-Consent: dynamic\n")
+	commit("x", "MoE-Run: pulse-1\nMoE-Project: a\nMoE-Kind: open\nMoE-Consent: dynamic\n")
 	// An operator's own open, and a machine work turn landing on it
 	// afterwards. Every commit of a walk is consent-stamped, so without
-	// the subject pin this second commit would speak for an opening
+	// the kind pin this second commit would speak for an opening
 	// nobody stamped.
-	commit("Open run a/by-hand", "MoE-Run: by-hand\nMoE-Project: a\n")
-	commit("work: update design",
-		"MoE-Run: by-hand\nMoE-Project: a\nMoE-Document: design\nMoE-Consent: static\n")
+	commit("x", "MoE-Run: by-hand\nMoE-Project: a\nMoE-Kind: open\n")
+	commit("x",
+		"MoE-Run: by-hand\nMoE-Project: a\nMoE-Document: design\nMoE-Kind: turn\nMoE-Consent: static\n")
 	// Two promotions, one driven by a sweep's kick and one typed.
 	commit("Promote idea a/idea-1 → a/run-1",
 		"MoE-Run: idea-1\nMoE-Project: a\nMoE-Promoted-To: a/run-1\nMoE-Consent: dynamic\n")
@@ -1262,30 +1268,32 @@ func LastActivity(root, projectID, runID string) (time.Time, error) {
 // TestWorkTurnDocsScopesToOneRun pins the journal read the review loop's
 // cap counts from: only this run's work turns, newest first, across
 // documents — not a sibling run's, not the same slug in another
-// project, not a session-start commit, and not a commit whose
-// MoE-Document trailer disagrees with its subject. A looser grep here
-// silently moves the cap.
+// project, not a session-start commit, and not a commit that only has a
+// work-turn headline. A looser grep here silently moves the cap.
 func TestWorkTurnDocsScopesToOneRun(t *testing.T) {
 	root := newTestRoot(t)
 	t0 := time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC)
 	i := 0
-	commit := func(subject, projectID, runID, docID string) {
+	commit := func(subject, kind, projectID, runID, docID string) {
 		t.Helper()
 		i++
 		stamp := t0.Add(time.Duration(i) * time.Minute).Format(time.RFC3339)
+		if kind != "" {
+			kind = "MoE-Kind: " + kind + "\n"
+		}
 		gittest.RunWithEnv(t, root, []string{"GIT_AUTHOR_DATE=" + stamp, "GIT_COMMITTER_DATE=" + stamp},
 			"commit", "--allow-empty", "-m", subject+"\n\n"+
-				"MoE-Run: "+runID+"\nMoE-Project: "+projectID+"\nMoE-Workflow: sdlc\nMoE-Document: "+docID+"\n")
+				"MoE-Run: "+runID+"\nMoE-Project: "+projectID+"\nMoE-Workflow: sdlc\nMoE-Document: "+docID+"\n"+kind)
 	}
-	commit("work: update design", "moe", "loop", "design")
-	commit("work: update build", "moe", "loop", "build")
-	commit("work: update review", "moe", "loop", "review")
-	commit("work: update review", "moe", "other", "review")      // sibling run
-	commit("work: update review", "lightpool", "loop", "review") // same slug, other project
-	commit("work: start session for review", "moe", "loop", "review")
-	commit("work: update review", "moe", "loop", "build") // subject and trailer disagree
-	commit("work: update build", "moe", "loop", "build")
-	commit("work: update review", "moe", "loop", "review")
+	commit("x", "turn", "moe", "loop", "design")
+	commit("x", "turn", "moe", "loop", "build")
+	commit("x", "turn", "moe", "loop", "review")
+	commit("x", "turn", "moe", "other", "review")                     // sibling run
+	commit("x", "turn", "lightpool", "loop", "review")                // same slug, other project
+	commit("x", "", "moe", "loop", "review")                          // session start
+	commit("Update review for moe/loop", "", "moe", "loop", "review") // headline, no kind
+	commit("x", "turn", "moe", "loop", "build")
+	commit("x", "turn", "moe", "loop", "review")
 
 	got, err := WorkTurnDocs(root, "moe", "loop")
 	if err != nil {

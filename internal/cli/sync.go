@@ -359,7 +359,7 @@ func finalizePushedRunOwned(owner *runowner.Handle, root, projectID, runID, stat
 		extra.Project = projectID
 		extra.Document = "push"
 		extra.Consent = walkConsent()
-		msg := run.SyncSubject(projectID, runID, status) + "\n\n" +
+		msg := "Sync " + projectID + "/" + runID + " — " + strings.ToLower(status) + "\n\n" +
 			extra.String()
 		if err := commitTerminal(root, md, priorStatus, msg, paths); err != nil {
 			return fmt.Errorf("moe sync: commit %s for %s/%s: %w", strings.ToLower(status), projectID, runID, err)

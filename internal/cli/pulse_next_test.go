@@ -374,8 +374,8 @@ func TestNextReentersARunParkedOnABlockedDesignGate(t *testing.T) {
 	if err := os.WriteFile(canvas, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	msg := "work: update design\n\n" + trailers.Block{
-		Run: id, Project: "beta", Workflow: "sdlc", Document: "design", Consent: "dynamic",
+	msg := "x\n\n" + trailers.Block{
+		Run: id, Project: "beta", Workflow: "sdlc", Document: "design", Kind: trailers.KindTurn, Consent: "dynamic",
 	}.String()
 	if err := run.StageAndCommit(root, msg, canvas); err != nil {
 		t.Fatal(err)
@@ -450,8 +450,8 @@ func TestRootSweptMovesEachDispatchedCursorOnItsOwnEvidence(t *testing.T) {
 		base[p] = tip
 	}
 	// A ride lands in beta during the sweep.
-	msg := "work: update design\n\n" + trailers.Block{
-		Run: busy, Project: "beta", Workflow: "sdlc", Document: "design", Consent: "dynamic",
+	msg := "x\n\n" + trailers.Block{
+		Run: busy, Project: "beta", Workflow: "sdlc", Document: "design", Kind: trailers.KindTurn, Consent: "dynamic",
 	}.String()
 	if err := git.Run(root, "commit", "--allow-empty", "-m", msg); err != nil {
 		t.Fatal(err)

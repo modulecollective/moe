@@ -696,16 +696,16 @@ func requirePriorCanvas(projectID, runID, priorStage, currentStage string) error
 			priorStage, priorStage, projectID, runID, currentStage)
 	}
 	// Compare the blob at HEAD to the blob at the canvas's kickoff
-	// commit. The check only fires when the kickoff was an `Open
-	// run` — i.e. run.New seeded the canvas via SeedDocs. When the
-	// canvas's first commit is a work turn (no SeedDocs path), the
-	// "first content was an agent edit" case isn't a meaningful
+	// commit. The check only fires when the kickoff was a run open
+	// (MoE-Kind: open) — i.e. run.New seeded the canvas via SeedDocs.
+	// When the canvas's first commit is a work turn (no SeedDocs path),
+	// the "first content was an agent edit" case isn't a meaningful
 	// failure — there's no stub to be unchanged from.
-	kickoffSHA, kickoffSubject, err := canvasKickoffCommit(root, canvasRel)
+	kickoffSHA, kickoffKind, err := canvasKickoffCommit(root, canvasRel)
 	if err != nil || kickoffSHA == "" {
 		return nil
 	}
-	if !strings.HasPrefix(kickoffSubject, "Open run ") {
+	if kickoffKind != trailers.KindOpen {
 		return nil
 	}
 	headBlob, headErr := git.RevParse(root, "HEAD:"+canvasRel)
@@ -788,14 +788,15 @@ func checkSandboxBoundary(clonePath, entryHEAD, stageDoc string) error {
 	return nil
 }
 
-// canvasKickoffCommit returns the SHA and subject of the first commit
-// that added canvasRel. `git log --diff-filter=A --format=%H %s --
-// <path>` lists adds newest-first; the last line is the original add.
-// Returns "", "" with nil error if the path has no add in history (an
-// untracked canvas), so the caller can decide what to do without
-// disambiguating "no history" from "git failed".
-func canvasKickoffCommit(root, canvasRel string) (sha, subject string, err error) {
-	out, err := git.Output(root, "log", "--diff-filter=A", "--format=%H %s", "--", canvasRel)
+// canvasKickoffCommit returns the SHA and MoE-Kind of the first commit
+// that added canvasRel. `git log --diff-filter=A -- <path>` lists adds
+// newest-first; the last line is the original add. Returns "", "" with
+// nil error if the path has no add in history (an untracked canvas), so
+// the caller can decide what to do without disambiguating "no history"
+// from "git failed".
+func canvasKickoffCommit(root, canvasRel string) (sha, kind string, err error) {
+	out, err := git.Output(root, "log", "--diff-filter=A",
+		"--format=%H %(trailers:key=MoE-Kind,valueonly,separator=%x2C)", "--", canvasRel)
 	if err != nil {
 		return "", "", err
 	}
@@ -804,8 +805,8 @@ func canvasKickoffCommit(root, canvasRel string) (sha, subject string, err error
 	if last == "" {
 		return "", "", nil
 	}
-	sha, subject, _ = strings.Cut(last, " ")
-	return sha, subject, nil
+	sha, kind, _ = strings.Cut(last, " ")
+	return sha, kind, nil
 }
 
 // Pushed runs remain editable for PR iteration and CI repair.

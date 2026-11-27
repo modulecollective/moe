@@ -702,7 +702,7 @@ func TestRepairShipUpdatesSamePRWithoutMerging(t *testing.T) {
 					gittest.Run(t, f.clonePath, "commit", "-m", "fix CI")
 					writeStampedBuild(t, f.root, md)
 					gittest.Run(t, f.root, "add", run.ContentDir(projectID, runID, doc))
-					gittest.Run(t, f.root, "commit", "-m", "work: update build\n\n"+trailers.Block{Project: projectID, Run: runID, Document: doc, Workflow: sdlcWorkflow, Consent: "dynamic"}.String())
+					gittest.Run(t, f.root, "commit", "-m", "x\n\n"+trailers.Block{Project: projectID, Run: runID, Document: doc, Kind: trailers.KindTurn, Workflow: sdlcWorkflow, Consent: "dynamic"}.String())
 					return 0
 				}
 				body := "# " + doc + "\n\nRepair work for this iteration.\n"
@@ -720,7 +720,7 @@ func TestRepairShipUpdatesSamePRWithoutMerging(t *testing.T) {
 				}
 				writeContent(t, f.root, projectID, runID, doc, body)
 				gittest.Run(t, f.root, "add", run.ContentPath(projectID, runID, doc))
-				gittest.Run(t, f.root, "commit", "-m", "work: update "+doc+"\n\n"+trailers.Block{Project: projectID, Run: runID, Document: doc, Workflow: sdlcWorkflow, Consent: "dynamic"}.String())
+				gittest.Run(t, f.root, "commit", "-m", "x\n\n"+trailers.Block{Project: projectID, Run: runID, Document: doc, Kind: trailers.KindTurn, Workflow: sdlcWorkflow, Consent: "dynamic"}.String())
 				return 0
 			}
 			t.Cleanup(func() { runStageSession = prev })

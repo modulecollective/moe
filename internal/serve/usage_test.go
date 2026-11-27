@@ -71,8 +71,8 @@ func seedUsageThread(t *testing.T, root, projectID, runID, stage, body string, w
 	gittest.Run(t, root, "add", "-A")
 	date := when.Format(time.RFC3339)
 	gittest.RunWithEnv(t, root, []string{"GIT_AUTHOR_DATE=" + date, "GIT_COMMITTER_DATE=" + date},
-		"commit", "-m", "work: update "+stage+
-			"\n\nMoE-Run: "+runID+"\nMoE-Project: "+projectID+"\nMoE-Document: "+stage+"\n")
+		"commit", "-m", "x"+
+			"\n\nMoE-Run: "+runID+"\nMoE-Project: "+projectID+"\nMoE-Document: "+stage+"\nMoE-Kind: turn\n")
 }
 
 func usageTurn(id, model string, cacheRead, output int) string {

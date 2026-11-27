@@ -70,7 +70,7 @@ func seedThreadAt(t *testing.T, root, projectID, runID, stage, agent, body strin
 	}
 	gittest.Run(t, root, "add", "-A")
 	args := []string{"commit", "-m",
-		"work: update " + stage + "\n\nMoE-Run: " + runID + "\nMoE-Project: " + projectID + "\nMoE-Document: " + stage + "\n"}
+		"x\n\nMoE-Run: " + runID + "\nMoE-Project: " + projectID + "\nMoE-Document: " + stage + "\nMoE-Kind: turn\n"}
 	if when.IsZero() {
 		gittest.Run(t, root, args...)
 		return
@@ -491,7 +491,7 @@ func TestScanMemoizedOnHEAD(t *testing.T) {
 	// Commit it and HEAD moves, so the next Gather rebuilds.
 	gittest.Run(t, root, "add", "-A")
 	gittest.Run(t, root, "commit", "-m",
-		"work: update code\n\nMoE-Run: memo\nMoE-Project: tele\nMoE-Document: code\n")
+		"x\n\nMoE-Run: memo\nMoE-Project: tele\nMoE-Document: code\nMoE-Kind: turn\n")
 	fresh, err := Gather(root, f, &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("Gather: %v", err)

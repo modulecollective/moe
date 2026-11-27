@@ -140,6 +140,7 @@ func commitTurn(root string, md *run.Metadata, docID, backend string, timedOut t
 		Project:  md.Project,
 		Workflow: md.Workflow,
 		Document: docID,
+		Kind:     trailers.KindTurn,
 		Session:  md.Documents[docID].Sessions[backend],
 		Consent:  walkConsent(),
 	}
