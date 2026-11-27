@@ -10,6 +10,7 @@ import (
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/input"
+	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/servepause"
 )
 
@@ -112,7 +113,7 @@ func TestDashPulseSectionStates(t *testing.T) {
 		t.Fatal(err)
 	}
 	sec = pulseSection(t, s)
-	if !strings.Contains(sec, "#5</span>\n        <span class=\"pulse-state\">▒ waiting · next sweep") ||
+	if !strings.Contains(sec, "#5</span>\n        <span class=\"pulse-state\" data-pulse-waiting>▒ waiting · next check") ||
 		!strings.Contains(sec, "do the lightpool fix next\nit blocks the release") {
 		t.Errorf("pending note not shown in full with its countdown:\n%s", sec)
 	}
@@ -178,5 +179,29 @@ func TestRunStatusCarriesTheClock(t *testing.T) {
 	}
 	if m["__clock"] != dash.Clock(time.Now()) && m["__clock"] != dash.Clock(time.Now().Add(-time.Minute)) {
 		t.Fatalf("__clock = %v", m["__clock"])
+	}
+}
+
+func TestPulseQuotaRunningAndPrimaryBrakes(t *testing.T) {
+	s := pulseServer(t, true)
+	now := time.Now()
+	s.opts.SurveyAdmission = func(time.Time) run.SurveyAdmission {
+		return run.SurveyAdmission{Backend: "claude", Reason: "quota exhausted", NotBefore: now.Add(time.Hour)}
+	}
+	if _, err := input.AddPulse(s.opts.Root, "pending"); err != nil {
+		t.Fatal(err)
+	}
+	if sec := pulseSection(t, s); !strings.Contains(sec, "retry after") || !strings.Contains(sec, "pending") {
+		t.Fatal(sec)
+	}
+	if _, err := servepause.Set(s.opts.Root, true, nil, time.Now); err != nil {
+		t.Fatal(err)
+	}
+	if sec := pulseSection(t, s); !strings.Contains(sec, "waiting · new automatic sweeps paused") || !strings.Contains(sec, "retry after") {
+		t.Fatal(sec)
+	}
+	s.activity.recordSweepStart("_cabinet", now)
+	if sec := pulseSection(t, s); !strings.Contains(sec, "survey running") || strings.Contains(sec, "retry after") {
+		t.Fatal(sec)
 	}
 }

@@ -397,6 +397,7 @@ func (s *uiSource) buildBoard(now time.Time) (ui.Board, []cliout.ProgramStatus) 
 	// `moe dash` uses, with serve's trouble rows left to the Console.
 	pulse := s.serveNow.pulse(now, rows, readPulseNotes(s.root, nil), "")
 	pulse.Status = ui.SafeText(pulse.Status)
+	pulse.Quota, pulse.Waiting = ui.SafeText(pulse.Quota), ui.SafeText(pulse.Waiting)
 	for _, notes := range [][]input.Entry{pulse.Pending, pulse.Read} {
 		for i := range notes {
 			notes[i].Text, notes[i].DeliveredTo = ui.SafeText(notes[i].Text), ui.SafeText(notes[i].DeliveredTo)

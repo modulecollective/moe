@@ -568,7 +568,7 @@ func TestBlockedSourceTaggedFollowupPulseHandoff(t *testing.T) {
 	}
 	// Promotion is the pick's, so the survey names the idea.
 	prevOpen := openPulse
-	openPulse = func(projectID, runID string, _ bool, _ *pulseInterrupt, _, _ io.Writer) surveyOutcome {
+	openPulse = func(projectID, runID string, _ bool, _ *pulseInterrupt, admission *pulseAdmission, _, _ io.Writer) surveyOutcome {
 		writePulseGate(t, root, projectID, runID, `{"status":"ok","next":{"run":"tele/required-fix","why":"the prerequisite"}}`)
 		return surveyOutcome{code: 0, agentStarted: true}
 	}

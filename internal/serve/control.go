@@ -137,7 +137,10 @@ func (s *Server) handleRunStatuses(w http.ResponseWriter, r *http.Request) {
 	}
 	now := time.Now()
 	view := defaultAgentView(s.opts.Root, now)
-	out["__serve_cluster"] = s.pausePanel(now).Cluster
+	panel := s.pausePanel(now)
+	out["__serve_cluster"] = panel.Cluster
+	pulse := s.pulseView(now, nil, panel)
+	out["__pulse_quota"], out["__pulse_waiting"] = pulse.Quota, pulse.Waiting
 	out["__clock"] = dash.Clock(now)
 	out["__agent_summary"], out["__agent_error"] = view.Summary, view.Error
 	out["__agent_revision"] = strconv.Itoa(view.Revision)

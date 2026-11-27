@@ -45,13 +45,13 @@ func TestRenderPulseGolden(t *testing.T) {
 			p: Pulse{
 				Status:  "serve armed · up 4m · rex · next 15m",
 				Last:    last,
-				Waiting: PulseWaiting(true, "15m", ""),
+				Waiting: PulseWaiting(true, "15m", "", ""),
 				Pending: pending,
 				Read:    read,
 			},
 			want: "PULSE\n" +
 				"  serve armed · up 4m · rex · next 15m · last pulse 12m ago (pulse-2026-11-26-12)\n" +
-				"  ▒ #3  do the lightpool fix next  · waiting — next sweep in 15m\n" +
+				"  ▒ #3  do the lightpool fix next  · waiting — next check in 15m\n" +
 				"  ░ #2  prefer lightpool           · read by _cabinet/pulse-2026-11-26-12\n\n",
 		},
 		{
@@ -59,7 +59,7 @@ func TestRenderPulseGolden(t *testing.T) {
 			p: Pulse{
 				Status:  "serve dead (pid 42) · stale 3h 0m",
 				Detail:  "  origin  push failing  (3h 0m · 2 commits) — rejected\n",
-				Waiting: PulseWaiting(false, "", "new automatic sweeps paused until 14:20"),
+				Waiting: PulseWaiting(false, "", "new automatic sweeps paused until 14:20", ""),
 				Pending: pending,
 			},
 			want: "PULSE\n" +
@@ -76,7 +76,7 @@ func TestRenderPulseGolden(t *testing.T) {
 			}
 		})
 	}
-	if got := PulseWaiting(false, "", ""); got != "serve is not armed — `moe pulse new`" {
+	if got := PulseWaiting(false, "", "", ""); got != "serve is not armed — `moe pulse new`" {
 		t.Errorf("unarmed waiting = %q", got)
 	}
 }

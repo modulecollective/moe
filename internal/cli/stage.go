@@ -69,6 +69,8 @@ const headlessTurnTimeout = 180 * time.Minute
 // beyond the run identifiers. Most stages just set NeedsSandbox and
 // InitialPrompt.
 type stageSessionOpts struct {
+	// admittedPulse belongs only to this newly minted pulse.pulse invocation.
+	admittedPulse *pulseAdmission
 	// ValidateEntry rechecks workflow entry under the admission lock after pull.
 	ValidateEntry func(*run.Metadata) error
 	// NeedsSandbox switches the per-run sandbox clone on. Code stages
@@ -484,24 +486,31 @@ func (s *stageSession) enter(freshOwner bool, acquired time.Time) int {
 	// Living here means every caller of runStageSession — interactive
 	// verbs, cascade headless, serve children — gets stylesheet steering
 	// by construction.
-	sheet, err := stylesheet.Load(s.root)
-	if err != nil {
-		moePrintf(s.stderr, "%v\n", err)
-		return 1
-	}
-	// Validate the sheet's own vocabulary against the live registries
-	// before resolving. A misspelled selector, property, or agent value
-	// refuses the turn here — same fail-loud path as a parse error —
-	// rather than silently matching nothing on some future turn.
-	if err := sheet.Validate(stylesheetVocab()); err != nil {
-		moePrintf(s.stderr, "stylesheet %s: %v\n", filepath.Join(s.root, stylesheet.FileName), err)
-		return 1
-	}
-	s.explicitModel = s.opts.Model
-	s.agentName, s.opts.Model, _, err = selectStageAgent(s.root, sheet, s.opts, s.md, s.docID, s.explicitModel, agentDefaultNow())
-	if err != nil {
-		moePrintf(s.stderr, "%v\n", err)
-		return 1
+	if a := s.opts.admittedPulse; a != nil {
+		if s.md.Workflow != pulseWorkflow || s.docID != pulseDoc {
+			panic("pulse admission used outside survey")
+		}
+		s.agentName, s.opts.Model = a.backend, a.model
+	} else {
+		sheet, err := stylesheet.Load(s.root)
+		if err != nil {
+			moePrintf(s.stderr, "%v\n", err)
+			return 1
+		}
+		// Validate the sheet's own vocabulary against the live registries
+		// before resolving. A misspelled selector, property, or agent value
+		// refuses the turn here — same fail-loud path as a parse error —
+		// rather than silently matching nothing on some future turn.
+		if err := sheet.Validate(stylesheetVocab()); err != nil {
+			moePrintf(s.stderr, "stylesheet %s: %v\n", filepath.Join(s.root, stylesheet.FileName), err)
+			return 1
+		}
+		s.explicitModel = s.opts.Model
+		s.agentName, s.opts.Model, _, err = selectStageAgent(s.root, sheet, s.opts, s.md, s.docID, s.explicitModel, agentDefaultNow())
+		if err != nil {
+			moePrintf(s.stderr, "%v\n", err)
+			return 1
+		}
 	}
 	// A project-doc fix turn runs *inside* an outer stage's banner pair, so
 	// framing it as a stage of its own reads as two stages having run.
@@ -950,6 +959,20 @@ func (s *stageSession) commitStager(workRoot string, runErr error) error {
 // and wait out quota.
 func (s *stageSession) admit(sess *session.Session) int {
 	root, md, docID, stderr := s.root, s.md, s.docID, s.stderr
+	if a := s.opts.admittedPulse; a != nil {
+		s.agentName, s.opts.Model = a.backend, a.model
+		if err := s.prepareWorkspace(); err != nil {
+			moePrintf(stderr, "%v\n", err)
+			return 1
+		}
+		if c := s.entry.admitted("stage "+docID, stderr); c != 0 {
+			return c
+		}
+		publishRun(root, md.Project, md.ID, func(st *runsock.Status) {
+			st.Phase, st.Waiting, st.Stage, st.Agent = runsock.PhaseRunning, "", docID, s.agentName
+		})
+		return 0
+	}
 	// Capture canonical configuration before resolving the reservation, so a
 	// recovered session's pre-existing policy difference is not itself a
 	// reconciliation cue.

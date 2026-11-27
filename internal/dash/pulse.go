@@ -28,6 +28,7 @@ func Clock(now time.Time) string {
 type Pulse struct {
 	// Status is the serve cluster line; empty renders "serve not running".
 	Status string
+	Quota  string
 	// Detail is pre-rendered lines that qualify Status, each indented.
 	Detail string
 	// Last is the newest pulse run on the board, if any.
@@ -72,16 +73,18 @@ func SplitPulseNotes(f input.File) (pending, read []input.Entry) {
 // when one is coming, otherwise why none is. pause is the global pause
 // summary when a pause is active, empty otherwise; next is the countdown
 // to the next tick, empty when none is scheduled.
-func PulseWaiting(armed bool, next, pause string) string {
+func PulseWaiting(armed bool, next, pause, quota string) string {
 	switch {
 	case pause != "":
 		return pause
 	case !armed:
 		return "serve is not armed — `moe pulse new`"
+	case quota != "":
+		return quota
 	case next != "":
-		return "next sweep in " + next
+		return "next check in " + next
 	default:
-		return "next sweep"
+		return "next eligible survey"
 	}
 }
 
@@ -99,6 +102,9 @@ func RenderPulse(w io.Writer, now time.Time, p Pulse) {
 	}
 	fmt.Fprintf(w, "  %s\n", status)
 	fmt.Fprint(w, p.Detail)
+	if p.Quota != "" {
+		fmt.Fprintf(w, "  %s\n", p.Quota)
+	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	for _, e := range p.Pending {
 		fmt.Fprintf(tw, "  ▒ #%d\t%s\t· waiting — %s\n", e.ID, e.FirstLine(), p.Waiting)

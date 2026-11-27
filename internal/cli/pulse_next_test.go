@@ -34,7 +34,7 @@ func nextFixture(t *testing.T) (string, *[]openSdlcStageInvocation) {
 func sweepWithGate(t *testing.T, root, payload string) (int, string) {
 	t.Helper()
 	orig := openPulse
-	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, admission *pulseAdmission, stdout, stderr io.Writer) surveyOutcome {
 		writePulseGate(t, root, projectID, runID, payload)
 		return surveyOutcome{code: 0, agentStarted: true}
 	}

@@ -23,6 +23,7 @@ type pulseVM struct {
 	// Waiting says what a pending note waits on: the countdown, a pause,
 	// or no armed serve.
 	Waiting string
+	Quota   string
 	Pending []pulseNoteVM
 	Read    []pulseNoteVM
 }
@@ -55,7 +56,16 @@ func (s *Server) pulseView(now time.Time, rows []dash.Row, panel servePanelVM) p
 	if panel.Pause.Active {
 		pause = panel.Pause.Summary
 	}
-	vm.Waiting = dash.PulseWaiting(panel.Armed, panel.NextSweep, pause)
+	if s.opts.SurveyAdmission != nil {
+		vm.Quota = s.opts.SurveyAdmission(now).Summary(now)
+	}
+	for _, p := range s.activity.snapshot(now).Projects {
+		if p.Sweeping() {
+			vm.Quota = "survey running"
+			break
+		}
+	}
+	vm.Waiting = dash.PulseWaiting(panel.Armed, panel.NextSweep, pause, vm.Quota)
 	f, err := input.LoadPulse(s.opts.Root)
 	if err != nil {
 		s.logf("pulse notes: %v", err)

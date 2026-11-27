@@ -14,6 +14,8 @@ const pause = {querySelector: s => ({
  '[name="revision"]': pauseRevision, 'button': pauseButton, 'form': pauseForm
 })[s]};
 const cluster = {textContent: 'serve browse-only · up 0m'};
+const quota = {textContent: '', hidden: true}, waiting = [{textContent: ''}];
+const hasQuota = page.includes('data-pulse-quota');
 const clock = {textContent: 'Thu 26 Nov 14:07'};
 const hasCluster = page.includes('data-serve-cluster'), hasClock = page.includes('data-clock');
 const rows = [...page.matchAll(/<span class="note run-status" data-key="([^"]+)">([^<]*)<\/span>/g)]
@@ -31,10 +33,12 @@ const document = {
   hidden: false, activeElement: button,
   getElementById: id => { if (id === 'serve-pause') return page.includes('id="serve-pause"') ? pause : null; assert.equal(id, 'agent-default'); return page.includes('id="agent-default"') ? form : null; },
   querySelector: s => {
+    if (s === '[data-pulse-quota]') return hasQuota ? quota : null;
     if (s === '[data-clock]') return hasClock ? clock : null;
     assert.equal(s, '[data-serve-cluster]'); return hasCluster ? cluster : null;
   },
   querySelectorAll: s => {
+    if (s === '[data-pulse-waiting]') return hasQuota ? waiting : [];
     if (s === '.run-status[data-key]') return rows;
     assert.equal(s, '[data-blocked-key]'); return badges;
   },
@@ -56,6 +60,8 @@ async function refresh(text, rev, err = '', status = 'serve armed · up 4m · 3 
     __pause_summary: 'new automatic sweeps ' + (rev % 2 ? 'paused until tomorrow' : 'unpaused'),
     __pause_revision: String(rev), __pause_error: err, __pause_active: rev % 2 ? 'true' : 'false',
     __agent_summary: text, __agent_revision: String(rev), __agent_error: err,
+    __pulse_quota: rev % 2 ? 'claude · quota exhausted · retry after Thu 14:30 PST' : '',
+    __pulse_waiting: rev % 2 ? 'waiting for quota' : 'next check in 3m',
     __serve_cluster: status, __clock: 'Thu 26 Nov 14:0' + rev, ...(present ? Object.fromEntries(rows.map(row => [row.dataset.key, {summary: '<working>', stage_blocked: blocked}])) : {})
   })});
   await flush();
@@ -71,6 +77,11 @@ async function refresh(text, rev, err = '', status = 'serve armed · up 4m · 3 
     assert.equal(pauseButton.textContent, rev % 2 ? 'Unpause' : 'Pause for 24 hours');
     assert.equal(pauseButton.disabled, !!err);
     assert.equal(pauseForm.action, rev % 2 ? '/serve/unpause' : '/serve/pause');
+  }
+  if (hasQuota) {
+    assert.equal(quota.hidden, !(rev % 2));
+    assert.equal(quota.textContent, rev % 2 ? 'claude · quota exhausted · retry after Thu 14:30 PST' : '');
+    assert.equal(waiting[0].textContent, '▒ waiting · ' + (rev % 2 ? 'waiting for quota' : 'next check in 3m'));
   }
   if (hasCluster) assert.equal(cluster.textContent, status);
   if (hasClock) assert.equal(clock.textContent, 'Thu 26 Nov 14:0' + rev);

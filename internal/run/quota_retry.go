@@ -23,9 +23,11 @@ type QuotaTarget struct {
 }
 
 // QuotaRetry is a harness-authored journal event. A nonempty token installs
-// or updates one pulse's obligation; Resolves names only tokens observed by
-// the invocation on entry. Replacing a token never grants stage execution.
+// or updates one survey admission or pulse ride obligation; Resolves names
+// only tokens observed by the invocation on entry. Replacing a token never grants stage execution.
 type QuotaRetry struct {
+	// Survey marks pre-mint admission, whose token and targets name no run.
+	Survey    bool          `json:"survey,omitempty"`
 	Project   string        `json:"project"`
 	Token     string        `json:"token,omitempty"`
 	NotBefore time.Time     `json:"not_before,omitzero"`

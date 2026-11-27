@@ -146,6 +146,16 @@ func runPulse(root, emitRun string, stdout, stderr io.Writer) (int, bool) {
 		clockQuota = q
 		defer func() { clockQuota = prior }()
 	}
+	if clockInvoked {
+		state := surveyAdmissionState(root, agentDefaultNow())
+		if state.Held(agentDefaultNow()) {
+			moePrintf(stderr, "pulse: %s\n", state.Summary(agentDefaultNow()))
+			if state.Error != "" {
+				return 1, false
+			}
+			return exitQuotaDeferred, false
+		}
+	}
 	pi := installPulseInterrupt()
 	defer pi.Close()
 	moePrintf(stderr, "pulse: scanning — Ctrl-C to skip\n")
@@ -287,6 +297,20 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 		return 0
 	}
 
+	admission, code := admitPulseSurvey(root, stderr)
+	if code == exitInterrupted {
+		pi.mark()
+		return 0
+	}
+	if code == exitNotStarted {
+		return 1
+	}
+	if code != 0 {
+		return code
+	}
+	if pi.interrupted() {
+		return 0
+	}
 	md, err := runopen.Open(root, projectID, run.Options{
 		IDBase:   pulseWorkflow,
 		Workflow: pulseWorkflow,
@@ -338,7 +362,7 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 	// of exhausted plan limits) and tells a phone glance the sweep
 	// succeeded. Either way the run stays open on the dash's ACTIVE list
 	// for the operator, and either way the next survey is unblocked.
-	survey := openPulse(projectID, md.ID, true /*headless*/, pi, stdout, stderr)
+	survey := openPulse(projectID, md.ID, true /*headless*/, pi, admission, stdout, stderr)
 	if survey.code == exitInterrupted {
 		// The Ctrl-C may have been observed only at the agent boundary, so
 		// mark the latch to propagate the skip out as the verb's own exit.
@@ -346,15 +370,6 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 		pi.mark()
 	}
 	switch {
-	case !pi.interrupted() && !survey.agentStarted && survey.code == exitQuotaDeferred:
-		// Admission already released the reservation and atomically
-		// closed the untouched pulse with its retry event.
-		return exitQuotaDeferred
-	case !pi.interrupted() && !survey.agentStarted && survey.code == exitNotStarted:
-		if err := disposePulseRunReason(root, projectID, md.ID, "quota admission unavailable; retry with ordinary failure backoff", stderr); err != nil {
-			moePrintf(stderr, "pulse: skip-close: %v\n", err)
-		}
-		return 1
 	case pi.interrupted() && !survey.agentStarted:
 		// The latch is set and the agent never started: a Ctrl-C in a
 		// millisecond gap between setup children tripped the pre-executor
@@ -454,9 +469,6 @@ func pulseSurvey(root, projectID, emitRun string, pi *pulseInterrupt, stdout, st
 	if err := closePulseRunStamped(root, projectID, md.ID, "next section", nextSection, stderr); err != nil {
 		moePrintf(stderr, "pulse: auto-close %s/%s: %v\n", projectID, md.ID, err)
 		return 1
-	}
-	if clockQuota != nil {
-		clockQuota.survey = false
 	}
 
 	// The kick is last, and deliberately *outside* the pulse's skip
@@ -607,11 +619,12 @@ var errPulseSkipped = errors.New("pulse: skipped before the survey started")
 //
 // It reports a surveyOutcome rather than a bare exit code: the two extra
 // facts are the ones the apply step can't recover afterwards.
-var openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+var openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, admission *pulseAdmission, stdout, stderr io.Writer) surveyOutcome {
 	out := surveyOutcome{}
 	out.code = runStageSession(projectID, runID, pulseDoc,
 		stageSessionOpts{
 			ValidateEntry: inProgressSessionEntry(pulseWorkflow),
+			admittedPulse: admission,
 			// No clone: the survey reads each project's canonical checkout
 			// by absolute path, and writes only its own run documents.
 			Headless:     headless,

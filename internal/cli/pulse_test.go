@@ -73,7 +73,7 @@ func TestPulseSurveyLatchBeforeOpenMintsNothing(t *testing.T) {
 
 	var calls int
 	orig := openPulse
-	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, admission *pulseAdmission, stdout, stderr io.Writer) surveyOutcome {
 		calls++
 		return surveyOutcome{code: 0, agentStarted: true}
 	}
@@ -105,7 +105,7 @@ func TestPulseSurveySkipDuringSetupDisposesRun(t *testing.T) {
 	trailerstest.SeedProject(t, root, "moe")
 
 	orig := openPulse
-	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, admission *pulseAdmission, stdout, stderr io.Writer) surveyOutcome {
 		// Model the belt: the Ctrl-C latched during setup and the
 		// bootstrap-failure path returned 1 without ever starting the
 		// agent.
@@ -167,7 +167,7 @@ func TestPulseDisposeStampFailureLeavesRunOpen(t *testing.T) {
 	trailerstest.SeedProject(t, root, "moe")
 
 	orig := openPulse
-	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, admission *pulseAdmission, stdout, stderr io.Writer) surveyOutcome {
 		// Wedge the canvas open-for-write before the disposal reaches it.
 		docDir := filepath.Join(root, run.DocDir(projectID, runID, pulseDoc))
 		if err := os.Chmod(filepath.Join(docDir, "content.md"), 0o444); err != nil {
@@ -216,7 +216,7 @@ func TestPulseDisposeCommitFailureRestoresRun(t *testing.T) {
 	trailerstest.SeedProject(t, root, "moe")
 
 	orig := openPulse
-	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, admission *pulseAdmission, stdout, stderr io.Writer) surveyOutcome {
 		// Break `git commit` and nothing else: the run's own opening
 		// commit has already landed, so the scoped hooks dir only reaches
 		// the disposal's commit.
@@ -303,7 +303,7 @@ func TestPulseSurveyMidAgentInterruptLeavesRunOpen(t *testing.T) {
 	trailerstest.SeedProject(t, root, "moe")
 
 	orig := openPulse
-	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, admission *pulseAdmission, stdout, stderr io.Writer) surveyOutcome {
 		return surveyOutcome{code: exitInterrupted, agentStarted: true}
 	}
 	t.Cleanup(func() { openPulse = orig })
@@ -333,7 +333,7 @@ func TestPulseSurveyLatchWithCleanAgentExitLeavesRunOpen(t *testing.T) {
 	trailerstest.SeedProject(t, root, "moe")
 
 	orig := openPulse
-	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, admission *pulseAdmission, stdout, stderr io.Writer) surveyOutcome {
 		// A real sweep: it wrote a fillable gate asking for a spawn, and
 		// exited 0 — with the operator's Ctrl-C latched.
 		writePulseGate(t, root, projectID, runID,
@@ -540,7 +540,7 @@ func TestPulseSurveyAllowsConcurrentRuns(t *testing.T) {
 
 	orig := openPulse
 	var calls int
-	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, admission *pulseAdmission, stdout, stderr io.Writer) surveyOutcome {
 		calls++
 		writePulseGate(t, root, projectID, runID, `{"status": "ok"}`)
 		return surveyOutcome{code: 0, agentStarted: true}
@@ -587,7 +587,7 @@ func TestPulseSurveyAutoClosesOnSuccess(t *testing.T) {
 
 	orig := openPulse
 	var calls int
-	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, admission *pulseAdmission, stdout, stderr io.Writer) surveyOutcome {
 		calls++
 		writePulseGate(t, root, projectID, runID, `{"status": "ok"}`)
 		fp := filepath.Join(root, run.FollowupsPath(projectID, runID))
@@ -651,7 +651,7 @@ func TestPulseSurveyOpensTopLevel(t *testing.T) {
 	trailerstest.SeedProject(t, root, "moe")
 
 	orig := openPulse
-	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, admission *pulseAdmission, stdout, stderr io.Writer) surveyOutcome {
 		writePulseGate(t, root, projectID, runID, `{"status": "ok"}`)
 		return surveyOutcome{code: 0, agentStarted: true}
 	}
@@ -703,7 +703,7 @@ func TestPulseSurveyFailureLeavesRunOpenButDoesNotBlock(t *testing.T) {
 
 	orig := openPulse
 	var calls int
-	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, admission *pulseAdmission, stdout, stderr io.Writer) surveyOutcome {
 		calls++
 		return surveyOutcome{code: 1, agentStarted: true}
 	}
@@ -749,7 +749,7 @@ func TestPulseSurveyUnfilledGateLeavesRunOpen(t *testing.T) {
 	orig := openPulse
 	// Stub writes nothing — the run opens with the skeleton's unparsable
 	// `## Gate` placeholder, which is exactly the no-op shape.
-	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, admission *pulseAdmission, stdout, stderr io.Writer) surveyOutcome {
 		return surveyOutcome{code: 0, agentStarted: true}
 	}
 	t.Cleanup(func() { openPulse = orig })
@@ -1042,7 +1042,7 @@ func TestPulseEmitsTheRunItMinted(t *testing.T) {
 
 	emit := filepath.Join(t.TempDir(), "sweep-moe")
 	orig := openPulse
-	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, admission *pulseAdmission, stdout, stderr io.Writer) surveyOutcome {
 		// Mid-sweep is exactly when a spawning serve reads it.
 		body, err := os.ReadFile(emit)
 		if err != nil {
@@ -1084,7 +1084,7 @@ func TestPulseEmitFailureNeverFailsTheSweep(t *testing.T) {
 
 	emit := filepath.Join(t.TempDir(), "no-such-dir", "sweep-moe")
 	orig := openPulse
-	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, admission *pulseAdmission, stdout, stderr io.Writer) surveyOutcome {
 		writePulseGate(t, root, projectID, runID, `{"status": "ok"}`)
 		return surveyOutcome{code: 0, agentStarted: true}
 	}

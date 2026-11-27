@@ -80,7 +80,7 @@ func TestPulseSurveyRefusesGateWithATypodAsk(t *testing.T) {
 	trailerstest.SeedProject(t, root, "moe")
 
 	orig := openPulse
-	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, stdout, stderr io.Writer) surveyOutcome {
+	openPulse = func(projectID, runID string, headless bool, pi *pulseInterrupt, admission *pulseAdmission, stdout, stderr io.Writer) surveyOutcome {
 		writePulseGate(t, root, projectID, runID, `{"status":"ok",`+
 			`"loose":[{"slug":"moe/fix-a","title":"Fix a","why":"because"}],`+
 			`"next":{"run":"moe/fix-a","why":"because","sak":"typo"}}`)

@@ -11,6 +11,7 @@ import (
 	"github.com/modulecollective/moe/internal/input"
 	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
+	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/serve"
 	"github.com/modulecollective/moe/internal/servepause"
 	"github.com/modulecollective/moe/internal/sync"
@@ -49,6 +50,7 @@ const (
 // of the dash renders. A dashboard that refused to draw because a monitor
 // file was truncated would have the priorities backwards.
 type serveState struct {
+	quota    run.SurveyAdmission
 	pause    servepause.State
 	pauseErr error
 	snap     serve.ActivitySnapshot
@@ -77,7 +79,7 @@ type serveState struct {
 func readServeState(root string) serveState {
 	snap, ok, err := serve.ReadActivitySnapshot(root)
 	pause, pauseErr := servepause.Read(root)
-	st := serveState{pause: pause, pauseErr: pauseErr, snap: snap, ok: ok, err: err, live: serveDead}
+	st := serveState{quota: surveyAdmissionState(root, time.Now()), pause: pause, pauseErr: pauseErr, snap: snap, ok: ok, err: err, live: serveDead}
 	if ok {
 		st.live = probeLiveness(snap)
 	}
@@ -215,7 +217,16 @@ func (s serveState) pulse(now time.Time, rows []dash.Row, notes input.File, deta
 	if s.pauseErr == nil && s.pause.Active(now) {
 		pause = s.pause.Summary(now)
 	}
-	p.Waiting = dash.PulseWaiting(armed, next, pause)
+	p.Quota = s.quota.Summary(now)
+	if s.ok && s.live != serveDead {
+		for _, project := range s.snap.Projects {
+			if project.Sweeping() {
+				p.Quota = "survey running"
+				break
+			}
+		}
+	}
+	p.Waiting = dash.PulseWaiting(armed, next, pause, p.Quota)
 	return p
 }
 

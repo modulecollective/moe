@@ -162,7 +162,7 @@ func TestChangedDefaultWakesJournaledRideRetryAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	q.pulse, q.survey = pulse.ID, false
+	q.pulse = pulse.ID
 	if err := q.record(quotaDeferral{target: run.QuotaTarget{Project: "moe", Run: ride.ID, Stage: "design", Backend: "claude", Reason: "spent"}, retryAt: time.Now().Add(48 * time.Hour)}, io.Discard); err != nil {
 		t.Fatal(err)
 	}

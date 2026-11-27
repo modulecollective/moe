@@ -126,8 +126,9 @@ func runServe(args []string, stdout, stderr io.Writer) int {
 // directly in tests.
 func serveOptions(root string, stderr io.Writer) serve.Options {
 	return serve.Options{
-		Root:   root,
-		Logger: stderr,
+		SurveyAdmission: func(now time.Time) run.SurveyAdmission { return surveyAdmissionState(root, now) },
+		Root:            root,
+		Logger:          stderr,
 		// The resident heartbeat's gate. Serve owns the clock, the
 		// backoff and the child; every question that needs the journal,
 		// the chain graph or the workflow registry is answered on this

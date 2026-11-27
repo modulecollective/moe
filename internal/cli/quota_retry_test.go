@@ -15,7 +15,6 @@ import (
 	"github.com/modulecollective/moe/internal/git"
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/input"
-	"github.com/modulecollective/moe/internal/project"
 	"github.com/modulecollective/moe/internal/repolock"
 	"github.com/modulecollective/moe/internal/run"
 	"github.com/modulecollective/moe/internal/session"
@@ -116,118 +115,6 @@ func TestQuotaCleanupFailureIsAnError(t *testing.T) {
 	}
 }
 
-func TestClockSurveyQuotaDisposalAndRestart(t *testing.T) {
-	for _, unavailable := range []bool{false, true} {
-		t.Run(map[bool]string{false: "exhausted", true: "unavailable"}[unavailable], func(t *testing.T) {
-			root := newTestBureaucracy(t)
-			markBureaucracy(t, root)
-			seedSdlcOneShotProject(t, root, "tele")
-			t.Setenv("MOE_HOME", root)
-			t.Setenv("MOE_SERVE_AGENT", "1")
-			t.Chdir(root)
-			defer withClockInvoked()()
-			defer withRideMode(rideDynamic)()
-			reset := time.Now().Add(48 * time.Hour).UTC()
-			prev := readStageQuota
-			t.Cleanup(func() { readStageQuota = prev })
-			reads := 0
-			readStageQuota = func(context.Context, string, string, []string) (agent.Quota, error) {
-				reads++
-				if unavailable {
-					return agent.Quota{}, errors.New("offline")
-				}
-				return quota(99, reset), nil
-			}
-			var log bytes.Buffer
-			code, interrupted := runPulse(root, "", io.Discard, &log)
-			want := exitQuotaDeferred
-			if unavailable {
-				want = 1
-			}
-			if code != want || interrupted || reads != 1 {
-				t.Fatalf("code=%d interrupted=%v reads=%d: %s", code, interrupted, reads, &log)
-			}
-			mds, err := run.Scan(root)
-			if err != nil || len(mds) != 1 || mds[0].Status != run.StatusClosed {
-				t.Fatalf("runs=%v err=%v: %s", mds, err, &log)
-			}
-			md := mds[0]
-			body, err := os.ReadFile(filepath.Join(root, run.ContentPath(project.RootID, md.ID, pulseDoc)))
-			if err != nil || !strings.Contains(string(body), "No survey started") || strings.Contains(string(body), "agent fills") {
-				t.Fatalf("canvas=%s err=%v", body, err)
-			}
-			sessions, err := session.List(root)
-			if err != nil || len(sessions) != 0 {
-				t.Fatalf("reservation leaked: %v %v", sessions, err)
-			}
-			idx, err := run.BuildJournalIndex(root)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(idx.WorkTurnTime) != 0 {
-				t.Fatal("pre-admission stage work committed")
-			}
-			if unavailable {
-				if len(idx.QuotaRetries) != 0 {
-					t.Fatal("unavailable quota invented a reset")
-				}
-				return
-			}
-			token := project.RootID + "/" + md.ID
-			retry, ok := idx.QuotaRetries[token]
-			if !ok || !retry.NotBefore.Equal(reset.Add(cooldownResetSlack)) || len(retry.Targets) != 1 || retry.Targets[0].Stage != pulseDoc {
-				t.Fatalf("retry=%+v", retry)
-			}
-			g := newHeartbeatGate(root)
-			sc := mustPulseScan(t, root)
-			p, err := project.Load(root, project.RootID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if due, _, why := g.projectDue(sc, p, time.Now()); due || !strings.Contains(why, "deferred for quota") {
-				t.Fatalf("future retry: due=%v %s", due, why)
-			}
-			// The retry leg outranks a clean cursor and needs no parked run.
-			g.Swept(project.RootID, true)
-			if due, _, why := g.projectDue(sc, p, retry.NotBefore); !due {
-				t.Fatalf("due retry hidden: %s", why)
-			}
-			p.Mode = string(project.ModePaused)
-			if due, _, _ := g.projectDue(sc, p, retry.NotBefore); due {
-				t.Fatal("retry ignored pause")
-			}
-			// A failed retry leaves the token. A clean new survey discharges
-			// only the obligations it observed, without needing a stage ride.
-			prevOpen := openPulse
-			openPulse = func(projectID, runID string, _ bool, _ *pulseInterrupt, _, _ io.Writer) surveyOutcome {
-				return surveyOutcome{code: 1, agentStarted: true}
-			}
-			if code, _ := runPulse(root, "", io.Discard, &log); code != 1 {
-				t.Fatalf("failed retry code=%d", code)
-			}
-			idx, _ = run.BuildJournalIndex(root)
-			if _, ok := idx.QuotaRetries[token]; !ok {
-				t.Fatal("failed survey discharged retry")
-			}
-			openPulse = func(projectID, runID string, _ bool, _ *pulseInterrupt, _, _ io.Writer) surveyOutcome {
-				writePulseGate(t, root, projectID, runID, `{"status":"ok"}`)
-				return surveyOutcome{agentStarted: true}
-			}
-			t.Cleanup(func() { openPulse = prevOpen })
-			if code, _ := runPulse(root, "", io.Discard, &log); code != 0 {
-				t.Fatalf("clean retry code=%d: %s", code, &log)
-			}
-			idx, _ = run.BuildJournalIndex(root)
-			if len(idx.QuotaRetries) != 0 {
-				t.Fatalf("clean survey retained retries: %+v", idx.QuotaRetries)
-			}
-			if len(dueProjectsPastTheWindow(t, newHeartbeatGate(root))) != 0 {
-				t.Fatal("clean retry kept waking after restart")
-			}
-		})
-	}
-}
-
 func TestQuotaRetryAggregationAndObservedTokens(t *testing.T) {
 	root := quietFixture(t)
 	defer withRideMode(rideDynamic)()
@@ -238,7 +125,7 @@ func TestQuotaRetryAggregationAndObservedTokens(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		q.pulse, q.survey = slug, false
+		q.pulse = slug
 		return q
 	}
 	def := func(stage string, after time.Duration) quotaDeferral {
@@ -341,7 +228,7 @@ func TestQuotaRecordFailureRestoresJournal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	q.pulse, q.survey = "pulse", false
+	q.pulse = "pulse"
 	hooks := t.TempDir()
 	writeFile(t, filepath.Join(hooks, "pre-commit"), "#!/bin/sh\nexit 1\n")
 	if err := os.Chmod(filepath.Join(hooks, "pre-commit"), 0755); err != nil {
@@ -396,7 +283,7 @@ func TestCIRepairClaimsAfterQuotaAdmission(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			q.pulse, q.survey = pulse.ID, false
+			q.pulse = pulse.ID
 			previousQuota := clockQuota
 			clockQuota = q
 			t.Cleanup(func() { clockQuota = previousQuota })

@@ -74,6 +74,8 @@ const DefaultPort = 4242
 
 // Options configures a Server.
 type Options struct {
+	// SurveyAdmission projects durable quota evidence using the CLI selection registry.
+	SurveyAdmission func(time.Time) run.SurveyAdmission
 	// Addr overrides the listener address. Accepts "host" or
 	// "host:port". Empty means 127.0.0.1 with Port.
 	Addr string

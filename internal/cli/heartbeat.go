@@ -139,6 +139,18 @@ func (g *heartbeatGate) Due(log io.Writer) []serve.HeartbeatDecision {
 		return nil
 	}
 	now := time.Now()
+	state := surveyAdmissionState(g.root, now)
+	if state.Held(now) {
+		decisions := make([]serve.HeartbeatDecision, 0, len(projects))
+		for _, p := range projects {
+			decision := serve.HeartbeatDecision{Project: p.ID, Held: true, Reason: state.Summary(now)}
+			if project.ModeOf(p) == project.ModePaused {
+				decision.Held, decision.Reason = false, "paused"
+			}
+			decisions = append(decisions, decision)
+		}
+		return decisions
+	}
 
 	// Every project's verdict comes back, not just the ones to sweep: the
 	// stand-downs are the trace that used to be invisible, and the loop
@@ -557,6 +569,9 @@ func quotaSelectionChanged(root string, sc *pulseScan, projectID string, now tim
 		}
 		for _, target := range retry.Targets {
 			md := sc.byKey[target.Project+"/"+target.Run]
+			if retry.Survey {
+				md = &run.Metadata{Workflow: pulseWorkflow}
+			}
 			if md == nil {
 				continue
 			}

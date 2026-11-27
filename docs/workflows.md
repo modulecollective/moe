@@ -985,25 +985,34 @@ successful sweep, against the exact snapshot handed to that survey; failures
 arriving during its rides remain visible to the next tick. Healthy and pending
 changes alone spend no turn. No recorded pushed PR means no added network read.
 
-Known quota exhaustion yields the session and records a retry in the journal.
-The first ordinary heartbeat at or after its date can commission a fresh
-survey, even after restart and with nothing parked. The survey rejudges the
-current board; it never resumes an old pick. Future retries alone cost no run
-or agent call and do not block new journal, chore or PR work. Project mode, the
-global pause and same-run ownership still bind a due retry. Stopping or
-unarming serve leaves its dates inert. Pure quota deferral neither acknowledges
-the board or PR checks as fully surveyed nor increases the failure streak, and
-sends no routine exit webhook. Existing failure history stays until a fully
-clean sweep.
+Known survey quota exhaustion records a retry before opening a pulse run.
+Until its deadline, every automatic wake waits for the same effective survey
+backend/model, including new notes, journal changes, chores and PR changes.
+Held ticks make no provider calls or journal commits. A changed selection can
+recheck on the next eligible tick. Ride deferrals remain scoped to existing
+runs and do not hold other survey wakes. The survey rejudges the current board;
+it never resumes an old pick. Project mode, global pause, ownership and failure
+backoff still bind. Stopping or unarming serve leaves retry dates inert. Pure
+quota deferral neither acknowledges the board or PR checks as fully surveyed
+nor increases the failure streak, and sends no routine exit webhook. Existing
+failure history stays until a fully clean sweep.
+
+PULSE on web, dash and UI shows the recorded backend/model, waiting reason and
+local, zone-marked eligibility time, even after restart or with serve stopped.
+At expiry it says eligible for quota recheck. The tick countdown is a check
+time, not a promised survey start. Pending notes remain waiting, and the last
+real pulse link stays available. Paused or unarmed serve remains the primary
+explanation of why nothing starts; quota is additional context. The existing
+web status refresh updates and clears this evidence without reloading.
 
 Failure cools itself off: consecutive failed sweeps back the one sweep off
-exponentially, so a dead network or unavailable quota interface does not mint
-a pile of pulse runs. Quota admission refused before any survey agent starts
-closes the untouched pulse with a skip note. An agent that started and died
-leaves its real artifact open on ACTIVE; the heartbeat sweeps past that open
-run rather than letting one failed sweep wedge the board. In a mixed
-outcome, real failures take precedence over quota deferral; failure backoff
-and any recorded quota retry both apply.
+exponentially, so a dead network or unavailable quota interface does not mint a
+pile of pulse runs. Unavailable survey quota and cancellation during admission
+also create no run. Ordinary failures after successful admission keep their
+recovery evidence. An agent that started and died leaves its real artifact open
+on ACTIVE; the heartbeat sweeps past that open run rather than letting one
+failed sweep wedge the board. In a mixed outcome, real failures take precedence
+over quota deferral; failure backoff and any recorded quota retry both apply.
 
 The heartbeat also recovers machine sessions whose matching claim proves the
 owner dead — same host and PID namespace, process gone, heartbeat stale. It
@@ -1118,17 +1127,21 @@ original budget. This does not increase provider polling. Explicit choices
 that mask a default change keep their selection; executing agents stay put.
 
 Heartbeat-invoked stages instead read once and yield immediately when blocked.
-The pulse journals the earliest retry among its deferred roots, using each
-stage's latest blocking reset plus five seconds. If any blocking reset is
-missing or past, the next ordinary tick can retry. Weekly resets may defer for
-days without retaining a process. Unavailable quota, including unresolved high
-model scope, refuses without transport sleeps and uses failure backoff. Every
-later stage admission reads fresh quota; a retry date never admits work on its
-own. A different effective backend/model on a deferred target offers a fresh
-survey on the next otherwise eligible tick, including after restart; project
-mode, the global pause, same-run ownership and failure backoff still apply.
-Configuration errors preserve the obligation rather than claiming a changed
-choice. Typed dynamic pulses keep the ordinary wait policy.
+A survey admits before minting its run, then carries that exact selection into
+its stage without a second quota read. Its deferral journals only survey
+admission evidence, preserving outstanding ride obligations until a real survey
+rejudges them. For rides, the pulse journals the earliest retry among deferred
+roots. Both use each stage's latest blocking reset plus five seconds. If any
+blocking reset is missing or past, the next ordinary tick can retry. Weekly
+resets may defer for days without retaining a process. Unavailable quota,
+including unresolved high model scope, refuses without transport sleeps and
+uses failure backoff. Every later stage admission reads fresh quota; a retry
+date never admits work on its own. A different effective backend/model on a
+deferred target offers a fresh survey on the next otherwise eligible tick,
+including after restart; project mode, the global pause, same-run ownership and
+failure backoff still apply. Configuration errors preserve the obligation
+rather than claiming a changed choice. Typed dynamic pulses keep the ordinary
+wait policy.
 
 At an interactive stage's attached terminal, `c` + Enter continues that stage
 now, `a` + Enter skips checks for the rest of this invocation, and `q` + Enter

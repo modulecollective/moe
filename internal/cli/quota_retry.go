@@ -22,7 +22,6 @@ type pulseQuotaRetries struct {
 	root, project, pulse string
 	observed             map[string]string
 	event                run.QuotaRetry
-	survey               bool
 	// A claimed CI repair cannot be continued by a new sweep. Later
 	// quota exhaustion yields, but must not issue a retry for that repair.
 	repairClaimed bool
@@ -33,9 +32,17 @@ func newPulseQuotaRetries(root, project string) (*pulseQuotaRetries, error) {
 	if err != nil {
 		return nil, err
 	}
-	q := &pulseQuotaRetries{root: root, project: project, survey: true, observed: map[string]string{}}
+	// Admission owns survey resolutions; the real pulse collector owns rides.
+	// Keeping resolved survey tokens here would journal the same resolution again
+	// when an admitted survey finishes without any deferred ride.
+	surveys, err := idx.SurveyRetries(root)
+	if err != nil {
+		return nil, err
+	}
+	q := &pulseQuotaRetries{root: root, project: project, observed: map[string]string{}}
 	for token, r := range idx.QuotaRetries {
-		if r.Project == project {
+		_, survey := surveys[token]
+		if r.Project == project && !survey {
 			q.observed[token] = r.Fingerprint()
 		}
 	}
@@ -59,16 +66,7 @@ func (q *pulseQuotaRetries) record(d quotaDeferral, stderr io.Writer) error {
 		e.NotBefore = d.retryAt
 	}
 	e.Targets = append(append([]run.QuotaTarget(nil), e.Targets...), d.target)
-	if q.survey {
-		block, err := quotaRetryTrailer(e)
-		if err != nil {
-			return err
-		}
-		note := pulseSkipNote(d.target.Reason) + "\n" + renderQuotaRetries(e)
-		if err := closePulseRunStamped(q.root, q.project, q.pulse, "quota skip note", func([]byte) []byte { return []byte(note) }, stderr, block); err != nil {
-			return err
-		}
-	} else if err := q.commit(e); err != nil {
+	if err := q.commit(e); err != nil {
 		return err
 	}
 	q.event = e

@@ -18,11 +18,11 @@ func TestQuotaDeferralCompletionAcrossHosts(t *testing.T) {
 		t.Run(host, func(t *testing.T) {
 			root := t.TempDir()
 			gittest.InitAt(t, root)
-			payload, err := json.Marshal(run.QuotaRetry{Project: "_cabinet", Token: "_cabinet/pulse", NotBefore: time.Now().Add(time.Hour).UTC(), Targets: []run.QuotaTarget{{Project: "_cabinet", Run: "work", Stage: "code", Backend: "codex", Reason: "spent"}}})
+			payload, err := json.Marshal(run.QuotaRetry{Survey: true, Project: "_cabinet", Token: "_cabinet/pulse", NotBefore: time.Now().Add(time.Hour).UTC(), Targets: []run.QuotaTarget{{Project: "_cabinet", Stage: "pulse", Backend: "codex", Reason: "spent"}}})
 			if err != nil {
 				t.Fatal(err)
 			}
-			gittest.Run(t, root, "commit", "--allow-empty", "-m", "quota retry\n\n"+trailers.Block{Run: "pulse", Project: "_cabinet", Workflow: "pulse", Consent: "dynamic", QuotaRetry: string(payload)}.String())
+			gittest.Run(t, root, "commit", "--allow-empty", "-m", "quota retry\n\n"+trailers.Block{Project: "_cabinet", Consent: "dynamic", QuotaRetry: string(payload)}.String())
 			gate := &fakeHeartbeat{due: []string{"_cabinet"}}
 			var log syncBuf
 			var s *Server
@@ -82,7 +82,7 @@ func TestQuotaDeferralCompletionAcrossHosts(t *testing.T) {
 				t.Fatalf("activity=%+v", p)
 			}
 			panel := s.activity.panel(time.Now())
-			if len(panel.Projects) != 1 || panel.Projects[0].State != "deferred" || panel.Projects[0].Failed {
+			if len(panel.Projects) != 1 || panel.Projects[0].State != "deferred" || panel.Projects[0].Failed || panel.Projects[0].Run != "" {
 				t.Fatalf("deferral rendered as a failure or disappeared: %+v", panel.Projects)
 			}
 			for _, ev := range panel.Events {

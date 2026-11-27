@@ -228,7 +228,7 @@ func TestHeartbeatHTTPAdvanceWithSameSecondFutureQuotaRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	q.pulse, q.survey = "pulse-before", false
+	q.pulse = "pulse-before"
 	if err := q.record(quotaDeferral{
 		target:  run.QuotaTarget{Project: "moe", Run: "advance-me", Stage: "build", Backend: "codex", Reason: "weekly 99%"},
 		retryAt: time.Now().Add(24 * time.Hour),

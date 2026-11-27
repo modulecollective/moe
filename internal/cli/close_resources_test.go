@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/repolock"
@@ -299,35 +298,6 @@ func TestPulseStampedCloseCommitFailurePreservesResourcesForRetry(t *testing.T) 
 	assertCloseRecorded(t, root, "tele", "finish", pulseWorkflow)
 }
 
-func TestPulseQuotaSkipReleasesResourcesAndRecordsRetry(t *testing.T) {
-	root := seedCloseFixture(t, "tele", "finish", pulseWorkflow, run.StatusInProgress)
-	writePulseGate(t, root, "tele", "finish", `{"status":"ok"}`)
-	installCloseResourceHooks(t, root, "tele")
-	resources := allocateCloseResources(t, root, "tele", "finish")
-	q, err := newPulseQuotaRetries(root, "tele")
-	if err != nil {
-		t.Fatal(err)
-	}
-	q.pulse = "finish"
-	retryAt := time.Now().UTC().Add(time.Hour)
-	err = q.record(quotaDeferral{retryAt: retryAt, target: run.QuotaTarget{Project: "tele", Run: "finish", Stage: pulseDoc, Backend: "claude", Reason: "quota exhausted"}}, io.Discard)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resources.assertReleased(t)
-	assertCloseRecorded(t, root, "tele", "finish", pulseWorkflow)
-	idx, err := run.BuildJournalIndex(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if retry, ok := idx.QuotaRetries["tele/finish"]; !ok || !retry.NotBefore.Equal(retryAt) {
-		t.Fatalf("quota retry lost: %+v", idx.QuotaRetries)
-	}
-	if body := readPulseCanvas(t, root, "tele", "finish"); !strings.Contains(body, "## Quota deferrals") || !strings.Contains(body, "quota exhausted") {
-		t.Fatalf("skip note lost: %s", body)
-	}
-}
-
 func TestPulseSurveyResourceLifecycle(t *testing.T) {
 	for _, scenario := range []string{"static", "dynamic", "skip", "invalid", "failed"} {
 		t.Run(scenario, func(t *testing.T) {
@@ -343,7 +313,7 @@ func TestPulseSurveyResourceLifecycle(t *testing.T) {
 			var resources closeResources
 			orig := openPulse
 			t.Cleanup(func() { openPulse = orig })
-			openPulse = func(projectID, runID string, _ bool, pi *pulseInterrupt, _, _ io.Writer) surveyOutcome {
+			openPulse = func(projectID, runID string, _ bool, pi *pulseInterrupt, admission *pulseAdmission, _, _ io.Writer) surveyOutcome {
 				resources = allocateCloseResources(t, root, projectID, runID)
 				if scenario == "skip" {
 					pi.mark()

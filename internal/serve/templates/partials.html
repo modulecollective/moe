@@ -94,6 +94,7 @@
   <section class="dash-section pulse-section" id="pulse">
     <h2><span>pulse</span></h2>
     <p class="pulse-status"><a href="/serve" data-serve-cluster>{{.Serve.Cluster}}</a>{{with .Pulse.LastRun}} · last <a href="/run/{{.}}">{{.}}</a> {{$.Pulse.LastAgo}}{{end}}</p>
+    <p class="pulse-status" data-pulse-quota {{if not .Pulse.Quota}}hidden{{end}}>{{.Pulse.Quota}}</p>
     {{template "pause_control.html" .Serve.Pause}}
     <form method="post" action="/pulse/note" class="input-reply pulse-note-form">
       <textarea name="text" rows="2" placeholder="tell the next pulse — work to start, what comes first" required></textarea>
@@ -104,7 +105,7 @@
       {{range .Pulse.Pending}}
       <li class="row pulse-note">
         <span class="slug">#{{.ID}}</span>
-        <span class="pulse-state">▒ waiting · {{$.Pulse.Waiting}}</span>
+        <span class="pulse-state" data-pulse-waiting>▒ waiting · {{$.Pulse.Waiting}}</span>
         <span class="note pulse-text">{{.Text}}</span>
       </li>
       {{end}}
@@ -344,6 +345,11 @@ document.getElementById('theme-toggle').addEventListener('click', function () {
         if (!m || document.hidden) return;
         var cluster = document.querySelector('[data-serve-cluster]');
         if (cluster) cluster.textContent = m.__serve_cluster;
+        var quota = document.querySelector('[data-pulse-quota]');
+        if (quota) { quota.textContent = m.__pulse_quota || ''; quota.hidden = !m.__pulse_quota; }
+        document.querySelectorAll('[data-pulse-waiting]').forEach(function (el) {
+          el.textContent = '▒ waiting · ' + m.__pulse_waiting;
+        });
         var clock = document.querySelector('[data-clock]');
         if (clock && m.__clock) clock.textContent = m.__clock;
         var agent = document.getElementById('agent-default');
