@@ -43,7 +43,8 @@ type Pulse struct {
 
 // LastPulse returns the newest pulse run among rows. Rows carry each
 // run's last journal activity, so this is the sweep the operator most
-// recently heard from.
+// recently heard from. That activity has one-second resolution, so two
+// sweeps can tie; the later-minted slug wins a tie.
 func LastPulse(rows []Row) *Row {
 	var last *Row
 	for i := range rows {
@@ -51,11 +52,26 @@ func LastPulse(rows []Row) *Row {
 		if r.Workflow != PulseWorkflow {
 			continue
 		}
-		if last == nil || r.When.After(last.When) {
+		if last == nil || r.When.After(last.When) ||
+			r.When.Equal(last.When) && mintedAfter(r.Run, last.Run) {
 			last = r
 		}
 	}
 	return last
+}
+
+// mintedAfter reports whether pulse slug a was minted after b. Slugs are
+// pulse-YYYY-MM-DD, then -2, -3, … for the same day, so the later date
+// wins, then the longer slug (-10 after -9), then byte order.
+func mintedAfter(a, b string) bool {
+	const head = len("pulse-2006-01-02")
+	if len(a) >= head && len(b) >= head && a[:head] != b[:head] {
+		return a[:head] > b[:head]
+	}
+	if len(a) != len(b) {
+		return len(a) > len(b)
+	}
+	return a > b
 }
 
 // SplitPulseNotes partitions the pulse record: pending oldest first,

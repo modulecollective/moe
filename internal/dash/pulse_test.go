@@ -95,3 +95,43 @@ func TestLastPulsePicksTheNewestPulseRow(t *testing.T) {
 		t.Fatal("LastPulse found a pulse on a board with none")
 	}
 }
+
+// When has one-second resolution, so sweeps closing in the same second
+// tie. Rows arrive in ReadDir byte order, which puts the older slug
+// first in the first two cases.
+func TestLastPulseBreaksSameSecondTiesBySlug(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
+	for _, tc := range []struct {
+		runs []string
+		want string
+	}{
+		{[]string{"pulse-2026-11-26-5", "pulse-2026-11-26-6"}, "pulse-2026-11-26-6"},
+		{[]string{"pulse-2026-11-26", "pulse-2026-11-26-2"}, "pulse-2026-11-26-2"},
+		{[]string{"pulse-2026-11-26-10", "pulse-2026-11-26-9"}, "pulse-2026-11-26-10"},
+		{[]string{"pulse-2026-11-26-18", "pulse-2026-11-27"}, "pulse-2026-11-27"},
+	} {
+		for _, reverse := range []bool{false, true} {
+			var rows []Row
+			for _, run := range tc.runs {
+				rows = append(rows, Row{Run: run, Workflow: PulseWorkflow, When: now})
+			}
+			if reverse {
+				rows[0], rows[1] = rows[1], rows[0]
+			}
+			if got := LastPulse(rows); got == nil || got.Run != tc.want {
+				t.Errorf("LastPulse(%s, %s) = %+v, want %s", rows[0].Run, rows[1].Run, got, tc.want)
+			}
+		}
+	}
+
+	// Time still outranks slug.
+	rows := []Row{
+		{Run: "pulse-2026-11-26-5", Workflow: PulseWorkflow, When: now.Add(time.Second)},
+		{Run: "pulse-2026-11-26-6", Workflow: PulseWorkflow, When: now},
+	}
+	for _, rs := range [][]Row{rows, {rows[1], rows[0]}} {
+		if got := LastPulse(rs); got == nil || got.Run != "pulse-2026-11-26-5" {
+			t.Errorf("LastPulse = %+v, want the strictly newer pulse-2026-11-26-5", got)
+		}
+	}
+}
