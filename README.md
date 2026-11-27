@@ -1,99 +1,92 @@
 # ▓▒░ MINISTRY OF EVERYTHING ░▒▓
 
-Ministry of Everything (MoE) is a CLI-first harness for one operator and the
-AI agents working for them. It runs
-[Claude Code](https://claude.com/claude-code) or
-[Codex](https://chatgpt.com/codex/) against living markdown documents — durable
-context that outlasts the sessions that write it.
+Ministry of Everything (MoE) is a command-line tool for getting finished work
+out of coding agents. You describe a change. [Claude
+Code](https://claude.com/claude-code) or [Codex](https://chatgpt.com/codex/)
+designs it, builds it, reviews it and ships it. Everything they wrote along the
+way is saved in a Git repository you own.
 
-Running several agent threads usually means chat-history archaeology: the
-design lives in one scrollback, the test evidence in another, and the context
-dies with the session. MoE's answer is that every stage of work writes a short
-canvas — an artifact the next stage reads without replaying the whole chat —
-and every turn is committed to a personal Git journal, so the project keeps
-memory that can be resumed, reverted, audited, and reused.
+Coding agents are good at one task in one sitting. The trouble is everything
+around the sitting. The design lives in one chat's scrollback and the test
+results in another. Close the terminal and the context goes with it. Run five
+agents at once and you become the person who has to remember what each one was
+doing.
 
-Work travels as far as you license, and no further. Typed, that's a bang
-grammar: `!` runs one stage and parks at the gate, `!!` ships the run. Standing,
-it's an armed `moe serve --dynamic`, whose heartbeat surveys every project's
-board, picks the one thing that should happen next — a due chore, a tagged idea,
-a parked run — and rides it through build, review, and ship while you're away,
-one run at a time. Stopping serve prevents new sweeps; already-launched Rex-hosted
-sweeps and the rides they carry can finish independently.
+We think the fix is to keep the work in files, not in chats. MoE is built on
+three ideas:
 
-Underneath is a bet that agents have made careful work cheap. When a designed,
-reviewed, tested change costs one conversation and two keystrokes, the
-discipline that used to be overhead becomes the default path. What still costs
-is coordination — opening work, handing context forward, checking progress,
-filing the lessons that should shape the next run — so coordination is what MoE
-automates.
+1. **Every stage leaves a document.** A change moves through four stages:
+   design, build, review, push. Each one writes a short markdown file, called a
+   canvas, that the next stage reads. Nobody replays a chat to find out what
+   was decided.
+2. **Everything is committed.** Each turn lands in a private Git repository
+   called the bureaucracy. You can stop, come back next week, see what
+   happened, and undo it.
+3. **You choose how far it goes alone.** Run one stage and look at the result.
+   Or tell a run to ship itself. Or leave the server on overnight and let it
+   work through the ideas you marked as ready, one at a time.
 
-MoE is deliberately single-operator: one person's backlog, one person's
-journal, no accounts and no sharing. [Anti-Social on
-Purpose](#anti-social-on-purpose) has the reasoning.
+MoE is for one person. There are no accounts and nothing is shared; [One
+operator, on purpose](#one-operator-on-purpose) says why. It is also built with
+itself: every change to MoE ships through these same stages, and most of them
+now start on their own.
 
-MoE is built with MoE — every change ships through the same workflows it
-provides, and these days most of those runs open themselves.
+## A Quick Taste
 
-Everything works from the CLI. A small web server is useful from a phone (via
-something like Tailscale) or locally: capture ideas and intents, answer a
-run's question, and browse runs and canvases, lore, per-project hubs, project
-knowledge, and twin docs.
-
-## The 60-Second Taste
-
-The everyday path is two commands and one conversation:
+Write the idea down when it occurs to you, then turn it into a run:
 
 ```sh
-moe idea new my-project/add-batch-support              # jot it when it occurs to you
+moe idea new my-project/add-batch-support              # jot it down
 moe sdlc new --from-idea my-project/add-batch-support  # promote it to a run
 ```
 
-Promoting the idea offers to jump straight into the design stage: one
-conversation that shapes the note into a reviewable plan. When the stage ends,
-MoE prints a chain prompt. Type `!!` there, and the run codes, tests, reviews,
-and ships itself headlessly — each stage reading the canvas the previous stage
-wrote, each turn committed to the journal.
+Promoting the idea offers to start the design stage: one conversation with the
+agent that turns your note into a plan you can review. When it ends, MoE asks
+what to do next. Type `!!` and the run builds, reviews and ships itself without
+you, each stage reading the canvas the last one wrote and each turn committed.
+Type `!` instead to run just the next stage and stop there for a look. The full
+set of answers is in [docs/workflows.md](docs/workflows.md#sdlc).
 
-The bangs are the lever for how far a run travels without you: `!` runs just
-the next stage and parks at the gate, `!<stage>` runs up to a named gate, `!!`
-ships this run. The full vocabulary — every stage spelled out and the matching
-CLI flags — is in [docs/workflows.md](docs/workflows.md#sdlc).
+## Leaving It Running
 
-The armed server is where the economics turn: shape a few runs during the day,
-tag the ideas you want done, and step away. It then works through them one at a
-time on capacity your flat-rate dev subscription already pays for while you
-sleep — each run still gated, journaled, and revertible in the morning.
+Agents have made careful work cheap. When a designed, reviewed, tested change
+costs one conversation and two keystrokes, the discipline that used to be
+overhead becomes the default path. What still costs is coordination: opening
+work, handing context forward, checking progress, writing down the lessons
+that should shape the next run. So coordination is what MoE automates.
 
-That is the standing rung: leave `moe serve --dynamic` running and its heartbeat
-finds ready work across each project's board, opens it, and carries it through
-the same gates and journal with no bang typed. Stopping serve stops new sweeps;
-to cancel an existing Rex-hosted sweep and its ride, press Ctrl-C in its Rex
-block. Local sweeps stop with serve; see the [heartbeat
-guide](docs/workflows.md#the-heartbeat) for hosting details. When a run needs
-your judgment, push it a sentence — `moe input add` from the terminal, or the
-web's `/input` queue from a phone — and the next turn on that run acts on it. A
-sweep can ask you something the same way, and you answer it in prose.
+Run `moe serve --dynamic` and leave it. Every few minutes it looks across your
+projects for something ready to do: a recurring chore that came due, an idea
+you tagged, a run waiting for its next stage. It picks one, carries it through
+build, review and ship, and then looks again. Starting the server is your
+consent; you can pause it for a day, or switch a project to start only what you
+marked.
 
-## You Might Want MoE If
+That is where the economics turn. Shape a few runs during the day, tag the
+ideas you want done, and step away. The server works through them one at a
+time on capacity your flat-rate subscription already pays for, and each run is
+still gated, committed and revertible in the morning. When a run needs your
+judgment, send it a sentence with `moe input add`, or from your phone through
+the web UI, and its next turn acts on it.
 
-- you run several agent threads and need to resume them without chat-history
-  archaeology;
-- you want agents to work from durable design, test, review, and knowledge
-  artifacts instead of one long prompt;
-- you want follow-up ideas, project intent, and cross-project lessons to feed
-  future runs automatically;
-- you want to steer by intent and monitor by exception — writing direction and
-  reviewing what merges, while most runs open themselves;
-- you want recurring maintenance to surface as ready-to-open runs instead of
-  living in your memory — and, once you arm `moe serve --dynamic`, to open and
-  ride itself;
-- you pay for a flat-rate dev subscription that idles sixteen hours a day and
-  would rather it worked a queue overnight than sat unused;
-- you prefer explicit CLI commands and Git history over a hosted coordination
-  product.
+## Is It For You?
 
-## Anti-Social on Purpose
+You might want MoE if you:
+
+- run several agent threads and want to resume them without digging through
+  chat history;
+- want agents to work from written designs, test evidence and review notes
+  rather than one long prompt;
+- want follow-up ideas, project direction and lessons learned to feed later
+  runs on their own;
+- would rather steer by stating direction and reviewing what merges than by
+  starting each run yourself;
+- want recurring maintenance to show up as ready-to-open work instead of living
+  in your memory;
+- pay for a flat-rate subscription that sits idle sixteen hours a day;
+- prefer explicit CLI commands and Git history to a hosted product.
+
+## One Operator, On Purpose
 
 MoE is deliberately single-operator. There are no accounts, no sharing, and no
 multi-operator coordination surface — that is a recorded non-goal, not a
@@ -131,19 +124,10 @@ moe init
 moe project add <repo-url>
 ```
 
-The fallback backend is `claude`. Use `moe agent codex` to change global
-defaults for 24 hours, or choose it from the web dashboard or `moe ui`'s
-`:agent` command. Explicit `--agent codex` run bindings and the process override
-`MOE_FORCE_AGENT=codex` still win. A model-stylesheet `agent:` rule sets
-permanent policy. Codex needs no permissions-profile setup because MoE supplies
-it. See [docs/reference.md](docs/reference.md#codex-setup) for the sandbox
-details. [`moe ui`](docs/workflows.md#seeing-and-steering-a-running-run) is the
-terminal home screen for re-entry: select runs, follow live details, send notes
-and controls, edit ideas and intents, and manage chores. `moe run list` prints
-the runs as plain text for agents and scripts. `moe serve` serves the web UI,
-pushes pending bureaucracy journal commits to origin armed or unarmed, and
-optionally runs the heartbeat with `--dynamic`. `moe help` and per-command usage
-are the source of truth for the exact command surface.
+`moe ui` is the terminal home screen: every run, idea and chore on one board,
+with the controls to steer them. MoE uses `claude` unless you choose otherwise;
+[docs/reference.md](docs/reference.md#model-stylesheet) covers choosing a
+backend and model, and `moe help` lists every command.
 
 ## The Workflows
 
@@ -156,18 +140,14 @@ full treatment.
 | [`sdlc`](docs/workflows.md#sdlc) | `design` -> `build` -> `review` -> `push` | designed code changes with a ship gate |
 | [`chat`](docs/workflows.md#chat) | one `chat` run, continued across sittings | a read-only thinking partner that reviews the project and grooms the backlog |
 | [`idea`](docs/workflows.md#ideas) | one `idea` canvas, edited through verbs | backlog capture before a full run exists |
-| [`intent`](docs/workflows.md#intents) | one `intent` canvas, edited through verbs | standing direction and goals; the operator authors themes and bets, while the pulse tracks progress and may open or close outcome goals |
-| [`pulse`](docs/workflows.md#pulse) | `pulse` | a read-only survey, fired by the armed serve's heartbeat or by hand, that feeds the backlog and, under `--dynamic`, picks and rides the one run that should happen next |
+| [`intent`](docs/workflows.md#intents) | one `intent` canvas, edited through verbs | standing direction and goals for a project |
+| [`pulse`](docs/workflows.md#pulse) | `pulse` | a read-only survey of every project that feeds the backlog and picks the next run |
 
 Four bureaucracy-side artifacts have no workflow of their own — project
 [hooks](docs/workflows.md#hooks), [chores](docs/workflows.md#chores),
 [knowledge topics](docs/workflows.md#knowledge), and the
 [digital twin](docs/workflows.md#twin). Edit them by hand, or let an sdlc run
-land them: a stage's per-turn commit picks all four up. Chores also have direct
-CLI, web and console management; see the
-[Chores guide](docs/workflows.md#chores). Such an artifact-only run ships
-nothing to the target repo — build's `test.md` gate says so (`ship: none`) and
-`push` closes it.
+land them: a stage's per-turn commit picks all four up.
 
 ## Going Deeper
 
@@ -176,8 +156,9 @@ nothing to the target repo — build's `test.md` gate says so (`ship: none`) and
 - [docs/concepts.md](docs/concepts.md) — the moving parts: runs and canvases,
   the bureaucracy repo, sandboxes and workspaces, feedback channels, and how
   agents are steered.
-- [docs/reference.md](docs/reference.md) — the command catalog, Codex setup,
-  shell completion, hooks/dev-env/secrets, and cleanup and recovery.
+- [docs/reference.md](docs/reference.md) — the command catalog, the console and
+  server, Codex setup, shell completion, hooks/dev-env/secrets, and cleanup and
+  recovery.
 - [docs/evolution.md](docs/evolution.md) — how MoE moved from supervised
   sessions to work that finds, orders, and starts itself.
 - [docs/un-changelist.md](docs/un-changelist.md) — what removed experiments
@@ -190,8 +171,8 @@ and trailer conventions can change. Expect sharp edges.
 
 ## Contributing
 
-Please don't contribute :-) Not accepting issues or PRs right now. This is one firm's internal
-tool, shared in case it is useful.
+Please don't contribute :-) Not accepting issues or PRs right now. This is one
+firm's internal tool, shared in case it is useful.
 
 ## License
 
