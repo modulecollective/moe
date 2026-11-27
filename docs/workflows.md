@@ -817,7 +817,7 @@ minutes and runs one `moe pulse new --dynamic` when any of them has something
 worth looking at. While a sweep or the ride it started is running, no other
 starts. That heartbeat is the only automatic pulse there is, and the only thing
 in the process that starts an agent at all — the web writes licences and marks,
-and the clock spends them. Stopping serve stops new sweeps. AnA sweep hosted in
+and the clock spends them. Stopping serve stops new sweeps. A sweep hosted in
 Rex, and the ride it carries, can finish after serve stops; Ctrl-C in its Rex
 block cancels them. [The server](reference.md#the-server-moe-serve) covers
 hosting.

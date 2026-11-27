@@ -261,8 +261,7 @@ The Console heading quietly labels an active temporary default when space
 allows. `:agent codex` or `:agent claude` chooses that backend for 24 hours;
 `:agent reset` returns to the current stylesheet, and `:agent` shows full status
 and local expiry at every width. These work without a selected row, serve or
-Rex. Status refreshes with the Status refreshes with the normal three-second
-discovery pass.
+Rex. Status refreshes with the normal three-second discovery pass.
 
 `/` opens temporary board search from any pane. Type a case-insensitive literal
 substring of `project/run`; surrounding spaces are ignored. Search covers all
@@ -396,14 +395,14 @@ and found nothing to ship (no repair commit, or a nominated close). A clock
 pulse with only quota deferrals exits 76: it neither increases the failure
 streak nor clears previous failure history. Real failures take precedence in
 mixed outcomes; interruption exits 130. See [Subscription quota
-cooldown](#subscription-quota-cooldown) for the quota policy. The
-heartbeat also passes `--emit-run <path>`: the sweep writes the run it opens
-there, so /serve can link a sweep to the pulse run it minted rather than leaving
-the operator to hunt the dash for a matching `pulse-*` slug. It also passes its
-exact owned-PR observation through the internal `--pr-checks` argument, so a
-successful sweep acknowledges what its survey saw. New actionable failures on
-recorded pushed PRs can wake a sweep without a journal change, unless that
-head's repair attempt is spent and no fresh note is waiting.
+cooldown](#subscription-quota-cooldown) for the quota policy. The heartbeat also
+passes `--emit-run <path>`: the sweep writes the run it opens there, so /serve
+can link a sweep to the pulse run it minted rather than leaving the operator to
+hunt the dash for a matching `pulse-*` slug. It also passes its exact owned-PR
+observation through the internal `--pr-checks` argument, so a successful sweep
+acknowledges what its survey saw. New actionable failures on recorded pushed PRs
+can wake a sweep without a journal change, unless that head's repair attempt is
+spent and no fresh note is waiting.
 
 ## Subscription Quota Cooldown
 
@@ -991,6 +990,7 @@ Stage logic can recover orphaned Claude sessions from the Claude cache or an
 identity-matching mirror. Missing history starts a fresh conversation with a
 notice. Malformed or conflicting mirror identity stops the turn before launch
 when recovery needs that mirror.
+
 ### After An Upgrade
 
 These notes apply only to state or processes left by an older MoE binary.
