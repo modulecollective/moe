@@ -34,6 +34,14 @@ func GrepPattern(key, value string) string {
 	return "^" + key + ": " + regexp.QuoteMeta(value) + "$"
 }
 
+// MoE-Kind values.
+const (
+	KindOpen       = "open"
+	KindTurn       = "turn"
+	KindAdvance    = "advance"
+	KindDiagnostic = "diagnostic"
+)
+
 // Block is the typed shape of the MoE-* trailer block. Each field
 // maps to one trailer; zero-value fields elide. String() renders the
 // non-empty fields in canonical order, one per line, each terminated
@@ -44,7 +52,14 @@ type Block struct {
 	Project  string
 	Workflow string
 	Document string
-	Session  string
+	// Kind says what a commit is, for the four kinds a reader must tell
+	// apart and the other trailers cannot: a run's open, a stage's work
+	// turn, an advance marker and an archived diagnostic (the Kind*
+	// constants). Readers classify by this and never by the headline;
+	// a commit without it is none of the four. Other commits leave it
+	// empty until a reader needs their kind.
+	Kind    string
+	Session string
 	// TimedOut carries the headless cap that fired (e.g. "3h0m0s") on
 	// the turn commit of a stage killed by headlessTurnTimeout. Set
 	// only on that rare commit; absence means the turn ended some other
@@ -126,6 +141,7 @@ func (b Block) String() string {
 	write(&sb, "MoE-Project", b.Project)
 	write(&sb, "MoE-Workflow", b.Workflow)
 	write(&sb, "MoE-Document", b.Document)
+	write(&sb, "MoE-Kind", b.Kind)
 	write(&sb, "MoE-Session", b.Session)
 	write(&sb, "MoE-Timed-Out", b.TimedOut)
 	write(&sb, "MoE-PR", b.PR)
