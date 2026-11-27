@@ -8,9 +8,10 @@
 //
 //	▓▒░ MINISTRY OF EVERYTHING ░▒▓  <suffix>
 //
-// rendered at every stage-session entry and atop `moe ui`. The stage-exit footer mirrors the same gradient blocks
-// (flipped) as a closing bookend so the top/bottom pair frames the
-// stage block in scrollback without spending an extra line.
+// rendered at every stage-session entry and atop `moe ui`. The stage-exit
+// footer mirrors the same gradient blocks (flipped) as a closing bookend
+// so the top/bottom pair frames the stage block in scrollback without
+// spending an extra line.
 package banner
 
 import (

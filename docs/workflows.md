@@ -515,7 +515,7 @@ Where intents reach the robots:
   closes the same intent twice: after `moe intent reopen`, only the operator
   closes it again.
 - **The dash.** Open intents render in a standing `INTENTS` section above the
-  backlog, on both the CLI dash and `moe serve`, with the counts of linked work
+  backlog, on both `moe ui` and `moe serve`, with the counts of linked work
   open and landed and a `pulse` mark on one a pulse opened. The heading renders
   even at zero: an empty list is itself a signal that the robots are running
   unaimed. A closed intent is a finished goal and gets a `COMPLETED` row, noted
@@ -995,13 +995,13 @@ quota deferral neither acknowledges the board or PR checks as fully surveyed
 nor increases the failure streak, and sends no routine exit webhook. Existing
 failure history stays until a fully clean sweep.
 
-PULSE on web, dash and UI shows the recorded backend/model, waiting reason and
-local, zone-marked eligibility time, even after restart or with serve stopped.
-At expiry it says eligible for quota recheck. The tick countdown is a check
-time, not a promised survey start. Pending notes remain waiting, and the last
-real pulse link stays available. Paused or unarmed serve remains the primary
-explanation of why nothing starts; quota is additional context. The existing
-web status refresh updates and clears this evidence without reloading.
+PULSE on the web and in `moe ui` shows the recorded backend/model, waiting
+reason and local, zone-marked eligibility time, even after restart or with serve
+stopped. At expiry it says eligible for quota recheck. The tick countdown is a
+check time, not a promised survey start. Pending notes remain waiting, and the
+last real pulse link stays available. Paused or unarmed serve remains the
+primary explanation of why nothing starts; quota is additional context. The
+existing web status refresh updates and clears this evidence without reloading.
 
 Failure cools itself off: consecutive failed sweeps back the one sweep off
 exponentially, so a dead network or unavailable quota interface does not mint a

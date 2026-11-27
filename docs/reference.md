@@ -184,7 +184,7 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   listing proving absence permits replacement. Session establishment and
   reconciliation must succeed before sweeps. An incompatible Rex discovery reply
   instead requires fixing the host and restarting serve. The startup log, `moe
-  dash` and `/serve` name which host is in use. A `/serve` page owns that
+  ui` and `/serve` name which host is in use. A `/serve` page owns that
   ticker's status and trace — what each recent tick decided, and the output tail
   of any sweep that failed — reachable from the menu and from the status
   line of the dash's PULSE section. `MOE_SERVE_NOTIFY_URL` is the other

@@ -419,7 +419,7 @@ func (s *Server) serve(ctx context.Context, ln net.Listener) error {
 	// next sweep or interactive stage instead of for the next tick.
 	s.logf("security: no request here executes code, but whoever can reach http://%s/ steers the agents that do — reach is the only auth", s.addr)
 	// The state file goes down as soon as the listener is up, so `moe
-	// dash` can see an armed serve before its first tick — "up, nothing
+	// ui` can see an armed serve before its first tick — "up, nothing
 	// swept yet" is a different answer from "no serve at all", and both
 	// are worth telling apart.
 	s.saveActivity()

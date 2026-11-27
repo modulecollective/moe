@@ -243,7 +243,7 @@ func TestDashSurvivesATruncatedStateFile(t *testing.T) {
 
 // TestDashBannerCarriesTheModeCounts: modes are read off project.json
 // rather than out of serve.json, so `moe project mode` shows up in `moe
-// dash` on the next frame instead of the next tick — minutes of
+// ui` on the next frame instead of the next tick — minutes of
 // the dash disagreeing with the command just typed.
 func TestDashBannerCarriesTheModeCounts(t *testing.T) {
 	root := t.TempDir()
