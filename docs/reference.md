@@ -13,18 +13,19 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
 
 ### Re-Entry And Supervision
 
-- `moe dash [--all] [--project <id>] [--workflow <name>]` prints a snapshot
-  of the terminal dashboard, with all registered chores in CHORES and a daily
-  histogram of recent run activity (`--project` scopes the chart to one
-  project). BACKLOG counts ideas only; workflow filters omit chores. The
-  banner is the logo and the local date and time. The board opens with a
-  PULSE section: the serve status line — armed or not, uptime, next sweep,
-  the global pause, and the last pulse run — then your pending pulse notes
-  and the last one a sweep read. A project earns a line under the status
-  only when it is sweeping, cooling off, or its last sweep died. The status
-  line also carries the drain to origin: `N unpushed` when commits are waiting
-  (read from git, so it shows with or without a serve). An empty queue stays
-  quiet. A push origin is refusing earns a row with git's reason.
+- `moe dash [--all] [--project <id>] [--workflow <name>]` prints a snapshot of
+  the terminal dashboard, with all registered chores in CHORES and a daily
+  histogram of the last 60 days of run activity (`--project` scopes the chart to
+  one project); while any run has an open session, today's bar is capped with a
+  `*`. BACKLOG counts ideas only; workflow filters omit chores. The banner is
+  the logo and the local date and time. The board opens with a PULSE section:
+  the serve status line — armed or not, uptime, next sweep, the global pause,
+  and the last pulse run — then your pending pulse notes and the last one a
+  sweep read. A project earns a line under the status only when it is sweeping,
+  cooling off, or its last sweep died. The status line also carries the drain to
+  origin: `N unpushed` when commits are waiting (read from git, so it shows with
+  or without a serve). An empty queue stays quiet. A push origin is refusing
+  earns a row with git's reason.
 - `moe agent [codex|claude|reset]` reports or sets the global default backend
   for 24 hours. Flags, persisted run bindings and `MOE_FORCE_AGENT` still win.
   Re-selecting an active backend keeps its expiry; choosing the other starts
@@ -60,10 +61,12 @@ wait policy, controls, exit codes, and consequences of choosing to bypass it.
   design-only. Enter opens a labelled draft and Ctrl-S creates it. An edit
   refuses to overwrite a canvas someone else changed meanwhile. Runs update as
   their owners publish, not only on the 3s refresh; a lost owner's facts stay,
-  labelled stale. Smoke cycles cached art every 500 ms without scans, socket
-  reads or status reports. The shared dash banner stays visible; the complete
-  histogram and factory are pinned above the scrolling board when they fit, and
-  collapse together on short or narrow terminals. Resizing restores them. Pane
+  labelled stale. The shared dash banner stays visible, its clock at the right
+  edge. The activity histogram is pinned above the scrolling board when it fits,
+  one day per column across the terminal (up to a year), and collapses on short
+  or narrow terminals. While a run has an open session, today's bar wears a star
+  that twinkles every 500 ms from cached frames, without scans, socket reads or
+  status reports; nothing else on the board moves. Resizing restores it. Pane
   separators have a blank row on either side, and the console shows six message
   rows. The minimum terminal size is 40 columns by 20 rows. Moving to the first
   board item reveals the section headings above it. A heavy, bright amber pane

@@ -230,19 +230,19 @@ moe control resume  moe/change-auth   # release a hold; starts nothing
 
 `moe ui` puts all of this on one screen: the board with a selection, the
 selected run's `control show` facts below it, updated as the owner publishes,
-and the same controls as `:pause`, `:finish` and so on, alongside notes,
-answers and the run's Rex terminal (`t`). A third pane keeps recent command
-outcomes and recovery messages. Tab and Shift-Tab cycle the three panes; the
-pane receiving input has a bright amber heading with a heavy rule (heavy even
-without color). The selection's `>` still marks the target when another pane
-has input. End in the console follows new messages after scrolling. The shared
-dash banner stays at the top; the complete histogram and factory stay below it
-while board lines scroll. When space is short, the whole overview collapses
-and returns on resize. The board heading's `lines … of …` counts scrollable
-display lines, including section headings and blanks, rather than runs. Pane
-separators have a blank row on each side, and the console keeps six message
-rows even on short terminals. The minimum size is 40 columns by 20 rows.
-Moving to the first board item reveals the headings above it.
+and the same controls as `:pause`, `:finish` and so on, alongside notes, answers
+and the run's Rex terminal (`t`). A third pane keeps recent command outcomes and
+recovery messages. Tab and Shift-Tab cycle the three panes; the pane receiving
+input has a bright amber heading with a heavy rule (heavy even without color).
+The selection's `>` still marks the target when another pane has input. End in
+the console follows new messages after scrolling. The shared dash banner stays
+at the top, clock on the right; the activity histogram stays below it, one day
+per column across the terminal, while board lines scroll. When space is short,
+the whole overview collapses and returns on resize. The board heading's `lines …
+of …` counts scrollable display lines, including section headings and blanks,
+rather than runs. Pane separators have a blank row on each side, and the console
+keeps six message rows even on short terminals. The minimum size is 40 columns
+by 20 rows. Moving to the first board item reveals the headings above it.
 
 The Console heading quietly labels an active temporary default when space
 allows. `:agent codex` or `:agent claude` chooses that backend for 24 hours;
@@ -299,8 +299,9 @@ surrounding text. For example, `:new-i<Tab> p/example` becomes
 `:new-idea p/example`.
 
 The board still gathers every three seconds and follows owner status
-subscriptions. A separate 500 ms timer cycles cached smoke without extra
-observation work.
+subscriptions. While a run has an open session, a separate 500 ms timer twinkles
+the star on today's histogram bar from cached frames, without extra observation
+work; an idle board does not repaint.
 
 None of them interrupts an agent. The owner finishes the turn it is on — commit,
 transcript, input stamps, any recovery that turn needs — and acts at its next

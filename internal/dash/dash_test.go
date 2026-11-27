@@ -104,7 +104,7 @@ func TestChatInProgressRendersOpenResumeNeverDone(t *testing.T) {
 				t.Fatalf("chat note must never say done: %q", r.Note)
 			}
 			if r.Stage != ChatDocID {
-				t.Fatalf("stage=%q want %q (factory-art glyph)", r.Stage, ChatDocID)
+				t.Fatalf("stage=%q want %q (bare stage name)", r.Stage, ChatDocID)
 			}
 		})
 	}

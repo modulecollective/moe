@@ -88,9 +88,7 @@ func TestGatherDashSnapshotIntentChatSessionRow(t *testing.T) {
 		t.Errorf("INTENTS rows for sharpen-me = %d, want 1", standing)
 	}
 
-	// And it survives the real render — the factory art has no station
-	// glyph for an "intent" stage, so this also pins that the unknown
-	// name falls through to the generic boiler rather than panicking.
+	// And it survives the real render with an open session on an intent.
 	t.Setenv("NO_COLOR", "1")
 	var out, errb bytes.Buffer
 	if code := Run([]string{"dash"}, &out, &errb); code != 0 {
