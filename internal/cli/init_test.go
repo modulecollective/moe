@@ -98,11 +98,8 @@ func TestRunInitWithDevNullStdinLeavesStaged(t *testing.T) {
 	t.Setenv("MOE_HOME", dir)
 	stdout.Reset()
 	stderr.Reset()
-	if code := runDash(nil, &stdout, &stderr); code != 0 {
-		t.Fatalf("fresh init dash exit=%d: %s", code, stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "BACKLOG") || !strings.Contains(stdout.String(), "ACTIVE") {
-		t.Fatalf("missing CLI board: %s", stdout.String())
+	if code := runRunList([]string{"--all"}, &stdout, &stderr); code != 0 || stdout.Len() != 0 {
+		t.Fatalf("fresh init run list exit=%d stdout=%q: %s", code, stdout.String(), stderr.String())
 	}
 	if _, err := git.HEAD(dir); err == nil {
 		t.Fatal("observation committed the scaffold")

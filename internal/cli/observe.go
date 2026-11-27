@@ -1,8 +1,8 @@
 package cli
 
-// The one read seam behind every status surface — `moe dash`, `moe
-// control show`, serve's dash and run page, and the Rex status the dash
-// reports. It overlays three observations on a run the journal gatherer
+// The one read seam behind every status surface — `moe ui`, `moe run
+// list`, `moe control show`, serve's dash and run page, and the Rex status
+// the dash reports. It overlays three observations on a run the journal gatherer
 // already found: the durable control record, the run guard, and the
 // owner's live endpoint. Each source degrades on its own: a slow or
 // missing endpoint costs one row its live phase, never the board, and an

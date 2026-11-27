@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bytes"
 	"context"
 	"html"
 	"io"
@@ -118,13 +117,10 @@ func TestRegisteredChoresGatherUIAndHTTP(t *testing.T) {
 			t.Fatalf("filtered states %+v", f)
 		}
 	}
-	var out, errb bytes.Buffer
-	if code := Run([]string{"dash", "--project", "alpha"}, &out, &errb); code != 0 {
-		t.Fatalf("dash exit %d: %s", code, &errb)
-	}
+	board := boardText(t, root, DashFilter{ProjectFilter: "alpha"})
 	for _, want := range []string{"CHORES (6)", "BACKLOG (1)", "judged — pulse decides", "open run linked"} {
-		if !strings.Contains(out.String(), want) {
-			t.Fatalf("dash missing %q:\n%s", want, &out)
+		if !strings.Contains(board, want) {
+			t.Fatalf("board missing %q:\n%s", want, board)
 		}
 	}
 	source := newUISource(root, DashFilter{ProjectFilter: "alpha"}, os.Stdout)

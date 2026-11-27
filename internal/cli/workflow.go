@@ -18,7 +18,7 @@ import (
 //
 //  1. owns canvas documents (one per stage)
 //  2. has a stage ladder Next can walk
-//  3. shows up in `moe dash`
+//  3. shows up on the board (`moe ui`)
 //
 // Verbs that miss any leg of the test (project, session)
 // live as plain CommandGroups; they have no Workflow at all.

@@ -55,16 +55,14 @@ func TestRenderPulseGolden(t *testing.T) {
 				"  ░ #2  prefer lightpool           · read by _cabinet/pulse-2026-11-26-12\n\n",
 		},
 		{
-			name: "paused, dead serve detail",
+			name: "paused, dead serve",
 			p: Pulse{
 				Status:  "serve dead (pid 42) · stale 3h 0m",
-				Detail:  "  origin  push failing  (3h 0m · 2 commits) — rejected\n",
 				Waiting: PulseWaiting(false, "", "new automatic sweeps paused until 14:20", ""),
 				Pending: pending,
 			},
 			want: "PULSE\n" +
 				"  serve dead (pid 42) · stale 3h 0m\n" +
-				"  origin  push failing  (3h 0m · 2 commits) — rejected\n" +
 				"  ▒ #3  do the lightpool fix next  · waiting — new automatic sweeps paused until 14:20\n\n",
 		},
 	} {

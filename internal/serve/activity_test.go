@@ -252,7 +252,7 @@ func TestActivityUnarmedServeHasNoNextTick(t *testing.T) {
 }
 
 // TestActivityStateFileRoundTrips is the CLI transport: serve writes,
-// `moe dash` reads, and a clean shutdown takes the file with it — which
+// `moe ui` reads, and a clean shutdown takes the file with it — which
 // is what makes a file left behind mean "crashed".
 func TestActivityStateFileRoundTrips(t *testing.T) {
 	root := t.TempDir()
@@ -643,7 +643,7 @@ func TestActivityPanelClusterCountsFailingProjects(t *testing.T) {
 }
 
 // TestSnapshotStampsThePidNamespace: the pid alone is not enough for a
-// reader to probe. `moe dash` run from an agent's Bash sandbox sits in
+// reader to probe. A board read from an agent's Bash sandbox sits in
 // its own pid namespace, where serve's pid does not exist and the
 // liveness probe answers "gone" for a process that is fine — so the
 // snapshot has to say which namespace its pid is a number in.

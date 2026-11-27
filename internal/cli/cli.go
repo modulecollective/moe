@@ -62,7 +62,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	installGitTrace()
 	if len(args) == 0 {
 		PrintUsage(stdout)
-		moePrintln(stdout, "try 'moe dash'")
+		moePrintln(stdout, "try 'moe ui'")
 		return 0
 	}
 	name := args[0]

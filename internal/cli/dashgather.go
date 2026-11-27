@@ -22,7 +22,7 @@ type DashSnapshot struct {
 	ActiveProjects int
 	// Histogram is the trailing-HistMaxDays daily run-activity window,
 	// oldest→newest, projected from the journal index relative to now.
-	// moe dash and serve chart its trailing HistDays; moe ui charts as
+	// serve charts its trailing HistDays; moe ui charts as
 	// many days as the terminal is wide. All render through
 	// dash.BuildActivityHistogram.
 	Histogram []int
@@ -40,8 +40,8 @@ type DashSnapshot struct {
 	Chores map[string]chore.State
 }
 
-// DashFilter mirrors the `moe dash` flag set so the gatherer can be
-// reached identically from the CLI and from `moe serve`.
+// DashFilter is the board's --project / --workflow pair, so the gatherer
+// is reached identically from `moe ui`, `moe run list` and `moe serve`.
 type DashFilter struct {
 	ProjectFilter  string
 	WorkflowFilter string

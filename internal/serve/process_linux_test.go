@@ -294,7 +294,7 @@ func TestShutdownPhaseThreeHangsUpStubbornChild(t *testing.T) {
 // the sweep watchers aren't waited on at all. So the ordinary Ctrl-C
 // with a live child has a straggling save landing after ListenAndServe
 // removed the file, re-creating it. Serve then exits leaving a record
-// that names a pid which no longer exists, and every later `moe dash`
+// that names a pid which no longer exists, and every later `moe ui`
 // reads a crash that never happened — permanently, until the next serve
 // start.
 //
@@ -340,7 +340,7 @@ func TestShutdownWithALiveChildLeavesNoStateFile(t *testing.T) {
 
 	if _, ok, _ := ReadActivitySnapshot(root); ok {
 		t.Error("a straggling save re-created the state file after a clean shutdown; " +
-			"every later `moe dash` would report a crash that never happened")
+			"every later `moe ui` would report a crash that never happened")
 	}
 }
 

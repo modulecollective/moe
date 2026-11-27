@@ -354,8 +354,8 @@ func TestClosedChainRunStillLoadsAndRenders(t *testing.T) {
 		t.Fatalf("journal with an old chain trailer: %v", err)
 	}
 	var out, errb bytes.Buffer
-	if code := Run([]string{"dash"}, &out, &errb); code != 0 {
-		t.Fatalf("dash exit=%d stderr=%q", code, errb.String())
+	if code := Run([]string{"run", "list", "--all"}, &out, &errb); code != 0 {
+		t.Fatalf("run list exit=%d stderr=%q", code, errb.String())
 	}
 	if _, err := LookupWorkflow("chain"); err != nil {
 		t.Fatalf("closed chain run's workflow no longer resolves: %v", err)

@@ -75,7 +75,7 @@ func TestSurveyQuotaOnWebDashAndUI(t *testing.T) {
 			state := readServeState(root)
 			var out bytes.Buffer
 			notes, _ := input.LoadPulse(root)
-			dash.RenderPulse(&out, now, state.pulse(now, rows, notes, ""))
+			dash.RenderPulse(&out, now, state.pulse(now, rows, notes))
 			source := newUISource(root, DashFilter{}, nil)
 			source.snap = DashSnapshot{Rows: rows}
 			source.serveNow = state
@@ -101,14 +101,14 @@ func TestSurveyQuotaOnWebDashAndUI(t *testing.T) {
 	}
 	state := readServeState(root)
 	notes, _ := input.LoadPulse(root)
-	pulse := state.pulse(now, rows, notes, "")
+	pulse := state.pulse(now, rows, notes)
 	if !strings.Contains(pulse.Waiting, "paused until") || !strings.Contains(pulse.Quota, "unavailable") {
 		t.Fatal(pulse)
 	}
 	// Running replaces recorded quota context without adding routine activity rows.
 	state.ok, state.live = true, serveAlive
 	state.snap.Projects = []serve.ActivityProject{{Project: project.RootID, SweepStarted: now}}
-	if got := state.pulse(now, rows, notes, "").Quota; got != "survey running" {
+	if got := state.pulse(now, rows, notes).Quota; got != "survey running" {
 		t.Fatal(got)
 	}
 }

@@ -110,7 +110,7 @@ func SeedProject(t *testing.T, root, projectID string) {
 }
 
 // SeedRun writes a minimal run.json + project.json pair under root so
-// scans like moe dash find it, then commits both with MoE-Run /
+// scans like the board's find it, then commits both with MoE-Run /
 // MoE-Project trailers so `git log --grep=MoE-Run` resolves the run.
 // Returns the in-memory Metadata so callers can assert or mutate it.
 func SeedRun(t *testing.T, root, projectID, runID, workflow, status string) *run.Metadata {

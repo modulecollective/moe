@@ -1,6 +1,6 @@
 // Package banner renders the small set of one-line marks that frame
 // moe-originated output in the operator's terminal — stage entry, stage
-// exit, the dash header, and the dev-env / project-hook walker section
+// exit, the board header, and the dev-env / project-hook walker section
 // headers. Content shapes live here; the styled-output primitives
 // (TTY-aware Printf, NO_COLOR suppression) stay in cliout.
 //
@@ -8,8 +8,7 @@
 //
 //	▓▒░ MINISTRY OF EVERYTHING ░▒▓  <suffix>
 //
-// rendered at every stage-session entry and at the top of every
-// `moe dash`. The stage-exit footer mirrors the same gradient blocks
+// rendered at every stage-session entry and atop `moe ui`. The stage-exit footer mirrors the same gradient blocks
 // (flipped) as a closing bookend so the top/bottom pair frames the
 // stage block in scrollback without spending an extra line.
 package banner
@@ -76,18 +75,6 @@ func titleSeq(status, run string) string {
 		return r
 	}, strings.ToValidUTF8(title, ""))
 	return "\x1b]2;" + title + "\x07"
-}
-
-// Dash prints the dash-render mark: the gradient bar and the clock,
-// nothing else. The activity chart directly below is unmistakable, and the
-// clock is what tells a stale tab from a fresh one (and a dash render
-// from a stage-entry banner, which carries none). Serve status lives in
-// the board's PULSE section, not here.
-//
-// clock is preformatted by the caller (dash.Clock), so the terminal and
-// the web header spell it the same way.
-func Dash(w io.Writer, clock string) {
-	cliout.Printf(w, "%s  %s\n", bar, clock)
 }
 
 // DashBar prints the dash mark's bar alone, unterminated, for moe ui,

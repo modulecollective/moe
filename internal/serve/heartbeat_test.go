@@ -674,7 +674,7 @@ func TestHeartbeatTickRecordsTheWholeVerdictSet(t *testing.T) {
 	}
 }
 
-// TestHeartbeatTickWritesTheStateFile: `moe dash` has no channel to a
+// TestHeartbeatTickWritesTheStateFile: `moe ui` has no channel to a
 // running serve but the file, so a tick that doesn't write it is a tick
 // the terminal can't see.
 func TestHeartbeatTickWritesTheStateFile(t *testing.T) {

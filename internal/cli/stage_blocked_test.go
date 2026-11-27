@@ -190,11 +190,11 @@ func TestStageBlockedBoardAndWeb(t *testing.T) {
 	}
 	var out, errb bytes.Buffer
 	t.Setenv("NO_COLOR", "1")
-	if code := runDash(nil, &out, &errb); code != 0 {
-		t.Fatalf("dash %d: %s", code, &errb)
+	if code := runRunList(nil, &out, &errb); code != 0 {
+		t.Fatalf("run list %d: %s", code, &errb)
 	}
 	if !strings.Contains(out.String(), "sdlc:design") || strings.Count(out.String(), "[blocked]") != 1 || !strings.Contains(out.String(), "· input") {
-		t.Fatalf("dash: %s", &out)
+		t.Fatalf("run list: %s", &out)
 	}
 	out.Reset()
 	if code := runControlShow([]string{"moe/change-auth"}, &out, &errb); code != 0 {

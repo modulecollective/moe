@@ -109,7 +109,7 @@ const CompletedCap = 5
 const CompletedStep = 25
 
 // CompletedCutoff returns the number of leading completed rows to render.
-// A negative cap means unlimited. CLI and web share the same row count.
+// A negative cap means unlimited.
 func CompletedCutoff(n, cap int) int {
 	if cap < 0 {
 		return n
@@ -801,64 +801,9 @@ func Live(rows []Row) bool {
 	return false
 }
 
-// Render prints the full dashboard: the activity histogram, board
-// sections (ACTIVE, INTENTS, CHORES, BACKLOG, COMPLETED), and the
-// footer. tabwriter aligns columns per section so a long idea title
-// doesn't widen the run rows. COMPLETED is capped at CompletedCap unless
-// showAll is set.
-//
-// The dash banner (rendered upstream of Render by the CLI handler)
-// carries the render timestamp; Render itself no longer prints a
-// title line. `now` is still threaded through for HumanAgo inside
-// the per-row decoration.
-//
-// activeCount is the number of *projects* with at least one active
-// run — not the count of active rows. The footer reads "N project(s)
-// registered · M with active runs", so both numbers count projects.
-// The ACTIVE section header already exposes the row count.
-//
-// histogram is the pre-rendered activity chart (dash.BuildActivityHistogram
-// output), keeping the package pure over its inputs. It arrives as plain
-// runes (the same lines the web dash serves) and gets its terminal
-// colour here, behind the same TTY / NO_COLOR gate cliout.Printf uses —
-// see style.go.
-func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectCount, activeCount int, showAll bool) {
-	RenderIndexed(w, now, histogram, rows, projectCount, activeCount, showAll)
-}
-
-// RenderIndexed is Render that also says where each row landed: lines[i]
-// is the zero-based output line rows[i] was printed on, or -1 when the
-// row is not shown (BucketNone, or a completed row past the cap). Every
-// row renders as exactly one line, so a caller can select rows on the
-// painted board without reading them back out of the text.
-func RenderIndexed(w io.Writer, now time.Time, histogram []string, rows []Row, projectCount, activeCount int, showAll bool) (lines []int) {
-	lw := &lineWriter{w: w}
-	fmt.Fprintln(lw)
-	RenderOverview(lw, histogram)
-	fmt.Fprintln(lw)
-	offset := lw.n
-	lines = RenderIndexedRows(lw, now, rows, projectCount, activeCount, showAll)
-	for i := range lines {
-		if lines[i] >= 0 {
-			lines[i] += offset
-		}
-	}
-	return lines
-}
-
-// RenderOverview renders the histogram without outer blank padding.
-func RenderOverview(w io.Writer, histogram []string) {
-	if cliout.Enabled(w) {
-		histogram = styleHistogramANSI(histogram)
-	}
-	for _, line := range histogram {
-		fmt.Fprintln(w, line)
-	}
-}
-
 // RenderIndexedRows renders only run sections and project totals. Positions
 // are relative to this output; omitted rows have position -1.
-func RenderIndexedRows(w io.Writer, now time.Time, rows []Row, projectCount, activeCount int, showAll bool) (lines []int) {
+func RenderIndexedRows(w io.Writer, now time.Time, rows []Row, projectCount, activeCount int) (lines []int) {
 	lw := &lineWriter{w: w}
 	w = lw
 	lines = make([]int, len(rows))
@@ -896,7 +841,7 @@ func RenderIndexedRows(w io.Writer, now time.Time, rows []Row, projectCount, act
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 		for _, r := range active {
 			slug := r.Project + "/" + r.Run
-			fmt.Fprintf(tw, "  %s\t%s\t%s\n", slug, HumanAgo(now, r.When), noteWithControl(r))
+			fmt.Fprintf(tw, "  %s\t%s\t%s\n", slug, HumanAgo(now, r.When), NoteWithControl(r))
 		}
 		tw.Flush()
 	}
@@ -945,26 +890,16 @@ func RenderIndexedRows(w io.Writer, now time.Time, rows []Row, projectCount, act
 	}
 	fmt.Fprintln(w)
 
-	// The terminal dash pages by scrollback, so it has only the two
-	// stops the --all flag names: the default cap, or everything.
-	topCap := CompletedCap
-	if showAll {
-		topCap = -1
-	}
-	shown := completed[:CompletedCutoff(len(completed), topCap)]
-	if len(shown) < len(completed) {
-		cliout.Printf(w, "COMPLETED (%d of %d)\n", len(shown), len(completed))
-	} else {
-		cliout.Printf(w, "COMPLETED (%d)\n", len(completed))
-	}
-	if len(shown) == 0 {
+	// The terminal board scrolls, so it shows every completed run.
+	cliout.Printf(w, "COMPLETED (%d)\n", len(completed))
+	if len(completed) == 0 {
 		fmt.Fprintln(w, "  (none)")
 	} else {
-		place(completedAt[:len(shown)])
+		place(completedAt)
 		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-		for _, r := range shown {
+		for _, r := range completed {
 			slug := r.Project + "/" + r.Run
-			fmt.Fprintf(tw, "  %s\t%s\t%s\n", slug, HumanAgo(now, r.When), noteWithControl(r))
+			fmt.Fprintf(tw, "  %s\t%s\t%s\n", slug, HumanAgo(now, r.When), NoteWithControl(r))
 		}
 		tw.Flush()
 	}
@@ -974,9 +909,10 @@ func RenderIndexedRows(w io.Writer, now time.Time, rows []Row, projectCount, act
 	return lines
 }
 
-// Keep the control before the note so a narrow watch viewport preserves
-// the operator's hold before clipping the workflow detail.
-func noteWithControl(r Row) string {
+// NoteWithControl is a run row's note as the board prints it, with the
+// blocked marker and control overlay. The control goes before the note so
+// a narrow viewport keeps the operator's hold and clips the workflow detail.
+func NoteWithControl(r Row) string {
 	if r.StageBlocked {
 		r.Note += " [blocked]"
 	}

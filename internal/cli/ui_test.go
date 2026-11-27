@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/modulecollective/moe/internal/banner"
+	"github.com/modulecollective/moe/internal/cliout"
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/git/gittest"
 	"github.com/modulecollective/moe/internal/input"
@@ -1212,4 +1213,23 @@ func TestUIBoardSeparatesPinnedRegionsAndEscapesLabels(t *testing.T) {
 func overviewAt(b ui.Board, cols int) []string {
 	lines, _ := b.Overview(cols)
 	return lines
+}
+
+// TestTTYFrameBufferKeepsColourGate: buffering a UI frame must not make
+// its eventual terminal destination disappear from cliout.Enabled.
+func TestTTYFrameBufferKeepsColourGate(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	f, err := os.Open("/dev/ptmx")
+	if err != nil {
+		t.Skipf("no pty device to stand in for the operator's terminal: %v", err)
+	}
+	t.Cleanup(func() { f.Close() })
+	if !cliout.Enabled(f) {
+		t.Skipf("/dev/ptmx does not classify as a terminal here; nothing to unwrap to")
+	}
+
+	frame := ttyFrameBuffer{terminal: f}
+	if !cliout.Enabled(&frame) {
+		t.Fatal("cliout.Enabled(ttyFrameBuffer{tty}) = false; buffered UI frames would render unstyled")
+	}
 }

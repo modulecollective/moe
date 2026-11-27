@@ -313,8 +313,8 @@ func TestSDLCReopenDashMarkerDropsAfterReopen(t *testing.T) {
 
 	// Pre-reopen: marker present.
 	var out, errb bytes.Buffer
-	if code := Run([]string{"dash"}, &out, &errb); code != 0 {
-		t.Fatalf("dash 1 exit=%d stderr=%q", code, errb.String())
+	if code := Run([]string{"run", "list", "--all"}, &out, &errb); code != 0 {
+		t.Fatalf("run list 1 exit=%d stderr=%q", code, errb.String())
 	}
 	if !strings.Contains(out.String(), "sdlc:closed · reopen?") {
 		t.Fatalf("expected pre-reopen marker on closed run:\n%s", out.String())
@@ -329,8 +329,8 @@ func TestSDLCReopenDashMarkerDropsAfterReopen(t *testing.T) {
 	// Post-reopen: marker gone on prior, successor in ACTIVE.
 	out.Reset()
 	errb.Reset()
-	if code := Run([]string{"dash"}, &out, &errb); code != 0 {
-		t.Fatalf("dash 2 exit=%d stderr=%q", code, errb.String())
+	if code := Run([]string{"run", "list", "--all"}, &out, &errb); code != 0 {
+		t.Fatalf("run list 2 exit=%d stderr=%q", code, errb.String())
 	}
 	if strings.Contains(out.String(), "sdlc:closed · reopen?") {
 		t.Fatalf("reopen marker should be gone after successor is opened:\n%s", out.String())
@@ -339,7 +339,7 @@ func TestSDLCReopenDashMarkerDropsAfterReopen(t *testing.T) {
 		t.Fatalf("prior closed run should still appear (without marker):\n%s", out.String())
 	}
 	if !strings.Contains(out.String(), "fix-it-"+todayDateSuffix()) {
-		t.Fatalf("successor run should appear in dash:\n%s", out.String())
+		t.Fatalf("successor run should appear in the run list:\n%s", out.String())
 	}
 }
 
@@ -356,7 +356,7 @@ func TestDashClosedNonSDLCHasNoReopenMarker(t *testing.T) {
 		time.Now().UTC().Add(-2*24*time.Hour))
 
 	var out, errb bytes.Buffer
-	if code := Run([]string{"dash"}, &out, &errb); code != 0 {
+	if code := Run([]string{"run", "list", "--all"}, &out, &errb); code != 0 {
 		t.Fatalf("exit=%d stderr=%q", code, errb.String())
 	}
 	if !strings.Contains(out.String(), "chat:closed") {

@@ -66,16 +66,6 @@ func TestTitleSeq(t *testing.T) {
 	}
 }
 
-// TestDashGolden pins the dash mark: the logo and the clock, and nothing
-// else — serve status lives in the board's PULSE section.
-func TestDashGolden(t *testing.T) {
-	var buf bytes.Buffer
-	Dash(&buf, "Thu 14 May 00:13")
-	if got, want := buf.String(), "▓▒░ MINISTRY OF EVERYTHING ░▒▓  Thu 14 May 00:13\n"; got != want {
-		t.Fatalf("Dash =\n%q\nwant\n%q", got, want)
-	}
-}
-
 // TestHookSectionPluralisation: the script-count noun matches the
 // number, so the section header doesn't read "1 scripts".
 func TestHookSectionPluralisation(t *testing.T) {

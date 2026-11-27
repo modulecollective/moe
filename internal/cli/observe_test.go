@@ -44,7 +44,7 @@ func TestDashRowsCarryControlOverlay(t *testing.T) {
 	}
 	var out bytes.Buffer
 	t.Setenv("NO_COLOR", "1")
-	dash.Render(&out, time.Now(), nil, snap.Rows, 1, 1, false)
+	dash.RenderIndexedRows(&out, time.Now(), snap.Rows, 1, 1)
 	if !strings.Contains(out.String(), "[handed off]") {
 		t.Fatalf("terminal dash lacks the overlay:\n%s", out.String())
 	}

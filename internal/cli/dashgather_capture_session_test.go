@@ -91,11 +91,11 @@ func TestGatherDashSnapshotIntentChatSessionRow(t *testing.T) {
 	// And it survives the real render with an open session on an intent.
 	t.Setenv("NO_COLOR", "1")
 	var out, errb bytes.Buffer
-	if code := Run([]string{"dash"}, &out, &errb); code != 0 {
-		t.Fatalf("dash exit=%d stderr=%q", code, errb.String())
+	if code := Run([]string{"run", "list"}, &out, &errb); code != 0 {
+		t.Fatalf("run list exit=%d stderr=%q", code, errb.String())
 	}
 	if !strings.Contains(out.String(), "intent:edit --chat [running]") {
-		t.Fatalf("rendered dash missing the live-session row:\n%s", out.String())
+		t.Fatalf("run list missing the live-session row:\n%s", out.String())
 	}
 
 	if err := session.Abandon(sess); err != nil {

@@ -2,11 +2,8 @@ package cli
 
 import (
 	"fmt"
-	"io"
-	"text/tabwriter"
 	"time"
 
-	"github.com/modulecollective/moe/internal/cliout"
 	"github.com/modulecollective/moe/internal/dash"
 	"github.com/modulecollective/moe/internal/input"
 	"github.com/modulecollective/moe/internal/project"
@@ -17,13 +14,13 @@ import (
 	"github.com/modulecollective/moe/internal/sync"
 )
 
-// The CLI dash's window onto a running serve.
+// The terminal board's window onto a running serve.
 //
-// `moe dash` is stateless compute-on-read from the journal and has no
-// channel to a resident serve, so a heartbeat that is about to pulse — or
-// one that died three hours ago — is invisible from the terminal. This
-// reads the snapshot serve keeps at <root>/.moe/serve.json and spends at
-// most a handful of lines on it.
+// `moe ui` is compute-on-read from the journal and has no channel to a
+// resident serve, so a heartbeat that is about to pulse — or one that died
+// three hours ago — is invisible from the terminal. This reads the
+// snapshot serve keeps at <root>/.moe/serve.json for the PULSE section and
+// the Console.
 //
 // The line budget is the point. Status costs no line at all: it rides the
 // banner's tail as one cluster, in the same slot for every state, so an
@@ -63,8 +60,8 @@ type serveState struct {
 	// modes counts the projects the operator has capped, read straight
 	// from project.json rather than out of the snapshot. Serve only
 	// rewrites serve.json on its own events, so waiting for a mode flip to
-	// appear there would leave `moe project mode` invisible in `moe dash`
-	// until the next tick — minutes of the dash disagreeing with
+	// appear there would leave `moe project mode` invisible on the board
+	// until the next tick — minutes of the board disagreeing with
 	// the command the operator just ran.
 	modes dash.ModeCounts
 	// ahead is how many commits local main holds that origin doesn't,
@@ -204,10 +201,9 @@ func (s serveState) serveCluster(now time.Time) string {
 
 // pulse assembles the PULSE section from this read of serve, the board's
 // rows and the pulse-notes record. Status is the same cluster the
-// banner's tail used to carry; detail is the serve trouble rows the
-// caller rendered, if any.
-func (s serveState) pulse(now time.Time, rows []dash.Row, notes input.File, detail string) dash.Pulse {
-	p := dash.Pulse{Status: s.bannerCluster(now), Detail: detail, Last: dash.LastPulse(rows)}
+// banner's tail used to carry.
+func (s serveState) pulse(now time.Time, rows []dash.Row, notes input.File) dash.Pulse {
+	p := dash.Pulse{Status: s.bannerCluster(now), Last: dash.LastPulse(rows)}
 	p.Pending, p.Read = dash.SplitPulseNotes(notes)
 	armed := s.ok && s.live != serveDead && s.snap.Armed
 	var next, pause string
@@ -230,14 +226,10 @@ func (s serveState) pulse(now time.Time, rows []dash.Row, notes input.File, deta
 	return p
 }
 
-// readPulseNotes reads the pulse-notes record for a board render.
-// Warn-only: a malformed record costs the section its notes, not the
-// frame.
-func readPulseNotes(root string, stderr io.Writer) input.File {
-	f, err := input.LoadPulse(root)
-	if err != nil && stderr != nil {
-		moePrintf(stderr, "dash: %v\n", err)
-	}
+// readPulseNotes reads the pulse-notes record for a board render. A
+// malformed record costs the section its notes, not the frame.
+func readPulseNotes(root string) input.File {
+	f, _ := input.LoadPulse(root)
 	return f
 }
 
@@ -265,46 +257,9 @@ func (s serveState) failing(now time.Time) int {
 	return n
 }
 
-// renderLines writes what serve earns below the banner: the parse
-// warning if the file was unreadable, then a row per noteworthy project.
-// A healthy quiet board writes nothing — its status is already in the
-// banner's tail.
-func (s serveState) renderLines(w io.Writer, now time.Time) {
-	if s.err != nil {
-		// The error already wears the "serve:" prefix (it names the file).
-		cliout.Printf(w, "%v\n", s.err)
-		return
-	}
-	if s.live == serveDead {
-		// A dead serve's project records are as stale as its stamp; the
-		// banner's "dead" is the whole message. Only provable death
-		// buys this silence — under unknown each caller keeps its row
-		// policy, and the headline flags what it can't vouch for.
-		return
-	}
-	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	// Same rule as the projects below: trouble earns a row, health
-	// doesn't. A healthy drain is already in the banner's tail.
-	// A host serve can't drive withholds every dispatch, so the projects
-	// below would only ever read "held"; this row says why, first.
-	if s.snap.HostError != "" {
-		fmt.Fprintf(tw, "  host\t%s\t— %s\n", s.snap.Host, s.snap.HostError)
-	}
-	if state, detail := s.pushLine(now); state != "" {
-		fmt.Fprintf(tw, "  origin\t%s\t%s\n", state, detail)
-	}
-	for _, p := range s.snap.Projects {
-		state, detail := serveProjectState(now, p)
-		if state == "" {
-			continue
-		}
-		fmt.Fprintf(tw, "  %s\t%s\t%s\n", p.Project, state, detail)
-	}
-	tw.Flush()
-}
-
-// issues is what moe ui's Console logs for serve: renderLines' exceptions
-// without its routine sweeps, one line each. The Console logs a line once
+// issues is what moe ui's Console logs for serve: the parse warning, an
+// unusable host, a refused push, and cooling, failed or deferred
+// projects — never routine sweeps — one line each. The Console logs a line once
 // per change of text, so these carry clock times rather than ages or
 // countdowns — a relative "31m ago" would relog on every repaint.
 func (s serveState) issues() []string {
@@ -312,7 +267,7 @@ func (s serveState) issues() []string {
 		return []string{s.err.Error()} // already "serve:"-prefixed
 	}
 	if s.live == serveDead {
-		return nil // the banner's "dead" is the whole message, as in renderLines
+		return nil // the banner's "dead" is the whole message; its records are stale
 	}
 	var out []string
 	if s.snap.HostError != "" {
@@ -341,32 +296,6 @@ func (s serveState) issues() []string {
 		}
 	}
 	return out
-}
-
-// pushLine decides whether the drain has earned a row of its own and
-// what it says. It has, and only has, when serve is being refused *and*
-// commits are actually waiting: that is the state the banner's item can
-// only name, and the error text is the thing the operator needs — a
-// rejected non-fast-forward and a dead network want different responses.
-//
-// An empty state is the normal case, and the one a root with no state
-// file falls into for free — its zero snapshot is failing since never.
-// Callers have already dropped the dead-serve frame, whose whole record
-// is stale.
-//
-// The error goes last, after the parenthetical, so the tabwriter's
-// columns are set by the short fixed parts rather than by however long
-// git's complaint happens to be. The web row is composed the same way.
-func (s serveState) pushLine(now time.Time) (state, detail string) {
-	if s.snap.PushFailingSince.IsZero() || s.ahead == 0 {
-		return "", ""
-	}
-	detail = dash.HumanDuration(now.Sub(s.snap.PushFailingSince)) +
-		" · " + dash.Plural(s.ahead, "commit")
-	if !s.snap.PushRetryAt.IsZero() {
-		detail += " · retry in " + dash.HumanDuration(max(s.snap.PushRetryAt.Sub(now), 0))
-	}
-	return "push failing", "(" + detail + ") — " + s.snap.PushError
 }
 
 // serveProjectState decides whether a project has earned a line and what

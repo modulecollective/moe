@@ -389,7 +389,7 @@ func TestLoadRequiresWorkflow(t *testing.T) {
 
 // TestJournalIndexLastActivityMatchesLastActivity is the load-bearing
 // equivalence check: the batched index and the per-slug git log must
-// agree for every run on disk. moe dash relies on that — replacing
+// agree for every run on disk. The board relies on that — replacing
 // N×LastActivity with one map lookup is only safe if both return the
 // same answer.
 func TestJournalIndexLastActivityMatchesLastActivity(t *testing.T) {

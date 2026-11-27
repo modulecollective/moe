@@ -15,7 +15,7 @@ import (
 // that moves.
 
 const (
-	// HistDays is the window moe dash and the web dash chart: the trailing
+	// HistDays is the window the web dash charts: the trailing
 	// N days of activity. Fixed (no config knob) — single-operator project.
 	HistDays = 60
 	// HistMaxDays is how many daily counts a snapshot carries: moe ui

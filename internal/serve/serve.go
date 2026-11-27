@@ -674,7 +674,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, dat
 }
 
 // saveActivity rewrites the state file from the current record.
-// Warn-only: the file is a convenience for `moe dash`, and a serve that
+// Warn-only: the file is a convenience for `moe ui`, and a serve that
 // can't write it should still serve.
 //
 // The lock is what makes the file honest. Callers arrive from three
@@ -709,7 +709,7 @@ func (s *Server) saveActivity() {
 // hook *after* closing it, and the sweep watchers aren't waited on at
 // all — so on the ordinary Ctrl-C with a live child, a straggling save
 // lands after the remove and re-creates the file. Serve then exits
-// leaving a record that names a dead pid, and every later `moe dash`
+// leaving a record that names a dead pid, and every later `moe ui`
 // reports a crash that never happened, permanently, until the next serve
 // start. Setting stopped under the same mutex saveActivity takes lets a
 // save already in flight finish before the remove and turns every later

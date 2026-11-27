@@ -28,7 +28,7 @@ import (
 // from.
 //
 // This is the one model both surfaces read. The web dash renders it from
-// memory on page load; `moe dash` reads the JSON snapshot serve keeps at
+// memory on page load; `moe ui` reads the JSON snapshot serve keeps at
 // <root>/.moe/serve.json (see writeSnapshot).
 //
 // Runtime state, not history. It resets on restart, exactly like the
@@ -375,7 +375,7 @@ func (a *activity) nextTick() time.Time {
 // ActivitySnapshot is the JSON serve keeps at <root>/.moe/serve.json:
 // the activity record minus the per-child output tails.
 //
-// The file is the CLI dash's whole transport. `moe dash` would need a
+// The file is the terminal board's whole transport. `moe ui` would need a
 // record like this to *discover* a running serve before it could probe
 // one over HTTP, so the record might as well carry the payload: one
 // writer, one reader, no HTTP client in the CLI, no new API surface, and
@@ -501,8 +501,8 @@ func ActivityPath(root string) string {
 
 // ReadActivitySnapshot reads the state file. ok is false when no serve
 // has written one — the ordinary case for an operator who doesn't run
-// serve, and the case that keeps `moe dash` byte-identical to what it
-// was. A file that exists but won't parse is an error: a truncated write
+// serve, and the case that keeps `moe ui`'s PULSE section quiet about
+// serve. A file that exists but won't parse is an error: a truncated write
 // is worth a word rather than a silently missing panel.
 func ReadActivitySnapshot(root string) (snap ActivitySnapshot, ok bool, err error) {
 	body, err := os.ReadFile(ActivityPath(root))

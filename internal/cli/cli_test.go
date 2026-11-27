@@ -31,8 +31,8 @@ func TestRunNoArgsPrintsUsage(t *testing.T) {
 	if !strings.Contains(out.String(), "usage: moe") {
 		t.Fatalf("expected usage in stdout, got %q", out.String())
 	}
-	if !strings.Contains(out.String(), "try 'moe dash'") {
-		t.Fatalf("expected dash hint, got %q", out.String())
+	if !strings.Contains(out.String(), "try 'moe ui'") {
+		t.Fatalf("expected ui hint, got %q", out.String())
 	}
 	if errb.Len() != 0 {
 		t.Fatalf("stderr should be empty, got %q", errb.String())

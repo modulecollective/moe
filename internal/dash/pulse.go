@@ -22,15 +22,12 @@ func Clock(now time.Time) string {
 
 // Pulse is what the PULSE section shows: the survey's state, and what
 // the operator has told it. The caller builds Status (the serve cluster,
-// which only it can read) and Detail (any serve trouble rows it earns,
-// already rendered); the rest is read off the board and the pulse-notes
-// record.
+// which only it can read); the rest is read off the board and the
+// pulse-notes record.
 type Pulse struct {
 	// Status is the serve cluster line; empty renders "serve not running".
 	Status string
 	Quota  string
-	// Detail is pre-rendered lines that qualify Status, each indented.
-	Detail string
 	// Last is the newest pulse run on the board, if any.
 	Last *Row
 	// Waiting says what a pending note waits on (see PulseWaiting).
@@ -117,7 +114,6 @@ func RenderPulse(w io.Writer, now time.Time, p Pulse) {
 		status += fmt.Sprintf(" · last pulse %s (%s)", HumanAgo(now, p.Last.When), p.Last.Run)
 	}
 	fmt.Fprintf(w, "  %s\n", status)
-	fmt.Fprint(w, p.Detail)
 	if p.Quota != "" {
 		fmt.Fprintf(w, "  %s\n", p.Quota)
 	}

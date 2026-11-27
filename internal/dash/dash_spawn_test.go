@@ -60,10 +60,10 @@ func TestSpawnCompletionKeepsOwnRecency(t *testing.T) {
 		t.Fatalf("child = %+v", got)
 	}
 	var buf bytes.Buffer
-	Render(&buf, base, nil, completed, 1, 0, false)
+	RenderIndexedRows(&buf, base, completed, 1, 0)
 	out := buf.String()
-	if !strings.Contains(out, "COMPLETED (5 of 8)") || !strings.Contains(out, "\n  p/child ") || strings.Contains(out, "\n  p/pulse ") || strings.Contains(out, "↳") {
-		t.Fatalf("default dash must show the child flat, with the old pulse capped out:\n%s", out)
+	if !strings.Contains(out, "COMPLETED (8)") || !strings.Contains(out, "\n  p/child ") || strings.Index(out, "\n  p/child ") > strings.Index(out, "\n  p/pulse ") || strings.Contains(out, "↳") {
+		t.Fatalf("the board must show the child flat, above the old pulse:\n%s", out)
 	}
 }
 

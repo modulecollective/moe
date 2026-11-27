@@ -802,7 +802,7 @@ func Load(root, projectID, id string) (*Metadata, error) {
 
 // Scan walks projects/*/runs/*/run.json under root and returns every
 // run's metadata, in unspecified order. The caller does the sorting
-// and bucketing (moe dash, moe history). A missing or empty projects/
+// and bucketing (the board, moe history). A missing or empty projects/
 // directory returns no runs and no error — a freshly-initialized
 // bureaucracy is a valid state, not an error.
 //
@@ -1165,7 +1165,7 @@ type JournalIndex struct {
 	DailyRunCount map[string]int
 	// DailyRunCountByProject maps a project id to that project's own
 	// DailyRunCount (UTC date → distinct run slugs active that day). The
-	// per-project slice the dash filters to under `moe dash --project`.
+	// per-project slice the dash filters to under `--project`.
 	// Commits with no MoE-Project trailer bucket under "" — nobody reads
 	// that key by name (the empty filter takes the global DailyRunCount
 	// path), but it keeps the global total whole. Summing every project's

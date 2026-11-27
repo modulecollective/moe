@@ -104,7 +104,7 @@ func TestOwedFinishReadsAsItsLocalOutcome(t *testing.T) {
 	}
 	var board bytes.Buffer
 	t.Setenv("NO_COLOR", "1")
-	dash.Render(&board, time.Now(), nil, snap.Rows, 1, 1, false)
+	dash.RenderIndexedRows(&board, time.Now(), snap.Rows, 1, 1)
 	if !strings.Contains(board.String(), "[finish failed · receipt not recorded]") || strings.Contains(board.String(), "finish pending") {
 		t.Fatalf("dash row:\n%s", board.String())
 	}

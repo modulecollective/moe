@@ -189,7 +189,7 @@ func TestMoeHowtoSkillEmbedded(t *testing.T) {
 	for _, want := range []string{
 		"name: moe-howto",
 		"moe idea new",
-		"moe dash",
+		"moe run list",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("embedded moe-howto skill missing %q in body", want)

@@ -33,7 +33,7 @@ func dashboardBoard() Board {
 	b.Clock = dash.Clock(now)
 	out.Reset()
 	fmt.Fprintln(&out, "  service detail")
-	lines := dash.RenderIndexedRows(&out, now, rows, 1, 1, true)
+	lines := dash.RenderIndexedRows(&out, now, rows, 1, 1)
 	b.Lines = strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
 	for i, r := range rows {
 		it := run(r.Project, r.Run)

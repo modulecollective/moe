@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -48,12 +47,10 @@ func serveCluster(t *testing.T, root string, now time.Time) string {
 	return readServeState(root).bannerCluster(now)
 }
 
-// serveLines is what serve earns *below* the banner.
-func serveLines(t *testing.T, root string, now time.Time) string {
+// serveIssues is what moe ui's Console logs for serve, one line each.
+func serveIssues(t *testing.T, root string) string {
 	t.Helper()
-	var buf bytes.Buffer
-	readServeState(root).renderLines(&buf, now)
-	return buf.String()
+	return strings.Join(readServeState(root).issues(), "\n")
 }
 
 func TestQuotaDeferralDashRetainsFailureHistory(t *testing.T) {
@@ -78,7 +75,7 @@ func TestDashSaysNothingWithoutAServe(t *testing.T) {
 	if got := serveCluster(t, root, now); got != "" {
 		t.Errorf("banner tail = %q with no serve running, want nothing at all", got)
 	}
-	if got := serveLines(t, root, now); got != "" {
+	if got := serveIssues(t, root); got != "" {
 		t.Errorf("dash printed %q with no serve running, want nothing at all", got)
 	}
 }
@@ -103,7 +100,7 @@ func TestDashBannerCarriesAnArmedServe(t *testing.T) {
 	if got, want := serveCluster(t, root, now), "serve armed · up 3d 2h · next 3m"; got != want {
 		t.Errorf("banner tail = %q, want %q", got, want)
 	}
-	if got := serveLines(t, root, now); got != "" {
+	if got := serveIssues(t, root); got != "" {
 		t.Errorf("a healthy quiet board spent %q below the banner, want nothing", got)
 	}
 }
@@ -181,7 +178,7 @@ func TestDashShowsACrashedServe(t *testing.T) {
 	if strings.Contains(got, "armed") {
 		t.Errorf("banner tail = %q, want a dead serve to stop claiming it will pulse", got)
 	}
-	if lines := serveLines(t, root, now); lines != "" {
+	if lines := serveIssues(t, root); lines != "" {
 		t.Errorf("a dead serve printed %q from its stale records, want nothing", lines)
 	}
 }
@@ -205,23 +202,20 @@ func TestDashSpendsProjectLinesOnlyOnNoteworthyProjects(t *testing.T) {
 		},
 	})
 
-	got := serveLines(t, root, now)
+	got := serveIssues(t, root)
 	for _, want := range []string{
-		"sweeper  sweeping",
-		"cooler   cooling   (2 ticks left)",
-		"faller   failed",
+		"serve: cooler sweep failed at " + now.Add(-40*time.Minute).Local().Format("15:04") + " (2 in a row)",
+		"serve: faller sweep failed at ",
 	} {
 		if !strings.Contains(got, want) {
-			t.Errorf("serve lines are missing %q:\n%s", want, got)
+			t.Errorf("serve issues are missing %q:\n%s", want, got)
 		}
 	}
-	for _, unwanted := range []string{"quiet", "cleanly"} {
+	// A live sweep is routine, not an issue; nor is a quiet project.
+	for _, unwanted := range []string{"sweeper", "quiet", "cleanly"} {
 		if strings.Contains(got, unwanted) {
 			t.Errorf("a project with nothing to report (%s) spent a line:\n%s", unwanted, got)
 		}
-	}
-	if !strings.Contains(got, "last sweep failed 40m ago") {
-		t.Errorf("the cooling line should date the failure that earned it:\n%s", got)
 	}
 }
 
@@ -238,8 +232,8 @@ func TestDashSurvivesATruncatedStateFile(t *testing.T) {
 	if err := os.WriteFile(serve.ActivityPath(root), []byte("{half"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	got := serveLines(t, root, now)
-	if !strings.HasPrefix(got, "serve:") || strings.Count(got, "\n") != 1 {
+	got := serveIssues(t, root)
+	if !strings.HasPrefix(got, "serve:") || strings.Count(got, "\n") != 0 {
 		t.Errorf("serve lines = %q, want one warning line", got)
 	}
 	if tail := serveCluster(t, root, now); tail != "" {
@@ -312,6 +306,7 @@ func TestDashWontCallAServeDeadItCannotSee(t *testing.T) {
 		Projects: []serve.ActivityProject{
 			{Project: "sweeper", Decision: "the journal moved", Sweep: true,
 				SweepStarted: now.Add(-time.Minute)},
+			{Project: "deferrer", SweepDeferred: true, Decision: "deferred for quota"},
 		},
 	})
 
@@ -325,8 +320,8 @@ func TestDashWontCallAServeDeadItCannotSee(t *testing.T) {
 			t.Errorf("banner tail = %q, want no %q claim from a reader that can't see the pid", got, forbidden)
 		}
 	}
-	if lines := serveLines(t, root, now); !strings.Contains(lines, "sweeper  sweeping") {
-		t.Errorf("serve lines = %q, want the sweep rows an unknown serve still earns", lines)
+	if lines := serveIssues(t, root); !strings.Contains(lines, "serve: deferrer deferred — deferred for quota") {
+		t.Errorf("serve issues = %q, want the rows an unknown serve still earns", lines)
 	}
 }
 
@@ -384,7 +379,7 @@ func TestDashCountsUnpushedWithoutAServe(t *testing.T) {
 	}
 	// It is a count, not an alarm: nothing is wrong yet, so nothing earns
 	// a row.
-	if got := serveLines(t, root, now); got != "" {
+	if got := serveIssues(t, root); got != "" {
 		t.Errorf("dash printed %q below the banner for a plain backlog, want nothing", got)
 	}
 }
@@ -443,9 +438,9 @@ func TestDashSpendsARowOnARefusedPush(t *testing.T) {
 		"serve armed · up 1h 0m · push failing 12m · 3 unpushed"; got != want {
 		t.Errorf("banner tail = %q, want %q", got, want)
 	}
-	lines := serveLines(t, root, now)
+	lines := serveIssues(t, root)
 	for _, want := range []string{
-		"origin", "push failing", "(12m · 3 commits", "could not read from remote", "retry in 4m",
+		"serve: push failing since " + now.Add(-12*time.Minute).Local().Format("15:04"), "could not read from remote",
 	} {
 		if !strings.Contains(lines, want) {
 			t.Errorf("serve lines = %q, want it to carry %q", lines, want)
@@ -469,7 +464,7 @@ func TestDashDropsAFailureOnceTheQueueIsEmpty(t *testing.T) {
 	if got := serveCluster(t, root, now); strings.Contains(got, "failing") {
 		t.Errorf("banner tail = %q, want no failure with nothing left to push", got)
 	}
-	if got := serveLines(t, root, now); got != "" {
+	if got := serveIssues(t, root); got != "" {
 		t.Errorf("dash printed %q for a failure with an empty queue, want nothing", got)
 	}
 }
@@ -489,7 +484,7 @@ func TestDashBannerNamesTheHost(t *testing.T) {
 	if got, want := serveCluster(t, root, now), "serve armed · up 4m · rex · next 15m"; got != want {
 		t.Errorf("banner tail = %q, want %q", got, want)
 	}
-	if got := serveLines(t, root, now); got != "" {
+	if got := serveIssues(t, root); got != "" {
 		t.Errorf("a usable host spent %q below the banner, want nothing", got)
 	}
 
@@ -503,9 +498,8 @@ func TestDashBannerNamesTheHost(t *testing.T) {
 	if got, want := serveCluster(t, root, now), "serve armed · up 4m · rex unusable · next 15m · 1 failing"; got != want {
 		t.Errorf("banner tail = %q, want %q", got, want)
 	}
-	lines := strings.Split(strings.TrimRight(serveLines(t, root, now), "\n"), "\n")
-	if len(lines) != 2 || !strings.HasPrefix(lines[0], "  host") ||
-		!strings.HasSuffix(lines[0], "rex unusable  — rex API revision 7 is older than 8") {
+	lines := readServeState(root).issues()
+	if len(lines) != 2 || lines[0] != "serve: host rex unusable — rex API revision 7 is older than 8" {
 		t.Errorf("rows = %q, want the host row first, then the project", lines)
 	}
 

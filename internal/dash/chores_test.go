@@ -33,7 +33,7 @@ func TestChoresStandingSection(t *testing.T) {
 		t.Fatalf("order %s, want %s", got, want)
 	}
 	var out strings.Builder
-	positions := RenderIndexedRows(&out, now, rows, 2, 0, true)
+	positions := RenderIndexedRows(&out, now, rows, 2, 0)
 	lines := strings.Split(out.String(), "\n")
 	for i, pos := range positions {
 		if pos < 0 || !strings.Contains(lines[pos], rows[i].Project+"/"+rows[i].Run) {
@@ -72,7 +72,7 @@ func TestChoresStandingSection(t *testing.T) {
 		}
 	}
 	out.Reset()
-	RenderIndexedRows(&out, now, nil, 0, 0, false)
+	RenderIndexedRows(&out, now, nil, 0, 0)
 	if !strings.Contains(out.String(), "CHORES (0)\n  (none)") {
 		t.Fatalf("empty section: %s", out.String())
 	}

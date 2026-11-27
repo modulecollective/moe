@@ -10,6 +10,7 @@ package cli
 // is healthy.
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -110,6 +111,16 @@ func (s *uiSource) overview(counts []int, live bool) func(cols int) ([]string, u
 		return lines, art
 	}
 }
+
+// ttyFrameBuffer lets the UI render a complete frame without hiding
+// the terminal from its colour gates. The bytes land in memory; Unwrap points
+// cliout.IsTTY at the terminal they will ultimately be painted to.
+type ttyFrameBuffer struct {
+	bytes.Buffer
+	terminal io.Writer
+}
+
+func (b *ttyFrameBuffer) Unwrap() io.Writer { return b.terminal }
 
 // histMargin is the blank columns either side of moe ui's chart: the
 // board's two-space gutter, mirrored on the right.
@@ -448,9 +459,9 @@ func (s *uiSource) buildBoard(now time.Time) (ui.Board, []cliout.ProgramStatus) 
 	if s.gerr != nil {
 		moePrintf(buf, "observation failed: %s (showing the last good board)\n", ui.SafeText(s.gerr.Error()))
 	}
-	// The PULSE section opens the board, above ACTIVE: the same renderer
-	// `moe dash` uses, with serve's trouble rows left to the Console.
-	pulse := s.serveNow.pulse(now, rows, readPulseNotes(s.root, nil), "")
+	// The PULSE section opens the board, above ACTIVE; serve's trouble
+	// rows are left to the Console.
+	pulse := s.serveNow.pulse(now, rows, readPulseNotes(s.root))
 	pulse.Status = ui.SafeText(pulse.Status)
 	pulse.Quota, pulse.Waiting = ui.SafeText(pulse.Quota), ui.SafeText(pulse.Waiting)
 	for _, notes := range [][]input.Entry{pulse.Pending, pulse.Read} {
@@ -487,7 +498,7 @@ func (s *uiSource) buildBoard(now time.Time) (ui.Board, []cliout.ProgramStatus) 
 		r.Project, r.Run = ui.SafeText(r.Project), ui.SafeText(r.Run)
 		r.Note, r.Control = ui.SafeText(r.Note), ui.SafeText(r.Control)
 	}
-	lines := dash.RenderIndexedRows(buf, now, paintRows, snap.ProjectCount, snap.ActiveProjects, true)
+	lines := dash.RenderIndexedRows(buf, now, paintRows, snap.ProjectCount, snap.ActiveProjects)
 	b.Lines = strings.Split(strings.TrimSuffix(serviceLines+buf.String(), "\n"), "\n")
 	offset := strings.Count(serviceLines, "\n")
 

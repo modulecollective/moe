@@ -25,24 +25,6 @@ func assertOrder(t *testing.T, active []Row, want ...string) {
 	}
 }
 
-// TestRenderPrintsHistogramAboveSections guards the CLI integration
-// seam: Render emits the pre-built histogram lines before the section
-// headers.
-func TestRenderPrintsHistogramAboveSections(t *testing.T) {
-	var buf strings.Builder
-	hist := []string{"  ▂▄█", "", "  activity · last 60 days        peak 3 runs/day"}
-	Render(&buf, time.Now().UTC(), hist, nil, 0, 0, false)
-	out := buf.String()
-	capIdx := strings.Index(out, "activity · last 60 days")
-	activeIdx := strings.Index(out, "ACTIVE")
-	if capIdx < 0 {
-		t.Fatalf("histogram caption missing from render:\n%s", out)
-	}
-	if activeIdx < 0 || capIdx > activeIdx {
-		t.Fatalf("histogram must precede the ACTIVE header:\n%s", out)
-	}
-}
-
 // rowsByKey runs BuildRows and returns the rows keyed by
 // "<project>/<run>" so a test can assert one run's bucket and note
 // without depending on section order.
@@ -470,21 +452,16 @@ func TestRenderIndexedPlacesRows(t *testing.T) {
 		rows = append(rows, Row{Project: "p", Run: fmt.Sprintf("done-%d", i), Bucket: BucketCompletedRuns, When: now})
 	}
 	var buf bytes.Buffer
-	lines := RenderIndexed(&buf, now, nil, rows, 1, 1, false)
+	lines := RenderIndexedRows(&buf, now, rows, 1, 1)
 	out := strings.Split(buf.String(), "\n")
 	for i, r := range rows {
 		switch {
-		case r.Bucket == BucketNone || r.Bucket == BucketCompletedRuns && i >= len(rows)-2:
+		case r.Bucket == BucketNone:
 			if lines[i] != -1 {
 				t.Errorf("%s placed at %d, want unshown", r.Run, lines[i])
 			}
 		case lines[i] < 0 || !strings.Contains(out[lines[i]], "p/"+r.Run):
 			t.Errorf("%s placed at %d: %q", r.Run, lines[i], out[max(lines[i], 0)])
 		}
-	}
-	var plain bytes.Buffer
-	Render(&plain, now, nil, rows, 1, 1, false)
-	if plain.String() != buf.String() {
-		t.Fatal("RenderIndexed output differs from Render")
 	}
 }

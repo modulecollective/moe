@@ -9,11 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/modulecollective/moe/internal/cliout"
 	"github.com/modulecollective/moe/internal/dash"
-	"github.com/modulecollective/moe/internal/input"
 	"github.com/modulecollective/moe/internal/run"
-	"github.com/modulecollective/moe/internal/serve"
 	"github.com/modulecollective/moe/internal/session"
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
@@ -50,18 +47,46 @@ func newMoeHome(t *testing.T) string {
 	return root
 }
 
+// boardText renders the board's sections — ACTIVE, INTENTS, CHORES,
+// BACKLOG, COMPLETED and the footer — from the same gather and renderer
+// moe ui paints with, for tests that assert what the run list does not
+// carry.
+func boardText(t *testing.T, root string, filter DashFilter) string {
+	t.Helper()
+	now := time.Now()
+	snap, err := GatherDashSnapshot(root, now, filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	dash.RenderIndexedRows(&out, now, snap.Rows, snap.ProjectCount, snap.ActiveProjects)
+	return out.String()
+}
+
+// runList runs `moe run list` with args and returns its stdout.
+func runList(t *testing.T, args ...string) string {
+	t.Helper()
+	var out, errb bytes.Buffer
+	if code := Run(append([]string{"run", "list"}, args...), &out, &errb); code != 0 {
+		t.Fatalf("run list %v: exit=%d stderr=%q", args, code, errb.String())
+	}
+	return out.String()
+}
+
+// listLines is run list output split into its rows.
+func listLines(out string) []string {
+	if out == "" {
+		return nil
+	}
+	return strings.Split(strings.TrimSuffix(out, "\n"), "\n")
+}
+
 func TestDashEmptyBureaucracy(t *testing.T) {
-	newMoeHome(t)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
+	got := boardText(t, root, DashFilter{})
 	for _, want := range []string{
-		"MINISTRY OF EVERYTHING",
 		"ACTIVE (0)",
 		"BACKLOG (0)",
 		"COMPLETED (0)",
@@ -71,11 +96,14 @@ func TestDashEmptyBureaucracy(t *testing.T) {
 			t.Fatalf("missing %q in output:\n%s", want, got)
 		}
 	}
+	if out := runList(t, "--all"); out != "" {
+		t.Fatalf("run list on an empty bureaucracy = %q, want nothing", out)
+	}
 }
 
 // TestDashAfterCodeShowsCodeStage: design + code turns are in, no
 // push turn yet. Under the forward-walking rule the run is parked at
-// code (push has no successor turn after code's), so dash renders
+// code (push has no successor turn after code's), so the row reads
 // "sdlc:build". The operator either re-runs code, which fires the push
 // chain prompt again, or types `moe sdlc push` directly to ship.
 func TestDashAfterCodeShowsCodeStage(t *testing.T) {
@@ -91,26 +119,15 @@ func TestDashAfterCodeShowsCodeStage(t *testing.T) {
 	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0)
 	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "build", t0.Add(time.Hour))
 
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
-	if !strings.Contains(got, "ACTIVE (1)") {
-		t.Fatalf("expected one active run row, got:\n%s", got)
-	}
-	if !strings.Contains(got, "fix-it") || !strings.Contains(got, "tele") {
-		t.Fatalf("row missing project/run:\n%s", got)
-	}
-	if !containsRunRow(got, "tele", "fix-it", "sdlc:build [blocked]") {
-		t.Fatalf("expected parked build row with its unready gate badge, got:\n%s", got)
+	got := runList(t)
+	if want := "tele/fix-it\tsdlc\tsdlc:build [blocked]\n"; got != want {
+		t.Fatalf("run list = %q, want the parked build row with its unready gate badge %q", got, want)
 	}
 }
 
 // TestDashPrereqReworkedShowsDesignStage: design is re-signed after
 // the code turn. Under the forward-walking rule, design's latest turn
-// is now newer than code's so design is parked. dash should show
+// is now newer than code's so design is parked, and the row shows
 // "design"; the previous backward-walking rule would have shown "build"
 // (code stale because prereq newer).
 func TestDashPrereqReworkedShowsDesignStage(t *testing.T) {
@@ -127,17 +144,9 @@ func TestDashPrereqReworkedShowsDesignStage(t *testing.T) {
 	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "build", t0.Add(time.Hour))
 	trailerstest.CommitWorkTurnAt(t, root, "tele", "fix-it", "sdlc", "design", t0.Add(2*time.Hour))
 
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
-	if !strings.Contains(got, "ACTIVE (1)") {
-		t.Fatalf("expected one active run row, got:\n%s", got)
-	}
-	if !containsRunRow(got, "tele", "fix-it", "sdlc:design [blocked]") {
-		t.Fatalf("expected reworked design row with its missing gate badge, got:\n%s", got)
+	got := runList(t)
+	if len(listLines(got)) != 1 || !containsRunRow(got, "tele", "fix-it", "sdlc:design [blocked]") {
+		t.Fatalf("expected one reworked design row with its missing gate badge, got:\n%s", got)
 	}
 }
 
@@ -149,24 +158,15 @@ func TestDashFreshRunShowsFirstStage(t *testing.T) {
 
 	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
-	if !strings.Contains(got, "ACTIVE (1)") {
-		t.Fatalf("expected one active run row, got:\n%s", got)
-	}
-	if !containsRunRow(got, "tele", "fix-it", "sdlc:design") {
-		t.Fatalf("expected run row with stage 'sdlc:design', got:\n%s", got)
+	got := runList(t)
+	if len(listLines(got)) != 1 || !containsRunRow(got, "tele", "fix-it", "sdlc:design") {
+		t.Fatalf("expected one run row with stage 'sdlc:design', got:\n%s", got)
 	}
 }
 
-// TestDashPushedRunShowsAwaitingMerge: a run with StatusPushed renders
-// in ACTIVE with an "awaiting merge: #<n>" label so the operator
-// sees it still owes a click on GitHub. PR number comes from the
-// MoE-PR trailer.
+// TestDashPushedRunShowsAwaitingMerge: a run with StatusPushed stays
+// active with an "awaiting merge: #<n>" label so the operator sees it
+// still owes a click on GitHub. PR number comes from the MoE-PR trailer.
 func TestDashPushedRunShowsAwaitingMerge(t *testing.T) {
 	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
@@ -176,25 +176,14 @@ func TestDashPushedRunShowsAwaitingMerge(t *testing.T) {
 		"MoE-Run: fix-it\nMoE-Project: tele\nMoE-PR: https://example.com/pr/42",
 		time.Now().UTC().Add(-2*24*time.Hour))
 
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
-	if !strings.Contains(got, "ACTIVE (1)") {
-		t.Fatalf("expected pushed run in ACTIVE, got:\n%s", got)
-	}
-	if !containsRunRow(got, "tele", "fix-it", "#42") {
-		t.Fatalf("expected run row with PR number '#42', got:\n%s", got)
-	}
-	if !strings.Contains(got, "sdlc:awaiting merge: #42") {
-		t.Fatalf("expected 'sdlc:awaiting merge: #42' label, got:\n%s", got)
+	got := runList(t)
+	if len(listLines(got)) != 1 || !containsRunRow(got, "tele", "fix-it", "sdlc:awaiting merge: #42") {
+		t.Fatalf("expected the pushed run active as 'sdlc:awaiting merge: #42', got:\n%s", got)
 	}
 }
 
-// TestDashMergedRunShowsMerged: a run with StatusMerged renders as
-// "merged" in COMPLETED.
+// TestDashMergedRunShowsMerged: a run with StatusMerged is completed:
+// absent from the default list, "merged" under --all.
 func TestDashMergedRunShowsMerged(t *testing.T) {
 	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
@@ -204,15 +193,10 @@ func TestDashMergedRunShowsMerged(t *testing.T) {
 		"MoE-Run: fix-it\nMoE-Project: tele\nMoE-Merged: abc1234567890",
 		time.Now().UTC().Add(-2*24*time.Hour))
 
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	if got := runList(t); got != "" {
+		t.Fatalf("merged run listed as active:\n%s", got)
 	}
-	got := out.String()
-	if !strings.Contains(got, "COMPLETED (1)") {
-		t.Fatalf("expected merged run in COMPLETED, got:\n%s", got)
-	}
+	got := runList(t, "--all")
 	// Unextended reopen chain, so the merged row carries the reopen hint
 	// too — the merged row is where "how do I keep going" gets answered
 	// now that re-typing the stage verb refuses.
@@ -234,25 +218,17 @@ func TestDashClosedRunShowsClosed(t *testing.T) {
 		"MoE-Run: fix-it\nMoE-Project: tele\nMoE-Closed: https://example.com/pr/42",
 		time.Now().UTC().Add(-2*24*time.Hour))
 
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	if got := runList(t); got != "" {
+		t.Fatalf("closed run listed as active:\n%s", got)
 	}
-	got := out.String()
-	if !strings.Contains(got, "COMPLETED (1)") {
-		t.Fatalf("expected closed run in COMPLETED, got:\n%s", got)
-	}
-	if !strings.Contains(got, "sdlc:closed · reopen?") {
+	if got := runList(t, "--all"); !containsRunRow(got, "tele", "fix-it", "sdlc:closed · reopen?") {
 		t.Fatalf("expected closed sdlc run to carry the reopen marker, got:\n%s", got)
 	}
 }
 
 // TestDashStaleInProgressRunSurfacesInActive: a 60-day-old in-progress
-// run shows up in ACTIVE *without* --all, carrying its real age. There
-// is no longer a dormancy filter — stale in-progress work is surfaced
-// for grooming, not hidden. (Inverts the former
-// TestDashDormantHiddenWithoutAll, which asserted the opposite.)
+// run shows up in ACTIVE, carrying its real age. There is no dormancy
+// filter — stale in-progress work is surfaced for grooming, not hidden.
 func TestDashStaleInProgressRunSurfacesInActive(t *testing.T) {
 	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
@@ -262,17 +238,12 @@ func TestDashStaleInProgressRunSurfacesInActive(t *testing.T) {
 		"MoE-Run: old-one\nMoE-Project: tele\nMoE-Document: spec",
 		time.Now().UTC().Add(-60*24*time.Hour))
 
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	if got := runList(t); !strings.HasPrefix(got, "tele/old-one\t") {
+		t.Fatalf("stale in-progress run should be listed as active, got:\n%s", got)
 	}
-	got := out.String()
+	got := boardText(t, root, DashFilter{})
 	if !strings.Contains(got, "ACTIVE (1)") {
 		t.Fatalf("stale in-progress run should surface in ACTIVE, got:\n%s", got)
-	}
-	if !strings.Contains(got, "old-one") {
-		t.Fatalf("expected the stale run row to be present, got:\n%s", got)
 	}
 	// The age is the grooming signal: 60 days reads as "60d ago".
 	if !strings.Contains(got, "60d ago") {
@@ -282,10 +253,10 @@ func TestDashStaleInProgressRunSurfacesInActive(t *testing.T) {
 
 // TestDashStaleMergedRunCountsInCompleted is the regression guard for
 // "what happened to 750?": a run merged 60 days ago must still count in
-// COMPLETED without --all. The old dormancy gate subtracted such runs
-// from the completed total once they aged past 30 days, so the header
-// drifted down day by day. The completed count is cumulative history —
-// it should only climb.
+// COMPLETED. The old dormancy gate subtracted such runs from the
+// completed total once they aged past 30 days, so the header drifted
+// down day by day. The completed count is cumulative history — it should
+// only climb.
 func TestDashStaleMergedRunCountsInCompleted(t *testing.T) {
 	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
@@ -295,17 +266,12 @@ func TestDashStaleMergedRunCountsInCompleted(t *testing.T) {
 		"MoE-Run: long-merged\nMoE-Project: tele\nMoE-Merged: abc1234567890",
 		time.Now().UTC().Add(-60*24*time.Hour))
 
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
+	got := boardText(t, root, DashFilter{})
 	if !strings.Contains(got, "COMPLETED (1)") {
 		t.Fatalf("stale merged run should still count in COMPLETED, got:\n%s", got)
 	}
-	if !containsRunRow(got, "tele", "long-merged", "sdlc:merged · reopen?") {
-		t.Fatalf("expected the stale merged run row, got:\n%s", got)
+	if !containsRunRow(runList(t, "--all"), "tele", "long-merged", "sdlc:merged · reopen?") {
+		t.Fatalf("expected the stale merged run row")
 	}
 }
 
@@ -323,14 +289,9 @@ func TestDashSortsNewestFirstWithinBucket(t *testing.T) {
 		"MoE-Run: newer\nMoE-Project: tele\nMoE-Document: spec",
 		time.Now().UTC().Add(-1*time.Hour))
 
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
-	newerIdx := strings.Index(got, "newer")
-	olderIdx := strings.Index(got, "older")
+	got := runList(t)
+	newerIdx := strings.Index(got, "tele/newer\t")
+	olderIdx := strings.Index(got, "tele/older\t")
 	if newerIdx < 0 || olderIdx < 0 {
 		t.Fatalf("missing one of the rows: newer=%d older=%d in:\n%s", newerIdx, olderIdx, got)
 	}
@@ -355,12 +316,7 @@ func TestDashBacklogShowsCapturedIdeas(t *testing.T) {
 		}
 	}
 
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
+	got := boardText(t, root, DashFilter{})
 	if !strings.Contains(got, "BACKLOG (2)") {
 		t.Fatalf("expected BACKLOG (2), got:\n%s", got)
 	}
@@ -387,19 +343,19 @@ func TestDashBacklogShowsCapturedIdeas(t *testing.T) {
 	if !(activeIdx >= 0 && backlogIdx >= 0 && completedIdx >= 0 && activeIdx < backlogIdx && backlogIdx < completedIdx) {
 		t.Fatalf("section order wrong (active=%d backlog=%d completed=%d):\n%s", activeIdx, backlogIdx, completedIdx, got)
 	}
+	// Open ideas are the backlog, not runs: the run list leaves them to
+	// `moe idea list`.
+	if out := runList(t, "--all"); out != "" {
+		t.Fatalf("run list carried backlog ideas:\n%s", out)
+	}
 }
 
 func TestDashBacklogEmptyShowsNone(t *testing.T) {
-	newMoeHome(t)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	if !strings.Contains(out.String(), "BACKLOG (0)") {
-		t.Fatalf("expected empty BACKLOG section, got:\n%s", out.String())
+	if got := boardText(t, root, DashFilter{}); !strings.Contains(got, "BACKLOG (0)") {
+		t.Fatalf("expected empty BACKLOG section, got:\n%s", got)
 	}
 }
 
@@ -420,20 +376,15 @@ func TestDashProjectCountReflectsProjectJSON(t *testing.T) {
 		}
 	}
 
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	if !strings.Contains(out.String(), "3 project(s) registered") {
-		t.Fatalf("expected 3 projects in footer, got:\n%s", out.String())
+	if got := boardText(t, root, DashFilter{}); !strings.Contains(got, "3 project(s) registered") {
+		t.Fatalf("expected 3 projects in footer, got:\n%s", got)
 	}
 }
 
 // TestDashFooterActiveCountsProjectsNotRuns pins the footer semantic:
 // "N with active runs" counts *projects* with at least one active run,
 // not active rows. Two active runs in one project ⇒ 1, not 2. The
-// dashboard already shows the row count on the ACTIVE header, so the
+// board already shows the row count on the ACTIVE header, so the
 // footer carries a fact you can't read off the section headers.
 func TestDashFooterActiveCountsProjectsNotRuns(t *testing.T) {
 	root := newMoeHome(t)
@@ -442,12 +393,7 @@ func TestDashFooterActiveCountsProjectsNotRuns(t *testing.T) {
 	trailerstest.SeedRun(t, root, "tele", "fix-a", "sdlc", run.StatusInProgress)
 	trailerstest.SeedRun(t, root, "tele", "fix-b", "sdlc", run.StatusInProgress)
 
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
+	got := boardText(t, root, DashFilter{})
 	if !strings.Contains(got, "ACTIVE (2)") {
 		t.Fatalf("expected two active rows, got:\n%s", got)
 	}
@@ -456,59 +402,15 @@ func TestDashFooterActiveCountsProjectsNotRuns(t *testing.T) {
 	}
 }
 
-// TestDashCompletedCapsAtCap seeds more completed runs than the
-// dashboard cap and asserts (a) the header shows "N of total" and
-// (b) only the newest CompletedCap rows render. The cap exists so the
-// section doesn't grow unbounded and drown the live sections above it.
-func TestDashCompletedCapsAtCap(t *testing.T) {
-	root := newMoeHome(t)
-	t.Setenv("NO_COLOR", "1")
-
-	// 12 merged runs, oldest first so "newest-first" ordering pushes
-	// the newer slugs to the top of the section.
-	for i := range 12 {
-		slug := fmt.Sprintf("done-%02d", i)
-		trailerstest.SeedRun(t, root, "tele", slug, "sdlc", run.StatusMerged)
-		trailerstest.CommitTrailer(t, root, "push: "+slug+" merged",
-			"MoE-Run: "+slug+"\nMoE-Project: tele\nMoE-Merged: deadbeef"+slug,
-			time.Now().UTC().Add(-time.Duration(12-i)*time.Hour))
-	}
-
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
-	if want := fmt.Sprintf("COMPLETED (%d of 12)", dash.CompletedCap); !strings.Contains(got, want) {
-		t.Fatalf("expected capped header %q, got:\n%s", want, got)
-	}
-	// The newest CompletedCap render; everything older is truncated.
-	if !containsRunRow(got, "tele", "done-11", "sdlc:merged · reopen?") {
-		t.Fatalf("expected newest completed run to render, got:\n%s", got)
-	}
-	for i := range 12 - dash.CompletedCap {
-		dropped := fmt.Sprintf("done-%02d", i)
-		if strings.Contains(got, dropped) {
-			t.Fatalf("expected %q to be truncated below cap, got:\n%s", dropped, got)
-		}
-	}
-}
-
 // TestDashSectionHeadingsDropRuns pins the operator-facing section
 // labels: "ACTIVE" and "COMPLETED" — the bare nouns, without the
 // implementation-flavored "RUNS" suffix that used to read like a
 // schema label rather than a status.
 func TestDashSectionHeadingsDropRuns(t *testing.T) {
-	newMoeHome(t)
+	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
+	got := boardText(t, root, DashFilter{})
 	for _, want := range []string{"ACTIVE (0)", "BACKLOG (0)", "COMPLETED (0)"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in output:\n%s", want, got)
@@ -536,13 +438,8 @@ func TestDashPromotedIdeaShowsSuccessorSlug(t *testing.T) {
 		"MoE-Run: search-idea\nMoE-Project: tele\nMoE-Workflow: idea\nMoE-Promoted-To: tele/search-impl",
 		time.Time{})
 
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
-	if !strings.Contains(got, "idea:promoted → tele/search-impl") {
+	got := runList(t, "--all")
+	if !containsRunRow(got, "tele", "search-idea", "idea:promoted → tele/search-impl") {
 		t.Fatalf("expected 'idea:promoted → tele/search-impl' on the promoted row, got:\n%s", got)
 	}
 }
@@ -561,13 +458,8 @@ func TestDashPromotedIdeaMissingTargetFallsBack(t *testing.T) {
 		"MoE-Run: ghost-idea\nMoE-Project: tele\nMoE-Workflow: idea\nMoE-Promoted-To: tele/never-seeded",
 		time.Time{})
 
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
-	if !strings.Contains(got, "idea:promoted") {
+	got := runList(t, "--all")
+	if !containsRunRow(got, "tele", "ghost-idea", "idea:promoted") {
 		t.Fatalf("expected promoted row, got:\n%s", got)
 	}
 	if strings.Contains(got, "→") {
@@ -589,26 +481,19 @@ func TestDashPromotedIdeaKeepsSettledSuccessorFlat(t *testing.T) {
 		"MoE-Run: search-impl\nMoE-Project: tele\nMoE-Merged: deadbeef",
 		time.Now().UTC().Add(-2*time.Hour))
 
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
+	got := runList(t, "--all")
 	if strings.Contains(got, "↳") || !strings.Contains(got, "idea:promoted → tele/search-impl") {
 		t.Fatalf("expected flat rows with inline lineage:\n%s", got)
 	}
-	ideaAt := strings.Index(got, "tele/search-idea")
-	implAt := strings.Index(got, "tele/search-impl")
+	ideaAt := strings.Index(got, "tele/search-idea\t")
+	implAt := strings.Index(got, "tele/search-impl\t")
 	if ideaAt < 0 || implAt < 0 || implAt > ideaAt {
 		t.Fatalf("expected the newer successor first:\n%s", got)
 	}
 }
 
 // TestDashFilterByProject: with two registered projects each holding an
-// active run, `--project foo` narrows the dashboard to foo's row only.
-// Empty-string default = no filter, so this also pins that the flag
-// only kicks in when set.
+// active run, `--project foo` narrows the list to foo's row only.
 func TestDashFilterByProject(t *testing.T) {
 	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
@@ -616,20 +501,12 @@ func TestDashFilterByProject(t *testing.T) {
 	trailerstest.SeedRun(t, root, "foo", "alpha", "sdlc", run.StatusInProgress)
 	trailerstest.SeedRun(t, root, "bar", "beta", "sdlc", run.StatusInProgress)
 
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash", "--project", "foo"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	if got := runList(t); len(listLines(got)) != 2 {
+		t.Fatalf("expected both projects' rows without a filter, got:\n%s", got)
 	}
-	got := out.String()
-	if !strings.Contains(got, "ACTIVE (1)") {
-		t.Fatalf("expected one active row after --project foo, got:\n%s", got)
-	}
-	if !containsRunRow(got, "foo", "alpha", "sdlc:design") {
-		t.Fatalf("expected foo/alpha row, got:\n%s", got)
-	}
-	if strings.Contains(got, "beta") {
-		t.Fatalf("did not expect bar/beta in --project foo view:\n%s", got)
+	got := runList(t, "--project", "foo")
+	if want := "foo/alpha\tsdlc\tsdlc:design\n"; got != want {
+		t.Fatalf("run list --project foo = %q, want %q", got, want)
 	}
 }
 
@@ -642,20 +519,9 @@ func TestDashFilterByWorkflow(t *testing.T) {
 	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 	trailerstest.SeedRun(t, root, "tele", "lookup", "chat", run.StatusInProgress)
 
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash", "--workflow", "chat"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
-	if !strings.Contains(got, "ACTIVE (1)") {
-		t.Fatalf("expected one active row after --workflow chat, got:\n%s", got)
-	}
-	if !containsRunRow(got, "tele", "lookup", "chat:open · resume?") {
-		t.Fatalf("expected tele/lookup row, got:\n%s", got)
-	}
-	if strings.Contains(got, "fix-it") {
-		t.Fatalf("did not expect sdlc/fix-it in --workflow chat view:\n%s", got)
+	got := runList(t, "--workflow", "chat")
+	if want := "tele/lookup\tchat\tchat:open · resume?\n"; got != want {
+		t.Fatalf("run list --workflow chat = %q, want %q", got, want)
 	}
 }
 
@@ -669,59 +535,62 @@ func TestDashFilterCombined(t *testing.T) {
 	trailerstest.SeedRun(t, root, "foo", "lookup", "chat", run.StatusInProgress)
 	trailerstest.SeedRun(t, root, "bar", "lookup", "chat", run.StatusInProgress)
 
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash", "--project", "foo", "--workflow", "chat"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
-	if !strings.Contains(got, "ACTIVE (1)") {
-		t.Fatalf("expected one row at the intersection, got:\n%s", got)
-	}
-	if !containsRunRow(got, "foo", "lookup", "chat:open · resume?") {
-		t.Fatalf("expected foo/lookup (chat) row, got:\n%s", got)
-	}
-	if strings.Contains(got, "alpha") {
-		t.Fatalf("did not expect foo/alpha (sdlc) in combined view:\n%s", got)
-	}
-	if strings.Contains(got, "bar") {
-		t.Fatalf("did not expect bar/lookup in combined view:\n%s", got)
+	got := runList(t, "--project", "foo", "--workflow", "chat")
+	if want := "foo/lookup\tchat\tchat:open · resume?\n"; got != want {
+		t.Fatalf("run list --project foo --workflow chat = %q, want %q", got, want)
 	}
 }
 
-// TestDashFilterUnknownReturnsEmpty: an unknown filter value isn't an
-// error — the dashboard renders with empty section bodies and exit 0.
-// Filtering is read-only; "(none)" is the obvious miss signal.
-func TestDashFilterUnknownReturnsEmpty(t *testing.T) {
+// TestDashFilterUnknownWorkflowReturnsEmpty: an unknown workflow isn't an
+// error — filtering is read-only and an empty list is the obvious miss
+// signal, as on the board.
+func TestDashFilterUnknownWorkflowReturnsEmpty(t *testing.T) {
 	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash", "--project", "bogus"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
-	for _, want := range []string{"ACTIVE (0)", "BACKLOG (0)", "COMPLETED (0)"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("expected empty %q after unknown project, got:\n%s", want, got)
-		}
-	}
-	if strings.Contains(got, "fix-it") {
-		t.Fatalf("did not expect any rows for unknown project:\n%s", got)
+	if got := runList(t, "--workflow", "bogus", "--all"); got != "" {
+		t.Fatalf("did not expect any rows for an unknown workflow:\n%s", got)
 	}
 }
 
-// TestDashAllLiftsCompletedCap: with more completed runs than the cap,
-// the default view truncates to completedCap (header reads "X of Y");
-// `--all` lifts the truncation and renders the full list with a plain
-// "COMPLETED (Y)" header.
-func TestDashAllLiftsCompletedCap(t *testing.T) {
+// TestRunListUnknownProjectIsAnError: --project names a registered
+// project, as `moe idea list --project` does; a typo is an error rather
+// than an empty list that reads like "nothing running".
+func TestRunListUnknownProjectIsAnError(t *testing.T) {
+	root := newMoeHome(t)
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+
+	var out, errb bytes.Buffer
+	if code := Run([]string{"run", "list", "--project", "bogus"}, &out, &errb); code != 1 {
+		t.Fatalf("exit=%d, want 1 (stdout=%q stderr=%q)", code, out.String(), errb.String())
+	}
+	if out.Len() != 0 || !strings.Contains(errb.String(), "project bogus not registered") {
+		t.Fatalf("stdout=%q stderr=%q", out.String(), errb.String())
+	}
+}
+
+// TestRunListRejectsPositionalArgs: the list takes flags only.
+func TestRunListRejectsPositionalArgs(t *testing.T) {
+	newMoeHome(t)
+	var out, errb bytes.Buffer
+	if code := Run([]string{"run", "list", "tele"}, &out, &errb); code != 2 {
+		t.Fatalf("exit=%d, want 2", code)
+	}
+	if !strings.Contains(errb.String(), "usage: moe run list [--project <id>] [--workflow <name>] [--all]") {
+		t.Fatalf("stderr = %q", errb.String())
+	}
+}
+
+// TestDashAllListsEveryCompletedRun: completed runs stay off the default
+// list; `--all` adds every one of them, uncapped, newest first, after
+// the active rows.
+func TestDashAllListsEveryCompletedRun(t *testing.T) {
 	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
+	trailerstest.SeedRun(t, root, "tele", "live", "sdlc", run.StatusInProgress)
 	for i := range 12 {
 		slug := fmt.Sprintf("done-%02d", i)
 		trailerstest.SeedRun(t, root, "tele", slug, "sdlc", run.StatusMerged)
@@ -730,31 +599,40 @@ func TestDashAllLiftsCompletedCap(t *testing.T) {
 			time.Now().UTC().Add(-time.Duration(12-i)*time.Hour))
 	}
 
-	// Default: capped at CompletedCap.
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
+	if got := runList(t); got != "tele/live\tsdlc\tsdlc:design\n" {
+		t.Fatalf("default list = %q, want only the active run", got)
 	}
-	if want := fmt.Sprintf("COMPLETED (%d of 12)", dash.CompletedCap); !strings.Contains(out.String(), want) {
-		t.Fatalf("expected capped header %q by default, got:\n%s", want, out.String())
+	lines := strings.Split(strings.TrimSuffix(runList(t, "--all"), "\n"), "\n")
+	if len(lines) != 13 || !strings.HasPrefix(lines[0], "tele/live\t") {
+		t.Fatalf("--all = %q, want the active run then all 12 completed", lines)
 	}
+	for i, line := range lines[1:] {
+		if want := fmt.Sprintf("tele/done-%02d\tsdlc\tsdlc:merged · reopen?", 11-i); line != want {
+			t.Fatalf("--all line %d = %q, want %q", i+1, line, want)
+		}
+	}
+}
 
-	// --all: every completed row renders, plain header.
-	out.Reset()
-	errb.Reset()
-	code = Run([]string{"dash", "--all"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q --all stderr=%q", code, errb.String(), errb.String())
+// TestRunListShape: three tab-separated fields per line and, even with
+// colour allowed, no escape bytes on a non-terminal stdout.
+func TestRunListShape(t *testing.T) {
+	root := newMoeHome(t)
+	t.Setenv("NO_COLOR", "")
+	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "lookup", "chat", run.StatusInProgress)
+	trailerstest.SeedRun(t, root, "tele", "gone", "sdlc", run.StatusClosed)
+
+	got := runList(t, "--all")
+	if strings.Contains(got, "\x1b") {
+		t.Fatalf("escape bytes on a non-terminal stdout: %q", got)
 	}
-	got := out.String()
-	if !strings.Contains(got, "COMPLETED (12)") {
-		t.Fatalf("expected uncapped header under --all, got:\n%s", got)
+	lines := strings.Split(strings.TrimSuffix(got, "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("lines = %q", lines)
 	}
-	for i := range 12 {
-		slug := fmt.Sprintf("done-%02d", i)
-		if !strings.Contains(got, slug) {
-			t.Fatalf("expected %q to render under --all, got:\n%s", slug, got)
+	for _, line := range lines {
+		if f := strings.Split(line, "\t"); len(f) != 3 || f[0] == "" || f[1] == "" || f[2] == "" {
+			t.Fatalf("line %q is not <project>/<slug> TAB <workflow> TAB <note>", line)
 		}
 	}
 }
@@ -782,21 +660,15 @@ func TestDashOpenSessionSameDocMarksRunning(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = session.Abandon(sess) })
 
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	if !strings.Contains(out.String(), "sdlc:build [running]") {
-		t.Fatalf("expected 'sdlc:build [running]' on the active row, got:\n%s", out.String())
+	if got := runList(t); !strings.Contains(got, "sdlc:build [running]") {
+		t.Fatalf("expected 'sdlc:build [running]' on the active row, got:\n%s", got)
 	}
 }
 
 // TestDashOpenSessionDifferentDocMarksDocRunning: a code session open
 // on a run still parked at design — the case that motivates this rail
-// — renders "sdlc:design [build running]". Without the marker the dash
-// would say "design" while the operator knows code is in flight off
-// the dashboard.
+// — renders "sdlc:design [build running]". Without the marker the row
+// would say "design" while the operator knows code is in flight.
 func TestDashOpenSessionDifferentDocMarksDocRunning(t *testing.T) {
 	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
@@ -809,45 +681,33 @@ func TestDashOpenSessionDifferentDocMarksDocRunning(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = session.Abandon(sess) })
 
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	if !strings.Contains(out.String(), "sdlc:design [build running]") {
-		t.Fatalf("expected 'sdlc:design [build running]' on the active row, got:\n%s", out.String())
+	if got := runList(t); !strings.Contains(got, "sdlc:design [build running]") {
+		t.Fatalf("expected 'sdlc:design [build running]' on the active row, got:\n%s", got)
 	}
 }
 
 // TestDashNoOpenSessionLeavesNoteUnchanged: with no session worktrees
-// open, the active-run note carries no "[running]" suffix — the dash's
-// behaviour before this rail. Pins the no-marker default so a future
-// change can't smuggle a marker into the no-session case.
+// open, the active-run note carries no "[running]" suffix. Pins the
+// no-marker default so a future change can't smuggle a marker into the
+// no-session case.
 func TestDashNoOpenSessionLeavesNoteUnchanged(t *testing.T) {
 	root := newMoeHome(t)
 	t.Setenv("NO_COLOR", "1")
 
 	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	if strings.Contains(out.String(), "running]") {
-		t.Fatalf("expected no '[running]' marker without an open session, got:\n%s", out.String())
+	if got := runList(t); strings.Contains(got, "running]") {
+		t.Fatalf("expected no '[running]' marker without an open session, got:\n%s", got)
 	}
 }
 
 // TestDashStarsLiveSession: end-to-end, an open stage session threads
 // classify → Row.RunningDoc → dash.Live and caps today's histogram bar
-// with the star; the same run with no session draws none. The board
-// keeps no factory rail.
+// with the star; the same run with no session draws none.
 func TestDashStarsLiveSession(t *testing.T) {
 	for _, live := range []bool{false, true} {
 		t.Run(fmt.Sprint("live=", live), func(t *testing.T) {
 			root := newMoeHome(t)
-			t.Setenv("NO_COLOR", "1")
 			trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
 			if live {
 				sess, err := session.Open(root, "tele", "fix-it", "build")
@@ -857,174 +717,15 @@ func TestDashStarsLiveSession(t *testing.T) {
 				t.Cleanup(func() { _ = session.Abandon(sess) })
 			}
 
-			var out, errb bytes.Buffer
-			if code := Run([]string{"dash"}, &out, &errb); code != 0 {
-				t.Fatalf("exit=%d stderr=%q", code, errb.String())
+			snap, err := GatherDashSnapshot(root, time.Now(), DashFilter{})
+			if err != nil {
+				t.Fatal(err)
 			}
-			got := out.String()
-			capIdx := strings.Index(got, "activity · last 60 days")
-			activeIdx := strings.Index(got, "ACTIVE (")
-			if capIdx < 0 || activeIdx < 0 {
-				t.Fatalf("missing caption or ACTIVE marker in:\n%s", got)
-			}
-			chart := got[:capIdx]
+			chart := strings.Join(dash.BuildActivityHistogram(trailingDays(snap.Histogram, dash.HistDays), dash.Live(snap.Rows)), "\n")
 			if n := strings.Count(chart, "*"); n != map[bool]int{false: 0, true: 1}[live] {
 				t.Fatalf("live=%v: %d stars in the chart:\n%s", live, n, chart)
 			}
-			for _, rail := range []string{"[⚙]", "[⚒]", "━━━"} {
-				if strings.Contains(got, rail) {
-					t.Fatalf("factory rail %q still drawn:\n%s", rail, got)
-				}
-			}
-			// The caption is followed by one blank line, then ACTIVE: no
-			// art block in between.
-			if between := got[capIdx:activeIdx]; strings.Count(between, "\n") != 2 {
-				t.Fatalf("expected the caption, one blank, then ACTIVE; got %q", between)
-			}
 		})
-	}
-}
-
-func TestDashRejectsRemovedWatchFlag(t *testing.T) {
-	newMoeHome(t)
-	t.Setenv("NO_COLOR", "1")
-	for _, arg := range []string{"--watch", "--watch=false"} {
-		t.Run(arg, func(t *testing.T) {
-			var out, errb bytes.Buffer
-			code := Run([]string{"dash", arg}, &out, &errb)
-			if code != 2 {
-				t.Fatalf("exit=%d want 2 (stdout=%q stderr=%q)", code, out.String(), errb.String())
-			}
-			if !strings.Contains(errb.String(), "flag provided but not defined: -watch") {
-				t.Fatalf("expected unknown watch flag error, got:\n%s", errb.String())
-			}
-			if out.Len() != 0 {
-				t.Fatalf("expected no frame on a rejected watch flag, got:\n%q", out.String())
-			}
-		})
-	}
-}
-
-func TestDashHelpListsSnapshotFlags(t *testing.T) {
-	var out, errb bytes.Buffer
-	if code := Run([]string{"dash", "--help"}, &out, &errb); code != 2 {
-		t.Fatalf("exit=%d want 2 (stderr=%q)", code, errb.String())
-	}
-	if out.Len() != 0 {
-		t.Fatalf("help printed a dashboard: %q", out.String())
-	}
-	if strings.Contains(errb.String(), "watch") {
-		t.Fatalf("help advertises removed watch flag: %s", errb.String())
-	}
-	for _, flag := range []string{"--all", "--project", "--workflow"} {
-		if !strings.Contains(errb.String(), flag) {
-			t.Errorf("help lacks %s: %s", flag, errb.String())
-		}
-	}
-}
-
-// TestTTYFrameBufferKeepsColourGate: buffering a UI frame must not make
-// its eventual terminal destination disappear from cliout.Enabled.
-func TestTTYFrameBufferKeepsColourGate(t *testing.T) {
-	t.Setenv("NO_COLOR", "")
-	f, err := os.Open("/dev/ptmx")
-	if err != nil {
-		t.Skipf("no pty device to stand in for the operator's terminal: %v", err)
-	}
-	t.Cleanup(func() { f.Close() })
-	if !cliout.Enabled(f) {
-		t.Skipf("/dev/ptmx does not classify as a terminal here; nothing to unwrap to")
-	}
-
-	frame := ttyFrameBuffer{terminal: f}
-	if !cliout.Enabled(&frame) {
-		t.Fatal("cliout.Enabled(ttyFrameBuffer{tty}) = false; buffered UI frames would render unstyled")
-	}
-}
-
-// TestDashBannerTimestampIsLocal pins the banner's render stamp to the
-// box's wall clock. The stamp carries no zone marker, so an operator
-// reads it as local time — printing UTC made the banner wrong by the
-// offset, and late enough in the evening wrong by a whole day.
-//
-// time.Local is swapped rather than TZ set: the runtime resolves TZ
-// once, on first use, which in a test binary has long since happened.
-// Without the swap this assertion is vacuous on a UTC host, which is
-// most of them. Safe here because no test in this package is parallel.
-func TestDashBannerTimestampIsLocal(t *testing.T) {
-	newMoeHome(t)
-	t.Setenv("NO_COLOR", "1")
-
-	// An offset no host is plausibly in, and not a whole number of
-	// hours, so a UTC stamp can't slip through on coincidence.
-	saved := time.Local
-	t.Cleanup(func() { time.Local = saved })
-	time.Local = time.FixedZone("MOETEST", 7*3600+1800)
-
-	var out, errb bytes.Buffer
-	before := time.Now()
-	code := Run([]string{"dash"}, &out, &errb)
-	after := time.Now()
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-
-	// The banner is the logo and the clock, nothing else.
-	const marker = "░▒▓  "
-	var stamp string
-	for line := range strings.SplitSeq(out.String(), "\n") {
-		if !strings.Contains(line, "MINISTRY OF EVERYTHING") {
-			continue
-		}
-		_, after, ok := strings.Cut(line, marker)
-		if !ok {
-			t.Fatalf("banner line has no %q marker: %q", marker, line)
-		}
-		stamp = strings.TrimSpace(after)
-	}
-	if stamp == "" {
-		t.Fatalf("no banner line in output:\n%s", out.String())
-	}
-	// Minute-truncated, so it names either end of the call window. A UTC
-	// stamp would be off by the zone's 7h30m and match neither.
-	if stamp != dash.Clock(before) && stamp != dash.Clock(after) {
-		t.Fatalf("banner stamp %q, want the local clock %q", stamp, dash.Clock(after))
-	}
-}
-
-// TestDashOpensWithThePulseSection: the serve cluster moved off the
-// banner into the PULSE section, which sits first on the board — above
-// the art and ACTIVE — and carries a dead serve's state and the
-// operator's pending pulse notes.
-func TestDashOpensWithThePulseSection(t *testing.T) {
-	root := newMoeHome(t)
-	t.Setenv("NO_COLOR", "1")
-	now := time.Now()
-	pid := deadPid(t)
-	writeServeState(t, root, serve.ActivitySnapshot{Pid: pid, Armed: true, Started: now.Add(-time.Hour), WrittenAt: now.Add(-3 * time.Hour)})
-	if _, err := input.AddPulse(root, "do the lightpool fix next\n\nit blocks the release"); err != nil {
-		t.Fatal(err)
-	}
-
-	var out, errb bytes.Buffer
-	if code := Run([]string{"dash"}, &out, &errb); code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	lines := strings.Split(out.String(), "\n")
-	if strings.Contains(lines[0], "serve") || strings.Contains(lines[0], "·") {
-		t.Fatalf("banner carries more than logo and clock: %q", lines[0])
-	}
-	if lines[1] != "PULSE" {
-		t.Fatalf("board does not open with PULSE:\n%s", out.String())
-	}
-	if want := fmt.Sprintf("  serve dead (pid %d) · stale 3h 0m", pid); lines[2] != want {
-		t.Fatalf("status line = %q, want %q", lines[2], want)
-	}
-	if !strings.HasPrefix(lines[3], "  ▒ #1  do the lightpool fix next  · waiting — serve is not armed") {
-		t.Fatalf("pending note line = %q", lines[3])
-	}
-	if pulse, active := strings.Index(out.String(), "PULSE"), strings.Index(out.String(), "ACTIVE ("); pulse > active {
-		t.Fatalf("PULSE is not above ACTIVE:\n%s", out.String())
 	}
 }
 

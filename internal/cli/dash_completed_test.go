@@ -14,7 +14,7 @@ import (
 	"github.com/modulecollective/moe/internal/trailers/trailerstest"
 )
 
-// Exercise journal scan -> shared rows -> CLI and the real web wiring.
+// Exercise journal scan -> shared rows -> run list and the real web wiring.
 // The old fold hid this fresh completion beneath a three-day-old pulse.
 func TestCompletedChildVisibleAcrossDashSurfaces(t *testing.T) {
 	root := newMoeHome(t)
@@ -30,31 +30,14 @@ func TestCompletedChildVisibleAcrossDashSurfaces(t *testing.T) {
 	trailerstest.SeedRun(t, root, "p", "child", "sdlc", run.StatusClosed)
 	trailerstest.CommitTrailer(t, root, "open child", "MoE-Run: child\nMoE-Project: p\nMoE-Workflow: sdlc\nMoE-Spawned-By: p/pulse", base.Add(-48*time.Hour))
 	trailerstest.CommitTrailer(t, root, "close child", "MoE-Run: child\nMoE-Project: p\nMoE-Workflow: sdlc\nMoE-Closed: true", base)
-	for _, args := range [][]string{{"dash"}, {"dash", "--project", "p"}, {"dash", "--all"}} {
+	for _, args := range [][]string{{"run", "list", "--all"}, {"run", "list", "--all", "--project", "p"}} {
 		var out, errb bytes.Buffer
 		if code := Run(args, &out, &errb); code != 0 {
 			t.Fatalf("%v: %d %s", args, code, errb.String())
 		}
-		body := out.String()
-		completed := body[strings.Index(body, "COMPLETED ("):]
-		if !strings.Contains(completed, "\n  p/child ") || strings.Contains(completed, "↳") || !strings.Contains(completed, "· from p/pulse") {
-			t.Fatalf("%v: child missing or nested:\n%s", args, completed)
-		}
-		if strings.Index(completed, "p/child") > strings.Index(completed, "p/other-0") {
-			t.Fatalf("child not newest:\n%s", completed)
-		}
-		count := 0
-		for _, line := range strings.Split(completed, "\n") {
-			if strings.HasPrefix(line, "  p/") {
-				count++
-			}
-		}
-		want := dash.CompletedCap
-		if len(args) > 1 && args[1] == "--all" {
-			want = 8
-		}
-		if count != want {
-			t.Fatalf("%v: rows=%d, want %d", args, count, want)
+		lines := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
+		if len(lines) != 8 || !strings.HasPrefix(lines[0], "p/child\t") || !strings.HasSuffix(lines[0], "· from p/pulse") || strings.Contains(out.String(), "↳") {
+			t.Fatalf("%v: child must be listed first, flat, with lineage, among all 8:\n%s", args, out.String())
 		}
 	}
 	s, err := serve.New(serveOptions(root, &bytes.Buffer{}))

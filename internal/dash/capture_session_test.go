@@ -148,7 +148,7 @@ func TestCaptureSessionRowFallsBackToLastActivity(t *testing.T) {
 }
 
 // TestCaptureSessionRowRespectsWorkflowFilter: the row is run traffic,
-// emitted from the run loop, so `moe dash -w sdlc` drops it — unlike the
+// emitted from the run loop, so `--workflow sdlc` drops it — unlike the
 // standing INTENTS splice, which ignores the filter.
 func TestCaptureSessionRowRespectsWorkflowFilter(t *testing.T) {
 	md := &run.Metadata{ID: "sharpen-me", Project: "tele", Workflow: IntentWorkflow, Status: run.StatusInProgress}
