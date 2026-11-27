@@ -697,30 +697,31 @@ var ErrNothingToCommit = errors.New("run: nothing to commit")
 var ErrSlugTaken = errors.New("run: slug already used")
 
 // LatestWorkTurnSHA returns the SHA and committer time of the most recent
-// `work: update <docID>` commit for the run. Slugs are unique per
-// project across all workflows (the runs/<slug> directory namespace is
-// flat), so (project, run, document) is enough to key a run's history;
-// the workflow trailer is written but not filtered on. An anchored
-// subject grep keeps session-start, merge, and push commits from
-// slipping past. Returns ("", time.Time{}, nil) when there has been no
-// work turn yet — the caller treats that as "first turn, nothing to
+// work-turn commit (IsWorkTurnSubject) for the run's document. Slugs are
+// unique per project across all workflows (the runs/<slug> directory
+// namespace is flat), so (project, run, document) is enough to key a
+// run's history; the workflow trailer is written but not filtered on.
+// An anchored subject grep keeps session-start, merge, and push commits
+// from slipping past. Returns ("", time.Time{}, nil) when there has been
+// no work turn yet — the caller treats that as "first turn, nothing to
 // diff against."
 func LatestWorkTurnSHA(root, projectID, runID, docID string) (sha string, when time.Time, err error) {
-	return latestSubjectSHA(root, "work: update", projectID, runID, docID)
+	return latestSubjectSHA(root, projectID, runID, docID,
+		WorkTurnSubject(projectID, runID, docID), "work: update "+docID)
 }
 
-// WorkTurnDocs returns the document of every `work: update <doc>` commit
-// for the run, newest first. Same scoping as LatestWorkTurnSHA (anchored
-// subject, project and run trailers), with the document read from the
-// subject so one log walk answers every document — the review loop
-// counts review turns and asks whether review or build landed last.
-// The MoE-Document trailer must agree with the subject; a commit whose
-// two disagree is not a work turn this reader trusts.
+// WorkTurnDocs returns the document of every work-turn commit for the
+// run, newest first. Same scoping as LatestWorkTurnSHA (project and run
+// trailers), with the document read from the subject so one log walk
+// answers every document — the review loop counts review turns and asks
+// whether review or build landed last. The walk has no -1 to lose, so
+// the subject is classified here rather than grepped. The MoE-Document
+// trailer must agree with the subject; a commit whose two disagree is
+// not a work turn this reader trusts.
 func WorkTurnDocs(root, projectID, runID string) ([]string, error) {
 	out, err := git.Output(root,
 		"log",
 		"--all-match",
-		"--grep", "^work: update [a-z0-9-]*$",
 		"--grep", trailers.GrepPattern("MoE-Project", projectID),
 		"--grep", trailers.GrepPattern("MoE-Run", runID),
 		"--format=%s%x00%(trailers:key=MoE-Document,valueonly,separator=%x01)",
@@ -734,8 +735,8 @@ func WorkTurnDocs(root, projectID, runID string) ([]string, error) {
 		if !ok {
 			continue
 		}
-		doc := strings.TrimPrefix(subject, "work: update ")
-		if doc == subject || strings.TrimSpace(docTrailer) != doc {
+		doc, ok := workTurnDoc(subject, projectID, runID)
+		if !ok || strings.TrimSpace(docTrailer) != doc {
 			continue
 		}
 		docs = append(docs, doc)
@@ -744,7 +745,7 @@ func WorkTurnDocs(root, projectID, runID string) ([]string, error) {
 }
 
 // LatestAdvanceSHA returns the SHA and committer time of the most recent
-// `advance: <docID>` marker commit for the run — the click-forward marker
+// advance marker commit (IsAdvanceSubject) for the run — the click-forward marker
 // the chain prompt writes when the operator declines the next stage but
 // records the current one as done (commitAdvance). Mirrors
 // LatestWorkTurnSHA's scoping (anchored subject grep + the same
@@ -752,20 +753,29 @@ func WorkTurnDocs(root, projectID, runID string) ([]string, error) {
 // instead of the work-turn subject. Returns ("", time.Time{}, nil) when no
 // advance marker exists yet — the stage was never click-advanced.
 func LatestAdvanceSHA(root, projectID, runID, docID string) (sha string, when time.Time, err error) {
-	return latestSubjectSHA(root, "advance:", projectID, runID, docID)
+	return latestSubjectSHA(root, projectID, runID, docID,
+		AdvanceSubject(projectID, runID, docID), "advance: "+docID)
 }
 
-// latestSubjectSHA is the newest commit whose subject is exactly
-// "<prefix> <docID>" and whose trailers name the run's project, run and
-// document. ("", time.Time{}, nil) when there is none.
-func latestSubjectSHA(root, prefix, projectID, runID, docID string) (sha string, when time.Time, err error) {
-	// Doc IDs are [a-z0-9-]+ today, so QuoteMeta is belt-and-suspenders:
-	// nothing in that class is a BRE metacharacter, but escape anyway so
-	// a future looser validator can't turn a doc ID into a regex foot-gun.
+// latestSubjectSHA is the newest commit whose subject is exactly one of
+// subjects (the current headline and its legacy form) and whose
+// trailers name the run's project, run and document. ("", time.Time{},
+// nil) when there is none.
+//
+// The subject stays in the git-side grep so -1 stops the walk at the
+// newest match: without it git walks the whole journal (about 220ms
+// against 19k commits, where -1 answers in 3ms). Two exact headlines
+// need alternation, hence -E; QuoteMeta's escapes are all literal in
+// ERE, and the trailer patterns are plain slugs either way.
+func latestSubjectSHA(root, projectID, runID, docID string, subjects ...string) (sha string, when time.Time, err error) {
+	quoted := make([]string, len(subjects))
+	for i, s := range subjects {
+		quoted[i] = regexp.QuoteMeta(s)
+	}
 	out, err := git.Output(root,
 		"log", "-1",
-		"--all-match",
-		"--grep", fmt.Sprintf("^%s %s$", prefix, regexp.QuoteMeta(docID)),
+		"-E", "--all-match",
+		"--grep", "^("+strings.Join(quoted, "|")+")$",
 		"--grep", trailers.GrepPattern("MoE-Project", projectID),
 		"--grep", trailers.GrepPattern("MoE-Run", runID),
 		"--grep", trailers.GrepPattern("MoE-Document", docID),
@@ -1645,7 +1655,7 @@ func (w *journalWalk) foldTurns(c *journalCommit) {
 	// Work-turn keying is project-scoped, and the subject pin
 	// keeps session-start / merge / push commits out — same
 	// filter LatestWorkTurnSHA uses.
-	if c.subject == "work: update "+c.doc {
+	if IsWorkTurnSubject(c.subject, c.project, c.slug, c.doc) {
 		if _, ok := w.idx.WorkTurnTime[k]; !ok {
 			w.idx.WorkTurnTime[k] = c.when
 		}
@@ -1653,7 +1663,7 @@ func (w *journalWalk) foldTurns(c *journalCommit) {
 	// Advance markers share the work-turn keying; the distinct
 	// subject pin keeps them in their own map, mirroring
 	// LatestAdvanceSHA's grep.
-	if c.subject == "advance: "+c.doc {
+	if IsAdvanceSubject(c.subject, c.project, c.slug, c.doc) {
 		if _, ok := w.idx.AdvanceTime[k]; !ok {
 			w.idx.AdvanceTime[k] = c.when
 		}
@@ -1677,15 +1687,6 @@ func (w *journalWalk) finish() *JournalIndex {
 		idx.DailyRunCountByProject[proj] = perProject
 	}
 	return idx
-}
-
-// isPushRecordSubject reports whether subject is one of the terminal
-// records that mean a run actually shipped: `push: <p>/<r>` and
-// `push: <p>/<r> merged` from push.go, `sync: <p>/<r> <status>` from
-// sync.go reconciling an upstream merge. Everything else carrying
-// Document: push is stage traffic on the way there.
-func isPushRecordSubject(subject string) bool {
-	return strings.HasPrefix(subject, "push: ") || strings.HasPrefix(subject, "sync: ")
 }
 
 // LastFileActivity returns the committer time of the most recent commit

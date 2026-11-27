@@ -198,10 +198,11 @@ func latestStageFailure(root, projectID, runID, stage, agentArg string) (string,
 	entries := strings.Split(log, "\x00")
 	for i := 0; i+1 < len(entries); i += 2 {
 		sha, body := strings.TrimSpace(entries[i]), entries[i+1]
-		if strings.HasPrefix(body, "work: update "+stage+"\n") && strings.Contains(body, "\nMoE-Document: "+stage+"\n") {
+		subject, _, _ := strings.Cut(body, "\n")
+		if run.IsWorkTurnSubject(subject, projectID, runID, stage) && strings.Contains(body, "\nMoE-Document: "+stage+"\n") {
 			return "", nil, nil
 		}
-		if !strings.HasPrefix(body, fmt.Sprintf("diagnostic: %s/%s %s canvas ", projectID, runID, stage)) {
+		if !run.IsDiagnosticSubject(subject, projectID, runID, stage) {
 			continue
 		}
 		names, err := git.Output(root, "diff-tree", "--no-commit-id", "--name-only", "-r", "--diff-filter=A", sha, "--", dir)
