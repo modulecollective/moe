@@ -26,6 +26,14 @@ projects — those get their own guidance assembled from `SOUL.md` and
   renders as a notch and costs a later cleanup run. Code fences,
   tables, link targets, and command grammars don't wrap — leave them
   alone.
+- **A doc fact has one home.** When a change touches documented
+  behaviour, find where `docs/` already says it, edit that sentence,
+  and link to it from anywhere else that needs it — don't restate it
+  where your change happened to land. Notes that only matter to
+  someone upgrading from an older binary go under "After An Upgrade"
+  in `docs/reference.md`, not in guide prose. A command-catalog bullet
+  in `docs/reference.md` stays at about eight lines (synopsis, what
+  it's for, a link); anything longer gets its own section.
 
 ## Before you say you're done
 
