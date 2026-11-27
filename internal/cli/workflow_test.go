@@ -249,12 +249,11 @@ func TestWorkflowNextIgnoresOtherProjectSameSlug(t *testing.T) {
 	}
 }
 
-// TestWorkflowNextIgnoresSessionStartCommit guards the latent bug the
-// design called out: a `work: start session for code` commit carries
-// every MoE trailer stageSatisfied looked at before the subject pin,
-// so without the `^work: update …$` anchor it flipped the stage to
-// satisfied before the agent had actually done anything. The anchored
-// subject grep keeps session-start commits out of the match.
+// TestWorkflowNextIgnoresSessionStartCommit guards a session start
+// standing in for a work turn: a `Start code for …` commit carries the
+// same Run, Project, Workflow, Document and Session trailers a turn
+// does, so without the MoE-Kind: turn pin it would flip the stage to
+// satisfied before the agent had done anything.
 func TestWorkflowNextIgnoresSessionStartCommit(t *testing.T) {
 	root := newTestBureaucracy(t)
 	wf := NewWorkflow("session-start-test")
