@@ -24,7 +24,7 @@ import (
 // DIM/MID/BRIGHT are one hue, lightness-monotonic: a valid sequential
 // ramp for the dash's activity histogram. PLASMA is the theme's
 // attention hue, reserved for accents (the histogram's peak day, the
-// factory's hot exhaust).
+// live star's glint).
 const (
 	Dim    = "\x1b[38;5;94m"  // #875f00 — structure, chrome, "low"
 	Mid    = "\x1b[38;5;172m" // #d78700 — idle, mid-ramp, captions
@@ -41,7 +41,7 @@ const (
 
 // Enabled reports whether w is a TTY we should style. Non-file writers
 // (test buffers) and NO_COLOR=1 disable styling. Exported so callers
-// that compose their own SGR (dash's histogram and factory-art stylers)
+// that compose their own SGR (dash's histogram styler)
 // gate on exactly the same predicate these helpers do.
 func Enabled(w io.Writer) bool {
 	if os.Getenv("NO_COLOR") != "" {

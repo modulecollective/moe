@@ -74,7 +74,9 @@ type Question struct {
 	Text string
 }
 
-// Art is a bounded set of factory frames in the pinned overview.
+// Art is a bounded set of frames for a span of the pinned overview: the
+// activity chart, whose live star changes from frame to frame. One frame
+// never animates.
 type Art struct {
 	Start, Height int        // explicit zero-based line span in Board.Overview
 	Frames        [][]string // identical dimensions; already styled by the renderer

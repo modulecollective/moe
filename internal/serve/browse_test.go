@@ -85,7 +85,7 @@ func TestProjectsIndexAndHub(t *testing.T) {
 
 	gather := func(string) ([]dash.Row, int, int, []int, error) {
 		return []dash.Row{
-			{Project: "alpha", Run: "fix-1", Bucket: dash.BucketActiveRuns, When: time.Now()},
+			{Project: "alpha", Run: "fix-1", Bucket: dash.BucketActiveRuns, RunningDoc: "build", When: time.Now()},
 			{Project: "alpha", Run: "pulse-1", Bucket: dash.BucketActiveRuns, When: time.Now()},
 			{Project: "alpha", Run: "tidy", Bucket: dash.BucketChores, When: time.Now()},
 			{Project: "beta", Run: "old", Bucket: dash.BucketCompletedRuns, When: time.Now()},
@@ -112,9 +112,8 @@ func TestProjectsIndexAndHub(t *testing.T) {
 
 // TestProjectHubRendersBannerArt pins requirement 2: the project hub
 // gathers scoped to its own project (the projectID reaches GatherDash)
-// and draws the factory art + project-scoped histogram under the header —
-// both banner-art <pre> blocks, with the factory rail carrying the
-// #factory-art hook the cross-fade JS targets.
+// and draws the project-scoped histogram under the header, its star
+// reading this project's liveness.
 func TestProjectHubRendersBannerArt(t *testing.T) {
 	root := t.TempDir()
 	seedProject(t, root, "alpha")
@@ -125,16 +124,16 @@ func TestProjectHubRendersBannerArt(t *testing.T) {
 	gather := func(projectID string) ([]dash.Row, int, int, []int, error) {
 		gotProject = projectID
 		return []dash.Row{
-			{Project: "alpha", Run: "fix-1", Bucket: dash.BucketActiveRuns, When: time.Now()},
+			{Project: "alpha", Run: "fix-1", Bucket: dash.BucketActiveRuns, RunningDoc: "build", When: time.Now()},
 		}, 1, 1, counts, nil
 	}
 	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: root, GatherDash: gather})
 
 	hub := get(t, s, "/projects/alpha")
 	mustContain(t, hub,
-		`class="banner-art"`,                  // histogram <pre>
-		`class="banner-art" id="factory-art"`, // factory rail with the JS hook
-		`<span class="art-mid">`,              // glyphs banded, not flat-tinted
+		`class="banner-art"`,      // histogram <pre>
+		`<span class="art-mid">`,  // glyphs banded, not flat-tinted
+		`<span class="art-star">`, // the project's open session
 	)
 	// The caption's words land in separate band spans; strip the markup to
 	// assert the text a reader sees.

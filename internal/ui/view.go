@@ -66,7 +66,7 @@ Commands (:)
 
 Pane headings use a heavy rule for the input recipient (also without color).
 Board ranges count scrollable lines, including headings and blank rows.
-The complete chart and factory stay pinned when space permits; resize restores them.
+The activity chart stays pinned when space permits; its star twinkles while a run is live.
 Console: six message rows; arrows/page/Home scroll history; End follows newest.
 Minimum terminal size: 40 columns by 20 rows.
 Confirmations: y accepts, Esc cancels; arrows/page/Home/End scroll the question.

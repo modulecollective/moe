@@ -923,7 +923,7 @@ func TestUIClosedIntentsInspectable(t *testing.T) {
 	}
 }
 
-func TestUIFactoryFrameCache(t *testing.T) {
+func TestUIHistogramFrameCache(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	root, _ := controlFixture(t)
 	s := newUISource(root, DashFilter{}, os.Stdout)
@@ -931,28 +931,19 @@ func TestUIFactoryFrameCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := takeBoard(t, s)
-	if len(b.Art.Frames) != 8 || b.Art.Height != len(b.Art.Frames[0]) {
-		t.Fatal("missing bounded animation frames")
+	// No open session: one still frame, so the board never repaints.
+	if len(b.Art.Frames) != 1 || b.Art.Start != 0 || b.Art.Height != len(b.Art.Frames[0]) {
+		t.Fatalf("idle board art = %+v", b.Art)
 	}
 	for i, line := range b.Art.Frames[0] {
 		if b.Overview[b.Art.Start+i] != line {
 			t.Fatal("renderer span does not match board art")
 		}
-	}
-	for _, frame := range b.Art.Frames {
-		if len(frame) != b.Art.Height {
-			t.Fatal("varying frame height")
-		}
-		if frame[len(frame)-1] != b.Art.Frames[0][b.Art.Height-1] {
-			t.Fatal("rail animated")
-		}
-		for _, line := range frame {
-			if strings.ContainsRune(line, '\x1b') {
-				t.Fatal("NO_COLOR frame contains ANSI")
-			}
+		if strings.ContainsRune(line, '\x1b') {
+			t.Fatal("NO_COLOR frame contains ANSI")
 		}
 	}
-	// Owner pushes and new gathers with unchanged factory state reuse the
+	// Owner pushes and new gathers with an unchanged chart reuse the
 	// frame set. There are no input/capture reads on a cached publish.
 	s.mu.Lock()
 	again, _ := s.buildBoard(time.Now().Add(time.Second))
@@ -966,6 +957,25 @@ func TestUIFactoryFrameCache(t *testing.T) {
 	again = takeBoard(t, s)
 	if &b.Art.Frames[0][0] != &again.Art.Frames[0][0] {
 		t.Fatal("unchanged gather regenerated frames")
+	}
+	// A session opening caps today with the star: new frames, one per
+	// twinkle step, identical except for the star's row.
+	s.mu.Lock()
+	s.snap.Rows = append(slices.Clone(s.snap.Rows), dash.Row{Project: "moe", Run: "lit", Bucket: dash.BucketActiveRuns, RunningDoc: "build", When: time.Now()})
+	s.snap.Histogram = make([]int, dash.HistMaxDays)
+	s.snap.Histogram[dash.HistMaxDays-1] = 2
+	live, _ := s.buildBoard(time.Now())
+	s.mu.Unlock()
+	if len(live.Art.Frames) < 2 {
+		t.Fatalf("live board has %d frames", len(live.Art.Frames))
+	}
+	if !strings.HasSuffix(live.Art.Frames[0][0], "*") {
+		t.Fatalf("live frame 0 top row %q, want the star", live.Art.Frames[0][0])
+	}
+	for _, frame := range live.Art.Frames {
+		if len(frame) != live.Art.Height || !slices.Equal(frame[1:], live.Art.Frames[0][1:]) {
+			t.Fatal("a frame moved more than the star")
+		}
 	}
 }
 
@@ -1126,7 +1136,7 @@ func TestUIBoardSeparatesPinnedRegionsAndEscapesLabels(t *testing.T) {
 	if len(b.Items) != 1 || !strings.Contains(b.Lines[b.Items[0].Line], "p/r") {
 		t.Fatalf("service lines displaced item: %+v", b.Items)
 	}
-	if len(b.Overview) != dash.HistRows+2+1+b.Art.Height {
+	if len(b.Overview) != dash.HistRows+2 {
 		t.Fatal("chart or internal spacing lost")
 	}
 	for _, line := range b.Overview {
@@ -1136,7 +1146,7 @@ func TestUIBoardSeparatesPinnedRegionsAndEscapesLabels(t *testing.T) {
 	}
 	for i, line := range b.Art.Frames[0] {
 		if b.Overview[b.Art.Start+i] != line {
-			t.Fatal("factory boundary wrong")
+			t.Fatal("art boundary wrong")
 		}
 	}
 }

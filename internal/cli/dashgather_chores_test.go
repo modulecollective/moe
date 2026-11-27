@@ -104,8 +104,8 @@ func TestRegisteredChoresGatherUIAndHTTP(t *testing.T) {
 	if len(choreOrder) != 7 || choreOrder[0] != "alpha/due" || !slices.IsSorted(choreOrder[1:]) {
 		t.Fatalf("order=%v", choreOrder)
 	}
-	if state := dash.FactoryStateFromRows(snap.Rows); state.BacklogCount != 1 || len(state.ActiveStages) != 1 {
-		t.Fatalf("counts=%+v", state)
+	if dash.Live(snap.Rows) {
+		t.Fatal("no open session, yet the board reads live")
 	}
 	for _, f := range []DashFilter{{ProjectFilter: "alpha"}, {WorkflowFilter: "sdlc"}} {
 		s := gather(now, f)

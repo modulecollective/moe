@@ -14,7 +14,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
 	"os"
 	"slices"
 	"strings"
@@ -66,8 +65,7 @@ type uiSource struct {
 	extra     map[string]uiExtra
 	gathered  time.Time
 	gerr      error
-	seed      int64
-	artState  dash.FactoryState
+	artKey    []string // the built histogram artFrames was styled from
 	artColor  bool
 	artFrames [][]string
 	seq       uint64
@@ -139,7 +137,6 @@ func (s *uiSource) refresh(ctx context.Context) error {
 	if err == nil {
 		s.snap = snap
 		s.extra = s.readExtras(snap)
-		s.seed = now.UnixNano()
 		s.reconcile(ctx, snap)
 	}
 	s.mu.Unlock()
@@ -354,8 +351,8 @@ func (s *uiSource) overlay(now time.Time) ([]dash.Row, map[string]RunObservation
 }
 
 // buildBoard renders the full dashboard frame into lines and indexes
-// its rows as items. The art's randomness is fixed per gather, so a
-// live repaint does not re-roll it. s.mu is held.
+// its rows as items. The histogram's styled frames are cached across
+// repaints until the chart or the colour gate changes. s.mu is held.
 func (s *uiSource) buildBoard(now time.Time) (ui.Board, []cliout.ProgramStatus) {
 	s.seq++
 	b := ui.Board{Seq: s.seq, At: now, ProjectFilter: s.filter.ProjectFilter, WorkflowFilter: s.filter.WorkflowFilter}
@@ -406,16 +403,16 @@ func (s *uiSource) buildBoard(now time.Time) (ui.Board, []cliout.ProgramStatus) 
 	dash.RenderPulse(buf, now, pulse)
 	serviceLines := buf.String()
 	buf.Reset()
-	state := dash.FactoryStateFromRows(rows)
-	histogram := dash.BuildActivityHistogram(snap.Histogram)
+	histogram := dash.BuildActivityHistogram(trailingDays(snap.Histogram, dash.HistDays), dash.Live(rows))
 	color := cliout.Enabled(buf)
-	if s.artFrames == nil || color != s.artColor || state.BacklogCount != s.artState.BacklogCount || state.CompletedCount != s.artState.CompletedCount || !slices.Equal(state.ActiveStages, s.artState.ActiveStages) {
-		s.artFrames = dash.StyledFactoryFrames(buf, state, 8, rand.New(rand.NewSource(s.seed)))
-		s.artState, s.artColor = state, color
+	if s.artFrames == nil || color != s.artColor || !slices.Equal(histogram, s.artKey) {
+		s.artFrames = dash.StyledHistogramFrames(buf, histogram)
+		s.artKey, s.artColor = histogram, color
 	}
-	artStart := dash.RenderOverview(buf, histogram, s.artFrames[0])
-	b.Art = ui.Art{Start: artStart, Height: len(s.artFrames[0]), Frames: s.artFrames}
-	b.Overview = strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n")
+	// The styled frames are the overview: only the star's cell differs
+	// between them, and the UI swaps the bar rows on its animation tick.
+	b.Art = ui.Art{Start: 0, Height: len(s.artFrames[0]), Frames: s.artFrames}
+	b.Overview = slices.Clone(s.artFrames[0])
 	pauseState, pauseErr := servepause.Read(s.root)
 	b.PauseSummary, b.PauseRevision = pauseState.Summary(now), pauseState.Revision
 	if pauseErr != nil {

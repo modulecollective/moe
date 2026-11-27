@@ -13,8 +13,8 @@ import (
 
 func animatedBoard() Board {
 	b := board(1, run("p", "a"))
-	b.Overview = []string{"smoke A", "fixed rail"}
-	b.Art = Art{Start: 0, Height: 2, Frames: [][]string{{"smoke A", "fixed rail"}, {"smoke B", "fixed rail"}}}
+	b.Overview = []string{"star *", "fixed bars"}
+	b.Art = Art{Start: 0, Height: 2, Frames: [][]string{{"star *", "fixed bars"}, {"star ✦", "fixed bars"}}}
 	return b
 }
 
@@ -26,7 +26,7 @@ func TestAnimationPatchesOnlyVisibleArt(t *testing.T) {
 	old := m.view()
 	before := slices.Clone(old.rows)
 	out := string(m.animate(&old))
-	if !strings.Contains(out, "\x1b[3;1Hsmoke B") || strings.Contains(out, "fixed rail") || strings.Contains(out, "draft") || strings.Contains(out, "failure") {
+	if !strings.Contains(out, "\x1b[3;1Hstar ✦") || strings.Contains(out, "fixed bars") || strings.Contains(out, "draft") || strings.Contains(out, "failure") {
 		t.Fatalf("wrong patch: %q", out)
 	}
 	cursor := fmt.Sprintf("\x1b[%d;%dH\x1b[?25h", old.curRow+1, old.curCol+1)
@@ -83,7 +83,7 @@ func TestLoopAnimationIsIndependentOfObservation(t *testing.T) {
 	}()
 	h := &loopHarness{out: out}
 	boards <- animatedBoard()
-	h.waitOut(t, "smoke A")
+	h.waitOut(t, "star *")
 	input <- []byte("nprivate draft")
 	h.waitOut(t, "private draft")
 	// No board arrives while a source's next refresh is blocked. The UI
@@ -94,12 +94,12 @@ func TestLoopAnimationIsIndependentOfObservation(t *testing.T) {
 		deadline := time.Now().Add(time.Second)
 		for len(out.String()) == start {
 			if time.Now().After(deadline) {
-				t.Fatal("cached smoke did not advance")
+				t.Fatal("cached star did not advance")
 			}
 			time.Sleep(time.Millisecond)
 		}
 		patch := out.String()[start:]
-		if strings.Contains(patch, "MoE ui") || strings.Contains(patch, "private") || !strings.Contains(patch, "smoke ") {
+		if strings.Contains(patch, "MoE ui") || strings.Contains(patch, "private") || !strings.Contains(patch, "star ") {
 			t.Fatalf("full paint on tick: %q", patch)
 		}
 	}

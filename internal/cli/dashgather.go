@@ -20,10 +20,11 @@ type DashSnapshot struct {
 	Rows           []dash.Row
 	ProjectCount   int
 	ActiveProjects int
-	// Histogram is the trailing-HistDays daily run-activity window,
+	// Histogram is the trailing-HistMaxDays daily run-activity window,
 	// oldest→newest, projected from the journal index relative to now.
-	// Both surfaces render it through dash.BuildActivityHistogram so they
-	// chart the same slice.
+	// moe dash and serve chart its trailing HistDays; moe ui charts as
+	// many days as the terminal is wide. All render through
+	// dash.BuildActivityHistogram.
 	Histogram []int
 	// Questions are keyed by project/run, independently of rendered rows:
 	// a run may appear twice, and an open question never holds execution.
@@ -261,8 +262,8 @@ func sessionBranchTips(root string) map[string]time.Time {
 }
 
 // dailyRunCounts projects the journal index's daily run-activity onto the
-// trailing HistDays window ending at now (UTC), oldest→newest, so
-// dash.BuildActivityHistogram can chart it as a fixed-width strip. An
+// trailing HistMaxDays window ending at now (UTC), oldest→newest, so
+// each surface can slice the strip it charts (trailingDays). An
 // empty projectFilter reads the global idx.DailyRunCount; otherwise it
 // reads that project's slice — a project with no recent activity (nil
 // inner map) reads as all-zero, which collapses to the (quiet) state.
@@ -272,13 +273,18 @@ func dailyRunCounts(idx *run.JournalIndex, now time.Time, projectFilter string) 
 	if projectFilter != "" {
 		daily = idx.DailyRunCountByProject[projectFilter]
 	}
-	counts := make([]int, dash.HistDays)
+	counts := make([]int, dash.HistMaxDays)
 	end := now.UTC()
 	for i := range counts {
-		day := end.AddDate(0, 0, -(dash.HistDays - 1 - i)).Format("2006-01-02")
+		day := end.AddDate(0, 0, -(dash.HistMaxDays - 1 - i)).Format("2006-01-02")
 		counts[i] = daily[day]
 	}
 	return counts
+}
+
+// trailingDays is the newest n of counts (all of them when shorter).
+func trailingDays(counts []int, n int) []int {
+	return counts[max(len(counts)-n, 0):]
 }
 
 // GatherRunRow returns the dash.Row for a single run, computed the same

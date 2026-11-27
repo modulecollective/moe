@@ -1,9 +1,11 @@
 package dash
 
 import (
-	"math/rand"
+	"bytes"
+	"fmt"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/modulecollective/moe/internal/cliout"
 )
@@ -101,7 +103,7 @@ func TestHistogramSpans(t *testing.T) {
 	counts[0] = 24 // the window max: full height, so its top cell is █
 	counts[1] = 1  // a one-cell bar down on the baseline
 
-	plain := BuildActivityHistogram(counts)
+	plain := BuildActivityHistogram(counts, false)
 	spans := HistogramSpans(plain)
 	assertPlainRoundTrip(t, plain, spans)
 
@@ -137,95 +139,116 @@ func TestHistogramSpans(t *testing.T) {
 // TestHistogramSpansQuiet: the cold-state collapse is a single
 // caption-ish line, so it takes the caption's band.
 func TestHistogramSpansQuiet(t *testing.T) {
-	plain := BuildActivityHistogram(make([]int, HistDays))
+	plain := BuildActivityHistogram(make([]int, HistDays), false)
 	spans := HistogramSpans(plain)
 	assertPlainRoundTrip(t, plain, spans)
 	wantAllNonSpace(t, flatten(spans[0]), BandMid, "quiet line")
 }
 
-// TestFactorySpans pins the factory's heat mapping on a known-shape
-// rail: a live station lit bright over plasma exhaust, a parked one in
-// mid amber, goods mid, and the rail itself dim chrome. The two station
-// glyphs differ, so bracket context is exercised alongside the
-// base-row liveness read.
-func TestFactorySpans(t *testing.T) {
-	state := FactoryState{
-		BacklogCount: 2,
-		ActiveStages: []ActiveStation{
-			{Stage: "design", RunningDoc: "design"}, // live → ⚒
-			{Stage: "build"},                        // parked → ⚙
-		},
-		CompletedCount: 1,
-	}
-	// Seed 5 draws two drift wisps, so the decorative row has something
-	// to assert; the base row's puff is p=1.0 at every live chimney and
-	// doesn't depend on the seed.
-	plain := BuildFactoryArt(state, ArtWidth, rand.New(rand.NewSource(5)))
-	if len(plain) != 3 {
-		t.Fatalf("art line count = %d, want 3", len(plain))
-	}
-	spans := FactorySpans(plain)
-	assertPlainRoundTrip(t, plain, spans)
-
-	wantAllNonSpace(t, flatten(spans[0]), BandMid, "drift row")
-	wantAllNonSpace(t, flatten(spans[1]), BandPlasma, "base row")
-
-	rail := flatten(spans[2])
-	wantBand(t, rail, '⚒', BandBright, "running station")
-	wantBand(t, rail, '⚙', BandMid, "parked station")
-	wantBand(t, rail, '▦', BandMid, "backlog input")
-	wantBand(t, rail, '▣', BandMid, "completed output")
-	wantBand(t, rail, '━', BandDim, "rail filler")
-	wantBand(t, rail, '▶', BandDim, "feed arrow")
-	wantBand(t, rail, '[', BandDim, "bracket")
-}
-
-// TestFactorySpansEmpty: the one-line empty state is all chrome —
-// there's no heat to show.
-func TestFactorySpansEmpty(t *testing.T) {
-	plain := BuildFactoryArt(FactoryState{}, ArtWidth, rand.New(rand.NewSource(1)))
-	if len(plain) != 1 {
-		t.Fatalf("empty art line count = %d, want 1", len(plain))
-	}
-	spans := FactorySpans(plain)
-	assertPlainRoundTrip(t, plain, spans)
-	wantAllNonSpace(t, flatten(spans[0]), BandDim, "empty dots")
-}
-
-// TestFactorySpansOverloadedStationGlyph: ▶ is both the feed arrow
-// (chrome) and the "awaiting merge" station glyph (a station). Nothing
-// about the rune tells them apart — only the bracket to its left does.
-// A rail carrying both readings at once pins that lookback.
-func TestFactorySpansOverloadedStationGlyph(t *testing.T) {
-	state := FactoryState{
-		BacklogCount: 1,                                          // "▦ ▶" — input, then the feed arrow
-		ActiveStages: []ActiveStation{{Stage: "awaiting merge"}}, // parked "[▶]"
-	}
-	plain := BuildFactoryArt(state, ArtWidth, rand.New(rand.NewSource(2)))
-	spans := FactorySpans(plain)
-	assertPlainRoundTrip(t, plain, spans)
-
-	rail := flatten(spans[2])
-	var feeds, stations int
-	for i, p := range rail {
-		if p.r != '▶' {
-			continue
-		}
-		if i > 0 && rail[i-1].r == '[' {
-			stations++
-			if p.band != BandMid {
-				t.Errorf("bracketed ▶ (parked station) banded %v, want mid", p.band)
+// TestHistogramSpansStar: the live star is the chart's only BandStar
+// cell, it sits in the last column, and idle charts have none.
+func TestHistogramSpansStar(t *testing.T) {
+	for name, counts := range histFixtures() {
+		for _, live := range []bool{false, true} {
+			plain := BuildActivityHistogram(counts, live)
+			spans := HistogramSpans(plain)
+			assertPlainRoundTrip(t, plain, spans)
+			stars := 0
+			for _, line := range spans {
+				bs := flatten(line)
+				for c, p := range bs {
+					if p.band != BandStar {
+						continue
+					}
+					stars++
+					if c != len(bs)-1 || p.r != starRest {
+						t.Errorf("%s: star %q at col %d of %d", name, p.r, c, len(bs))
+					}
+				}
 			}
-			continue
-		}
-		feeds++
-		if p.band != BandDim {
-			t.Errorf("bare ▶ (feed arrow) banded %v, want dim", p.band)
+			if want := map[bool]int{false: 0, true: 1}[live]; stars != want {
+				t.Errorf("%s live=%v: %d star spans, want %d", name, live, stars, want)
+			}
 		}
 	}
-	if feeds != 1 || stations != 1 {
-		t.Fatalf("rail %q: %d feed arrows, %d stations; want 1 and 1", plain[2], feeds, stations)
+}
+
+// TestStyledHistogramFrames: a live chart animates through the twinkle
+// table, every frame the same shape and differing from frame 0 only in
+// the star cell; an idle chart is a single still frame. Colour or not,
+// the glyphs cycle.
+func TestStyledHistogramFrames(t *testing.T) {
+	counts := histFixtures()["tall"]
+	if f := StyledHistogramFrames(&bytes.Buffer{}, BuildActivityHistogram(counts, false)); len(f) != 1 {
+		t.Fatalf("idle: %d frames, want 1", len(f))
 	}
+	plain := BuildActivityHistogram(counts, true)
+	starRow := -1
+	for r, l := range plain[:HistRows] {
+		if c, _ := utf8.DecodeLastRuneInString(l); c == starRest {
+			starRow = r
+		}
+	}
+	for _, color := range []bool{false, true} {
+		t.Run(fmt.Sprint("color=", color), func(t *testing.T) {
+			frames := histogramFrames(plain, color)
+			if len(frames) != len(starTwinkle) {
+				t.Fatalf("%d frames, want %d", len(frames), len(starTwinkle))
+			}
+			if frames[0][starRow] == frames[1][starRow] {
+				t.Errorf("frames 0 and 1 share the star row %q", frames[0][starRow])
+			}
+			base := stripAll(frames[0])
+			for i, f := range frames {
+				got := stripAll(f)
+				if len(got) != len(base) {
+					t.Fatalf("frame %d: %d lines, want %d", i, len(got), len(base))
+				}
+				for r := range got {
+					a, b := []rune(base[r]), []rune(got[r])
+					if len(a) != len(b) {
+						t.Fatalf("frame %d line %d: %d runes, want %d", i, r, len(b), len(a))
+					}
+					for c := range a {
+						if a[c] != b[c] && (r != starRow || c != len(a)-1) {
+							t.Errorf("frame %d differs at line %d col %d", i, r, c)
+						}
+					}
+				}
+				last := []rune(got[starRow])
+				if g := last[len(last)-1]; g != starTwinkle[i].glyph {
+					t.Errorf("frame %d star = %q, want %q", i, g, starTwinkle[i].glyph)
+				}
+				if color {
+					p := parsePainted(t, f[starRow])
+					if c := p[len(p)-1].color; c != sgrFor(starTwinkle[i].band) {
+						t.Errorf("frame %d star colour %q, want %q", i, c, sgrFor(starTwinkle[i].band))
+					}
+				}
+			}
+			if !color && strings.Contains(strings.Join(frames[0], ""), "\x1b") {
+				t.Error("uncoloured frames carry escapes")
+			}
+		})
+	}
+	for i, s := range starTwinkle {
+		if i%2 == 0 && s.glyph != starRest {
+			t.Errorf("step %d is %q: the rest pose must return every other frame", i, s.glyph)
+		}
+	}
+}
+
+// stripAll removes SGR escapes from each line.
+func stripAll(lines []string) []string {
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		var b strings.Builder
+		for _, p := range parsePaintedNoT(l) {
+			b.WriteRune(p.r)
+		}
+		out[i] = b.String()
+	}
+	return out
 }
 
 // TestStyleANSIMapsBands is the CLI half of the split: the ANSI stylers
@@ -236,14 +259,10 @@ func TestFactorySpansOverloadedStationGlyph(t *testing.T) {
 func TestStyleANSIMapsBands(t *testing.T) {
 	counts := make([]int, HistDays)
 	counts[0] = 24
-	state := FactoryState{
-		BacklogCount:   2,
-		ActiveStages:   []ActiveStation{{Stage: "design", RunningDoc: "design"}, {Stage: "build"}},
-		CompletedCount: 1,
-	}
+	counts[HistDays-1] = 5
 
-	histPlain := BuildActivityHistogram(counts)
-	factPlain := BuildFactoryArt(state, ArtWidth, rand.New(rand.NewSource(5)))
+	histPlain := BuildActivityHistogram(counts, false)
+	livePlain := BuildActivityHistogram(counts, true)
 
 	for _, tc := range []struct {
 		name  string
@@ -251,7 +270,7 @@ func TestStyleANSIMapsBands(t *testing.T) {
 		style []string
 	}{
 		{"histogram", HistogramSpans(histPlain), styleHistogramANSI(histPlain)},
-		{"factory", FactorySpans(factPlain), styleFactoryANSI(factPlain)},
+		{"live", HistogramSpans(livePlain), styleHistogramANSI(livePlain)},
 	} {
 		if len(tc.style) != len(tc.spans) {
 			t.Fatalf("%s: styled line count = %d, want %d", tc.name, len(tc.style), len(tc.spans))
@@ -286,6 +305,8 @@ func sgrFor(b Band) string {
 		return cliout.Bright
 	case BandPlasma:
 		return cliout.Plasma
+	case BandStar:
+		return cliout.Bright // the rest pose; frames recolour the glint
 	}
 	return ""
 }
@@ -302,6 +323,19 @@ type painted struct {
 // escapes were coalesced.
 func parsePainted(t *testing.T, s string) []painted {
 	t.Helper()
+	out, ok := parsePaintedOK(s)
+	if !ok {
+		t.Fatalf("unterminated SGR in %q", s)
+	}
+	return out
+}
+
+func parsePaintedNoT(s string) []painted {
+	out, _ := parsePaintedOK(s)
+	return out
+}
+
+func parsePaintedOK(s string) ([]painted, bool) {
 	var out []painted
 	cur := ""
 	rs := []rune(s)
@@ -316,7 +350,7 @@ func parsePainted(t *testing.T, s string) []painted {
 			j++
 		}
 		if j == len(rs) {
-			t.Fatalf("unterminated SGR in %q", s)
+			return out, false
 		}
 		if seq := string(rs[i : j+1]); seq == cliout.Reset {
 			cur = ""
@@ -325,5 +359,5 @@ func parsePainted(t *testing.T, s string) []painted {
 		}
 		i = j + 1
 	}
-	return out
+	return out, true
 }

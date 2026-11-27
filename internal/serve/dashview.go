@@ -1,11 +1,9 @@
 package serve
 
 import (
-	"encoding/json"
 	"fmt"
 	"html/template"
 	"maps"
-	"math/rand"
 	"regexp"
 	"slices"
 	"strings"
@@ -45,11 +43,6 @@ func noteHTML(project, note string) template.HTML {
 	return template.HTML(linked)
 }
 
-// factoryFrameCount is how many factory-art frames the dash bakes into
-// the page for the client cross-fade. Lives in code, not config —
-// single-operator project.
-const factoryFrameCount = 10
-
 // dashRowVM is one row in the HTML dash — already string-formatted
 // so the template stays a flat presentation layer with no time math
 // or bucket-constant inspection.
@@ -82,29 +75,15 @@ func agentMark(r dash.Row) (bool, string) {
 
 // bannerArtVM is the shared banner-art block both the home dash and a
 // project hub draw between the banner and the run sections: the daily
-// activity histogram over the factory-art rail, plus the frames the
-// client cross-fades through. Embedded in dashVM and hubVM so the
-// {{define "bannerart"}} partial renders the same way on both pages.
+// activity histogram, its last column capped with a star while a session
+// is open. Embedded in dashVM and hubVM so the {{define "bannerart"}}
+// partial renders the same way on both pages.
 type bannerArtVM struct {
-	// FactoryArt is the peripheral-vision rail the CLI dash also draws
-	// under its banner — backlog feed, station glyphs for active runs,
-	// completed-output dots. One-line empty state, three lines populated.
-	// It is frame[0] of the frames below: the server-rendered, no-JS fallback.
-	FactoryArt []template.HTML
-	// Histogram is the daily run-activity chart drawn between the banner
-	// and the factory art — HistRows bar rows, a blank spacer, then a
-	// caption, or a single "(quiet)" line in the cold state. Static text (a
-	// per-render snapshot), so unlike the factory frames it carries no JS
-	// animation.
+	// Histogram is the daily run-activity chart — HistRows bar rows, a
+	// blank spacer, then a caption, or a single "(quiet)" line in the cold
+	// state. Static markup; the star's twinkle is CSS on .art-star, so the
+	// page carries no animation script.
 	Histogram []template.HTML
-	// FactoryFramesJSON is json.Marshal of all factory-art frames, embedded
-	// in the page so the client can cross-fade through them without an XHR.
-	// It is template.JS, not string: html/template treats <script> content
-	// as a JS value context and would string-wrap a plain string (breaking
-	// JSON.parse), so the pre-marshalled JSON is emitted verbatim. Safe to do
-	// so because json.Marshal escapes <,>,& — which is also what keeps the
-	// frames' own span markup from closing the script element early.
-	FactoryFramesJSON template.JS
 }
 
 // artClass is the web half of the band mapping: one CSS class per band,
@@ -121,6 +100,8 @@ func artClass(b dash.Band) string {
 		return "art-bright"
 	case dash.BandPlasma:
 		return "art-plasma"
+	case dash.BandStar:
+		return "art-star"
 	}
 	return ""
 }
@@ -148,7 +129,7 @@ func artHTML(spans []dash.Span) template.HTML {
 }
 
 // artLines renders a whole art block — one HTML string per line, ready
-// for the <pre> and for the frames JSON.
+// for the <pre>.
 func artLines(spans [][]dash.Span) []template.HTML {
 	out := make([]template.HTML, len(spans))
 	for i, line := range spans {
@@ -158,24 +139,13 @@ func artLines(spans [][]dash.Span) []template.HTML {
 }
 
 // newBannerArt builds the banner-art block from the (already
-// project-scoped, if filtering) dash rows and the trailing-HistDays
-// activity counts. The factory art reflects exactly the rows passed in,
-// so a project hub gets its own rail and histogram.
-func newBannerArt(now time.Time, rows []dash.Row, histogram []int) bannerArtVM {
-	state := dash.FactoryStateFromRows(rows)
-	r := rand.New(rand.NewSource(now.UnixNano()))
-	frames := dash.BuildFactoryFrames(state, dash.ArtWidth, factoryFrameCount, r)
-	// Bake each frame's markup server-side. The swap JS then just writes
-	// innerHTML — classification lives in dash, in one language.
-	painted := make([][]template.HTML, len(frames))
-	for i, f := range frames {
-		painted[i] = artLines(dash.FactorySpans(f))
-	}
-	framesJSON, _ := json.Marshal(painted) // strings never fail to marshal
+// project-scoped, if filtering) dash rows and daily activity counts,
+// charting the trailing HistDays. The star reflects exactly the rows
+// passed in, so a project hub shows its own project's liveness.
+func newBannerArt(rows []dash.Row, histogram []int) bannerArtVM {
+	histogram = histogram[max(len(histogram)-dash.HistDays, 0):]
 	return bannerArtVM{
-		FactoryArt:        painted[0],
-		Histogram:         artLines(dash.HistogramSpans(dash.BuildActivityHistogram(histogram))),
-		FactoryFramesJSON: template.JS(framesJSON),
+		Histogram: artLines(dash.HistogramSpans(dash.BuildActivityHistogram(histogram, dash.Live(rows)))),
 	}
 }
 
@@ -608,7 +578,7 @@ func rowURL(r dash.Row) string {
 
 func newDashVM(now time.Time, rows []dash.Row, projectCount, activeProjects int, histogram []int, topCap int) dashVM {
 	return dashVM{
-		bannerArtVM:    newBannerArt(now, rows, histogram),
+		bannerArtVM:    newBannerArt(rows, histogram),
 		rowBuckets:     newRowBuckets(now, rows, topCap),
 		ProjectCount:   projectCount,
 		ActiveProjects: activeProjects,

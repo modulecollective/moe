@@ -3,13 +3,11 @@ package cli
 import (
 	"bytes"
 	"fmt"
-	"math/rand"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"github.com/modulecollective/moe/internal/cliout"
 	"github.com/modulecollective/moe/internal/dash"
@@ -841,358 +839,49 @@ func TestDashNoOpenSessionLeavesNoteUnchanged(t *testing.T) {
 	}
 }
 
-// TestBuildFactoryArtEmpty: no backlog, no active, no completed →
-// single-line dotted field, no rail and no smoke. Pinned because the
-// dash's first-day state hits this exact shape.
-func TestBuildFactoryArtEmpty(t *testing.T) {
-	state := dash.FactoryState{}
-	r := rand.New(rand.NewSource(1))
-	lines := dash.BuildFactoryArt(state, dash.ArtWidth, r)
-	if len(lines) != 1 {
-		t.Fatalf("expected 1 line for empty state, got %d: %q", len(lines), lines)
-	}
-	if !strings.Contains(lines[0], "·") {
-		t.Fatalf("expected dotted empty-state field, got %q", lines[0])
-	}
-	for _, banned := range []string{"▦", "▣", "[", "▶", "━"} {
-		if strings.Contains(lines[0], banned) {
-			t.Fatalf("expected no rail glyph %q in empty state, got %q", banned, lines[0])
-		}
-	}
-}
-
-// TestBuildFactoryArtPopulatedShape: a mixed state (backlog, active
-// runs of mixed stages, completed) renders three lines (drift, base,
-// rail) whose rail carries the expected zone glyphs in zone order.
-func TestBuildFactoryArtPopulatedShape(t *testing.T) {
-	state := dash.FactoryState{
-		BacklogCount: 2,
-		ActiveStages: []dash.ActiveStation{
-			{Stage: "design"},
-			{Stage: "build"},
-			{Stage: "awaiting merge"},
-		},
-		CompletedCount: 3,
-	}
-	r := rand.New(rand.NewSource(1))
-	lines := dash.BuildFactoryArt(state, dash.ArtWidth, r)
-	if len(lines) != 3 {
-		t.Fatalf("expected 3 lines (drift + base + rail), got %d: %q", len(lines), lines)
-	}
-	rail := lines[2]
-	// Zones must appear in order: input → stations → output. Use the
-	// first occurrence of each zone-distinguishing glyph as a proxy.
-	idxIn := strings.Index(rail, "▦")
-	idxDesign := strings.Index(rail, "⚒")
-	idxCode := strings.Index(rail, "⚙")
-	idxShip := strings.Index(rail, "[▶]")
-	idxOut := strings.Index(rail, "▣")
-	if idxIn < 0 || idxDesign < 0 || idxCode < 0 || idxShip < 0 || idxOut < 0 {
-		t.Fatalf("missing zone glyph (in=%d design=%d code=%d ship=%d out=%d) in:\n%q",
-			idxIn, idxDesign, idxCode, idxShip, idxOut, rail)
-	}
-	if !(idxIn < idxDesign && idxDesign < idxCode && idxCode < idxShip && idxShip < idxOut) {
-		t.Fatalf("zones not in order in rail:\n%q", rail)
-	}
-	// The feed arrow follows the input zone when backlog is non-empty.
-	if !strings.Contains(rail, "▦ ▦ ▶") {
-		t.Fatalf("expected '▦ ▦ ▶' feed arrow after spaced input glyphs, got rail:\n%q", rail)
-	}
-}
-
-// TestBuildFactoryArtOverflow: counts past their caps render `+N` tags
-// rather than widening the line beyond budget.
-func TestBuildFactoryArtOverflow(t *testing.T) {
-	state := dash.FactoryState{
-		BacklogCount: dash.InputCap + 3,
-		ActiveStages: []dash.ActiveStation{ // dash.StationCap=4 + 2 over
-			{Stage: "design"},
-			{Stage: "build"},
-			{Stage: "design"},
-			{Stage: "build"},
-			{Stage: "build"},
-			{Stage: "design"},
-		},
-		CompletedCount: dash.OutputCap + 7,
-	}
-	r := rand.New(rand.NewSource(1))
-	lines := dash.BuildFactoryArt(state, dash.ArtWidth, r)
-	rail := lines[2]
-	for _, want := range []string{"▦ ▦ ▦ ▦ +3", "+2", "▣ ▣ ▣ ▣ ▣ +7"} {
-		if !strings.Contains(rail, want) {
-			t.Fatalf("expected overflow tag %q in rail:\n%q", want, rail)
-		}
-	}
-	// Bracketed stations capped: exactly dash.StationCap "[" should appear
-	// before the "+2" station overflow tag.
-	stationsRegion := rail
-	if before, _, ok := strings.Cut(rail, "+2"); ok {
-		stationsRegion = before
-	}
-	if got, want := strings.Count(stationsRegion, "["), dash.StationCap; got != want {
-		t.Fatalf("expected exactly %d bracketed stations before overflow, got %d in:\n%q",
-			want, got, rail)
-	}
-}
-
-// TestBuildFactoryArtUnknownStageFallsBack: an unrecognised stage
-// (e.g. a future workflow) renders with the generic boiler glyph,
-// not nothing. Single source of truth for the "new workflow doesn't
-// silently disappear" guarantee.
-func TestBuildFactoryArtUnknownStageFallsBack(t *testing.T) {
-	state := dash.FactoryState{ActiveStages: []dash.ActiveStation{{Stage: "unknown-stage"}}}
-	r := rand.New(rand.NewSource(1))
-	lines := dash.BuildFactoryArt(state, dash.ArtWidth, r)
-	rail := lines[2]
-	if !strings.Contains(rail, "[◉]") {
-		t.Fatalf("expected fallback boiler glyph '[◉]', got rail:\n%q", rail)
-	}
-}
-
-// TestBuildFactoryArtNoSmokeWithoutSession: smoke is the liveness
-// signal — stations whose run has no open session never smoke,
-// whatever their parked stage. Pins the no-session-no-smoke invariant
-// across design / code / awaiting-merge so a future change can't
-// quietly resurrect stage-shaped smoke decoration.
-func TestBuildFactoryArtNoSmokeWithoutSession(t *testing.T) {
-	state := dash.FactoryState{ActiveStages: []dash.ActiveStation{
-		{Stage: "design"},
-		{Stage: "build"},
-		{Stage: "awaiting merge"},
-	}}
-	// Sweep seeds so we exercise the RNG; any seed that paints a
-	// fleck above a parked station on either smoke row fails the test.
-	for seed := int64(1); seed <= 16; seed++ {
-		r := rand.New(rand.NewSource(seed))
-		lines := dash.BuildFactoryArt(state, dash.ArtWidth, r)
-		if len(lines) != 3 {
-			t.Fatalf("seed %d: expected 3 lines, got %d", seed, len(lines))
-		}
-		if strings.TrimSpace(lines[0]) != "" {
-			t.Fatalf("seed %d: expected blank drift row above parked-only stations, got %q", seed, lines[0])
-		}
-		if strings.TrimSpace(lines[1]) != "" {
-			t.Fatalf("seed %d: expected blank base row above parked-only stations, got %q", seed, lines[1])
-		}
-	}
-}
-
-// TestBuildFactoryArtWidth: every line is padded to at least dash.ArtWidth
-// runes so the art row stands alone above the section table. Lines
-// can exceed the budget under extreme overflow (e.g. backlog=99) —
-// the caps + "+N" tags hold the layout to the budget for normal
-// counts, and the extreme cases are rare enough that line-wrap on a
-// narrow terminal is acceptable.
-func TestBuildFactoryArtWidth(t *testing.T) {
-	cases := []dash.FactoryState{
-		{},
-		{BacklogCount: 1},
-		{ActiveStages: []dash.ActiveStation{{Stage: "design"}}},
-		{CompletedCount: 1},
-		{BacklogCount: 3, ActiveStages: []dash.ActiveStation{{Stage: "design"}, {Stage: "build"}}, CompletedCount: 4},
-	}
-	for i, st := range cases {
-		r := rand.New(rand.NewSource(int64(i + 1)))
-		for j, line := range dash.BuildFactoryArt(st, dash.ArtWidth, r) {
-			n := utf8.RuneCountInString(line)
-			if n < dash.ArtWidth {
-				t.Errorf("case %d line %d: width=%d want ≥ %d, line=%q", i, j, n, dash.ArtWidth, line)
+// TestDashStarsLiveSession: end-to-end, an open stage session threads
+// classify → Row.RunningDoc → dash.Live and caps today's histogram bar
+// with the star; the same run with no session draws none. The board
+// keeps no factory rail.
+func TestDashStarsLiveSession(t *testing.T) {
+	for _, live := range []bool{false, true} {
+		t.Run(fmt.Sprint("live=", live), func(t *testing.T) {
+			root := newMoeHome(t)
+			t.Setenv("NO_COLOR", "1")
+			trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
+			if live {
+				sess, err := session.Open(root, "tele", "fix-it", "build")
+				if err != nil {
+					t.Fatalf("session.Open: %v", err)
+				}
+				t.Cleanup(func() { _ = session.Abandon(sess) })
 			}
-		}
-	}
-}
 
-// TestBuildFactoryArtSmokeContainsOnlyPaletteRunes: every non-space
-// rune on either smoke row must come from the smoke palette. Pins
-// that neither the drift wisp nor the base puff ever accidentally
-// pulls a rune from the rail. Stations carry a runningDoc so the
-// smoke path actually fires — otherwise the palette assertion is
-// vacuous.
-func TestBuildFactoryArtSmokeContainsOnlyPaletteRunes(t *testing.T) {
-	state := dash.FactoryState{
-		BacklogCount: 3,
-		ActiveStages: []dash.ActiveStation{
-			{Stage: "design", RunningDoc: "design"},
-			{Stage: "build", RunningDoc: "build"},
-			{Stage: "design", RunningDoc: "design"},
-			{Stage: "build", RunningDoc: "build"},
-		},
-	}
-	allowed := make(map[rune]struct{}, len(dash.SmokeGlyphs)+1)
-	allowed[' '] = struct{}{}
-	for _, g := range dash.SmokeGlyphs {
-		allowed[g] = struct{}{}
-	}
-	// Iterate seeds so we explore the RNG; any seed that produces a
-	// non-palette rune on either smoke row fails the test.
-	for seed := int64(1); seed <= 8; seed++ {
-		r := rand.New(rand.NewSource(seed))
-		lines := dash.BuildFactoryArt(state, dash.ArtWidth, r)
-		for row, label := range []string{"drift", "base"} {
-			for _, ru := range lines[row] {
-				if _, ok := allowed[ru]; !ok {
-					t.Fatalf("seed %d: %s smoke row contains non-palette rune %q in %q", seed, label, ru, lines[row])
+			var out, errb bytes.Buffer
+			if code := Run([]string{"dash"}, &out, &errb); code != 0 {
+				t.Fatalf("exit=%d stderr=%q", code, errb.String())
+			}
+			got := out.String()
+			capIdx := strings.Index(got, "activity · last 60 days")
+			activeIdx := strings.Index(got, "ACTIVE (")
+			if capIdx < 0 || activeIdx < 0 {
+				t.Fatalf("missing caption or ACTIVE marker in:\n%s", got)
+			}
+			chart := got[:capIdx]
+			if n := strings.Count(chart, "*"); n != map[bool]int{false: 0, true: 1}[live] {
+				t.Fatalf("live=%v: %d stars in the chart:\n%s", live, n, chart)
+			}
+			for _, rail := range []string{"[⚙]", "[⚒]", "━━━"} {
+				if strings.Contains(got, rail) {
+					t.Fatalf("factory rail %q still drawn:\n%s", rail, got)
 				}
 			}
-		}
-	}
-}
-
-// TestBuildFactoryArtAlwaysSmokesWhenRunning: every running station
-// gets a non-space rune on the base smoke row in its chimney column,
-// for every seed. This is the p=1.0 base-puff guarantee — the
-// dash-cooler-smoke contract that liveness is a *reliable* peripheral
-// signal, not a flickering one. If a future change reintroduces a
-// probability gate on the base row, this test fires immediately.
-func TestBuildFactoryArtAlwaysSmokesWhenRunning(t *testing.T) {
-	state := dash.FactoryState{ActiveStages: []dash.ActiveStation{
-		{Stage: "design", RunningDoc: "design"},
-		{Stage: "build", RunningDoc: "build"},
-		{Stage: "awaiting merge", RunningDoc: "build"},
-	}}
-	for seed := int64(1); seed <= 32; seed++ {
-		r := rand.New(rand.NewSource(seed))
-		lines := dash.BuildFactoryArt(state, dash.ArtWidth, r)
-		if len(lines) != 3 {
-			t.Fatalf("seed %d: expected 3 lines, got %d", seed, len(lines))
-		}
-		baseRunes := []rune(lines[1])
-		var chimneys []int
-		for i, ru := range []rune(lines[2]) {
-			if ru == '[' {
-				chimneys = append(chimneys, i+1)
+			// The caption is followed by one blank line, then ACTIVE: no
+			// art block in between.
+			if between := got[capIdx:activeIdx]; strings.Count(between, "\n") != 2 {
+				t.Fatalf("expected the caption, one blank, then ACTIVE; got %q", between)
 			}
-		}
-		if got, want := len(chimneys), len(state.ActiveStages); got != want {
-			t.Fatalf("seed %d: expected %d chimneys, found %d in rail %q", seed, want, got, lines[2])
-		}
-		for _, c := range chimneys {
-			if c >= len(baseRunes) {
-				t.Fatalf("seed %d: chimney col %d out of range for base row %q", seed, c, lines[1])
-			}
-			if baseRunes[c] == ' ' {
-				t.Fatalf("seed %d: expected non-space rune above chimney col %d on base row %q (rail %q)",
-					seed, c, lines[1], lines[2])
-			}
-		}
-	}
-}
-
-// TestBuildFactoryArtRunningDocOverridesParkedGlyph: a station whose
-// run is parked at design but has an open code session shows the code
-// glyph (⚙), not the design glyph (⚒). The art names what's live; the
-// dashboard rows below carry the parked stage. Mirrors the text-side
-// "[code running]" marker that motivates this rail.
-func TestBuildFactoryArtRunningDocOverridesParkedGlyph(t *testing.T) {
-	state := dash.FactoryState{ActiveStages: []dash.ActiveStation{
-		{Stage: "design", RunningDoc: "build"},
-	}}
-	r := rand.New(rand.NewSource(1))
-	lines := dash.BuildFactoryArt(state, dash.ArtWidth, r)
-	rail := lines[2]
-	if !strings.Contains(rail, "[⚙]") {
-		t.Fatalf("expected running-doc glyph '[⚙]' on parked-design station, got rail:\n%q", rail)
-	}
-	if strings.Contains(rail, "[⚒]") {
-		t.Fatalf("expected no parked-stage glyph '[⚒]' when running doc differs, got rail:\n%q", rail)
-	}
-}
-
-// TestBuildFactoryArtAwaitingMergeRunningSmokesAndSwapsGlyph: an
-// awaiting-merge station with an open session swaps to the running
-// doc's glyph and earns smoke. Pre-rail awaiting-merge was always
-// non-smoking; under liveness-as-smoke the rule is "smoke iff session,"
-// so a session against a pushed run reads as work, not as shipped.
-func TestBuildFactoryArtAwaitingMergeRunningSmokesAndSwapsGlyph(t *testing.T) {
-	state := dash.FactoryState{ActiveStages: []dash.ActiveStation{
-		{Stage: "awaiting merge", RunningDoc: "build"},
-	}}
-	// Glyph swap is deterministic.
-	r := rand.New(rand.NewSource(1))
-	lines := dash.BuildFactoryArt(state, dash.ArtWidth, r)
-	rail := lines[2]
-	if !strings.Contains(rail, "[⚙]") {
-		t.Fatalf("expected running-doc glyph '[⚙]' on awaiting-merge station, got rail:\n%q", rail)
-	}
-	if strings.Contains(rail, "[▶]") {
-		t.Fatalf("expected no parked '[▶]' glyph on running awaiting-merge station, got rail:\n%q", rail)
-	}
-	// Base puff is the load-bearing liveness signal (p=1.0). Sweep
-	// seeds anyway as a regression net so a future change can't quietly
-	// drop awaiting-merge from the smoke set.
-	smokedAt := int64(-1)
-	for seed := int64(1); seed <= 16; seed++ {
-		r := rand.New(rand.NewSource(seed))
-		ls := dash.BuildFactoryArt(state, dash.ArtWidth, r)
-		if strings.TrimSpace(ls[1]) != "" {
-			smokedAt = seed
-			break
-		}
-	}
-	if smokedAt < 0 {
-		t.Fatal("expected base puff above running awaiting-merge station for at least one seed in [1,16], saw none")
-	}
-}
-
-// TestDashOpenSessionSwapsArtGlyph: end-to-end check that an open
-// session on a different doc threads through dash.FactoryStateFromRows and
-// lands a running-doc glyph in the dash's rail. Pins the wiring
-// classify → dashRow.runningDoc → dash.FactoryState → buildRail.
-func TestDashOpenSessionSwapsArtGlyph(t *testing.T) {
-	root := newMoeHome(t)
-	t.Setenv("NO_COLOR", "1")
-
-	// Fresh sdlc run: parked at design.
-	trailerstest.SeedRun(t, root, "tele", "fix-it", "sdlc", run.StatusInProgress)
-	sess, err := session.Open(root, "tele", "fix-it", "build")
-	if err != nil {
-		t.Fatalf("session.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = session.Abandon(sess) })
-
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
-	titleIdx := strings.Index(got, "MINISTRY OF EVERYTHING")
-	activeIdx := strings.Index(got, "ACTIVE (")
-	if titleIdx < 0 || activeIdx < 0 {
-		t.Fatalf("missing title or ACTIVE marker in:\n%s", got)
-	}
-	header := got[titleIdx:activeIdx]
-	if !strings.Contains(header, "[⚙]") {
-		t.Fatalf("expected '[⚙]' (running build) in art header, got:\n%q", header)
-	}
-	if strings.Contains(header, "[⚒]") {
-		t.Fatalf("expected no '[⚒]' (parked design) glyph in art header when code session is open, got:\n%q", header)
-	}
-}
-
-// TestDashRendersFactoryArt: dash output between the banner line and
-// the ACTIVE section carries the factory art (one or two lines), not
-// just a blank gap. Pinned at the empty-bureaucracy state because
-// it's the easiest deterministic shape (dotted line, no RNG drift on
-// stations).
-func TestDashRendersFactoryArt(t *testing.T) {
-	newMoeHome(t)
-	t.Setenv("NO_COLOR", "1")
-
-	var out, errb bytes.Buffer
-	code := Run([]string{"dash"}, &out, &errb)
-	if code != 0 {
-		t.Fatalf("exit=%d stderr=%q", code, errb.String())
-	}
-	got := out.String()
-	titleIdx := strings.Index(got, "MINISTRY OF EVERYTHING")
-	activeIdx := strings.Index(got, "ACTIVE (")
-	if titleIdx < 0 || activeIdx < 0 {
-		t.Fatalf("missing title or ACTIVE marker in:\n%s", got)
-	}
-	header := got[titleIdx:activeIdx]
-	if !strings.Contains(header, "·") {
-		t.Fatalf("expected dotted empty-state art between title and ACTIVE, got:\n%q", header)
+		})
 	}
 }
 

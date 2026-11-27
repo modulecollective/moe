@@ -98,7 +98,7 @@ type Options struct {
 
 	// GatherDash returns the dash data a route renders, scoped to a
 	// project: an empty projectID gathers every run (the home dash); a
-	// non-empty one scopes the rows, factory art, and histogram to that
+	// non-empty one scopes the rows, live star, and histogram to that
 	// project (the project hub). The ?all= query flag is a render-time
 	// concern (it lifts the COMPLETED cap in newDashVM), not a gather
 	// input. The cli/serve.go entry point wires this to
@@ -106,8 +106,8 @@ type Options struct {
 	// workflow registry.
 	//
 	// Required by the dash route; absent means GET / returns 500.
-	// histogram is the trailing-HistDays daily run-activity window
-	// (oldest→newest) the dash charts above the factory art.
+	// histogram is the daily run-activity counts (oldest→newest); the
+	// dash charts their trailing HistDays above the run sections.
 	GatherDash func(projectID string) (rows []dash.Row, projectCount, activeProjects int, histogram []int, err error)
 
 	// ResolveCanvas returns the absolute filesystem path serve should

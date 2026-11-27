@@ -100,9 +100,8 @@ a:hover, a:focus { border-bottom-style: solid; }
   border-bottom: none;
 }
 a.banner-bar:hover, a.banner-bar:focus { color: var(--accent); }
-/* Both art blocks — the activity histogram and the factory rail — carry
-   the terminal's heat ramp rather than --muted: they're ornament, and
-   the CLI render puts them in the theme's amber. Go classifies each run
+/* The activity histogram carries the terminal's heat ramp rather than
+   --muted: it's ornament, and the CLI render puts it in the theme's amber. Go classifies each run
    of glyphs into a band (internal/dash) and serve bakes that into
    .art-* spans, so the two surfaces agree on what's live, idle or
    chrome. Only padding lands outside a span, which is what --art-mid
@@ -122,14 +121,10 @@ a.banner-bar:hover, a.banner-bar:focus { color: var(--accent); }
 .banner-art .art-mid { color: var(--art-mid); }
 .banner-art .art-bright { color: var(--art-bright); }
 .banner-art .art-plasma { color: var(--art-plasma); }
-/* Animated art: JS stacks two <pre> layers in one grid cell and cross-fades
-   their opacity. Both layers always hold a same-shape frame, so the cell
-   size is stable. Without JS the single static <pre> renders unchanged. */
-.banner-art-stack { display: grid; }
-.banner-art-stack > .banner-art {
-  grid-area: 1 / 1;
-  transition: opacity 0.6s ease-in-out;
-}
+/* Today's bar wears a star while a session is open. Its presence is the
+   signal; the twinkle (below, with the other media rules) is decoration,
+   so reduced motion keeps a still bright star. */
+.banner-art .art-star { color: var(--art-bright); }
 .banner-sub {
   margin-top: 0.2rem;
   color: var(--muted);
@@ -271,15 +266,25 @@ section h2 .count {
   .row .note { flex-basis: auto; flex-grow: 1; }
 }
 
+/* The live star's twinkle, opted into by motion preference: a glow that
+   pulses between bright and plasma. Pure CSS; the page carries no
+   animation script. */
+@media (prefers-reduced-motion: no-preference) {
+  .banner-art .art-star { animation: art-star-twinkle 2.4s ease-in-out infinite; }
+}
+@keyframes art-star-twinkle {
+  0%, 100% { color: var(--art-bright); text-shadow: 0 0 2px var(--art-bright); opacity: 1; }
+  50% { color: var(--art-plasma); text-shadow: 0 0 6px var(--art-plasma), 0 0 1px var(--art-bright); opacity: 0.7; }
+}
+
 /* Phone: shrink the root so every rem-based size scales down together,
-   and fit the factory-art rail (small glyphs, scroll if still too wide). */
+   and fit the histogram (small glyphs, scroll if still too wide). */
 @media (max-width: 640px) {
   html { font-size: 14px; }
   .banner-art {
-    /* The 61-col rail clips at 0.7rem once the flex theme-toggle eats into
+    /* The 62-col chart clips at 0.7rem once the flex theme-toggle eats into
        the banner column. Scale with viewport width (capped at 0.7rem) so it
-       fits narrow phones; overflow-x stays as the backstop for a future
-       longer rail. */
+       fits narrow phones; overflow-x stays as the backstop. */
     font-size: min(0.7rem, 2.2vw);
     overflow-x: auto;
   }

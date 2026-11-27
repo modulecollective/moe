@@ -79,7 +79,7 @@ func titleSeq(status, run string) string {
 }
 
 // Dash prints the dash-render mark: the gradient bar and the clock,
-// nothing else. The factory art directly below is unmistakable, and the
+// nothing else. The activity chart directly below is unmistakable, and the
 // clock is what tells a stale tab from a fresh one (and a dash render
 // from a stage-entry banner, which carries none). Serve status lives in
 // the board's PULSE section, not here.

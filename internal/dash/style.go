@@ -2,14 +2,15 @@ package dash
 
 import (
 	"io"
-	"math/rand"
+	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/modulecollective/moe/internal/cliout"
 )
 
-// Colour for the dash's two art blocks. Both blocks are built once and
-// consumed twice — CLI Render here, and the serve templates' <pre> — so
+// Colour for the dash's activity chart. It is built once and consumed
+// twice — CLI Render here, and the serve templates' <pre> — so
 // the builders stay plain runes and classification is a pure post-pass
 // over their output. That post-pass yields semantic bands, not escapes:
 // the CLI maps bands to SGR behind cliout.Enabled, serve maps the same
@@ -34,7 +35,36 @@ const (
 	BandMid
 	BandBright
 	BandPlasma
+	// BandStar is today's live star. Its terminal colour follows its glyph
+	// (see starTwinkle); serve gives it a class with a CSS twinkle.
+	BandStar
 )
+
+// starTwinkle is the terminal star's cycle: one frame per step, each a
+// one-cell glyph with its band. The rest pose comes back every other
+// frame so it reads as a star that glints rather than a slot machine.
+// Fixed, no RNG; retune here.
+var starTwinkle = []struct {
+	glyph rune
+	band  Band
+}{
+	{starRest, BandBright},
+	{'✦', BandPlasma},
+	{starRest, BandBright},
+	{'·', BandMid},
+	{starRest, BandBright},
+	{'✧', BandPlasma},
+}
+
+// isStarGlyph reports whether r is one of the twinkle's glyphs.
+func isStarGlyph(r rune) bool {
+	for _, s := range starTwinkle {
+		if s.glyph == r {
+			return true
+		}
+	}
+	return false
+}
 
 // Span is a run of consecutive runes sharing one band. The grouping is
 // done once here so both consumers inherit it: a 60-column bar row costs
@@ -92,6 +122,9 @@ func bandNone(int, rune) Band { return BandNone }
 // "(quiet)" line) go mid-amber: the strip commits to the theme as an
 // ornament rather than reading as body text.
 //
+// The live star — a star glyph in the last column of a bar row — is the
+// one BandStar cell.
+//
 // Deliberate tradeoff: a one-cell bar is dim-on-black and recedes.
 // Quiet days should. The alternative — classifying each column by its
 // own height — paints every bar one flat band and loses the within-bar
@@ -110,10 +143,13 @@ func HistogramSpans(lines []string) [][]Span {
 		switch {
 		case i < rows:
 			band, top := histBand(i, rows), i == 0
-			out[i] = spanLine(l, func(_ int, r rune) Band {
+			last := utf8.RuneCountInString(l) - 1
+			out[i] = spanLine(l, func(col int, r rune) Band {
 				switch {
 				case r == ' ':
 					return BandNone
+				case col == last && isStarGlyph(r):
+					return BandStar
 				case top && r == '█':
 					return BandPlasma
 				default:
@@ -141,60 +177,9 @@ func histBand(row, rows int) Band {
 	return ramp[i]
 }
 
-// FactorySpans classifies the built factory art. Classification is
-// positional — the builder's line shapes are the contract:
-//
-//	1 line  → the empty-state dotted row: all chrome.
-//	3 lines → [drift wisps, base puffs, rail].
-//
-// A running station reads as a lit segment venting plasma exhaust that
-// cools to amber sparks as it rises; idle stations and goods sit
-// mid-amber; the rail recedes into dim chrome.
-func FactorySpans(lines []string) [][]Span {
-	out := make([][]Span, len(lines))
-	if len(lines) != 3 {
-		for i, l := range lines {
-			out[i] = spanLine(l, nonSpaceBand(BandDim))
-		}
-		return out
-	}
-	out[0] = spanLine(lines[0], nonSpaceBand(BandMid))
-	out[1] = spanLine(lines[1], nonSpaceBand(BandPlasma))
-	out[2] = spanLine(lines[2], railBand([]rune(lines[1]), []rune(lines[2])))
-	return out
-}
-
-// railBand classifies each rune of the rail row. base is the basePuff
-// row, read to tell a running station from a parked one: basePuff fires
-// with p=1.0 at a running station's chimney, and the chimney is the
-// station glyph's own column, so a non-space directly above a bracketed
-// glyph means the station below it is live.
-//
-// Bracket context is checked before the glyph itself because the
-// station set overlaps the rail's furniture — ▶ is also the feed arrow,
-// ▦ also a backlog input. Everything the switch doesn't claim (rail
-// filler, brackets, the feed arrow, +N overflow tags) is chrome.
-func railBand(base, rail []rune) func(int, rune) Band {
-	return func(col int, r rune) Band {
-		if r == ' ' {
-			return BandNone
-		}
-		if col > 0 && rail[col-1] == '[' {
-			if col < len(base) && base[col] != ' ' {
-				return BandBright
-			}
-			return BandMid
-		}
-		switch string(r) {
-		case inputGlyph, outputGlyph:
-			return BandMid
-		}
-		return BandDim
-	}
-}
-
 // sgr is the terminal escape for a band — the CLI half of the band
-// mapping. BandNone has none; paintSpans resets instead.
+// mapping. BandNone has none; paintSpans resets instead. BandStar has no
+// colour of its own: paintSpans asks starSGR for its glyph's.
 func (b Band) sgr() string {
 	switch b {
 	case BandDim:
@@ -220,6 +205,9 @@ func paintSpans(spans []Span) string {
 		case sp.Band == BandNone && open:
 			b.WriteString(cliout.Reset)
 			open = false
+		case sp.Band == BandStar:
+			b.WriteString(starSGR(sp.Text))
+			open = true
 		case sp.Band != BandNone:
 			b.WriteString(sp.Band.sgr())
 			open = true
@@ -241,21 +229,66 @@ func paintLines(spans [][]Span) []string {
 	return out
 }
 
-// styleHistogramANSI and styleFactoryANSI are the CLI's consumers of the
-// classification above: bands in, escapes out. Render calls them behind
-// cliout.Enabled, so NO_COLOR still yields the plain built lines.
-func styleHistogramANSI(lines []string) []string { return paintLines(HistogramSpans(lines)) }
-
-func styleFactoryANSI(lines []string) []string { return paintLines(FactorySpans(lines)) }
-
-// StyledFactoryFrames shares the CLI's color gate and classification with
-// cached UI frames. Every frame has the same dimensions and deterministic rail.
-func StyledFactoryFrames(w io.Writer, state FactoryState, n int, r *rand.Rand) [][]string {
-	frames := BuildFactoryFrames(state, ArtWidth, n, r)
-	if cliout.Enabled(w) {
-		for i := range frames {
-			frames[i] = styleFactoryANSI(frames[i])
+// starSGR is the escape for a star cell: the band its glyph has in
+// starTwinkle.
+func starSGR(text string) string {
+	r, _ := utf8.DecodeRuneInString(text)
+	for _, s := range starTwinkle {
+		if s.glyph == r {
+			return s.band.sgr()
 		}
 	}
+	return BandBright.sgr()
+}
+
+// styleHistogramANSI is the CLI's consumer of the classification above:
+// bands in, escapes out. Callers gate it behind cliout.Enabled, so
+// NO_COLOR still yields the plain built lines.
+func styleHistogramANSI(lines []string) []string { return paintLines(HistogramSpans(lines)) }
+
+// StyledHistogramFrames is the built chart as moe ui animates it, behind
+// the CLI's colour gate: one frame per twinkle step, identical except
+// for the star cell's glyph and colour. A chart with no star is one
+// frame, so an idle board never repaints. Without colour the glyphs
+// still cycle.
+func StyledHistogramFrames(w io.Writer, lines []string) [][]string {
+	return histogramFrames(lines, cliout.Enabled(w))
+}
+
+func histogramFrames(lines []string, color bool) [][]string {
+	row, col := starCell(lines)
+	n := 1
+	if row >= 0 {
+		n = len(starTwinkle)
+	}
+	frames := make([][]string, n)
+	for i := range frames {
+		f := lines
+		if row >= 0 {
+			f = slices.Clone(lines)
+			rs := []rune(f[row])
+			rs[col] = starTwinkle[i].glyph
+			f[row] = string(rs)
+		}
+		if color {
+			f = styleHistogramANSI(f)
+		}
+		frames[i] = f
+	}
 	return frames
+}
+
+// starCell finds the live star in built chart lines: the row and rune
+// column of the only BandStar cell, or -1, -1.
+func starCell(lines []string) (row, col int) {
+	for i, spans := range HistogramSpans(lines) {
+		col := 0
+		for _, sp := range spans {
+			if sp.Band == BandStar {
+				return i, col
+			}
+			col += utf8.RuneCountInString(sp.Text)
+		}
+	}
+	return -1, -1
 }

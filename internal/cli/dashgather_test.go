@@ -27,20 +27,20 @@ func TestDailyRunCountsProjectFilter(t *testing.T) {
 	// Empty filter → global window: today's bucket is the last element,
 	// yesterday's the one before it.
 	global := dailyRunCounts(idx, now, "")
-	if got := global[dash.HistDays-1]; got != 5 {
+	if got := global[dash.HistMaxDays-1]; got != 5 {
 		t.Errorf("global today = %d, want 5", got)
 	}
-	if got := global[dash.HistDays-2]; got != 3 {
+	if got := global[dash.HistMaxDays-2]; got != 3 {
 		t.Errorf("global yesterday = %d, want 3", got)
 	}
 
 	// Project filter → only that project's slice; days it had no activity
 	// read as zero even though the global window has counts there.
 	alpha := dailyRunCounts(idx, now, "alpha")
-	if got := alpha[dash.HistDays-1]; got != 2 {
+	if got := alpha[dash.HistMaxDays-1]; got != 2 {
 		t.Errorf("alpha today = %d, want 2", got)
 	}
-	if got := alpha[dash.HistDays-2]; got != 0 {
+	if got := alpha[dash.HistMaxDays-2]; got != 0 {
 		t.Errorf("alpha yesterday = %d, want 0 (no alpha activity)", got)
 	}
 

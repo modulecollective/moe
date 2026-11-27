@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"flag"
 	"io"
-	"math/rand"
 	"os"
 	"time"
 
@@ -85,11 +84,8 @@ type ttyFrameBuffer struct {
 func (b *ttyFrameBuffer) Unwrap() io.Writer { return b.terminal }
 
 // renderDashFrame writes one full dashboard frame — banner, the PULSE
-// section, factory art, sections — to its destination.
+// section, activity histogram, sections — to its destination.
 func renderDashFrame(stdout io.Writer, now time.Time, snap DashSnapshot, all bool, serveState serveState, notes input.File) {
-	state := dash.FactoryStateFromRows(snap.Rows)
-	// Fresh rand per render varies the factory's smoke.
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	// The same one-line gradient bar every stage session opens with,
 	// carrying only the clock.
 	banner.Dash(stdout, dash.Clock(now))
@@ -99,6 +95,7 @@ func renderDashFrame(stdout io.Writer, now time.Time, snap DashSnapshot, all boo
 	var detail bytes.Buffer
 	serveState.renderLines(&detail, now)
 	dash.RenderPulse(stdout, now, serveState.pulse(now, snap.Rows, notes, detail.String()))
-	histogram := dash.BuildActivityHistogram(snap.Histogram)
-	dash.Render(stdout, now, histogram, snap.Rows, snap.ProjectCount, snap.ActiveProjects, all, state, r)
+	// One shot: the live star stays at rest; moe ui is what twinkles it.
+	histogram := dash.BuildActivityHistogram(trailingDays(snap.Histogram, dash.HistDays), dash.Live(snap.Rows))
+	dash.Render(stdout, now, histogram, snap.Rows, snap.ProjectCount, snap.ActiveProjects, all)
 }

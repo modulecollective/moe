@@ -3,7 +3,6 @@ package dash
 import (
 	"bytes"
 	"fmt"
-	"math/rand"
 	"strings"
 	"testing"
 	"time"
@@ -26,13 +25,13 @@ func assertOrder(t *testing.T, active []Row, want ...string) {
 	}
 }
 
-// TestRenderPrintsHistogramAboveFactoryArt guards the CLI integration
-// seam: Render emits the pre-built histogram lines before the factory
-// art, which in turn precedes the section headers.
-func TestRenderPrintsHistogramAboveFactoryArt(t *testing.T) {
+// TestRenderPrintsHistogramAboveSections guards the CLI integration
+// seam: Render emits the pre-built histogram lines before the section
+// headers.
+func TestRenderPrintsHistogramAboveSections(t *testing.T) {
 	var buf strings.Builder
 	hist := []string{"  ▂▄█", "", "  activity · last 60 days        peak 3 runs/day"}
-	Render(&buf, time.Now().UTC(), hist, nil, 0, 0, false, FactoryState{}, rand.New(rand.NewSource(1)))
+	Render(&buf, time.Now().UTC(), hist, nil, 0, 0, false)
 	out := buf.String()
 	capIdx := strings.Index(out, "activity · last 60 days")
 	activeIdx := strings.Index(out, "ACTIVE")
@@ -471,7 +470,7 @@ func TestRenderIndexedPlacesRows(t *testing.T) {
 		rows = append(rows, Row{Project: "p", Run: fmt.Sprintf("done-%d", i), Bucket: BucketCompletedRuns, When: now})
 	}
 	var buf bytes.Buffer
-	lines := RenderIndexed(&buf, now, nil, rows, 1, 1, false, FactoryState{}, rand.New(rand.NewSource(1)))
+	lines := RenderIndexed(&buf, now, nil, rows, 1, 1, false)
 	out := strings.Split(buf.String(), "\n")
 	for i, r := range rows {
 		switch {
@@ -484,7 +483,7 @@ func TestRenderIndexedPlacesRows(t *testing.T) {
 		}
 	}
 	var plain bytes.Buffer
-	Render(&plain, now, nil, rows, 1, 1, false, FactoryState{}, rand.New(rand.NewSource(1)))
+	Render(&plain, now, nil, rows, 1, 1, false)
 	if plain.String() != buf.String() {
 		t.Fatal("RenderIndexed output differs from Render")
 	}

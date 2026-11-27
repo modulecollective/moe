@@ -106,7 +106,7 @@ type model struct {
 	focus pane
 	mode  mode
 
-	animation int // index into the board's cached factory frames
+	animation int // index into the board's cached art frames
 	boardTop  int // first board line in view
 	detailTop int
 

@@ -32,52 +32,6 @@
 {{define "bannerart"}}
   <pre class="banner-art">{{range .Histogram}}{{.}}
 {{end}}</pre>
-  <pre class="banner-art" id="factory-art">{{range .FactoryArt}}{{.}}
-{{end}}</pre>
-  <script type="application/json" id="factory-frames">{{.FactoryFramesJSON}}</script>
-  <script>
-  // Cross-fade the factory art through its pre-baked frames. Progressive
-  // enhancement: with JS off, reduced motion, or a single frame, the static
-  // <pre> server-rendered above stays as-is. Targets #factory-art by id so
-  // the histogram <pre> above it (also .banner-art) is left untouched.
-  (function () {
-    var data = document.getElementById('factory-frames');
-    var art = document.getElementById('factory-art');
-    if (!data || !art) return;
-    var frames;
-    try { frames = JSON.parse(data.textContent); } catch (e) { return; }
-    if (!Array.isArray(frames) || frames.length <= 1) return;
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-
-    // Match the server render exactly (trailing newline) so the two layers
-    // are the same height and the grid cell doesn't jump when they swap.
-    // Frame lines are server-baked span markup, so layers take innerHTML:
-    // the bands are classified once in Go, never re-derived here.
-    function paint(frame) { return frame.join('\n') + '\n'; }
-
-    // Stack two <pre> layers in one grid cell and cross-fade their opacity.
-    var stack = document.createElement('div');
-    stack.className = 'banner-art-stack';
-    art.parentNode.insertBefore(stack, art);
-    stack.appendChild(art);
-    var back = art.cloneNode(false);
-    back.removeAttribute('id'); // one #factory-art is enough; back is a layer
-    back.innerHTML = paint(frames[0]);
-    back.style.opacity = '0';
-    stack.appendChild(back);
-
-    var layers = [art, back]; // [0] showing, [1] hidden
-    var i = 0;
-    setInterval(function () {
-      i = (i + 1) % frames.length;
-      var hidden = layers[1];
-      hidden.innerHTML = paint(frames[i]);
-      layers[0].style.opacity = '0';
-      hidden.style.opacity = '1';
-      layers.reverse();
-    }, 3000);
-  })();
-  </script>
 {{end}}
 
 {{/* Every page's top line beside the logo: the date and time in the

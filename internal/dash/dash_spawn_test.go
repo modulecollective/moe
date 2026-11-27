@@ -3,7 +3,6 @@ package dash
 import (
 	"bytes"
 	"fmt"
-	"math/rand"
 	"strings"
 	"testing"
 	"time"
@@ -61,7 +60,7 @@ func TestSpawnCompletionKeepsOwnRecency(t *testing.T) {
 		t.Fatalf("child = %+v", got)
 	}
 	var buf bytes.Buffer
-	Render(&buf, base, nil, completed, 1, 0, false, FactoryState{}, rand.New(rand.NewSource(1)))
+	Render(&buf, base, nil, completed, 1, 0, false)
 	out := buf.String()
 	if !strings.Contains(out, "COMPLETED (5 of 8)") || !strings.Contains(out, "\n  p/child ") || strings.Contains(out, "\n  p/pulse ") || strings.Contains(out, "↳") {
 		t.Fatalf("default dash must show the child flat, with the old pulse capped out:\n%s", out)

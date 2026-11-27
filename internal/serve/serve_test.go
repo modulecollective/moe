@@ -429,38 +429,9 @@ func joinArt(lines []template.HTML) string {
 	return strings.Join(out, "\n")
 }
 
-// TestNewDashVMBakesFactoryFrames: the VM carries factoryFrameCount
-// frames as marshalled JSON, each line pre-rendered as band markup so
-// the client's swap only writes innerHTML, and FactoryArt (the no-JS
-// <pre> fallback) is exactly frame[0].
-func TestNewDashVMBakesFactoryFrames(t *testing.T) {
-	now := time.Now().UTC()
-	rows := []dash.Row{
-		{Project: "p", Run: "r1", Bucket: dash.BucketActiveRuns, When: now},
-		{Project: "p", Run: "b1", Bucket: dash.BucketBacklog, When: now},
-	}
-	vm := newDashVM(now, rows, 1, 1, nil, dash.CompletedCap)
-	var frames [][]string
-	if err := json.Unmarshal([]byte(vm.FactoryFramesJSON), &frames); err != nil {
-		t.Fatalf("FactoryFramesJSON is not valid JSON: %v", err)
-	}
-	if len(frames) != factoryFrameCount {
-		t.Fatalf("frame count = %d, want %d", len(frames), factoryFrameCount)
-	}
-	if joinArt(vm.FactoryArt) != strings.Join(frames[0], "\n") {
-		t.Fatalf("FactoryArt must equal frame[0]:\n art=%q\n f0 =%q", vm.FactoryArt, frames[0])
-	}
-	for i, f := range frames {
-		if !strings.Contains(strings.Join(f, "\n"), `<span class="art-`) {
-			t.Errorf("frame %d carries no band markup: %q", i, f)
-		}
-	}
-}
-
-// TestBannerArtCarriesBands: the rail's bands reach the page as classes
-// pointing at the --art-* custom properties. A live run puts a bright
-// station over plasma exhaust on a dim rail, which is the whole ramp in
-// one render.
+// TestBannerArtCarriesBands: the histogram's bands reach the page as
+// classes pointing at the --art-* custom properties — the whole heat
+// ramp plus the plasma peak — and a live run adds exactly one star.
 func TestBannerArtCarriesBands(t *testing.T) {
 	now := time.Now().UTC()
 	rows := []dash.Row{
@@ -468,17 +439,19 @@ func TestBannerArtCarriesBands(t *testing.T) {
 		{Project: "p", Run: "b1", Bucket: dash.BucketBacklog, When: now},
 	}
 	counts := make([]int, dash.HistDays)
-	counts[0] = 9
+	counts[0] = 9 // the peak: plasma cap
+	counts[1] = 8 // reaches the top row short of a full cell: bright
+	counts[dash.HistDays-1] = 4
 	vm := newDashVM(now, rows, 1, 1, counts, dash.CompletedCap)
 
-	art := joinArt(vm.FactoryArt)
+	art := joinArt(vm.Histogram)
 	for _, class := range []string{"art-dim", "art-mid", "art-bright", "art-plasma"} {
 		if !strings.Contains(art, `<span class="`+class+`">`) {
-			t.Errorf("factory art missing %s span: %q", class, art)
+			t.Errorf("histogram missing %s span: %q", class, art)
 		}
 	}
-	if !strings.Contains(joinArt(vm.Histogram), `<span class="art-plasma">`) {
-		t.Errorf("histogram peak missing its plasma cap: %q", vm.Histogram)
+	if n := strings.Count(art, `<span class="art-star">*</span>`); n != 1 {
+		t.Errorf("live histogram has %d stars, want 1: %q", n, art)
 	}
 }
 
@@ -500,38 +473,83 @@ func TestArtHTMLEscapes(t *testing.T) {
 	}
 }
 
-// TestDashRendersFactoryFramesScript guards the load-bearing escaping
-// concern: the marshalled frames must survive html/template and parse
-// back as JSON in the browser. html.UnescapeString mimics the browser
-// decoding the script element's textContent before JSON.parse.
-func TestDashRendersFactoryFramesScript(t *testing.T) {
+// TestDashRendersLiveStar drives the dash route: a board with an open
+// session gets exactly one star, an idle one none, and neither carries
+// the retired factory markup or any animation script. The snapshot
+// carries a year of counts; the page charts the trailing HistDays.
+func TestDashRendersLiveStar(t *testing.T) {
 	now := time.Now().UTC()
-	gather := func(string) ([]dash.Row, int, int, []int, error) {
-		return []dash.Row{{Project: "p", Run: "r1", Bucket: dash.BucketActiveRuns, When: now}}, 1, 1, nil, nil
+	counts := make([]int, dash.HistMaxDays)
+	counts[0] = 50 // outside the charted window: must not set the peak
+	counts[dash.HistMaxDays-1] = 3
+	for _, tc := range []struct {
+		name  string
+		doc   string
+		stars int
+	}{{"live", "build", 1}, {"idle", "", 0}} {
+		t.Run(tc.name, func(t *testing.T) {
+			gather := func(string) ([]dash.Row, int, int, []int, error) {
+				return []dash.Row{{Project: "p", Run: "r1", Bucket: dash.BucketActiveRuns, RunningDoc: tc.doc, When: now}}, 1, 1, counts, nil
+			}
+			s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), GatherDash: gather})
+			rr := httptest.NewRecorder()
+			s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/", nil))
+			if rr.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+			}
+			body := rr.Body.String()
+			if n := strings.Count(body, `class="art-star"`); n != tc.stars {
+				t.Errorf("%d art-star spans, want %d", n, tc.stars)
+			}
+			for _, gone := range []string{"factory-art", "factory-frames", "banner-art-stack"} {
+				if strings.Contains(body, gone) {
+					t.Errorf("page still carries %s", gone)
+				}
+			}
+			text := artText(body)
+			for _, want := range []string{"activity · last 60 days", "peak 3 runs/day"} {
+				if !strings.Contains(text, want) {
+					t.Errorf("page missing %q", want)
+				}
+			}
+		})
 	}
-	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir(), GatherDash: gather})
-	rr := httptest.NewRecorder()
-	s.Handler().ServeHTTP(rr, httptest.NewRequest("GET", "/", nil))
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s", rr.Code, rr.Body.String())
+}
+
+// TestArtStarTwinkleServed pins the star's CSS: a still bright colour
+// outside any media query, and the animation only inside the
+// reduced-motion opt-in block. Scoped to rule blocks, not substrings of
+// the whole sheet.
+func TestArtStarTwinkleServed(t *testing.T) {
+	s := newTestServer(t, Options{Addr: "127.0.0.1:0", Root: t.TempDir()})
+	css := getOK(t, s, "/static/style.css")
+	block := func(from, open string) string {
+		t.Helper()
+		start := strings.Index(from, open)
+		if start < 0 {
+			t.Fatalf("stylesheet missing %q", open)
+		}
+		start += len(open)
+		end := strings.Index(from[start:], "}")
+		if end < 0 {
+			t.Fatalf("%q unterminated", open)
+		}
+		return from[start : start+end]
 	}
-	body := rr.Body.String()
-	const open = `<script type="application/json" id="factory-frames">`
-	_, after, ok := strings.Cut(body, open)
-	if !ok {
-		t.Fatalf("factory-frames script missing\n%s", body)
+	still := block(css, ".banner-art .art-star { ")
+	if !strings.Contains(still, "color: var(--art-bright);") || strings.Contains(still, "animation") {
+		t.Errorf("still star rule = %q", still)
 	}
-	payload, _, ok := strings.Cut(after, "</script>")
-	if !ok {
-		t.Fatalf("factory-frames script not closed\n%s", body)
+	media := css[strings.Index(css, "@media (prefers-reduced-motion: no-preference) {"):]
+	if anim := block(media, ".banner-art .art-star { "); !strings.Contains(anim, "animation: art-star-twinkle") {
+		t.Errorf("motion star rule = %q", anim)
 	}
-	var frames [][]string
-	raw := html.UnescapeString(payload)
-	if err := json.Unmarshal([]byte(raw), &frames); err != nil {
-		t.Fatalf("embedded frames did not round-trip through the template: %v\nraw=%q", err, raw)
+	if strings.Count(css, "animation: art-star-twinkle") != 1 {
+		t.Error("the twinkle must be declared once, inside the motion opt-in")
 	}
-	if len(frames) != factoryFrameCount {
-		t.Fatalf("embedded frame count = %d, want %d", len(frames), factoryFrameCount)
+	frames := block(css, "@keyframes art-star-twinkle {\n  0%, 100% {")
+	if !strings.Contains(frames, "text-shadow") {
+		t.Errorf("keyframes carry no glow: %q", frames)
 	}
 }
 
@@ -558,8 +576,8 @@ func TestNewDashVMCarriesHistogram(t *testing.T) {
 }
 
 // TestDashRendersHistogram: the handler emits the histogram in its own
-// banner-art <pre>, so the caption reaches the page above the factory
-// rail.
+// banner-art <pre>, so the caption reaches the page above the run
+// sections.
 func TestDashRendersHistogram(t *testing.T) {
 	now := time.Now().UTC()
 	counts := make([]int, dash.HistDays)

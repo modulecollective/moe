@@ -1,7 +1,6 @@
 package dash
 
 import (
-	"math/rand"
 	"strings"
 	"testing"
 	"time"
@@ -76,7 +75,7 @@ func TestBuildRowsIntentsRespectProjectFilter(t *testing.T) {
 func TestRenderIntentsSectionAlwaysPresent(t *testing.T) {
 	// Zero intents: heading present, "(none)", above BACKLOG.
 	var buf strings.Builder
-	Render(&buf, time.Now().UTC(), nil, nil, 0, 0, false, FactoryState{}, rand.New(rand.NewSource(1)))
+	Render(&buf, time.Now().UTC(), nil, nil, 0, 0, false)
 	out := buf.String()
 	intentsIdx := strings.Index(out, "INTENTS (0)")
 	backlogIdx := strings.Index(out, "BACKLOG")
@@ -90,7 +89,7 @@ func TestRenderIntentsSectionAlwaysPresent(t *testing.T) {
 	// With an intent row: slug + title both appear under the heading.
 	rows := buildIntentRows(t, []IntentInput{{Project: "tele", Slug: "north-star", Title: "Be fastest"}}, "")
 	var buf2 strings.Builder
-	Render(&buf2, time.Now().UTC(), nil, rows, 0, 0, false, FactoryState{}, rand.New(rand.NewSource(1)))
+	Render(&buf2, time.Now().UTC(), nil, rows, 0, 0, false)
 	out2 := buf2.String()
 	if !strings.Contains(out2, "INTENTS (1)") {
 		t.Fatalf("expected INTENTS (1) header:\n%s", out2)

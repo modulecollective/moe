@@ -1,5 +1,5 @@
 // Package dash assembles the home-screen dashboard: runs, ideas, and
-// the factory-art header. The cli/dash.go entry point gathers inputs
+// the activity-histogram header. The cli/dash.go entry point gathers inputs
 // (run scan, journal index, open-session list, per-run next-stage
 // decisions) and hands them to BuildRows / Render here.
 //
@@ -14,7 +14,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"math/rand"
 	"path/filepath"
 	"slices"
 	"sort"
@@ -82,7 +81,7 @@ func CaptureDocID(workflow string) (string, bool) {
 // to run.json and the doc id for the single chat stage. dash needs the
 // workflow name to recognise chat runs in classify (chat is never
 // "done" — see there), and the doc id as the bare stage name for the
-// factory-art glyph and the open-session marker. The cli chat consts
+// open-session marker. The cli chat consts
 // alias these so the string lives in exactly one place.
 const (
 	ChatWorkflow = "chat"
@@ -143,8 +142,8 @@ type Row struct {
 	Run        string
 	Workflow   string    // the run's workflow; empty on intent and chore rows, which are not runs on the board
 	Note       string    // for runs: next stage name, or "done"; for backlog: idea title.
-	Stage      string    // bare next-stage name for active runs (no workflow prefix); "" for backlog/completed. Drives the factory art's station glyph.
-	RunningDoc string    // doc with an open session that "wins" the liveness slot; "" when no session is open. The factory art reads this to decide whether the station smokes and which doc's glyph to draw.
+	Stage      string    // bare next-stage name for active runs (no workflow prefix); "" for backlog/completed. Serve's run page reads it.
+	RunningDoc string    // doc with an open session that "wins" the liveness slot; "" when no session is open. Live reads it to decide whether today's histogram bar wears the star.
 	When       time.Time // sort key within the section; most recent first.
 	Bucket     Bucket
 	// Agent is true when the run was machine-opened — it carries a
@@ -458,8 +457,7 @@ func captureSessionRow(md *run.Metadata, openSessionDocs []string, sessionWhen, 
 }
 
 // classify decides which section a run lands in, what note to render,
-// the bare next-stage name the factory art uses to pick a station
-// glyph, and the doc with an open session that "wins" the liveness
+// the bare next-stage name, and the doc with an open session that "wins" the liveness
 // slot. Pure over its inputs — no disk I/O.
 func classify(md *run.Metadata, byRunKey map[string]*run.Metadata, idx *run.JournalIndex, openSessionDocs []string, nextByRun map[string]NextDecision) (Bucket, string, string, string) {
 	runKey := md.Project + "/" + md.ID
@@ -791,33 +789,23 @@ func CountProjects(root string) (int, error) {
 	return len(matches), nil
 }
 
-// FactoryStateFromRows folds dashboard rows into the data the art
-// reads. Active stations come straight off the rows in their existing
-// recency-sorted order, carrying both the parked stage and (when a
-// stage session is open) the live doc; backlog and completed counts
-// are simple bucket totals.
-func FactoryStateFromRows(rows []Row) FactoryState {
-	var state FactoryState
+// Live reports whether any active run in rows has an open session — the
+// test that caps today's histogram bar with a star. A project hub passes
+// project-scoped rows, so its star is that project's liveness.
+func Live(rows []Row) bool {
 	for _, r := range rows {
-		switch r.Bucket {
-		case BucketActiveRuns:
-			state.ActiveStages = append(state.ActiveStages, ActiveStation{
-				Stage:      r.Stage,
-				RunningDoc: r.RunningDoc,
-			})
-		case BucketBacklog:
-			state.BacklogCount++
-		case BucketCompletedRuns:
-			state.CompletedCount++
+		if r.Bucket == BucketActiveRuns && r.RunningDoc != "" {
+			return true
 		}
 	}
-	return state
+	return false
 }
 
-// Render prints the full dashboard: factory art, board sections
-// (ACTIVE, INTENTS, CHORES, BACKLOG, COMPLETED), and the footer. tabwriter aligns
-// columns per section so a long idea title doesn't widen the run
-// rows. COMPLETED is capped at CompletedCap unless showAll is set.
+// Render prints the full dashboard: the activity histogram, board
+// sections (ACTIVE, INTENTS, CHORES, BACKLOG, COMPLETED), and the
+// footer. tabwriter aligns columns per section so a long idea title
+// doesn't widen the run rows. COMPLETED is capped at CompletedCap unless
+// showAll is set.
 //
 // The dash banner (rendered upstream of Render by the CLI handler)
 // carries the render timestamp; Render itself no longer prints a
@@ -830,14 +818,12 @@ func FactoryStateFromRows(rows []Row) FactoryState {
 // The ACTIVE section header already exposes the row count.
 //
 // histogram is the pre-rendered activity chart (dash.BuildActivityHistogram
-// output); Render prints it between the upstream banner and the factory
-// art, keeping the package pure over its inputs.
-//
-// Both art blocks arrive as plain runes (the same lines the web dash
-// serves) and get their terminal colour here, behind the same TTY /
-// NO_COLOR gate cliout.Printf uses — see style.go.
-func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectCount, activeCount int, showAll bool, state FactoryState, r *rand.Rand) {
-	RenderIndexed(w, now, histogram, rows, projectCount, activeCount, showAll, state, r)
+// output), keeping the package pure over its inputs. It arrives as plain
+// runes (the same lines the web dash serves) and gets its terminal
+// colour here, behind the same TTY / NO_COLOR gate cliout.Printf uses —
+// see style.go.
+func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectCount, activeCount int, showAll bool) {
+	RenderIndexed(w, now, histogram, rows, projectCount, activeCount, showAll)
 }
 
 // RenderIndexed is Render that also says where each row landed: lines[i]
@@ -845,19 +831,10 @@ func Render(w io.Writer, now time.Time, histogram []string, rows []Row, projectC
 // row is not shown (BucketNone, or a completed row past the cap). Every
 // row renders as exactly one line, so a caller can select rows on the
 // painted board without reading them back out of the text.
-func RenderIndexed(w io.Writer, now time.Time, histogram []string, rows []Row, projectCount, activeCount int, showAll bool, state FactoryState, r *rand.Rand) (lines []int) {
-	lines, _ = RenderIndexedArt(w, now, histogram, rows, projectCount, activeCount, showAll, StyledFactoryFrames(w, state, 1, r)[0])
-	return lines
-}
-
-// RenderIndexedArt renders supplied, already styled factory art and returns
-// its explicit line span's start, alongside the selectable row positions.
-// The UI caches the styled frames and swaps only this span between gathers.
-func RenderIndexedArt(w io.Writer, now time.Time, histogram []string, rows []Row, projectCount, activeCount int, showAll bool, art []string) (lines []int, artStart int) {
+func RenderIndexed(w io.Writer, now time.Time, histogram []string, rows []Row, projectCount, activeCount int, showAll bool) (lines []int) {
 	lw := &lineWriter{w: w}
 	fmt.Fprintln(lw)
-	start := lw.n
-	artStart = start + RenderOverview(lw, histogram, art)
+	RenderOverview(lw, histogram)
 	fmt.Fprintln(lw)
 	offset := lw.n
 	lines = RenderIndexedRows(lw, now, rows, projectCount, activeCount, showAll)
@@ -866,24 +843,17 @@ func RenderIndexedArt(w io.Writer, now time.Time, histogram []string, rows []Row
 			lines[i] += offset
 		}
 	}
-	return lines, artStart
+	return lines
 }
 
-// RenderOverview renders the complete histogram and factory without outer
-// blank padding. It returns the factory's zero-based line start.
-func RenderOverview(w io.Writer, histogram, art []string) (artStart int) {
+// RenderOverview renders the histogram without outer blank padding.
+func RenderOverview(w io.Writer, histogram []string) {
 	if cliout.Enabled(w) {
 		histogram = styleHistogramANSI(histogram)
 	}
 	for _, line := range histogram {
 		fmt.Fprintln(w, line)
 	}
-	fmt.Fprintln(w)
-	artStart = len(histogram) + 1
-	for _, line := range art {
-		fmt.Fprintln(w, line)
-	}
-	return artStart
 }
 
 // RenderIndexedRows renders only run sections and project totals. Positions

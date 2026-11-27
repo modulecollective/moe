@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"io"
-	"math/rand"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -45,7 +44,7 @@ func TestDashRowsCarryControlOverlay(t *testing.T) {
 	}
 	var out bytes.Buffer
 	t.Setenv("NO_COLOR", "1")
-	dash.Render(&out, time.Now(), nil, snap.Rows, 1, 1, false, dash.FactoryState{}, rand.New(rand.NewSource(1)))
+	dash.Render(&out, time.Now(), nil, snap.Rows, 1, 1, false)
 	if !strings.Contains(out.String(), "[handed off]") {
 		t.Fatalf("terminal dash lacks the overlay:\n%s", out.String())
 	}

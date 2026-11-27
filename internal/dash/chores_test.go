@@ -48,8 +48,8 @@ func TestChoresStandingSection(t *testing.T) {
 	if !(strings.Index(out.String(), "INTENTS") < strings.Index(out.String(), "CHORES") && strings.Index(out.String(), "CHORES") < strings.Index(out.String(), "BACKLOG")) {
 		t.Fatal("section order")
 	}
-	if state := FactoryStateFromRows(rows); state.BacklogCount != 1 || len(state.ActiveStages) != 0 {
-		t.Fatalf("factory counts %+v", state)
+	if Live(rows) {
+		t.Fatal("chore rows read as live")
 	}
 	in.ProjectFilter = "moe"
 	rows, err = BuildRows(in)

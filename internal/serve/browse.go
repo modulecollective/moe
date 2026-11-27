@@ -177,7 +177,7 @@ func (s *Server) handleProjectsIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 type hubVM struct {
-	// bannerArtVM carries the project-scoped histogram + factory art the
+	// bannerArtVM carries the project-scoped histogram and star the
 	// "bannerart" partial draws under the header, same as the home dash.
 	bannerArtVM
 	// rowBuckets is the same Active/Intents/Chores/Backlog/Completed split the
@@ -236,9 +236,9 @@ func (s *Server) handleProjectHub(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// The snapshot is already scoped to projectID, so every row
-		// belongs here — no re-filter — and the factory art + histogram
+		// belongs here — no re-filter — and the histogram and its star
 		// reflect this project alone.
-		vm.bannerArtVM = newBannerArt(now, rows, histogram)
+		vm.bannerArtVM = newBannerArt(rows, histogram)
 		vm.rowBuckets = newRowBuckets(now, rows, completedCap(r))
 	}
 

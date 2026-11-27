@@ -57,7 +57,9 @@ func startUIKeyboard(t *testing.T, root string, args ...string) *uiKeyboardChild
 		t.Fatal(err)
 	}
 	defer slave.Close()
-	ws := struct{ row, col, x, y uint16 }{30, 100, 0, 0}
+	// 40 rows keeps a details pane tall enough to read back a note under
+	// the pinned activity chart, which fits from about 30 rows up.
+	ws := struct{ row, col, x, y uint16 }{40, 100, 0, 0}
 	if _, _, e := syscall.Syscall(syscall.SYS_IOCTL, slave.Fd(), syscall.TIOCSWINSZ, uintptr(unsafe.Pointer(&ws))); e != 0 {
 		t.Fatal(e)
 	}
