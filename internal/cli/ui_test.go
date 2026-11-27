@@ -1122,9 +1122,9 @@ func TestUIBoardSeparatesPinnedRegionsAndEscapesLabels(t *testing.T) {
 	s.snap.Histogram[59] = 5
 	b, _ := s.buildBoard(now)
 	var expected strings.Builder
-	banner.Dash(&expected, dash.Clock(now))
-	if b.Banner != strings.TrimSuffix(expected.String(), "\n") {
-		t.Fatalf("not the shared dash banner: %q", b.Banner)
+	banner.DashBar(&expected)
+	if b.Banner != expected.String() || b.Clock != dash.Clock(now) {
+		t.Fatalf("not the shared dash bar and clock: %q %q", b.Banner, b.Clock)
 	}
 	all := strings.Join(b.Lines, "\n")
 	if strings.Contains(all, "MINISTRY OF EVERYTHING") || strings.Contains(all, "last 60 days") {

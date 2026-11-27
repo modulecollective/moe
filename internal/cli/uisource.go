@@ -381,9 +381,13 @@ func (s *uiSource) buildBoard(now time.Time) (ui.Board, []cliout.ProgramStatus) 
 	snap.Rows, snap.Observations = rows, obs
 
 	buf := &ttyFrameBuffer{terminal: s.terminal}
-	banner.Dash(buf, dash.Clock(now))
-	// Printf's reset may follow its newline. This is exactly one banner row.
-	b.Banner = strings.ReplaceAll(buf.String(), "\n", "")
+	// The bar and clock are separate so the console can right-justify the
+	// clock on its title row.
+	banner.DashBar(buf)
+	b.Banner = buf.String()
+	buf.Reset()
+	cliout.Print(buf, ui.SafeText(dash.Clock(now)))
+	b.Clock = buf.String()
 	buf.Reset()
 	// Serve's exceptions are Console issues above, not board rows: they
 	// carry no action and would scroll with the runs.

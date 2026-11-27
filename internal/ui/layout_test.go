@@ -28,8 +28,9 @@ func dashboardBoard() Board {
 	frames := dash.StyledHistogramFrames(&bytes.Buffer{}, dash.BuildActivityHistogram(counts, dash.Live(rows)))
 	b := Board{Seq: 1, Overview: slices.Clone(frames[0]), Art: Art{Start: 0, Height: len(frames[0]), Frames: frames}, Header: "all projects · gathered 12:30:00 · 1 live"}
 	var out bytes.Buffer
-	banner.Dash(&out, dash.Clock(now))
-	b.Banner = strings.TrimSuffix(out.String(), "\n")
+	banner.DashBar(&out)
+	b.Banner = out.String()
+	b.Clock = dash.Clock(now)
 	out.Reset()
 	fmt.Fprintln(&out, "  service detail")
 	lines := dash.RenderIndexedRows(&out, now, rows, 1, 1, true)
@@ -45,7 +46,7 @@ func dashboardBoard() Board {
 func assertPinned(t *testing.T, m *model) {
 	t.Helper()
 	f := m.view()
-	if f.rows[0] != boardLine(m.board.Banner, false, m.width-1) {
+	if f.rows[0] != m.titleRow(m.width-1) || !strings.HasPrefix(stripSGR(f.rows[0]), "▓▒░ MINISTRY") {
 		t.Fatal("shared banner moved")
 	}
 	for i, line := range m.board.Overview {
@@ -400,5 +401,39 @@ func TestMinimumSizeRetainsDraft(t *testing.T) {
 	f := m.view()
 	if !f.cursor || m.active.ed.String() != "kept draft" || m.sel.run != "r" {
 		t.Fatal("resize lost draft, cursor or selection")
+	}
+}
+
+// The clock ends on the last painted column whenever bar and clock fit;
+// at the 40-column minimum they don't, and the row clips. The bar
+// carries SGR, so widths are measured as painted.
+func TestTitleRowRightJustifiesClock(t *testing.T) {
+	var bar bytes.Buffer
+	banner.DashBar(&bar)
+	for _, color := range []bool{false, true} {
+		b := Board{Banner: bar.String(), Clock: "Fri 27 Nov 12:30"}
+		if color {
+			b.Banner = cliout.Bright + b.Banner + cliout.Reset
+			b.Clock = cliout.Bright + b.Clock + cliout.Reset
+		}
+		for _, width := range []int{40, 80, 200} {
+			m, _ := testModel(t)
+			m.resize(30, width)
+			m.setBoard(b)
+			row := m.view().rows[0]
+			plainRow := stripSGR(row)
+			if got := textWidth(row); got != width-1 {
+				t.Errorf("color=%v width %d: title row is %d wide: %q", color, width, got, plainRow)
+			}
+			want := "Fri 27 Nov 12:30"
+			if width == 40 {
+				// Bar, two spaces and clock need 48 cells: the floor
+				// holds and the clock clips.
+				want = "Fri 27 "
+			}
+			if !strings.HasSuffix(plainRow, want) || !strings.HasPrefix(plainRow, "▓▒░ MINISTRY OF EVERYTHING ░▒▓  ") {
+				t.Errorf("color=%v width %d: %q", color, width, plainRow)
+			}
+		}
 	}
 }

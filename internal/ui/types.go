@@ -93,8 +93,10 @@ type Board struct {
 	AgentSummary  string
 	AgentRevision int
 	AgentError    string
-	// Banner and Overview are trusted renderer output, separate from scrolling lines.
+	// Banner, Clock and Overview are trusted renderer output, separate
+	// from scrolling lines. The title row puts Clock at its right edge.
 	Banner   string
+	Clock    string
 	Overview []string
 	Art      Art
 	Lines    []string

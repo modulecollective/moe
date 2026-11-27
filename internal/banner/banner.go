@@ -90,6 +90,12 @@ func Dash(w io.Writer, clock string) {
 	cliout.Printf(w, "%s  %s\n", bar, clock)
 }
 
+// DashBar prints the dash mark's bar alone, unterminated, for moe ui,
+// which places the clock itself at the far edge of its title row.
+func DashBar(w io.Writer) {
+	cliout.Print(w, bar)
+}
+
 // HookSection prints the section header for a hook-walker pass:
 //
 //	▸ <label>: <n> scripts in <dirRel>

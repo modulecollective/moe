@@ -194,8 +194,15 @@ func (m *model) view() frame {
 	return f
 }
 
+// titleRow is the banner bar with the clock ending on the last painted
+// column. Too narrow for both, the gap floors at two spaces and the row
+// clips like any other.
 func (m *model) titleRow(w int) string {
-	return boardLine(m.board.Banner, false, w)
+	if m.board.Clock == "" {
+		return boardLine(m.board.Banner, false, w)
+	}
+	gap := max(w-textWidth(m.board.Banner)-textWidth(m.board.Clock), 2)
+	return boardLine(m.board.Banner+strings.Repeat(" ", gap)+m.board.Clock, false, w)
 }
 
 // paneFocused follows the actual input recipient, including modal input.
