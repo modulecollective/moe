@@ -56,8 +56,13 @@ func TestServePauseCLIAndTerminalWriter(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := takeBoard(t, src)
-	if b.PauseRevision != 3 || !strings.Contains(strings.Join(overviewAt(b, 120), "\n"), "new automatic sweeps paused") || b.PauseError != "" {
-		t.Fatalf("pinned overview: %+v", b)
+	// The PULSE status row is the pause's one home on the board; the
+	// overview above it carries only the chart.
+	if b.PauseRevision != 3 || !strings.Contains(strings.Join(b.Lines, "\n"), "new automatic sweeps paused until") || b.PauseError != "" {
+		t.Fatalf("PULSE row: %+v", b)
+	}
+	if strings.Contains(strings.Join(overviewAt(b, 120), "\n"), "sweeps paused") {
+		t.Fatalf("pause repeated in the overview: %q", overviewAt(b, 120))
 	}
 	if got := readServeState(root).bannerCluster(time.Now()); !strings.Contains(got, "new automatic sweeps paused until") {
 		t.Fatal("pause invisible with serve stopped: " + got)
@@ -67,7 +72,7 @@ func TestServePauseCLIAndTerminalWriter(t *testing.T) {
 		t.Fatal(err)
 	}
 	b = takeBoard(t, src)
-	if b.PauseRevision != 4 || strings.Contains(strings.Join(overviewAt(b, 120), "\n"), "new automatic sweeps paused") || b.PauseSummary != "new automatic sweeps unpaused" {
+	if b.PauseRevision != 4 || strings.Contains(strings.Join(b.Lines, "\n"), "new automatic sweeps paused") || b.PauseSummary != "new automatic sweeps unpaused" {
 		t.Fatalf("remote unpause: %+v", b)
 	}
 	if _, err := servepause.Set(root, true, nil, func() time.Time { return time.Now().Add(-25 * time.Hour) }); err != nil {
@@ -77,7 +82,7 @@ func TestServePauseCLIAndTerminalWriter(t *testing.T) {
 		t.Fatal(err)
 	}
 	b = takeBoard(t, src)
-	if b.PauseRevision != 5 || b.PauseSummary != "new automatic sweeps unpaused" || strings.Contains(strings.Join(overviewAt(b, 120), "\n"), "new automatic sweeps paused") {
+	if b.PauseRevision != 5 || b.PauseSummary != "new automatic sweeps unpaused" || strings.Contains(strings.Join(b.Lines, "\n"), "new automatic sweeps paused") {
 		t.Fatalf("expiry: %+v", b)
 	}
 	for _, args := range [][]string{{"pause", "extra"}, {"unpause", "--dynamic"}, {"status", "extra"}} {
@@ -100,8 +105,8 @@ func TestServePauseCLIAndTerminalWriter(t *testing.T) {
 		t.Fatal(err)
 	}
 	b = takeBoard(t, src)
-	if b.PauseError == "" || !strings.Contains(strings.Join(overviewAt(b, 120), "\n"), "pause unavailable") {
-		t.Fatal("pinned pause error missing")
+	if b.PauseError == "" || !strings.Contains(strings.Join(b.Lines, "\n"), "pause unavailable") {
+		t.Fatal("PULSE pause error missing")
 	}
 	if got := readServeState(root).bannerCluster(time.Now()); !strings.Contains(got, "pause unavailable") {
 		t.Fatal("dash error missing: " + got)

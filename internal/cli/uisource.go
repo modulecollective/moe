@@ -80,11 +80,10 @@ type uiSource struct {
 
 // overview is the board's pinned overview as a function of terminal
 // width: the activity chart one column per day across the terminal, less
-// histMargin on each side, capped at a year and centred beyond that,
-// then the pause label. It runs on the console's goroutine, so the frame
-// cache it shares across boards has its own lock; within one board it
-// memoises on cols.
-func (s *uiSource) overview(counts []int, live bool, tail []string) func(cols int) ([]string, ui.Art) {
+// histMargin on each side, capped at a year and centred beyond that. It
+// runs on the console's goroutine, so the frame cache it shares across
+// boards has its own lock; within one board it memoises on cols.
+func (s *uiSource) overview(counts []int, live bool) func(cols int) ([]string, ui.Art) {
 	lastCols := -1
 	var lines []string
 	var art ui.Art
@@ -104,7 +103,7 @@ func (s *uiSource) overview(counts []int, live bool, tail []string) func(cols in
 		}
 		frames := s.histogramFrames(histogram)
 		lastCols = cols
-		lines = append(slices.Clone(frames[0]), tail...)
+		lines = slices.Clone(frames[0])
 		// Only the star's cell differs between frames; the console swaps
 		// the chart's rows on its animation tick.
 		art = ui.Art{Start: 0, Height: len(frames[0]), Frames: frames}
@@ -468,15 +467,7 @@ func (s *uiSource) buildBoard(now time.Time) (ui.Board, []cliout.ProgramStatus) 
 		b.PauseSummary, b.PauseError = "automatic sweep pause unavailable", pauseErr.Error()
 		b.Issues = append(b.Issues, b.PauseSummary+": "+b.PauseError)
 	}
-	var pauseLabel []string
-	if pauseErr != nil || pauseState.Active(now) {
-		label := "new automatic sweeps paused (:serve status)"
-		if pauseErr != nil {
-			label = "automatic sweep pause unavailable (:serve status)"
-		}
-		pauseLabel = []string{label}
-	}
-	b.Overview = s.overview(snap.Histogram, dash.Live(rows), pauseLabel)
+	b.Overview = s.overview(snap.Histogram, dash.Live(rows))
 	defaultState, err := agentdefault.Read(s.root)
 	b.AgentSummary, b.AgentRevision = defaultState.Summary(now), defaultState.Revision
 	if err != nil {

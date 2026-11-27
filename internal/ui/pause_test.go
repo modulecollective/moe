@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"slices"
 	"strings"
 	"testing"
 )
@@ -48,21 +47,15 @@ func TestServeCommandsOnEmptyAndFilteredBoards(t *testing.T) {
 	}
 }
 
-func TestPauseOverviewAndNarrowStatusPreserveSelection(t *testing.T) {
+func TestNarrowServeStatusPreservesSelection(t *testing.T) {
 	for _, width := range []int{120, 80, 40} {
 		m, _ := testModel(t)
 		m.resize(50, width)
 		b := dashboardBoard()
 		b.PauseSummary = "new automatic sweeps paused until 2026-11-26 12:00 PST"
-		lines, art := b.Overview(width)
-		b.Overview = fixedOverview(append(slices.Clone(lines), "new automatic sweeps paused (:serve status)"), art)
 		m.setBoard(b)
 		selected := m.sel
 		frame := m.view()
-		visible := strings.Contains(strings.Join(frame.rows, "\n"), "new automatic sweeps paused (:serve status)")
-		if width >= 80 && !visible {
-			t.Fatalf("pause missing at width %d", width)
-		}
 		for _, row := range frame.rows {
 			if textWidth(row) > width-1 {
 				t.Fatalf("overflow at %d: %q", width, row)

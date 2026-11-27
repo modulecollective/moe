@@ -895,9 +895,9 @@ expiry in local time. The commands work with serve stopped. Pausing an active
 pause is a no-op and does not extend the window. The web dashboard's PULSE
 section and `/serve` offer **Pause for 24 hours** / **Unpause**; `moe ui` offers
 `:serve pause`, `:serve unpause`, and `:serve status` without a selected run.
-Active pause or unreadable state appears in the PULSE status line and terminal
-overview; refresh observes remote writes and expiry. Stale opposing web/UI
-controls refuse and show current state.
+Active pause or unreadable state appears in the PULSE status line; refresh
+observes remote writes and expiry. Stale opposing web/UI controls refuse and
+show current state.
 
 A pause caps admission of new automatic sweeps: an already-admitted survey and
 its selected ride may finish. It does not stop current work, arm serve, clear
